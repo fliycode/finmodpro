@@ -53,7 +53,17 @@ class CompanyRiskReportCreateSerializer(serializers.Serializer):
         period_start = attrs.get("period_start")
         period_end = attrs.get("period_end")
         if period_start and period_end and period_start > period_end:
-            raise serializers.ValidationError("period_start 不能晚于 period_end。")
+            raise serializers.ValidationError({"message": "period_start 不能晚于 period_end。"})
+        return attrs
+
+
+class TimeRangeRiskReportCreateSerializer(serializers.Serializer):
+    period_start = serializers.DateField()
+    period_end = serializers.DateField()
+
+    def validate(self, attrs):
+        if attrs["period_start"] > attrs["period_end"]:
+            raise serializers.ValidationError({"message": "period_start 不能晚于 period_end。"})
         return attrs
 
 

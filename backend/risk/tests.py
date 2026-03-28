@@ -822,3 +822,184 @@ class CompanyRiskReportApiTests(TestCase):
             {"credit": 1, "liquidity": 1},
         )
         self.assertEqual(RiskReport.objects.count(), 1)
+
+
+@override_settings(
+    JWT_SECRET_KEY="test-jwt-secret",
+    JWT_ACCESS_TOKEN_LIFETIME_SECONDS=3600,
+)
+class TimeRangeRiskReportApiTests(TestCase):
+    def setUp(self):
+        self.client = Client()
+        seed_roles_and_permissions()
+        self.authorized_user = User.objects.create_user(
+            username="time-report-admin",
+            password="secret123",
+            email="time-report-admin@example.com",
+        )
+        self.authorized_user.groups.add(Group.objects.get(name=ROLE_ADMIN))
+        self.authorized_token = generate_access_token(self.authorized_user)
+
+        self.unauthorized_user = User.objects.create_user(
+            username="time-report-member",
+            password="secret123",
+            email="time-report-member@example.com",
+        )
+        self.unauthorized_token = generate_access_token(self.unauthorized_user)
+
+        self.first_document = Document.objects.create(
+            title="时间区间来源文档 A",
+            file=SimpleUploadedFile("time-a.pdf", b"risk-content", content_type="application/pdf"),
+            filename="time-a.pdf",
+            doc_type="pdf",
+        )
+        self.second_document = Document.objects.create(
+            title="时间区间来源文档 B",
+            file=SimpleUploadedFile("time-b.pdf", b"risk-content", content_type="application/pdf"),
+            filename="time-b.pdf",
+            doc_type="pdf",
+        )
+
+    def test_generate_time_range_report_requires_authentication(self):
+        response = self.client.post(
+            "/api/risk/reports/time-range",
+            data=json.dumps({"period_start": "2025-02-01", "period_end": "2025-02-28"}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 401)
+        self.assertEqual(
+            response.json(),
+            {"code": 401, "message": "未认证。", "data": {}},
+        )
+
+    def test_generate_time_range_report_rejects_user_without_permission(self):
+        response = self.client.post(
+            "/api/risk/reports/time-range",
+            data=json.dumps({"period_start": "2025-02-01", "period_end": "2025-02-28"}),
+            content_type="application/json",
+            HTTP_AUTHORIZATION=f"Bearer {self.unauthorized_token}",
+        )
+
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(
+            response.json(),
+            {"code": 403, "message": "无权限。", "data": {}},
+        )
+
+    def test_generate_time_range_report_validates_periods(self):
+        response = self.client.post(
+            "/api/risk/reports/time-range",
+            data=json.dumps({"period_start": "2025-03-01", "period_end": "2025-02-01"}),
+            content_type="application/json",
+            HTTP_AUTHORIZATION=f"Bearer {self.authorized_token}",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        payload = response.json()
+        self.assertEqual(payload["code"], 400)
+        self.assertEqual(payload["message"], "period_start 不能晚于 period_end。")
+
+    def test_generate_time_range_report_returns_404_when_no_approved_events(self):
+        RiskEvent.objects.create(
+            company_name="FinModPro Holdings",
+            risk_type="liquidity",
+            risk_level=RiskEvent.LEVEL_HIGH,
+            event_time="2025-02-10T09:00:00+08:00",
+            summary="待审核事件",
+            evidence_text="证据 A",
+            confidence_score=Decimal("0.810"),
+            review_status=RiskEvent.STATUS_PENDING,
+            document=self.first_document,
+        )
+
+        response = self.client.post(
+            "/api/risk/reports/time-range",
+            data=json.dumps({"period_start": "2025-02-01", "period_end": "2025-02-28"}),
+            content_type="application/json",
+            HTTP_AUTHORIZATION=f"Bearer {self.authorized_token}",
+        )
+
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(
+            response.json(),
+            {"code": 404, "message": "未找到已审核通过的风险事件。", "data": {}},
+        )
+
+    def test_generate_time_range_report_creates_report_from_approved_events_only(self):
+        in_range_event = RiskEvent.objects.create(
+            company_name="FinModPro Holdings",
+            risk_type="liquidity",
+            risk_level=RiskEvent.LEVEL_HIGH,
+            event_time="2025-02-10T09:00:00+08:00",
+            summary="区间内事件 A",
+            evidence_text="证据 A",
+            confidence_score=Decimal("0.910"),
+            review_status=RiskEvent.STATUS_APPROVED,
+            document=self.first_document,
+        )
+        second_in_range_event = RiskEvent.objects.create(
+            company_name="Another Corp",
+            risk_type="credit",
+            risk_level=RiskEvent.LEVEL_MEDIUM,
+            event_time="2025-02-18T09:00:00+08:00",
+            summary="区间内事件 B",
+            evidence_text="证据 B",
+            confidence_score=Decimal("0.740"),
+            review_status=RiskEvent.STATUS_APPROVED,
+            document=self.second_document,
+        )
+        RiskEvent.objects.create(
+            company_name="FinModPro Holdings",
+            risk_type="market",
+            risk_level=RiskEvent.LEVEL_LOW,
+            event_time="2025-03-05T09:00:00+08:00",
+            summary="区间外事件",
+            evidence_text="不应被纳入。",
+            confidence_score=Decimal("0.430"),
+            review_status=RiskEvent.STATUS_APPROVED,
+            document=self.second_document,
+        )
+        RiskEvent.objects.create(
+            company_name="Another Corp",
+            risk_type="operation",
+            risk_level=RiskEvent.LEVEL_LOW,
+            event_time="2025-02-15T09:00:00+08:00",
+            summary="未审核事件",
+            evidence_text="也不应被纳入。",
+            confidence_score=Decimal("0.520"),
+            review_status=RiskEvent.STATUS_PENDING,
+            document=self.second_document,
+        )
+
+        response = self.client.post(
+            "/api/risk/reports/time-range",
+            data=json.dumps({"period_start": "2025-02-01", "period_end": "2025-02-28"}),
+            content_type="application/json",
+            HTTP_AUTHORIZATION=f"Bearer {self.authorized_token}",
+        )
+
+        self.assertEqual(response.status_code, 201)
+        payload = response.json()
+        self.assertEqual(payload["code"], 0)
+        report_payload = payload["data"]["report"]
+        self.assertEqual(report_payload["scope_type"], RiskReport.SCOPE_TIME_RANGE)
+        self.assertIsNone(report_payload["company_name"])
+        self.assertEqual(report_payload["period_start"], "2025-02-01")
+        self.assertEqual(report_payload["period_end"], "2025-02-28")
+        self.assertIn("时间区间风险报告", report_payload["title"])
+        self.assertIn("已审核通过风险事件", report_payload["summary"])
+        self.assertIn("区间内事件 A", report_payload["content"])
+        self.assertIn("区间内事件 B", report_payload["content"])
+        self.assertEqual(
+            report_payload["source_metadata"]["event_ids"],
+            [in_range_event.id, second_in_range_event.id],
+        )
+        self.assertEqual(
+            report_payload["source_metadata"]["document_ids"],
+            [self.first_document.id, self.second_document.id],
+        )
+        self.assertEqual(
+            report_payload["source_metadata"]["risk_type_counts"],
+            {"credit": 1, "liquidity": 1},
+        )
