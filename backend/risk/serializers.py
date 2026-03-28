@@ -35,6 +35,15 @@ class RiskEventListQuerySerializer(serializers.Serializer):
     document_id = serializers.IntegerField(required=False, min_value=1)
 
 
+class RiskEventReviewSerializer(serializers.Serializer):
+    review_status = serializers.ChoiceField(
+        choices=(
+            (RiskEvent.STATUS_APPROVED, "Approved"),
+            (RiskEvent.STATUS_REJECTED, "Rejected"),
+        )
+    )
+
+
 class RiskEventSummarySerializer(serializers.ModelSerializer):
     document_id = serializers.IntegerField(source="document.id", read_only=True, allow_null=True)
     chunk_id = serializers.IntegerField(source="chunk.id", read_only=True, allow_null=True)
