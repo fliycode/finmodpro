@@ -99,6 +99,9 @@ class ChatAskApiTests(TestCase):
         self.assertEqual(payload["query"], "revenue and margin outlook")
         self.assertIn("Outlook memo", payload["answer"])
         self.assertIn("revenue growth stayed resilient", payload["answer"])
+        self.assertIn("duration_ms", payload)
+        self.assertIsInstance(payload["duration_ms"], int)
+        self.assertGreaterEqual(payload["duration_ms"], 0)
         self.assertEqual(len(payload["citations"]), 1)
         self.assertEqual(
             payload["citations"][0],
@@ -160,6 +163,8 @@ class ChatAskApiTests(TestCase):
         self.assertEqual(len(payload["citations"]), 1)
         self.assertEqual(payload["citations"][0]["document_title"], "Outlook memo")
         self.assertIn("Outlook memo", payload["answer"])
+        self.assertIn("duration_ms", payload)
+        self.assertGreaterEqual(payload["duration_ms"], 0)
 
     def test_chat_ask_requires_question_or_query(self):
         response = self.client.post(

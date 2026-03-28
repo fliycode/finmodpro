@@ -111,6 +111,9 @@ class RagRetrievalApiTests(TestCase):
         payload = response.json()
         self.assertEqual(payload["query"], "cash flow revenue")
         self.assertEqual(payload["question"], "cash flow revenue")
+        self.assertIn("duration_ms", payload)
+        self.assertIsInstance(payload["duration_ms"], int)
+        self.assertGreaterEqual(payload["duration_ms"], 0)
         self.assertEqual(len(payload["results"]), 1)
         self.assertEqual(len(payload["citations"]), 1)
         self.assertEqual(payload["results"], payload["citations"])
@@ -150,6 +153,7 @@ class RagRetrievalApiTests(TestCase):
         payload = response.json()
         self.assertEqual(payload["query"], "margin risk")
         self.assertEqual(payload["question"], "margin risk")
+        self.assertIn("duration_ms", payload)
         self.assertIsInstance(payload["citations"], list)
 
     def test_retrieval_query_uses_keyword_search_to_match_title_only_hits(self):

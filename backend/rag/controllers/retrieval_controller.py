@@ -48,12 +48,15 @@ def retrieval_query_view(request):
             response["Retry-After"] = str(exc.retry_after)
         return response
 
+    duration_ms = int((time.monotonic() - started_at) * 1000)
     create_retrieval_log(
         query=query,
         top_k=top_k,
         filters=filters,
         results=results,
         source="retrieval_api",
-        duration_ms=int((time.monotonic() - started_at) * 1000),
+        duration_ms=duration_ms,
     )
-    return JsonResponse(build_retrieval_response(query=query, results=results))
+    response_payload = build_retrieval_response(query=query, results=results)
+    response_payload["duration_ms"] = duration_ms
+    return JsonResponse(response_payload)
