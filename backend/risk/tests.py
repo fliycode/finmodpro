@@ -131,6 +131,104 @@ class RiskExtractionApiTests(TestCase):
         mocked_get_chat_provider.assert_not_called()
 
 
+@override_settings(
+    JWT_SECRET_KEY="test-jwt-secret",
+    JWT_ACCESS_TOKEN_LIFETIME_SECONDS=3600,
+)
+class RiskBatchExtractionApiTests(TestCase):
+    def setUp(self):
+        self.client = Client()
+        seed_roles_and_permissions()
+        self.media_root = tempfile.mkdtemp()
+        self.override = override_settings(MEDIA_ROOT=self.media_root)
+        self.override.enable()
+
+        self.user = User.objects.create_user(
+            username="risk-batch-admin",
+            password="secret123",
+            email="risk-batch-admin@example.com",
+        )
+        self.user.groups.add(Group.objects.get(name=ROLE_ADMIN))
+        self.access_token = generate_access_token(self.user)
+
+    def tearDown(self):
+        self.override.disable()
+        shutil.rmtree(self.media_root, ignore_errors=True)
+
+    def create_document(self, *, title, filename):
+        return Document.objects.create(
+            title=title,
+            file=SimpleUploadedFile(filename, b"risk-content", content_type="application/pdf"),
+            filename=filename,
+            doc_type="pdf",
+        )
+
+    def test_batch_extract_validates_document_ids(self):
+        response = self.client.post(
+            "/api/risk/documents/extract-batch",
+            data=json.dumps({}),
+            content_type="application/json",
+            HTTP_AUTHORIZATION=f"Bearer {self.access_token}",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        payload = response.json()
+        self.assertEqual(payload["code"], 400)
+        self.assertIn("document_ids", payload["data"])
+        self.assertEqual(RiskEvent.objects.count(), 0)
+
+    @patch("risk.services.extraction_service.get_chat_provider")
+    def test_batch_extract_returns_mixed_results_summary(self, mocked_get_chat_provider):
+        extractable_document = self.create_document(title="可抽取文档", filename="extractable.pdf")
+        empty_document = self.create_document(title="无切块文档", filename="empty.pdf")
+        chunk = DocumentChunk.objects.create(
+            document=extractable_document,
+            chunk_index=0,
+            content="FinModPro Holdings 信用风险升高，客户回款周期拉长。",
+            metadata={"page": 5},
+        )
+        mocked_get_chat_provider.return_value.chat.return_value = json.dumps(
+            {
+                "events": [
+                    {
+                        "company_name": "FinModPro Holdings",
+                        "risk_type": "credit",
+                        "risk_level": "medium",
+                        "event_time": None,
+                        "summary": "信用风险升高，客户回款周期拉长。",
+                        "evidence_text": "FinModPro Holdings 信用风险升高，客户回款周期拉长。",
+                        "confidence_score": "0.780",
+                        "chunk_id": chunk.id,
+                    }
+                ]
+            }
+        )
+
+        response = self.client.post(
+            "/api/risk/documents/extract-batch",
+            data=json.dumps({"document_ids": [extractable_document.id, empty_document.id, 999999]}),
+            content_type="application/json",
+            HTTP_AUTHORIZATION=f"Bearer {self.access_token}",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["code"], 0)
+        self.assertEqual(payload["data"]["total_documents"], 3)
+        self.assertEqual(payload["data"]["processed_documents"], 3)
+        self.assertEqual(payload["data"]["total_created_count"], 1)
+        self.assertEqual(
+            [item["status"] for item in payload["data"]["results"]],
+            ["created", "no_chunks", "not_found"],
+        )
+        self.assertEqual(payload["data"]["results"][0]["document_id"], extractable_document.id)
+        self.assertEqual(payload["data"]["results"][0]["created_count"], 1)
+        self.assertEqual(payload["data"]["results"][1]["document_id"], empty_document.id)
+        self.assertEqual(payload["data"]["results"][2]["document_id"], 999999)
+        self.assertEqual(RiskEvent.objects.count(), 1)
+        mocked_get_chat_provider.return_value.chat.assert_called_once()
+
+
 class RiskEventModelTests(TestCase):
     def setUp(self):
         self.media_root = tempfile.mkdtemp()
