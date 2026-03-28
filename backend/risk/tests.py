@@ -655,3 +655,170 @@ class RiskReportModelTests(TestCase):
         )
 
         self.assertEqual(list(RiskReport.objects.values_list("id", flat=True)), [second.id, first.id])
+
+
+@override_settings(
+    JWT_SECRET_KEY="test-jwt-secret",
+    JWT_ACCESS_TOKEN_LIFETIME_SECONDS=3600,
+)
+class CompanyRiskReportApiTests(TestCase):
+    def setUp(self):
+        self.client = Client()
+        seed_roles_and_permissions()
+        self.authorized_user = User.objects.create_user(
+            username="risk-report-admin",
+            password="secret123",
+            email="risk-report-admin@example.com",
+        )
+        self.authorized_user.groups.add(Group.objects.get(name=ROLE_ADMIN))
+        self.authorized_token = generate_access_token(self.authorized_user)
+
+        self.unauthorized_user = User.objects.create_user(
+            username="risk-report-member",
+            password="secret123",
+            email="risk-report-member@example.com",
+        )
+        self.unauthorized_token = generate_access_token(self.unauthorized_user)
+
+        self.first_document = Document.objects.create(
+            title="风险来源文档 A",
+            file=SimpleUploadedFile("report-a.pdf", b"risk-content", content_type="application/pdf"),
+            filename="report-a.pdf",
+            doc_type="pdf",
+        )
+        self.second_document = Document.objects.create(
+            title="风险来源文档 B",
+            file=SimpleUploadedFile("report-b.pdf", b"risk-content", content_type="application/pdf"),
+            filename="report-b.pdf",
+            doc_type="pdf",
+        )
+
+    def test_generate_company_report_requires_authentication(self):
+        response = self.client.post(
+            "/api/risk/reports/company",
+            data=json.dumps({"company_name": "FinModPro Holdings"}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 401)
+        self.assertEqual(
+            response.json(),
+            {"code": 401, "message": "未认证。", "data": {}},
+        )
+
+    def test_generate_company_report_rejects_user_without_permission(self):
+        response = self.client.post(
+            "/api/risk/reports/company",
+            data=json.dumps({"company_name": "FinModPro Holdings"}),
+            content_type="application/json",
+            HTTP_AUTHORIZATION=f"Bearer {self.unauthorized_token}",
+        )
+
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(
+            response.json(),
+            {"code": 403, "message": "无权限。", "data": {}},
+        )
+
+    def test_generate_company_report_validates_company_name(self):
+        response = self.client.post(
+            "/api/risk/reports/company",
+            data=json.dumps({}),
+            content_type="application/json",
+            HTTP_AUTHORIZATION=f"Bearer {self.authorized_token}",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        payload = response.json()
+        self.assertEqual(payload["code"], 400)
+        self.assertIn("company_name", payload["data"])
+
+    def test_generate_company_report_returns_404_when_no_approved_events(self):
+        RiskEvent.objects.create(
+            company_name="FinModPro Holdings",
+            risk_type="liquidity",
+            risk_level=RiskEvent.LEVEL_HIGH,
+            summary="待审核事件",
+            evidence_text="证据 A",
+            confidence_score=Decimal("0.810"),
+            review_status=RiskEvent.STATUS_PENDING,
+            document=self.first_document,
+        )
+
+        response = self.client.post(
+            "/api/risk/reports/company",
+            data=json.dumps({"company_name": "FinModPro Holdings"}),
+            content_type="application/json",
+            HTTP_AUTHORIZATION=f"Bearer {self.authorized_token}",
+        )
+
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(
+            response.json(),
+            {"code": 404, "message": "未找到已审核通过的风险事件。", "data": {}},
+        )
+
+    def test_generate_company_report_creates_report_from_approved_events_only(self):
+        approved_event = RiskEvent.objects.create(
+            company_name="FinModPro Holdings",
+            risk_type="liquidity",
+            risk_level=RiskEvent.LEVEL_HIGH,
+            event_time="2025-02-10T09:00:00+08:00",
+            summary="流动性风险上升",
+            evidence_text="短债覆盖倍数下降。",
+            confidence_score=Decimal("0.920"),
+            review_status=RiskEvent.STATUS_APPROVED,
+            document=self.first_document,
+        )
+        second_approved_event = RiskEvent.objects.create(
+            company_name="FinModPro Holdings",
+            risk_type="credit",
+            risk_level=RiskEvent.LEVEL_MEDIUM,
+            event_time="2025-02-20T09:00:00+08:00",
+            summary="信用风险增加",
+            evidence_text="客户回款周期拉长。",
+            confidence_score=Decimal("0.760"),
+            review_status=RiskEvent.STATUS_APPROVED,
+            document=self.second_document,
+        )
+        RiskEvent.objects.create(
+            company_name="FinModPro Holdings",
+            risk_type="market",
+            risk_level=RiskEvent.LEVEL_LOW,
+            summary="未审核事件",
+            evidence_text="不应被纳入报告。",
+            confidence_score=Decimal("0.450"),
+            review_status=RiskEvent.STATUS_PENDING,
+            document=self.second_document,
+        )
+
+        response = self.client.post(
+            "/api/risk/reports/company",
+            data=json.dumps({"company_name": "FinModPro Holdings"}),
+            content_type="application/json",
+            HTTP_AUTHORIZATION=f"Bearer {self.authorized_token}",
+        )
+
+        self.assertEqual(response.status_code, 201)
+        payload = response.json()
+        self.assertEqual(payload["code"], 0)
+        report_payload = payload["data"]["report"]
+        self.assertEqual(report_payload["scope_type"], RiskReport.SCOPE_COMPANY)
+        self.assertEqual(report_payload["company_name"], "FinModPro Holdings")
+        self.assertIn("FinModPro Holdings 风险报告", report_payload["title"])
+        self.assertIn("已审核通过风险事件", report_payload["summary"])
+        self.assertIn("流动性风险上升", report_payload["content"])
+        self.assertIn("信用风险增加", report_payload["content"])
+        self.assertEqual(
+            report_payload["source_metadata"]["event_ids"],
+            [approved_event.id, second_approved_event.id],
+        )
+        self.assertEqual(
+            report_payload["source_metadata"]["document_ids"],
+            [self.first_document.id, self.second_document.id],
+        )
+        self.assertEqual(
+            report_payload["source_metadata"]["risk_type_counts"],
+            {"credit": 1, "liquidity": 1},
+        )
+        self.assertEqual(RiskReport.objects.count(), 1)

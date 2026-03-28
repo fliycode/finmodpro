@@ -2,7 +2,7 @@ import json
 
 from rest_framework import serializers
 
-from risk.models import RiskEvent
+from risk.models import RiskEvent, RiskReport
 
 
 class RiskExtractionEventSerializer(serializers.Serializer):
@@ -44,6 +44,19 @@ class RiskEventReviewSerializer(serializers.Serializer):
     )
 
 
+class CompanyRiskReportCreateSerializer(serializers.Serializer):
+    company_name = serializers.CharField(max_length=255)
+    period_start = serializers.DateField(required=False, allow_null=True)
+    period_end = serializers.DateField(required=False, allow_null=True)
+
+    def validate(self, attrs):
+        period_start = attrs.get("period_start")
+        period_end = attrs.get("period_end")
+        if period_start and period_end and period_start > period_end:
+            raise serializers.ValidationError("period_start 不能晚于 period_end。")
+        return attrs
+
+
 class RiskEventSummarySerializer(serializers.ModelSerializer):
     document_id = serializers.IntegerField(source="document.id", read_only=True, allow_null=True)
     chunk_id = serializers.IntegerField(source="chunk.id", read_only=True, allow_null=True)
@@ -62,6 +75,24 @@ class RiskEventSummarySerializer(serializers.ModelSerializer):
             "review_status",
             "document_id",
             "chunk_id",
+            "created_at",
+            "updated_at",
+        ]
+
+
+class RiskReportSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = RiskReport
+        fields = [
+            "id",
+            "scope_type",
+            "title",
+            "company_name",
+            "period_start",
+            "period_end",
+            "summary",
+            "content",
+            "source_metadata",
             "created_at",
             "updated_at",
         ]
