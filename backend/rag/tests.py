@@ -66,10 +66,21 @@ class RagRetrievalApiTests(TestCase):
             title="Risk memo",
             source_date="2024-10-31",
         )
+        third_document = create_document_from_upload(
+            uploaded_file=SimpleUploadedFile(
+                "treasury.txt",
+                b"foreign exchange exposure remained elevated across the quarter",
+                content_type="text/plain",
+            ),
+            title="Treasury hedging note",
+            source_date="2025-03-31",
+        )
         ingest_document(first_document)
         ingest_document(second_document)
+        ingest_document(third_document)
         self.first_document = first_document
         self.second_document = second_document
+        self.third_document = third_document
 
     def tearDown(self):
         self.embedding_provider_patcher.stop()
@@ -140,6 +151,38 @@ class RagRetrievalApiTests(TestCase):
         self.assertEqual(payload["query"], "margin risk")
         self.assertEqual(payload["question"], "margin risk")
         self.assertIsInstance(payload["citations"], list)
+
+    def test_retrieval_query_uses_keyword_search_to_match_title_only_hits(self):
+        response = self.client.post(
+            "/api/rag/retrieval/query",
+            data=json.dumps({"query": "treasury hedging note", "top_k": 2}),
+            content_type="application/json",
+            HTTP_AUTHORIZATION=f"Bearer {self.access_token}",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(len(payload["results"]), 1)
+        self.assertEqual(payload["results"][0]["document_title"], "Treasury hedging note")
+        self.assertIn("foreign exchange exposure", payload["results"][0]["snippet"])
+
+    def test_retrieval_filters_still_apply_to_keyword_hits(self):
+        response = self.client.post(
+            "/api/rag/retrieval/query",
+            data=json.dumps(
+                {
+                    "query": "treasury hedging note",
+                    "filters": {"document_id": self.first_document.id},
+                }
+            ),
+            content_type="application/json",
+            HTTP_AUTHORIZATION=f"Bearer {self.access_token}",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["results"], [])
+        self.assertEqual(payload["citations"], [])
 
     def test_retrieval_rejects_user_without_ask_financial_qa_permission(self):
         unauthorized_user = User.objects.create_user(

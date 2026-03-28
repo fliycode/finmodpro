@@ -147,6 +147,20 @@ class ChatAskApiTests(TestCase):
         self.assertEqual(retrieval_log.result_count, 0)
         self.assertEqual(retrieval_log.filters, {"doc_type": "pdf"})
 
+    def test_chat_ask_uses_hybrid_retrieval_for_title_keyword_hits(self):
+        response = self.client.post(
+            "/api/chat/ask",
+            data=json.dumps({"query": "Outlook memo"}),
+            content_type="application/json",
+            HTTP_AUTHORIZATION=f"Bearer {self.access_token}",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(len(payload["citations"]), 1)
+        self.assertEqual(payload["citations"][0]["document_title"], "Outlook memo")
+        self.assertIn("Outlook memo", payload["answer"])
+
     def test_chat_ask_requires_question_or_query(self):
         response = self.client.post(
             "/api/chat/ask",
