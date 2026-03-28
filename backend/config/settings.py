@@ -78,6 +78,7 @@ INSTALLED_APPS = [
     "llm",
     "rag",
     "chat",
+    "risk",
     "systemcheck",
 ]
 
