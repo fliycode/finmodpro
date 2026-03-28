@@ -5,12 +5,13 @@ from unittest.mock import patch
 
 from django.contrib.auth.models import Group
 from django.core.files.uploadedfile import SimpleUploadedFile
+from django.db import IntegrityError
 from django.test import Client, TestCase, override_settings
 
 from authentication.models import User
 from authentication.services.jwt_service import generate_access_token
+from chat.models import ChatMessage, ChatSession
 from common.exceptions import UpstreamRateLimitError
-from chat.models import ChatSession
 from knowledgebase.services.document_service import create_document_from_upload, ingest_document
 from rag.services.vector_store_service import clear_store
 from rbac.services.rbac_service import ROLE_ADMIN, seed_roles_and_permissions
@@ -242,3 +243,79 @@ class ChatSessionModelTests(TestCase):
         user.delete()
 
         self.assertEqual(ChatSession.objects.count(), 0)
+
+
+@override_settings(
+    JWT_SECRET_KEY="test-jwt-secret",
+    JWT_ACCESS_TOKEN_LIFETIME_SECONDS=3600,
+)
+class ChatMessageModelTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username="message-user",
+            password="secret123",
+            email="message@example.com",
+        )
+        self.session = ChatSession.objects.create(user=self.user, title="测试会话")
+
+    def test_chat_message_can_be_created_with_default_type_and_incrementing_sequence(self):
+        first_message = ChatMessage.objects.create(
+            session=self.session,
+            role=ChatMessage.ROLE_USER,
+            content="第一条问题",
+        )
+        second_message = ChatMessage.objects.create(
+            session=self.session,
+            role=ChatMessage.ROLE_ASSISTANT,
+            content="第一条回答",
+        )
+
+        self.assertEqual(first_message.sequence, 1)
+        self.assertEqual(second_message.sequence, 2)
+        self.assertEqual(first_message.message_type, ChatMessage.TYPE_TEXT)
+
+    def test_chat_message_is_scoped_to_session_and_ordered_by_sequence(self):
+        ChatMessage.objects.create(
+            session=self.session,
+            sequence=2,
+            role=ChatMessage.ROLE_ASSISTANT,
+            content="第二条",
+        )
+        ChatMessage.objects.create(
+            session=self.session,
+            sequence=1,
+            role=ChatMessage.ROLE_USER,
+            content="第一条",
+        )
+
+        self.assertEqual(
+            list(self.session.messages.values_list("content", flat=True)),
+            ["第一条", "第二条"],
+        )
+
+    def test_chat_message_sequence_must_be_unique_within_session(self):
+        ChatMessage.objects.create(
+            session=self.session,
+            sequence=1,
+            role=ChatMessage.ROLE_USER,
+            content="重复检测 1",
+        )
+
+        with self.assertRaises(IntegrityError):
+            ChatMessage.objects.create(
+                session=self.session,
+                sequence=1,
+                role=ChatMessage.ROLE_ASSISTANT,
+                content="重复检测 2",
+            )
+
+    def test_deleting_session_cascades_chat_messages(self):
+        ChatMessage.objects.create(
+            session=self.session,
+            role=ChatMessage.ROLE_USER,
+            content="待删除消息",
+        )
+
+        self.session.delete()
+
+        self.assertEqual(ChatMessage.objects.count(), 0)
