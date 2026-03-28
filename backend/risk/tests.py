@@ -391,6 +391,114 @@ class RiskEventListApiTests(TestCase):
         self.assertIn("review_status", first_item)
 
 
+@override_settings(
+    JWT_SECRET_KEY="test-jwt-secret",
+    JWT_ACCESS_TOKEN_LIFETIME_SECONDS=3600,
+)
+class RiskEventReviewApiTests(TestCase):
+    def setUp(self):
+        self.client = Client()
+        seed_roles_and_permissions()
+        self.admin_user = User.objects.create_user(
+            username="risk-review-admin",
+            password="secret123",
+            email="risk-review-admin@example.com",
+        )
+        self.admin_user.groups.add(Group.objects.get(name=ROLE_ADMIN))
+        self.admin_token = generate_access_token(self.admin_user)
+
+        self.unauthorized_user = User.objects.create_user(
+            username="risk-review-member",
+            password="secret123",
+            email="risk-review-member@example.com",
+        )
+        self.unauthorized_token = generate_access_token(self.unauthorized_user)
+
+        self.risk_event = RiskEvent.objects.create(
+            company_name="FinModPro Holdings",
+            risk_type="liquidity",
+            risk_level=RiskEvent.LEVEL_HIGH,
+            summary="待审核事件",
+            evidence_text="证据文本",
+            confidence_score=Decimal("0.810"),
+            review_status=RiskEvent.STATUS_PENDING,
+        )
+
+    def test_review_risk_event_requires_authentication(self):
+        response = self.client.post(
+            f"/api/risk/events/{self.risk_event.id}/review",
+            data=json.dumps({"review_status": RiskEvent.STATUS_APPROVED}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 401)
+        self.assertEqual(
+            response.json(),
+            {"code": 401, "message": "未认证。", "data": {}},
+        )
+
+    def test_review_risk_event_rejects_user_without_permission(self):
+        response = self.client.post(
+            f"/api/risk/events/{self.risk_event.id}/review",
+            data=json.dumps({"review_status": RiskEvent.STATUS_APPROVED}),
+            content_type="application/json",
+            HTTP_AUTHORIZATION=f"Bearer {self.unauthorized_token}",
+        )
+
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(
+            response.json(),
+            {"code": 403, "message": "无权限。", "data": {}},
+        )
+
+    def test_review_risk_event_validates_review_status(self):
+        response = self.client.post(
+            f"/api/risk/events/{self.risk_event.id}/review",
+            data=json.dumps({"review_status": RiskEvent.STATUS_PENDING}),
+            content_type="application/json",
+            HTTP_AUTHORIZATION=f"Bearer {self.admin_token}",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        payload = response.json()
+        self.assertEqual(payload["code"], 400)
+        self.assertIn("review_status", payload["data"])
+
+    def test_review_risk_event_returns_404_when_event_missing(self):
+        response = self.client.post(
+            "/api/risk/events/999999/review",
+            data=json.dumps({"review_status": RiskEvent.STATUS_APPROVED}),
+            content_type="application/json",
+            HTTP_AUTHORIZATION=f"Bearer {self.admin_token}",
+        )
+
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(
+            response.json(),
+            {"code": 404, "message": "风险事件不存在。", "data": {}},
+        )
+
+    def test_review_risk_event_updates_review_status(self):
+        response = self.client.post(
+            f"/api/risk/events/{self.risk_event.id}/review",
+            data=json.dumps({"review_status": RiskEvent.STATUS_REJECTED}),
+            content_type="application/json",
+            HTTP_AUTHORIZATION=f"Bearer {self.admin_token}",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["code"], 0)
+        self.assertEqual(payload["data"]["risk_event"]["id"], self.risk_event.id)
+        self.assertEqual(
+            payload["data"]["risk_event"]["review_status"],
+            RiskEvent.STATUS_REJECTED,
+        )
+
+        self.risk_event.refresh_from_db()
+        self.assertEqual(self.risk_event.review_status, RiskEvent.STATUS_REJECTED)
+
+
 class RiskEventModelTests(TestCase):
     def setUp(self):
         self.media_root = tempfile.mkdtemp()
