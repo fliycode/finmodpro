@@ -13,7 +13,7 @@ from authentication.models import User
 from authentication.services.jwt_service import generate_access_token
 from knowledgebase.models import Document, DocumentChunk
 from rbac.services.rbac_service import ROLE_ADMIN, seed_roles_and_permissions
-from risk.models import RiskEvent
+from risk.models import RiskEvent, RiskReport
 
 
 @override_settings(
@@ -605,3 +605,53 @@ class RiskEventModelTests(TestCase):
         )
 
         self.assertEqual(list(RiskEvent.objects.values_list("id", flat=True)), [second.id, first.id])
+
+
+class RiskReportModelTests(TestCase):
+    def test_risk_report_can_be_created_for_company_scope(self):
+        report = RiskReport.objects.create(
+            scope_type=RiskReport.SCOPE_COMPANY,
+            title="FinModPro Holdings 风险报告",
+            company_name="FinModPro Holdings",
+            summary="公司维度风险摘要",
+            content="公司维度风险正文",
+            source_metadata={"event_ids": [1, 2], "document_ids": [3]},
+        )
+
+        self.assertEqual(report.scope_type, RiskReport.SCOPE_COMPANY)
+        self.assertEqual(report.company_name, "FinModPro Holdings")
+        self.assertIsNone(report.period_start)
+        self.assertEqual(report.source_metadata, {"event_ids": [1, 2], "document_ids": [3]})
+
+    def test_risk_report_can_be_created_for_time_range_scope(self):
+        report = RiskReport.objects.create(
+            scope_type=RiskReport.SCOPE_TIME_RANGE,
+            title="2025 Q1 风险报告",
+            period_start="2025-01-01",
+            period_end="2025-03-31",
+            content="时间区间风险正文",
+        )
+
+        self.assertEqual(report.scope_type, RiskReport.SCOPE_TIME_RANGE)
+        self.assertIsNone(report.company_name)
+        self.assertEqual(str(report.period_start), "2025-01-01")
+        self.assertEqual(str(report.period_end), "2025-03-31")
+        self.assertEqual(report.summary, "")
+        self.assertEqual(report.source_metadata, {})
+
+    def test_risk_report_orders_by_created_at_desc_then_id_desc(self):
+        first = RiskReport.objects.create(
+            scope_type=RiskReport.SCOPE_COMPANY,
+            title="较早报告",
+            company_name="A Corp",
+            content="正文 A",
+        )
+        second = RiskReport.objects.create(
+            scope_type=RiskReport.SCOPE_TIME_RANGE,
+            title="较新报告",
+            period_start="2025-01-01",
+            period_end="2025-01-31",
+            content="正文 B",
+        )
+
+        self.assertEqual(list(RiskReport.objects.values_list("id", flat=True)), [second.id, first.id])

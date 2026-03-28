@@ -68,3 +68,29 @@ class RiskEvent(models.Model):
     class Meta:
         ordering = ["-created_at", "-id"]
 
+
+class RiskReport(models.Model):
+    SCOPE_COMPANY = "company"
+    SCOPE_TIME_RANGE = "time_range"
+    SCOPE_CHOICES = (
+        (SCOPE_COMPANY, "Company"),
+        (SCOPE_TIME_RANGE, "Time Range"),
+    )
+
+    scope_type = models.CharField(
+        max_length=32,
+        choices=SCOPE_CHOICES,
+        db_index=True,
+    )
+    title = models.CharField(max_length=255)
+    company_name = models.CharField(max_length=255, blank=True, null=True, db_index=True)
+    period_start = models.DateField(blank=True, null=True, db_index=True)
+    period_end = models.DateField(blank=True, null=True, db_index=True)
+    summary = models.TextField(blank=True)
+    content = models.TextField()
+    source_metadata = models.JSONField(default=dict, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-created_at", "-id"]
