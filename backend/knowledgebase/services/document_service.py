@@ -1,7 +1,9 @@
 from datetime import date
 from pathlib import Path
 
-from knowledgebase.models import Document, DocumentChunk
+from django.utils import timezone
+
+from knowledgebase.models import Document, DocumentChunk, IngestionTask
 from knowledgebase.services.chunk_service import build_document_chunks
 from knowledgebase.services.parser_service import parse_document_file
 from knowledgebase.services.vector_service import index_document_chunks
@@ -31,6 +33,7 @@ def serialize_document(document, include_content_preview=False):
         "source_date": document.source_date.isoformat() if document.source_date else None,
         "file_path": document.file.name,
         "chunk_count": document.chunks.count(),
+        "vector_count": document.chunks.exclude(vector_id="").count(),
         "error_message": document.error_message or None,
         "created_at": document.created_at.isoformat(),
         "updated_at": document.updated_at.isoformat(),
@@ -121,6 +124,7 @@ def chunk_document(document, parsed_text):
                 document=document,
                 chunk_index=chunk["chunk_index"],
                 content=chunk["content"],
+                vector_id="",
                 metadata=chunk["metadata"],
             )
             for chunk in chunks
@@ -136,19 +140,61 @@ def vectorize_document(document):
     return document
 
 
-def ingest_document(document):
+def _mark_ingestion_task_running(ingestion_task):
+    ingestion_task.status = IngestionTask.STATUS_RUNNING
+    ingestion_task.error_message = ""
+    ingestion_task.started_at = timezone.now()
+    ingestion_task.finished_at = None
+    ingestion_task.save(
+        update_fields=[
+            "status",
+            "error_message",
+            "started_at",
+            "finished_at",
+            "updated_at",
+        ]
+    )
+
+
+def _mark_ingestion_task_finished(ingestion_task, *, status, error_message=""):
+    ingestion_task.status = status
+    ingestion_task.error_message = error_message
+    ingestion_task.finished_at = timezone.now()
+    ingestion_task.save(
+        update_fields=[
+            "status",
+            "error_message",
+            "finished_at",
+            "updated_at",
+        ]
+    )
+
+
+def ingest_document(document, ingestion_task=None):
     try:
         parsed_text = parse_document(document)
         chunk_document(document, parsed_text)
         vectorize_document(document)
+        if ingestion_task is not None:
+            _mark_ingestion_task_finished(
+                ingestion_task,
+                status=IngestionTask.STATUS_SUCCEEDED,
+            )
         return document
-    except ValueError as exc:
+    except Exception as exc:
         DocumentChunk.objects.filter(document=document).delete()
+        error_message = str(exc) or "文档摄取失败。"
         _update_document_status(
             document,
             status=Document.STATUS_FAILED,
-            error_message=str(exc),
+            error_message=error_message,
         )
+        if ingestion_task is not None:
+            _mark_ingestion_task_finished(
+                ingestion_task,
+                status=IngestionTask.STATUS_FAILED,
+                error_message=error_message,
+            )
         raise
 
 
@@ -157,5 +203,17 @@ def enqueue_document_ingestion(document):
 
     document.error_message = ""
     document.save(update_fields=["error_message", "updated_at"])
-    ingest_document_task.delay(document.id)
+    ingestion_task = IngestionTask.objects.create(document=document)
+    async_result = ingest_document_task.delay(document.id, ingestion_task.id)
+    ingestion_task.celery_task_id = async_result.id or ""
+    ingestion_task.save(update_fields=["celery_task_id", "updated_at"])
     return document
+
+
+def start_ingestion_task(ingestion_task):
+    if ingestion_task.status == IngestionTask.STATUS_FAILED:
+        ingestion_task.retry_count += 1
+    _mark_ingestion_task_running(ingestion_task)
+    if ingestion_task.retry_count:
+        ingestion_task.save(update_fields=["retry_count", "updated_at"])
+    return ingestion_task

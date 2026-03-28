@@ -34,6 +34,40 @@ class Document(models.Model):
         ordering = ["id"]
 
 
+class IngestionTask(models.Model):
+    STATUS_QUEUED = "queued"
+    STATUS_RUNNING = "running"
+    STATUS_SUCCEEDED = "succeeded"
+    STATUS_FAILED = "failed"
+    STATUS_CHOICES = (
+        (STATUS_QUEUED, "Queued"),
+        (STATUS_RUNNING, "Running"),
+        (STATUS_SUCCEEDED, "Succeeded"),
+        (STATUS_FAILED, "Failed"),
+    )
+
+    document = models.ForeignKey(
+        Document,
+        related_name="ingestion_tasks",
+        on_delete=models.CASCADE,
+    )
+    celery_task_id = models.CharField(max_length=255, blank=True, db_index=True)
+    status = models.CharField(
+        max_length=32,
+        choices=STATUS_CHOICES,
+        default=STATUS_QUEUED,
+    )
+    error_message = models.TextField(blank=True)
+    started_at = models.DateTimeField(blank=True, null=True)
+    finished_at = models.DateTimeField(blank=True, null=True)
+    retry_count = models.PositiveIntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["id"]
+
+
 class DocumentChunk(models.Model):
     document = models.ForeignKey(
         Document,
@@ -42,6 +76,7 @@ class DocumentChunk(models.Model):
     )
     chunk_index = models.PositiveIntegerField()
     content = models.TextField()
+    vector_id = models.CharField(max_length=64, blank=True, db_index=True)
     metadata = models.JSONField(default=dict, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 

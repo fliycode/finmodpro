@@ -8,12 +8,15 @@ from django.test import Client, TestCase, override_settings
 
 from authentication.models import User
 from authentication.services.jwt_service import generate_access_token
-from knowledgebase.models import Document
+from knowledgebase.models import Document, IngestionTask
+from knowledgebase.services.chunk_service import build_document_chunks
 from knowledgebase.services.document_service import (
     create_document_from_upload,
+    enqueue_document_ingestion,
     ingest_document,
     vectorize_document,
 )
+from knowledgebase.services.parser_service import ParserService
 from knowledgebase.tasks import ingest_document_task
 from rag.services.vector_store_service import clear_store
 from rbac.services.rbac_service import ROLE_ADMIN, seed_roles_and_permissions
@@ -100,8 +103,15 @@ class KnowledgebaseApiTests(TestCase):
         self.assertGreaterEqual(ingest_payload["document"]["chunk_count"], 1)
 
         document = Document.objects.get(id=document_id)
+        ingestion_task = IngestionTask.objects.get(document=document)
         self.assertEqual(document.status, Document.STATUS_INDEXED)
         self.assertEqual(document.chunks.count(), ingest_payload["document"]["chunk_count"])
+        self.assertEqual(ingestion_task.status, IngestionTask.STATUS_SUCCEEDED)
+        self.assertEqual(ingestion_task.retry_count, 0)
+        self.assertEqual(ingestion_task.error_message, "")
+        self.assertIsNotNone(ingestion_task.started_at)
+        self.assertIsNotNone(ingestion_task.finished_at)
+        self.assertTrue(ingestion_task.celery_task_id)
 
     def test_upload_requires_upload_permission_even_when_user_can_view_documents(self):
         member_user = User.objects.create_user(
@@ -131,12 +141,19 @@ class KnowledgebaseApiTests(TestCase):
 @override_settings(
     JWT_SECRET_KEY="test-jwt-secret",
     JWT_ACCESS_TOKEN_LIFETIME_SECONDS=3600,
+    CELERY_TASK_ALWAYS_EAGER=True,
+    CELERY_TASK_EAGER_PROPAGATES=True,
 )
 class KnowledgebaseDocumentServiceTests(TestCase):
     def setUp(self):
         clear_store()
         self.media_root = tempfile.mkdtemp()
-        self.override = override_settings(MEDIA_ROOT=self.media_root)
+        self.milvus_uri = f"{self.media_root}/test-milvus.db"
+        self.override = override_settings(
+            MEDIA_ROOT=self.media_root,
+            MILVUS_URI=self.milvus_uri,
+            MILVUS_COLLECTION_NAME="test_document_chunks",
+        )
         self.override.enable()
 
     def tearDown(self):
@@ -174,11 +191,13 @@ class KnowledgebaseDocumentServiceTests(TestCase):
         document.refresh_from_db()
         self.assertEqual(document.status, Document.STATUS_INDEXED)
         self.assertEqual(document.error_message, "")
+        self.assertTrue(all(chunk.vector_id for chunk in document.chunks.all()))
         self.assertEqual(observed_statuses, [Document.STATUS_CHUNKED])
 
         reparsed = Document.objects.get(id=document.id)
         self.assertEqual(reparsed.parsed_text, "revenue improved and margin recovered")
         self.assertEqual(reparsed.chunks.count(), 1)
+        self.assertTrue(reparsed.chunks.exclude(vector_id="").exists())
 
     def test_ingest_document_task_indexes_uploaded_document(self):
         document = create_document_from_upload(
@@ -190,10 +209,84 @@ class KnowledgebaseDocumentServiceTests(TestCase):
             title="Task doc",
             source_date="2025-03-01",
         )
+        ingestion_task = IngestionTask.objects.create(document=document)
 
-        ingest_document_task(document.id)
+        ingest_document_task(document.id, ingestion_task.id)
 
         document.refresh_from_db()
+        ingestion_task.refresh_from_db()
         self.assertEqual(document.status, Document.STATUS_INDEXED)
         self.assertEqual(document.error_message, "")
         self.assertEqual(document.chunks.count(), 1)
+        self.assertTrue(document.chunks.exclude(vector_id="").exists())
+        self.assertEqual(ingestion_task.status, IngestionTask.STATUS_SUCCEEDED)
+        self.assertIsNotNone(ingestion_task.started_at)
+        self.assertIsNotNone(ingestion_task.finished_at)
+
+    def test_enqueue_document_ingestion_creates_queued_then_succeeded_task_record(self):
+        document = create_document_from_upload(
+            uploaded_file=SimpleUploadedFile(
+                "queued.txt",
+                b"cash flow remained resilient",
+                content_type="text/plain",
+            ),
+            title="Queued doc",
+            source_date="2025-03-01",
+        )
+
+        enqueue_document_ingestion(document)
+
+        ingestion_task = IngestionTask.objects.get(document=document)
+        self.assertEqual(ingestion_task.status, IngestionTask.STATUS_SUCCEEDED)
+        self.assertEqual(ingestion_task.retry_count, 0)
+        self.assertTrue(ingestion_task.celery_task_id)
+        self.assertIsNotNone(ingestion_task.started_at)
+        self.assertIsNotNone(ingestion_task.finished_at)
+
+    def test_ingest_document_marks_task_failed_when_parser_raises(self):
+        document = create_document_from_upload(
+            uploaded_file=SimpleUploadedFile(
+                "failed.txt",
+                b"should fail",
+                content_type="text/plain",
+            ),
+            title="Failed doc",
+            source_date="2025-03-01",
+        )
+        ingestion_task = IngestionTask.objects.create(document=document)
+
+        with patch(
+            "knowledgebase.services.document_service.parse_document",
+            side_effect=ValueError("解析失败"),
+        ):
+            with self.assertRaisesMessage(ValueError, "解析失败"):
+                ingest_document_task(document.id, ingestion_task.id)
+
+        document.refresh_from_db()
+        ingestion_task.refresh_from_db()
+        self.assertEqual(document.status, Document.STATUS_FAILED)
+        self.assertEqual(document.error_message, "解析失败")
+        self.assertEqual(ingestion_task.status, IngestionTask.STATUS_FAILED)
+        self.assertEqual(ingestion_task.error_message, "解析失败")
+        self.assertIsNotNone(ingestion_task.started_at)
+        self.assertIsNotNone(ingestion_task.finished_at)
+
+    def test_parser_service_cleans_whitespace_and_blank_lines(self):
+        cleaned = ParserService().clean_text(
+            "Liquidity  risk \r\n\r\nwas stable.\n\n\nCapital-\nadequacy improved.\x00"
+        )
+
+        self.assertEqual(
+            cleaned,
+            "Liquidity risk\n\nwas stable.\n\nCapitaladequacy improved.",
+        )
+
+    def test_chunk_service_uses_fixed_length_with_overlap(self):
+        chunks = build_document_chunks(
+            "abcdefghij1234567890",
+            metadata_builder=lambda index: {"chunk_index": index},
+            chunk_size=10,
+            overlap=2,
+        )
+
+        self.assertEqual([chunk["content"] for chunk in chunks], ["abcdefghij", "ij12345678", "7890"])
