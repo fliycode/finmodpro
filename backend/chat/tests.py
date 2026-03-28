@@ -13,6 +13,7 @@ from authentication.services.jwt_service import generate_access_token
 from chat.models import ChatMessage, ChatSession
 from common.exceptions import UpstreamRateLimitError
 from knowledgebase.services.document_service import create_document_from_upload, ingest_document
+from rag.models import RetrievalLog
 from rag.services.vector_store_service import clear_store
 from rbac.services.rbac_service import ROLE_ADMIN, seed_roles_and_permissions
 
@@ -114,6 +115,14 @@ class ChatAskApiTests(TestCase):
                 "rerank_score": payload["citations"][0]["rerank_score"],
             },
         )
+        self.assertEqual(RetrievalLog.objects.count(), 1)
+        retrieval_log = RetrievalLog.objects.get()
+        self.assertEqual(retrieval_log.query, "revenue and margin outlook")
+        self.assertEqual(retrieval_log.top_k, 2)
+        self.assertEqual(retrieval_log.filters, {})
+        self.assertEqual(retrieval_log.result_count, 1)
+        self.assertEqual(retrieval_log.source, RetrievalLog.SOURCE_CHAT_ASK)
+        self.assertIsNotNone(retrieval_log.duration_ms)
 
     def test_chat_ask_accepts_query_alias_and_returns_empty_citations_when_no_match(self):
         response = self.client.post(
@@ -133,6 +142,10 @@ class ChatAskApiTests(TestCase):
         self.assertEqual(response.json()["query"], "foreign exchange exposure")
         self.assertEqual(response.json()["citations"], [])
         self.assertIn("未检索到相关资料", response.json()["answer"])
+        self.assertEqual(RetrievalLog.objects.count(), 1)
+        retrieval_log = RetrievalLog.objects.get()
+        self.assertEqual(retrieval_log.result_count, 0)
+        self.assertEqual(retrieval_log.filters, {"doc_type": "pdf"})
 
     def test_chat_ask_requires_question_or_query(self):
         response = self.client.post(
@@ -144,6 +157,7 @@ class ChatAskApiTests(TestCase):
 
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.json(), {"message": "question 或 query 为必填项。"})
+        self.assertEqual(RetrievalLog.objects.count(), 0)
 
     def test_chat_ask_rejects_user_without_ask_financial_qa_permission(self):
         unauthorized_user = User.objects.create_user(
@@ -162,6 +176,7 @@ class ChatAskApiTests(TestCase):
 
         self.assertEqual(response.status_code, 403)
         self.assertEqual(response.json(), {"message": "无权限。"})
+        self.assertEqual(RetrievalLog.objects.count(), 0)
 
     def test_chat_ask_maps_upstream_rate_limit_to_429(self):
         with patch(
@@ -185,6 +200,7 @@ class ChatAskApiTests(TestCase):
             },
         )
         self.assertEqual(response["Retry-After"], "30")
+        self.assertEqual(RetrievalLog.objects.count(), 0)
 
 
 @override_settings(

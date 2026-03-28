@@ -1,5 +1,9 @@
+import time
+
 from llm.services.prompt_service import render_prompt
 from llm.services.runtime_service import get_chat_provider
+from rag.models import RetrievalLog
+from rag.services.retrieval_log_service import create_retrieval_log
 from rag.services.retrieval_service import build_retrieval_response, retrieve
 
 
@@ -36,12 +40,22 @@ def _build_answer(question, citations):
 
 
 def ask_question(*, question, filters=None, top_k=5):
+    started_at = time.monotonic()
     retrieval_results = retrieve(query=question, filters=filters, top_k=top_k)
     retrieval_payload = build_retrieval_response(query=question, results=retrieval_results)
     citations = retrieval_payload["citations"]
-    return {
+    response_payload = {
         "question": question,
         "query": question,
         "answer": _build_answer(question, citations),
         "citations": citations,
     }
+    create_retrieval_log(
+        query=question,
+        top_k=top_k,
+        filters=filters or {},
+        results=retrieval_results,
+        source=RetrievalLog.SOURCE_CHAT_ASK,
+        duration_ms=int((time.monotonic() - started_at) * 1000),
+    )
+    return response_payload
