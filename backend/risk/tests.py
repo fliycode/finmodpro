@@ -1,13 +1,134 @@
+import json
 import shutil
 import tempfile
 from decimal import Decimal
+from unittest.mock import patch
 
+from django.contrib.auth.models import Group
 from django.core.files.uploadedfile import SimpleUploadedFile
-from django.test import TestCase, override_settings
+from django.test import Client, TestCase, override_settings
 from django.utils import timezone
 
+from authentication.models import User
+from authentication.services.jwt_service import generate_access_token
 from knowledgebase.models import Document, DocumentChunk
+from rbac.services.rbac_service import ROLE_ADMIN, seed_roles_and_permissions
 from risk.models import RiskEvent
+
+
+@override_settings(
+    JWT_SECRET_KEY="test-jwt-secret",
+    JWT_ACCESS_TOKEN_LIFETIME_SECONDS=3600,
+)
+class RiskExtractionApiTests(TestCase):
+    def setUp(self):
+        self.client = Client()
+        seed_roles_and_permissions()
+        self.media_root = tempfile.mkdtemp()
+        self.override = override_settings(MEDIA_ROOT=self.media_root)
+        self.override.enable()
+
+        self.user = User.objects.create_user(
+            username="risk-admin",
+            password="secret123",
+            email="risk-admin@example.com",
+        )
+        self.user.groups.add(Group.objects.get(name=ROLE_ADMIN))
+        self.access_token = generate_access_token(self.user)
+
+    def tearDown(self):
+        self.override.disable()
+        shutil.rmtree(self.media_root, ignore_errors=True)
+
+    def create_document(self, *, title="Q4 风险纪要", filename="risk.pdf"):
+        return Document.objects.create(
+            title=title,
+            file=SimpleUploadedFile(filename, b"risk-content", content_type="application/pdf"),
+            filename=filename,
+            doc_type="pdf",
+        )
+
+    @patch("risk.services.extraction_service.get_chat_provider")
+    def test_extract_document_creates_risk_events(self, mocked_get_chat_provider):
+        document = self.create_document()
+        chunk = DocumentChunk.objects.create(
+            document=document,
+            chunk_index=0,
+            content="FinModPro Holdings 流动性风险上升，短债覆盖倍数下降。",
+            metadata={"page": 2},
+        )
+        mocked_get_chat_provider.return_value.chat.return_value = json.dumps(
+            {
+                "events": [
+                    {
+                        "company_name": "FinModPro Holdings",
+                        "risk_type": "liquidity",
+                        "risk_level": "high",
+                        "event_time": "2025-03-01T00:00:00+08:00",
+                        "summary": "流动性风险上升，短债覆盖倍数下降。",
+                        "evidence_text": "FinModPro Holdings 流动性风险上升，短债覆盖倍数下降。",
+                        "confidence_score": "0.910",
+                        "chunk_id": chunk.id,
+                    }
+                ]
+            }
+        )
+
+        response = self.client.post(
+            f"/api/risk/documents/{document.id}/extract",
+            data=json.dumps({}),
+            content_type="application/json",
+            HTTP_AUTHORIZATION=f"Bearer {self.access_token}",
+        )
+
+        self.assertEqual(response.status_code, 201)
+        payload = response.json()
+        self.assertEqual(payload["code"], 0)
+        self.assertEqual(payload["data"]["document_id"], document.id)
+        self.assertEqual(payload["data"]["created_count"], 1)
+        self.assertEqual(len(payload["data"]["risk_events"]), 1)
+        self.assertEqual(payload["data"]["risk_events"][0]["company_name"], "FinModPro Holdings")
+        self.assertEqual(payload["data"]["risk_events"][0]["chunk_id"], chunk.id)
+
+        risk_event = RiskEvent.objects.get()
+        self.assertEqual(risk_event.document_id, document.id)
+        self.assertEqual(risk_event.chunk_id, chunk.id)
+        self.assertEqual(risk_event.risk_type, "liquidity")
+
+    def test_extract_document_returns_404_when_document_missing(self):
+        response = self.client.post(
+            "/api/risk/documents/999999/extract",
+            data=json.dumps({}),
+            content_type="application/json",
+            HTTP_AUTHORIZATION=f"Bearer {self.access_token}",
+        )
+
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(
+            response.json(),
+            {"code": 404, "message": "文档不存在。", "data": {}},
+        )
+
+    @patch("risk.services.extraction_service.get_chat_provider")
+    def test_extract_document_returns_empty_result_when_document_has_no_chunks(self, mocked_get_chat_provider):
+        document = self.create_document()
+
+        response = self.client.post(
+            f"/api/risk/documents/{document.id}/extract",
+            data=json.dumps({}),
+            content_type="application/json",
+            HTTP_AUTHORIZATION=f"Bearer {self.access_token}",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["code"], 0)
+        self.assertEqual(payload["message"], "文档暂无可抽取内容。")
+        self.assertEqual(payload["data"]["document_id"], document.id)
+        self.assertEqual(payload["data"]["created_count"], 0)
+        self.assertEqual(payload["data"]["risk_events"], [])
+        self.assertEqual(RiskEvent.objects.count(), 0)
+        mocked_get_chat_provider.assert_not_called()
 
 
 class RiskEventModelTests(TestCase):
