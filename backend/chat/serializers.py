@@ -23,6 +23,13 @@ class ChatSessionSerializer(serializers.ModelSerializer):
         ]
 
 
+class ChatSessionListSerializer(ChatSessionSerializer):
+    last_message_preview = serializers.CharField(read_only=True, default="")
+
+    class Meta(ChatSessionSerializer.Meta):
+        fields = ChatSessionSerializer.Meta.fields + ["last_message_preview"]
+
+
 class ChatMessageSerializer(serializers.ModelSerializer):
     class Meta:
         model = ChatMessage
