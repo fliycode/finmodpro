@@ -131,47 +131,52 @@ const formatDate = (dateStr) => {
         <p>暂无风险事件。</p>
       </div>
       
-      <div v-else class="events-list">
-        <div v-for="(item, index) in events" :key="item.id || item.event_id || index" class="event-card">
-          <div class="event-header">
-            <div class="header-left">
-              <span class="risk-level" :style="{ backgroundColor: getRiskLevelColor(item.risk_level) }">
-                {{ (item.risk_level || 'UNKNOWN').toUpperCase() }}
-              </span>
-              <span class="company-name">{{ item.company_name || '未知公司' }}</span>
-              <span class="risk-type">{{ item.risk_type }}</span>
-            </div>
-            <div class="header-right">
-              <span class="event-date">{{ formatDate(item.event_date || item.created_at) }}</span>
-              <span class="review-status" :style="{ color: getReviewStatusColor(item.review_status) }">
-                {{ getReviewStatusText(item.review_status) }}
-              </span>
-            </div>
-          </div>
-          
-          <div class="event-body">
-            <div class="summary-section">
-              <strong>摘要：</strong>
-              <p>{{ item.summary }}</p>
-            </div>
-            
-            <div class="evidence-section">
-              <strong>证据文本：</strong>
-              <p class="evidence-text">"{{ item.evidence_text }}"</p>
-            </div>
-
-            <div class="meta-section">
-              <span class="meta-tag">置信度: {{ item.confidence !== undefined ? item.confidence : 'N/A' }}</span>
-              <span class="meta-tag" v-if="item.document_id" :title="item.document_id">文档ID: {{ item.document_id.substring(0, 8) }}...</span>
-              <span class="meta-tag" v-if="item.chunk_id" :title="item.chunk_id">片段ID: {{ item.chunk_id.substring(0, 8) }}...</span>
-            </div>
-          </div>
-          
-          <div class="event-footer" v-if="(item.review_status || 'pending').toLowerCase() === 'pending'">
-            <button class="action-btn approve" @click="handleReview(item, 'approved')">确认风险</button>
-            <button class="action-btn reject" @click="handleReview(item, 'rejected')">忽略</button>
-          </div>
-        </div>
+      <div v-else class="table-container">
+        <table class="risk-table">
+          <thead>
+            <tr>
+              <th>公司名</th>
+              <th>风险类型</th>
+              <th>风险等级</th>
+              <th>事件时间</th>
+              <th>摘要 / 证据</th>
+              <th>审核状态</th>
+              <th>操作</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="(item, index) in events" :key="item.id || item.event_id || index">
+              <td class="company-name">{{ item.company_name || '未知公司' }}</td>
+              <td><span class="risk-type">{{ item.risk_type }}</span></td>
+              <td>
+                <span class="risk-level" :style="{ backgroundColor: getRiskLevelColor(item.risk_level) }">
+                  {{ (item.risk_level || 'UNKNOWN').toUpperCase() }}
+                </span>
+              </td>
+              <td class="event-date">{{ formatDate(item.event_date || item.created_at) }}</td>
+              <td class="summary-cell">
+                <div class="summary-text" :title="item.summary">{{ item.summary }}</div>
+                <div class="evidence-text" v-if="item.evidence_text" :title="item.evidence_text">"{{ item.evidence_text }}"</div>
+                <div class="meta-tags" v-if="item.confidence !== undefined || item.document_id">
+                  <span v-if="item.confidence !== undefined" class="meta-tag">置信度: {{ item.confidence }}</span>
+                  <span v-if="item.document_id" class="meta-tag" :title="item.document_id">文档: {{ item.document_id.substring(0,8) }}...</span>
+                </div>
+              </td>
+              <td>
+                <span class="review-status" :style="{ color: getReviewStatusColor(item.review_status) }">
+                  {{ getReviewStatusText(item.review_status) }}
+                </span>
+              </td>
+              <td class="action-cell">
+                <div class="actions" v-if="(item.review_status || 'pending').toLowerCase() === 'pending'">
+                  <button class="action-btn approve" @click="handleReview(item, 'approved')">确认</button>
+                  <button class="action-btn reject" @click="handleReview(item, 'rejected')">忽略</button>
+                </div>
+                <div v-else class="actions-done">-</div>
+              </td>
+            </tr>
+          </tbody>
+        </table>
       </div>
     </div>
   </div>
@@ -197,30 +202,164 @@ const formatDate = (dateStr) => {
 .error-icon { color: #ef4444; opacity: 1; }
 .mt-4 { margin-top: 16px; }
 
-.events-list { display: flex; flex-direction: column; gap: 16px; }
-.event-card { border: 1px solid #e2e8f0; border-radius: 8px; overflow: hidden; background: white; transition: box-shadow 0.2s; }
-.event-card:hover { box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1), 0 2px 4px -1px rgba(0,0,0,0.06); }
+/* Table Styles */
+.table-container {
+  overflow-x: auto;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: white;
+}
 
-.event-header { display: flex; justify-content: space-between; align-items: center; padding: 16px; background: #f8fafc; border-bottom: 1px solid #e2e8f0; }
-.header-left { display: flex; align-items: center; gap: 12px; }
-.risk-level { font-size: 11px; font-weight: 700; color: white; padding: 2px 8px; border-radius: 4px; }
-.company-name { font-weight: 700; color: #1e293b; font-size: 15px; }
-.risk-type { color: #475569; font-size: 14px; background: #e2e8f0; padding: 2px 8px; border-radius: 4px; }
-.header-right { display: flex; align-items: center; gap: 16px; }
-.event-date { color: #64748b; font-size: 13px; }
-.review-status { font-weight: 600; font-size: 14px; }
+.risk-table {
+  width: 100%;
+  border-collapse: collapse;
+  text-align: left;
+  font-size: 14px;
+}
 
-.event-body { padding: 16px; display: flex; flex-direction: column; gap: 12px; }
-.summary-section p, .evidence-section p { margin: 4px 0 0 0; color: #334155; line-height: 1.6; font-size: 14px; }
-.evidence-text { font-style: italic; color: #475569 !important; background: #f8fafc; padding: 8px 12px; border-left: 3px solid #cbd5e1; margin-top: 8px !important; }
+.risk-table th {
+  background: #f8fafc;
+  padding: 14px 16px;
+  font-weight: 600;
+  color: #475569;
+  border-bottom: 1px solid #e2e8f0;
+  white-space: nowrap;
+}
 
-.meta-section { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 8px; }
-.meta-tag { font-size: 12px; color: #64748b; background: #f1f5f9; padding: 4px 8px; border-radius: 4px; }
+.risk-table td {
+  padding: 16px;
+  border-bottom: 1px solid #f1f5f9;
+  vertical-align: top;
+  color: #1e293b;
+}
 
-.event-footer { padding: 12px 16px; background: #f8fafc; border-top: 1px solid #e2e8f0; display: flex; gap: 12px; justify-content: flex-end; }
-.action-btn { padding: 6px 16px; border-radius: 6px; font-size: 13px; font-weight: 600; cursor: pointer; transition: all 0.2s; border: none; }
-.action-btn.approve { background: #10b981; color: white; }
-.action-btn.approve:hover { background: #059669; }
-.action-btn.reject { background: white; color: #ef4444; border: 1px solid #ef4444; }
-.action-btn.reject:hover { background: #fef2f2; }
+.risk-table tr:last-child td {
+  border-bottom: none;
+}
+
+.risk-table tr:hover {
+  background: #f8fafc;
+}
+
+.company-name {
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.risk-type {
+  background: #e2e8f0;
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-size: 13px;
+  color: #475569;
+  white-space: nowrap;
+}
+
+.risk-level {
+  font-size: 11px;
+  font-weight: 700;
+  color: white;
+  padding: 3px 8px;
+  border-radius: 4px;
+  white-space: nowrap;
+}
+
+.event-date {
+  color: #64748b;
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.summary-cell {
+  min-width: 250px;
+  max-width: 400px;
+}
+
+.summary-text {
+  font-weight: 500;
+  margin-bottom: 8px;
+  color: #334155;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.evidence-text {
+  font-size: 13px;
+  color: #475569;
+  font-style: italic;
+  background: #f1f5f9;
+  padding: 8px 10px;
+  border-left: 3px solid #cbd5e1;
+  border-radius: 0 4px 4px 0;
+  margin-bottom: 8px;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.meta-tags {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.meta-tag {
+  font-size: 12px;
+  color: #64748b;
+  background: #f1f5f9;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.review-status {
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.action-cell {
+  white-space: nowrap;
+}
+
+.actions {
+  display: flex;
+  gap: 8px;
+}
+
+.actions-done {
+  color: #94a3b8;
+  font-weight: 500;
+  padding-left: 8px;
+}
+
+.action-btn {
+  padding: 6px 14px;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+  border: none;
+}
+
+.action-btn.approve {
+  background: #10b981;
+  color: white;
+}
+
+.action-btn.approve:hover {
+  background: #059669;
+}
+
+.action-btn.reject {
+  background: white;
+  color: #ef4444;
+  border: 1px solid #fecaca;
+}
+
+.action-btn.reject:hover {
+  background: #fef2f2;
+}
 </style>
