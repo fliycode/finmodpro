@@ -365,6 +365,104 @@ class ChatSessionCreateApiTests(TestCase):
     JWT_SECRET_KEY="test-jwt-secret",
     JWT_ACCESS_TOKEN_LIFETIME_SECONDS=3600,
 )
+class ChatSessionDetailApiTests(TestCase):
+    def setUp(self):
+        self.client = Client()
+        seed_roles_and_permissions()
+        self.user = User.objects.create_user(
+            username="detail-admin",
+            password="secret123",
+            email="detail-admin@example.com",
+        )
+        self.user.groups.add(Group.objects.get(name=ROLE_ADMIN))
+        self.access_token = generate_access_token(self.user)
+
+        self.other_user = User.objects.create_user(
+            username="detail-other",
+            password="secret123",
+            email="detail-other@example.com",
+        )
+        self.other_user.groups.add(Group.objects.get(name=ROLE_ADMIN))
+
+        self.session = ChatSession.objects.create(
+            user=self.user,
+            title="压力测试会话",
+            context_filters={"doc_type": "pdf"},
+        )
+        ChatMessage.objects.create(
+            session=self.session,
+            sequence=2,
+            role=ChatMessage.ROLE_ASSISTANT,
+            content="第二条回答",
+        )
+        ChatMessage.objects.create(
+            session=self.session,
+            sequence=1,
+            role=ChatMessage.ROLE_USER,
+            content="第一条问题",
+        )
+
+    def test_session_detail_returns_session_and_ordered_messages(self):
+        response = self.client.get(
+            f"/api/chat/sessions/{self.session.id}",
+            HTTP_AUTHORIZATION=f"Bearer {self.access_token}",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["code"], 0)
+        self.assertEqual(payload["data"]["session"]["id"], self.session.id)
+        self.assertEqual(payload["data"]["session"]["title"], "压力测试会话")
+        self.assertEqual(payload["data"]["session"]["context_filters"], {"doc_type": "pdf"})
+        self.assertEqual(
+            [message["content"] for message in payload["data"]["session"]["messages"]],
+            ["第一条问题", "第二条回答"],
+        )
+        self.assertEqual(
+            [message["sequence"] for message in payload["data"]["session"]["messages"]],
+            [1, 2],
+        )
+
+    def test_session_detail_requires_authentication(self):
+        response = self.client.get(f"/api/chat/sessions/{self.session.id}")
+
+        self.assertEqual(response.status_code, 401)
+        self.assertEqual(
+            response.json(),
+            {"code": 401, "message": "未认证。", "data": {}},
+        )
+
+    def test_session_detail_rejects_access_to_other_users_session(self):
+        other_token = generate_access_token(self.other_user)
+
+        response = self.client.get(
+            f"/api/chat/sessions/{self.session.id}",
+            HTTP_AUTHORIZATION=f"Bearer {other_token}",
+        )
+
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(
+            response.json(),
+            {"code": 403, "message": "无权限访问该会话。", "data": {}},
+        )
+
+    def test_session_detail_returns_404_for_missing_session(self):
+        response = self.client.get(
+            "/api/chat/sessions/999999",
+            HTTP_AUTHORIZATION=f"Bearer {self.access_token}",
+        )
+
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(
+            response.json(),
+            {"code": 404, "message": "会话不存在。", "data": {}},
+        )
+
+
+@override_settings(
+    JWT_SECRET_KEY="test-jwt-secret",
+    JWT_ACCESS_TOKEN_LIFETIME_SECONDS=3600,
+)
 class ChatMessageModelTests(TestCase):
     def setUp(self):
         self.user = User.objects.create_user(
