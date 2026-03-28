@@ -10,6 +10,7 @@ from django.test import Client, TestCase, override_settings
 from authentication.models import User
 from authentication.services.jwt_service import generate_access_token
 from common.exceptions import UpstreamRateLimitError
+from chat.models import ChatSession
 from knowledgebase.services.document_service import create_document_from_upload, ingest_document
 from rag.services.vector_store_service import clear_store
 from rbac.services.rbac_service import ROLE_ADMIN, seed_roles_and_permissions
@@ -183,3 +184,61 @@ class ChatAskApiTests(TestCase):
             },
         )
         self.assertEqual(response["Retry-After"], "30")
+
+
+@override_settings(
+    JWT_SECRET_KEY="test-jwt-secret",
+    JWT_ACCESS_TOKEN_LIFETIME_SECONDS=3600,
+)
+class ChatSessionModelTests(TestCase):
+    def test_chat_session_can_be_created_with_default_title_and_filters(self):
+        user = User.objects.create_user(
+            username="session-user",
+            password="secret123",
+            email="session@example.com",
+        )
+
+        session = ChatSession.objects.create(user=user)
+
+        self.assertEqual(session.title, "新会话")
+        self.assertEqual(session.context_filters, {})
+        self.assertEqual(user.chat_sessions.count(), 1)
+
+    def test_chat_session_allows_rag_scope_filters_without_strong_document_binding(self):
+        user = User.objects.create_user(
+            username="session-scope",
+            password="secret123",
+            email="scope@example.com",
+        )
+
+        session = ChatSession.objects.create(
+            user=user,
+            title="风险问答",
+            context_filters={
+                "document_id": 12,
+                "doc_type": "pdf",
+                "source_date_from": "2025-01-01",
+            },
+        )
+
+        session.refresh_from_db()
+        self.assertEqual(
+            session.context_filters,
+            {
+                "document_id": 12,
+                "doc_type": "pdf",
+                "source_date_from": "2025-01-01",
+            },
+        )
+
+    def test_deleting_user_cascades_chat_sessions(self):
+        user = User.objects.create_user(
+            username="session-delete",
+            password="secret123",
+            email="delete@example.com",
+        )
+        ChatSession.objects.create(user=user, title="待删除会话")
+
+        user.delete()
+
+        self.assertEqual(ChatSession.objects.count(), 0)
