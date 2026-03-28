@@ -229,6 +229,168 @@ class RiskBatchExtractionApiTests(TestCase):
         mocked_get_chat_provider.return_value.chat.assert_called_once()
 
 
+@override_settings(
+    JWT_SECRET_KEY="test-jwt-secret",
+    JWT_ACCESS_TOKEN_LIFETIME_SECONDS=3600,
+)
+class RiskEventListApiTests(TestCase):
+    def setUp(self):
+        self.client = Client()
+        seed_roles_and_permissions()
+        self.media_root = tempfile.mkdtemp()
+        self.override = override_settings(MEDIA_ROOT=self.media_root)
+        self.override.enable()
+
+        self.authorized_user = User.objects.create_user(
+            username="risk-list-admin",
+            password="secret123",
+            email="risk-list-admin@example.com",
+        )
+        self.authorized_user.groups.add(Group.objects.get(name=ROLE_ADMIN))
+        self.authorized_token = generate_access_token(self.authorized_user)
+
+        self.unauthorized_user = User.objects.create_user(
+            username="risk-list-member",
+            password="secret123",
+            email="risk-list-member@example.com",
+        )
+        self.unauthorized_token = generate_access_token(self.unauthorized_user)
+
+        self.document = Document.objects.create(
+            title="筛选文档",
+            file=SimpleUploadedFile("filter.pdf", b"risk-content", content_type="application/pdf"),
+            filename="filter.pdf",
+            doc_type="pdf",
+        )
+        self.chunk = DocumentChunk.objects.create(
+            document=self.document,
+            chunk_index=0,
+            content="风险切块",
+            metadata={},
+        )
+
+    def tearDown(self):
+        self.override.disable()
+        shutil.rmtree(self.media_root, ignore_errors=True)
+
+    def test_list_risk_events_requires_authentication(self):
+        response = self.client.get("/api/risk/events")
+
+        self.assertEqual(response.status_code, 401)
+        self.assertEqual(
+            response.json(),
+            {"code": 401, "message": "未认证。", "data": {}},
+        )
+
+    def test_list_risk_events_rejects_user_without_permission(self):
+        response = self.client.get(
+            "/api/risk/events",
+            HTTP_AUTHORIZATION=f"Bearer {self.unauthorized_token}",
+        )
+
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(
+            response.json(),
+            {"code": 403, "message": "无权限。", "data": {}},
+        )
+
+    def test_list_risk_events_supports_multi_condition_filters(self):
+        RiskEvent.objects.create(
+            company_name="FinModPro Holdings",
+            risk_type="liquidity",
+            risk_level=RiskEvent.LEVEL_HIGH,
+            summary="目标事件",
+            evidence_text="证据 A",
+            confidence_score=Decimal("0.920"),
+            review_status=RiskEvent.STATUS_APPROVED,
+            document=self.document,
+            chunk=self.chunk,
+        )
+        RiskEvent.objects.create(
+            company_name="FinModPro Holdings",
+            risk_type="liquidity",
+            risk_level=RiskEvent.LEVEL_HIGH,
+            summary="状态不匹配",
+            evidence_text="证据 B",
+            confidence_score=Decimal("0.820"),
+            review_status=RiskEvent.STATUS_PENDING,
+            document=self.document,
+            chunk=self.chunk,
+        )
+        RiskEvent.objects.create(
+            company_name="Other Corp",
+            risk_type="credit",
+            risk_level=RiskEvent.LEVEL_MEDIUM,
+            summary="公司和类型不匹配",
+            evidence_text="证据 C",
+            confidence_score=Decimal("0.730"),
+            review_status=RiskEvent.STATUS_APPROVED,
+        )
+
+        response = self.client.get(
+            "/api/risk/events?company_name=FinMod&risk_type=liquid&review_status=approved",
+            HTTP_AUTHORIZATION=f"Bearer {self.authorized_token}",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["code"], 0)
+        self.assertEqual(payload["data"]["total"], 1)
+        self.assertEqual(payload["data"]["risk_events"][0]["summary"], "目标事件")
+
+    def test_list_risk_events_returns_empty_result(self):
+        response = self.client.get(
+            "/api/risk/events?company_name=missing",
+            HTTP_AUTHORIZATION=f"Bearer {self.authorized_token}",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["data"], {"total": 0, "risk_events": []})
+
+    def test_list_risk_events_returns_expected_structure_and_sorting(self):
+        first_event = RiskEvent.objects.create(
+            company_name="A Corp",
+            risk_type="market",
+            risk_level=RiskEvent.LEVEL_LOW,
+            summary="较早事件",
+            evidence_text="证据 A",
+            confidence_score=Decimal("0.410"),
+            review_status=RiskEvent.STATUS_PENDING,
+            document=self.document,
+            chunk=self.chunk,
+        )
+        second_event = RiskEvent.objects.create(
+            company_name="B Corp",
+            risk_type="credit",
+            risk_level=RiskEvent.LEVEL_HIGH,
+            summary="较新事件",
+            evidence_text="证据 B",
+            confidence_score=Decimal("0.870"),
+            review_status=RiskEvent.STATUS_APPROVED,
+            document=self.document,
+            chunk=self.chunk,
+        )
+
+        response = self.client.get(
+            "/api/risk/events",
+            HTTP_AUTHORIZATION=f"Bearer {self.authorized_token}",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["data"]["total"], 2)
+        self.assertEqual(
+            [item["id"] for item in payload["data"]["risk_events"]],
+            [second_event.id, first_event.id],
+        )
+        first_item = payload["data"]["risk_events"][0]
+        self.assertEqual(first_item["document_id"], self.document.id)
+        self.assertEqual(first_item["chunk_id"], self.chunk.id)
+        self.assertIn("created_at", first_item)
+        self.assertIn("updated_at", first_item)
+        self.assertIn("review_status", first_item)
+
+
 class RiskEventModelTests(TestCase):
     def setUp(self):
         self.media_root = tempfile.mkdtemp()
