@@ -1,0 +1,112 @@
+import json
+
+from django.contrib.auth.models import Group
+from django.test import Client, TestCase, override_settings
+
+from authentication.services.jwt_service import decode_access_token
+
+
+@override_settings(
+    JWT_SECRET_KEY="test-jwt-secret",
+    JWT_ACCESS_TOKEN_LIFETIME_SECONDS=3600,
+)
+class AuthenticationApiTests(TestCase):
+    def setUp(self):
+        self.client = Client()
+
+    def test_register_creates_user_and_returns_access_token(self):
+        response = self.client.post(
+            "/api/auth/register",
+            data=json.dumps(
+                {
+                    "username": "alice",
+                    "password": "secret123",
+                    "email": "alice@example.com",
+                }
+            ),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 201)
+        payload = response.json()
+        self.assertEqual(payload["message"], "注册成功。")
+        self.assertEqual(payload["access_token_type"], "Bearer")
+        self.assertIn("access_token", payload)
+        self.assertEqual(payload["user"]["username"], "alice")
+        self.assertEqual(payload["user"]["email"], "alice@example.com")
+
+        claims = decode_access_token(payload["access_token"])
+        self.assertEqual(claims["sub"], "alice")
+        self.assertEqual(claims["user_id"], payload["user"]["id"])
+
+    def test_register_adds_new_user_to_member_group(self):
+        Group.objects.create(name="member")
+
+        response = self.client.post(
+            "/api/auth/register",
+            data=json.dumps(
+                {
+                    "username": "bob",
+                    "password": "secret123",
+                    "email": "bob@example.com",
+                }
+            ),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 201)
+        payload = response.json()
+        self.assertEqual(payload["user"]["username"], "bob")
+        self.assertEqual(
+            Group.objects.get(name="member").user_set.filter(username="bob").count(),
+            1,
+        )
+
+    def test_login_returns_access_token_for_valid_credentials(self):
+        self.client.post(
+            "/api/auth/register",
+            data=json.dumps(
+                {
+                    "username": "alice",
+                    "password": "secret123",
+                    "email": "alice@example.com",
+                }
+            ),
+            content_type="application/json",
+        )
+
+        response = self.client.post(
+            "/api/auth/login",
+            data=json.dumps(
+                {
+                    "username": "alice",
+                    "password": "secret123",
+                }
+            ),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["message"], "登录成功。")
+        self.assertEqual(payload["access_token_type"], "Bearer")
+        self.assertIn("access_token", payload)
+        self.assertEqual(payload["user"]["username"], "alice")
+
+        claims = decode_access_token(payload["access_token"])
+        self.assertEqual(claims["sub"], "alice")
+
+    def test_login_rejects_invalid_credentials(self):
+        response = self.client.post(
+            "/api/auth/login",
+            data=json.dumps(
+                {
+                    "username": "alice",
+                    "password": "wrong-password",
+                }
+            ),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 401)
+        self.assertEqual(response.json()["message"], "用户名或密码错误。")
