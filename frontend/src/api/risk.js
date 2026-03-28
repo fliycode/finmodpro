@@ -1,21 +1,54 @@
 import { createApiConfig, joinUrl } from './config.js';
+import { authStorage } from '../lib/auth-storage.js';
 
 const apiConfig = createApiConfig();
 
+const parseResponse = async (response) => {
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(data.message || '请求失败，请稍后重试');
+  }
+  return data;
+};
+
+const getHeaders = () => {
+  const token = authStorage.getToken();
+  const headers = { ...apiConfig.headers };
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
+  return headers;
+};
+
 export const riskApi = {
-  // Mock generating summary and risks
-  async getAnalysis(documentId = null) {
-    return new Promise(resolve => {
-      setTimeout(() => {
-        resolve({
-          summary: '该文档详细描述了2025年度的财务表现，主要亮点在于海外业务增长了25%，同时研发投入保持在营收的10%左右。整体经营活动现金流充沛。',
-          risks: [
-            { level: 'high', category: '市场风险', description: '原材料价格波动可能对下半年毛利率产生显著影响。' },
-            { level: 'medium', category: '汇率风险', description: '海外业务占比提升，需关注汇率大幅波动的套期保值需求。' },
-            { level: 'low', category: '合规风险', description: '新发布的行业监管政策可能增加合规成本。' }
-          ]
-        });
-      }, 1000);
+  // Get risk events
+  async getEvents(params = {}) {
+    const query = new URLSearchParams();
+    Object.entries(params).forEach(([key, value]) => {
+      if (value !== undefined && value !== null && value !== '') {
+        query.append(key, value);
+      }
     });
+    
+    const queryString = query.toString();
+    const urlPath = queryString ? `/api/risk/events?${queryString}` : '/api/risk/events';
+
+    const response = await apiConfig.fetchImpl(joinUrl(apiConfig.baseURL, urlPath), {
+      method: 'GET',
+      headers: getHeaders(),
+    });
+    
+    return parseResponse(response);
+  },
+
+  // Review a risk event
+  async reviewEvent(eventId, reviewStatus) {
+    const response = await apiConfig.fetchImpl(joinUrl(apiConfig.baseURL, `/api/risk/events/${eventId}/review`), {
+      method: 'POST',
+      headers: getHeaders(),
+      body: JSON.stringify({ review_status: reviewStatus }),
+    });
+
+    return parseResponse(response);
   }
 };
