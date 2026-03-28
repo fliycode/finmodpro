@@ -1,8 +1,9 @@
 from django.urls import path
 
-from systemcheck.controllers.health_controller import health_view
+from systemcheck.controllers.health_controller import HealthView
 
 
 urlpatterns = [
-    path("health", health_view, name="health"),
+    path("health", HealthView.as_view(), name="health-legacy"),
+    path("health/", HealthView.as_view(), name="health"),
 ]
