@@ -27,6 +27,14 @@ class RiskBatchExtractionRequestSerializer(serializers.Serializer):
     )
 
 
+class RiskEventListQuerySerializer(serializers.Serializer):
+    company_name = serializers.CharField(required=False, allow_blank=False)
+    risk_type = serializers.CharField(required=False, allow_blank=False)
+    review_status = serializers.ChoiceField(required=False, choices=RiskEvent.STATUS_CHOICES)
+    risk_level = serializers.ChoiceField(required=False, choices=RiskEvent.LEVEL_CHOICES)
+    document_id = serializers.IntegerField(required=False, min_value=1)
+
+
 class RiskEventSummarySerializer(serializers.ModelSerializer):
     document_id = serializers.IntegerField(source="document.id", read_only=True, allow_null=True)
     chunk_id = serializers.IntegerField(source="chunk.id", read_only=True, allow_null=True)
@@ -46,6 +54,7 @@ class RiskEventSummarySerializer(serializers.ModelSerializer):
             "document_id",
             "chunk_id",
             "created_at",
+            "updated_at",
         ]
 
 
