@@ -1,12 +1,13 @@
 import json
+import time
 
 from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
 
 from common.exceptions import UpstreamServiceError
-from rag.models import RetrievalAuditLog
 from rag.services.retrieval_service import build_retrieval_response, retrieve
+from rag.services.retrieval_log_service import create_retrieval_log
 from rbac.services.authz_service import permission_required
 
 
@@ -33,6 +34,7 @@ def retrieval_query_view(request):
     if not isinstance(filters, dict):
         return JsonResponse({"message": "filters 必须是对象。"}, status=400)
 
+    started_at = time.monotonic()
     try:
         results = retrieve(query=query, filters=filters, top_k=top_k)
     except ValueError as exc:
@@ -46,9 +48,12 @@ def retrieval_query_view(request):
             response["Retry-After"] = str(exc.retry_after)
         return response
 
-    RetrievalAuditLog.objects.create(
+    create_retrieval_log(
         query=query,
+        top_k=top_k,
         filters=filters,
-        result_count=len(results),
+        results=results,
+        source="retrieval_api",
+        duration_ms=int((time.monotonic() - started_at) * 1000),
     )
     return JsonResponse(build_retrieval_response(query=query, results=results))

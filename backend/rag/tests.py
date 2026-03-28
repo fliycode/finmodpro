@@ -12,7 +12,7 @@ from authentication.services.jwt_service import generate_access_token
 from common.exceptions import UpstreamRateLimitError
 from knowledgebase.models import Document
 from knowledgebase.services.document_service import create_document_from_upload, ingest_document
-from rag.models import RetrievalAuditLog
+from rag.models import RetrievalLog
 from rag.services.vector_store_service import clear_store
 from rbac.services.rbac_service import ROLE_ADMIN, seed_roles_and_permissions
 
@@ -110,7 +110,22 @@ class RagRetrievalApiTests(TestCase):
         self.assertIn("cash flow improved sharply", payload["results"][0]["snippet"])
         self.assertIn("score", payload["results"][0])
         self.assertIn("rerank_score", payload["results"][0])
-        self.assertEqual(RetrievalAuditLog.objects.count(), 1)
+        self.assertEqual(RetrievalLog.objects.count(), 1)
+        retrieval_log = RetrievalLog.objects.get()
+        self.assertEqual(retrieval_log.query, "cash flow revenue")
+        self.assertEqual(retrieval_log.top_k, 3)
+        self.assertEqual(
+            retrieval_log.filters,
+            {
+                "document_id": self.first_document.id,
+                "doc_type": "txt",
+                "source_date_from": "2025-01-01",
+                "source_date_to": "2025-12-31",
+            },
+        )
+        self.assertEqual(retrieval_log.result_count, 1)
+        self.assertEqual(retrieval_log.source, RetrievalLog.SOURCE_RETRIEVAL_API)
+        self.assertIsNotNone(retrieval_log.duration_ms)
 
     def test_retrieval_query_accepts_question_alias(self):
         response = self.client.post(
@@ -143,7 +158,7 @@ class RagRetrievalApiTests(TestCase):
 
         self.assertEqual(response.status_code, 403)
         self.assertEqual(response.json(), {"message": "无权限。"})
-        self.assertEqual(RetrievalAuditLog.objects.count(), 0)
+        self.assertEqual(RetrievalLog.objects.count(), 0)
 
     def test_retrieval_rejects_invalid_top_k(self):
         response = self.client.post(
@@ -155,7 +170,7 @@ class RagRetrievalApiTests(TestCase):
 
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.json(), {"message": "top_k 必须是正整数。"})
-        self.assertEqual(RetrievalAuditLog.objects.count(), 0)
+        self.assertEqual(RetrievalLog.objects.count(), 0)
 
     def test_retrieval_requires_query_or_question(self):
         response = self.client.post(
@@ -167,6 +182,7 @@ class RagRetrievalApiTests(TestCase):
 
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.json(), {"message": "query 或 question 为必填项。"})
+        self.assertEqual(RetrievalLog.objects.count(), 0)
 
     def test_retrieval_maps_upstream_rate_limit_to_429_without_audit_log(self):
         with patch(
@@ -190,7 +206,7 @@ class RagRetrievalApiTests(TestCase):
             },
         )
         self.assertEqual(response["Retry-After"], "15")
-        self.assertEqual(RetrievalAuditLog.objects.count(), 0)
+        self.assertEqual(RetrievalLog.objects.count(), 0)
 
 
 @override_settings(
