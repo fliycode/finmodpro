@@ -9,6 +9,12 @@ _VECTOR_STORE = {}
 
 def clear_store():
     _VECTOR_STORE.clear()
+    try:
+        from knowledgebase.services.vector_service import VectorService
+
+        VectorService().clear()
+    except Exception:
+        return
 
 
 def _normalize_source_date(raw_value):

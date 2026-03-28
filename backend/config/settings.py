@@ -21,6 +21,8 @@ CORS_ALLOWED_ORIGINS = get_list_env(
         "http://47.85.103.76:5173",
     ],
 )
+MEDIA_URL = get_env("MEDIA_URL", "/media/")
+MEDIA_ROOT = Path(get_env("MEDIA_ROOT", str(BASE_DIR / "media")))
 
 DB_ENGINE = get_env("DB_ENGINE", "sqlite")
 DB_NAME = get_env("DB_NAME", str(BASE_DIR / "db.sqlite3"))
@@ -35,6 +37,14 @@ REDIS_HOST = get_env("REDIS_HOST", "127.0.0.1")
 REDIS_PORT = get_int_env("REDIS_PORT", 6379)
 REDIS_DB = get_int_env("REDIS_DB", 0)
 REDIS_PASSWORD = get_env("REDIS_PASSWORD", "")
+MILVUS_URI = get_env("MILVUS_URI", str(BASE_DIR / "milvus.db"))
+MILVUS_COLLECTION_NAME = get_env(
+    "MILVUS_COLLECTION_NAME",
+    "knowledgebase_document_chunks",
+)
+KB_CHUNK_SIZE = get_int_env("KB_CHUNK_SIZE", 400)
+KB_CHUNK_OVERLAP = get_int_env("KB_CHUNK_OVERLAP", 50)
+KB_EMBEDDING_DIMENSION = get_int_env("KB_EMBEDDING_DIMENSION", 64)
 
 CELERY_BROKER_URL = get_env("CELERY_BROKER_URL", "memory://")
 CELERY_RESULT_BACKEND = get_env("CELERY_RESULT_BACKEND", "cache+memory://")
@@ -61,9 +71,11 @@ INSTALLED_APPS = [
     "django.contrib.messages",
     "django.contrib.staticfiles",
     "corsheaders",
+    "rest_framework",
     "authentication",
     "rbac",
     "knowledgebase",
+    "llm",
     "rag",
     "chat",
     "systemcheck",
@@ -142,12 +154,20 @@ else:
 
 AUTH_PASSWORD_VALIDATORS = []
 
+REST_FRAMEWORK = {
+    "DEFAULT_AUTHENTICATION_CLASSES": [
+        "authentication.drf_authentication.JWTAuthentication",
+    ],
+    "DEFAULT_PERMISSION_CLASSES": [
+        "rest_framework.permissions.IsAuthenticated",
+    ],
+    "EXCEPTION_HANDLER": "common.drf_exception_handler.custom_exception_handler",
+}
+
 LANGUAGE_CODE = "zh-hans"
 USE_I18N = True
 USE_TZ = True
 
 STATIC_URL = "static/"
-MEDIA_URL = "/media/"
-MEDIA_ROOT = BASE_DIR / "media"
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"

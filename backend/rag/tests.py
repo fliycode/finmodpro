@@ -17,6 +17,11 @@ from rag.services.vector_store_service import clear_store
 from rbac.services.rbac_service import ROLE_ADMIN, seed_roles_and_permissions
 
 
+class FakeEmbeddingProvider:
+    def embed(self, *, texts, options=None):
+        return [[float(index + 1) for index in range(64)] for _ in texts]
+
+
 @override_settings(
     JWT_SECRET_KEY="test-jwt-secret",
     JWT_ACCESS_TOKEN_LIFETIME_SECONDS=3600,
@@ -26,6 +31,11 @@ class RagRetrievalApiTests(TestCase):
         self.client = Client()
         seed_roles_and_permissions()
         clear_store()
+        self.embedding_provider_patcher = patch(
+            "knowledgebase.services.embedding_service.get_embedding_provider",
+            return_value=FakeEmbeddingProvider(),
+        )
+        self.embedding_provider_patcher.start()
         self.media_root = tempfile.mkdtemp()
         self.override = override_settings(MEDIA_ROOT=self.media_root)
         self.override.enable()
@@ -62,6 +72,7 @@ class RagRetrievalApiTests(TestCase):
         self.second_document = second_document
 
     def tearDown(self):
+        self.embedding_provider_patcher.stop()
         self.override.disable()
         shutil.rmtree(self.media_root, ignore_errors=True)
         clear_store()
@@ -200,11 +211,17 @@ class ChatSessionBoundaryTests(TestCase):
 class KnowledgebaseIngestFailureStateTests(TestCase):
     def setUp(self):
         clear_store()
+        self.embedding_provider_patcher = patch(
+            "knowledgebase.services.embedding_service.get_embedding_provider",
+            return_value=FakeEmbeddingProvider(),
+        )
+        self.embedding_provider_patcher.start()
         self.media_root = tempfile.mkdtemp()
         self.override = override_settings(MEDIA_ROOT=self.media_root)
         self.override.enable()
 
     def tearDown(self):
+        self.embedding_provider_patcher.stop()
         self.override.disable()
         shutil.rmtree(self.media_root, ignore_errors=True)
         clear_store()
