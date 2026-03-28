@@ -20,84 +20,42 @@ const getHeaders = () => {
   return headers;
 };
 
-const MOCK_HISTORY = [
-  { id: 'chat_1', title: '关于2023年财报的分析', lastMessage: '好的，谢谢你的解答。', timestamp: '2024-03-20 10:00' },
-  { id: 'chat_2', title: '市场风险评估讨论', lastMessage: '我们需要进一步核实供应链数据。', timestamp: '2024-03-18 15:30' }
-];
-
 export const chatApi = {
   // List chat history
   async listHistory() {
-    try {
-      const response = await apiConfig.fetchImpl(joinUrl(apiConfig.baseURL, '/api/v1/chat/history'), {
-        method: 'GET',
-        headers: getHeaders(),
-      });
-      const data = await parseResponse(response);
-      
-      const items = Array.isArray(data) ? data : (data.history || data.sessions || data.data || []);
-      return items.map(item => ({
-        id: item.id || item.sessionId || item._id || item.session_id,
-        title: item.title || item.name || item.topic || '未命名对话',
-        lastMessage: item.lastMessage || item.last_message || item.preview || item.last_content || '',
-        timestamp: item.timestamp || item.updated_at || item.created_at || item.last_activity || 'N/A'
-      }));
-    } catch (error) {
-      console.warn('chatApi.listHistory failed, using fallback:', error.message);
-      return MOCK_HISTORY;
-    }
+    // TODO: Backend does not have GET /api/chat/sessions yet.
+    // Return empty array for now instead of fake data.
+    return [];
+  },
+
+  // Create a new session
+  async createSession(title = '新会话') {
+    const response = await apiConfig.fetchImpl(joinUrl(apiConfig.baseURL, `/api/chat/sessions`), {
+      method: 'POST',
+      headers: getHeaders(),
+      body: JSON.stringify({ title }),
+    });
+    const data = await parseResponse(response);
+    return data.session;
   },
   
   // Get a single chat session
   async getSession(sessionId) {
-    try {
-      const response = await apiConfig.fetchImpl(joinUrl(apiConfig.baseURL, `/api/v1/chat/sessions/${sessionId}`), {
-        method: 'GET',
-        headers: getHeaders(),
-      });
-      const data = await parseResponse(response);
-      
-      const rawMessages = data.messages || data.history || data.data || [];
-      return {
-        id: data.id || data.sessionId || sessionId,
-        messages: rawMessages.map(msg => ({
-          role: msg.role || (msg.is_user ? 'user' : (msg.is_bot || msg.is_assistant ? 'assistant' : (msg.sender === 'user' ? 'user' : 'assistant'))),
-          content: msg.content || msg.text || msg.message || msg.body || ''
-        }))
-      };
-    } catch (error) {
-      console.warn('chatApi.getSession failed, using mock data:', error.message);
-      return {
-        id: sessionId,
-        messages: [
-          { role: 'assistant', content: '您好，我是您的金融助手，请问有什么可以帮您的？' },
-          { role: 'user', content: '我想了解去年的财务增长情况。' },
-          { role: 'assistant', content: '好的，根据系统内的2023年度财务报告显示，净利润同比增长了15.2%...' }
-        ]
-      };
-    }
-  },
-
-  // Send message to a session
-  async sendMessage(sessionId, message) {
-    try {
-      const response = await apiConfig.fetchImpl(joinUrl(apiConfig.baseURL, `/api/v1/chat/sessions/${sessionId}/messages`), {
-        method: 'POST',
-        headers: getHeaders(),
-        body: JSON.stringify({ message: message.content || message }),
-      });
-      const data = await parseResponse(response);
-      const res = data.message || data.response || data;
-      return {
-        role: res.role || 'assistant',
-        content: res.content || res.text || res.message || (res.response && res.response.content) || (typeof res === 'string' ? res : '')
-      };
-    } catch (error) {
-      console.warn('chatApi.sendMessage failed, using mock response:', error.message);
-      return {
-        role: 'assistant',
-        content: '这是一个模拟的回复。由于后端连接失败，我目前无法提供实时数据分析，但您可以继续浏览已上传的文档。'
-      };
-    }
+    const response = await apiConfig.fetchImpl(joinUrl(apiConfig.baseURL, `/api/chat/sessions/${sessionId}`), {
+      method: 'GET',
+      headers: getHeaders(),
+    });
+    const data = await parseResponse(response);
+    const session = data.session || {};
+    
+    const rawMessages = session.messages || [];
+    return {
+      id: session.id || sessionId,
+      title: session.title,
+      messages: rawMessages.map(msg => ({
+        role: msg.role,
+        content: msg.content
+      }))
+    };
   }
 };
