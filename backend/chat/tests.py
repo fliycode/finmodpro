@@ -265,6 +265,106 @@ class ChatSessionModelTests(TestCase):
     JWT_SECRET_KEY="test-jwt-secret",
     JWT_ACCESS_TOKEN_LIFETIME_SECONDS=3600,
 )
+class ChatSessionCreateApiTests(TestCase):
+    def setUp(self):
+        self.client = Client()
+        seed_roles_and_permissions()
+        self.user = User.objects.create_user(
+            username="session-admin",
+            password="secret123",
+            email="session-admin@example.com",
+        )
+        self.user.groups.add(Group.objects.get(name=ROLE_ADMIN))
+        self.access_token = generate_access_token(self.user)
+
+    def test_create_session_returns_unified_response_with_defaults(self):
+        response = self.client.post(
+            "/api/chat/sessions",
+            data=json.dumps({}),
+            content_type="application/json",
+            HTTP_AUTHORIZATION=f"Bearer {self.access_token}",
+        )
+
+        self.assertEqual(response.status_code, 201)
+        payload = response.json()
+        self.assertEqual(payload["code"], 0)
+        self.assertEqual(payload["message"], "ok")
+        self.assertEqual(payload["data"]["session"]["title"], "新会话")
+        self.assertEqual(payload["data"]["session"]["context_filters"], {})
+        self.assertEqual(payload["data"]["session"]["user_id"], self.user.id)
+        self.assertEqual(ChatSession.objects.count(), 1)
+
+    def test_create_session_accepts_title_and_context_filters(self):
+        response = self.client.post(
+            "/api/chat/sessions",
+            data=json.dumps(
+                {
+                    "title": "流动性分析",
+                    "context_filters": {"doc_type": "pdf", "document_id": 9},
+                }
+            ),
+            content_type="application/json",
+            HTTP_AUTHORIZATION=f"Bearer {self.access_token}",
+        )
+
+        self.assertEqual(response.status_code, 201)
+        session = ChatSession.objects.get()
+        self.assertEqual(session.title, "流动性分析")
+        self.assertEqual(session.context_filters, {"doc_type": "pdf", "document_id": 9})
+
+    def test_create_session_requires_authentication(self):
+        response = self.client.post(
+            "/api/chat/sessions",
+            data=json.dumps({}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 401)
+        self.assertEqual(
+            response.json(),
+            {"code": 401, "message": "未认证。", "data": {}},
+        )
+        self.assertEqual(ChatSession.objects.count(), 0)
+
+    def test_create_session_rejects_user_without_permission(self):
+        unauthorized_user = User.objects.create_user(
+            username="session-member",
+            password="secret123",
+            email="session-member@example.com",
+        )
+        token = generate_access_token(unauthorized_user)
+
+        response = self.client.post(
+            "/api/chat/sessions",
+            data=json.dumps({}),
+            content_type="application/json",
+            HTTP_AUTHORIZATION=f"Bearer {token}",
+        )
+
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(
+            response.json(),
+            {"code": 403, "message": "无权限。", "data": {}},
+        )
+        self.assertEqual(ChatSession.objects.count(), 0)
+
+    def test_create_session_rejects_invalid_context_filters(self):
+        response = self.client.post(
+            "/api/chat/sessions",
+            data=json.dumps({"context_filters": ["not-an-object"]}),
+            content_type="application/json",
+            HTTP_AUTHORIZATION=f"Bearer {self.access_token}",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["code"], 400)
+        self.assertEqual(ChatSession.objects.count(), 0)
+
+
+@override_settings(
+    JWT_SECRET_KEY="test-jwt-secret",
+    JWT_ACCESS_TOKEN_LIFETIME_SECONDS=3600,
+)
 class ChatMessageModelTests(TestCase):
     def setUp(self):
         self.user = User.objects.create_user(
