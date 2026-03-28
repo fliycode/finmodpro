@@ -1,7 +1,16 @@
 <script setup>
-import { ref, nextTick } from "vue";
+import { ref, nextTick, onMounted, watch } from "vue";
 import { qaApi } from "../api/qa.js";
+import { chatApi } from "../api/chat.js";
 
+const props = defineProps({
+  sessionId: {
+    type: [String, Number],
+    default: null
+  }
+});
+
+const currentSessionId = ref(props.sessionId);
 const query = ref("");
 const messages = ref([{ role: "system", content: "您好，我是您的金融助手。请输入您的问题。" }]);
 const isAsking = ref(false);
@@ -17,23 +26,67 @@ const scrollToBottom = async () => {
   }
 };
 
+const loadSession = async (id) => {
+  if (!id) return;
+  try {
+    const session = await chatApi.getSession(id);
+    if (session.messages && session.messages.length > 0) {
+      messages.value = [{ role: "system", content: "已加载历史会话..." }, ...session.messages];
+    } else {
+      messages.value = [{ role: "system", content: `已加载会话：${session.title || '无标题'}` }];
+    }
+  } catch (error) {
+    console.error("加载会话失败:", error);
+    messages.value = [{ role: "system", content: "加载会话失败，请重试。" }];
+  }
+  await scrollToBottom();
+};
+
+watch(() => props.sessionId, (newId) => {
+  currentSessionId.value = newId;
+  if (newId) {
+    loadSession(newId);
+  } else {
+    messages.value = [{ role: "system", content: "您好，我是您的金融助手。请输入您的问题。" }];
+  }
+});
+
+onMounted(() => {
+  if (currentSessionId.value) {
+    loadSession(currentSessionId.value);
+  }
+});
+
 const handleAsk = async () => {
   if (!query.value.trim() || isAsking.value) return;
-  messages.value.push({ role: "user", content: query.value });
+  
   const currentQuery = query.value;
   query.value = "";
+  
+  messages.value.push({ role: "user", content: currentQuery });
   isAsking.value = true;
   await scrollToBottom();
   
   try {
+    // 首次发送消息时，如果没有 session，则创建一个
+    if (!currentSessionId.value) {
+      try {
+        const session = await chatApi.createSession(currentQuery.substring(0, 50));
+        currentSessionId.value = session.id;
+      } catch (err) {
+        console.warn("Failed to create session, continuing without session ID:", err);
+      }
+    }
+
     const response = await qaApi.askQuestion(currentQuery);
     messages.value.push({
       role: "assistant",
       content: response.answer,
-      citations: response.citations
+      citations: response.citations,
+      duration_ms: response.duration_ms
     });
   } catch (error) {
-    messages.value.push({ role: "assistant", content: "（请求失败，请稍后重试）" });
+    messages.value.push({ role: "assistant", content: `（请求失败：${error.message || '请稍后重试'}）` });
   } finally {
     isAsking.value = false;
     await scrollToBottom();
@@ -48,7 +101,12 @@ const handleAsk = async () => {
         <div v-for="(msg, index) in messages" :key="index" :class="['message', msg.role]">
           <div class="avatar">{{ msg.role === "user" ? "🧑" : "🤖" }}</div>
           <div class="message-content">
-            <div class="bubble">{{ msg.content }}</div>
+            <div class="bubble">
+              {{ msg.content }}
+              <div v-if="msg.duration_ms" class="duration-info">
+                耗时: {{ (msg.duration_ms / 1000).toFixed(2) }}s
+              </div>
+            </div>
             
             <!-- Citations Block -->
             <div v-if="msg.citations && msg.citations.length > 0" class="citations-container">
@@ -63,7 +121,7 @@ const handleAsk = async () => {
                   <div class="tooltip-content">
                     <div class="cite-meta">
                       <span class="cite-type">{{ cite.doc_type }}</span>
-                      <span v-if="cite.page_label">页码: {{ cite.page_label }}</span>
+                      <span v-if="cite.page_label && cite.page_label !== 'N/A'">页码: {{ cite.page_label }}</span>
                       <span v-if="cite.score > 0">相关度: {{ (cite.score * 100).toFixed(0) }}%</span>
                     </div>
                     <div class="cite-snippet">"{{ cite.snippet }}"</div>
@@ -97,11 +155,16 @@ const handleAsk = async () => {
 .messages { flex: 1; padding: 24px; overflow-y: auto; display: flex; flex-direction: column; gap: 24px; scroll-behavior: smooth; }
 .message { display: flex; gap: 16px; max-width: 85%; }
 .message.user { align-self: flex-end; flex-direction: row-reverse; }
+.message.system { align-self: center; color: #94a3b8; font-size: 13px; max-width: 100%; }
+.message.system .avatar { display: none; }
+.message.system .bubble { background: transparent; border: none; box-shadow: none; padding: 0; color: #94a3b8; }
 .avatar { width: 40px; height: 40px; display: flex; align-items: center; justify-content: center; font-size: 20px; background: white; border-radius: 50%; box-shadow: 0 2px 4px rgba(0,0,0,0.05); flex-shrink: 0; border: 1px solid #f1f5f9; }
 .message-content { display: flex; flex-direction: column; gap: 8px; flex: 1; max-width: 100%; }
 .bubble { padding: 14px 18px; border-radius: 16px; line-height: 1.7; word-break: break-word; font-size: 15px; letter-spacing: 0.3px; box-shadow: 0 1px 2px rgba(0,0,0,0.05); }
 .assistant .bubble { background: #ffffff; color: #334155; border-top-left-radius: 4px; border: 1px solid #e2e8f0; }
 .user .bubble { background: linear-gradient(135deg, #6366f1, #4f46e5); color: white; border-top-right-radius: 4px; }
+.duration-info { font-size: 11px; color: #94a3b8; margin-top: 8px; text-align: right; }
+.user .duration-info { display: none; }
 
 /* Typing Animation */
 .typing { display: flex; align-items: center; justify-content: center; gap: 6px; height: 24px; padding: 14px 18px !important; width: fit-content; }

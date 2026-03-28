@@ -16,6 +16,17 @@ const props = defineProps({
 const emit = defineEmits(["back"]);
 
 const activeTab = ref("qa");
+const currentSessionId = ref(null);
+
+const handleOpenSession = (sessionId) => {
+  currentSessionId.value = sessionId;
+  activeTab.value = "qa";
+};
+
+const handleNewSession = () => {
+  currentSessionId.value = null;
+  activeTab.value = "qa";
+};
 
 const tabs = [
   { id: "qa", label: "金融问答", icon: "💬" },
@@ -60,9 +71,9 @@ const availableTabs = tabs.filter(tab => !tab.adminOnly || props.user.permission
         <h2>{{ tabs.find(t => t.id === activeTab)?.label }}</h2>
       </header>
       <div class="content-body">
-        <FinancialQA v-if="activeTab === 'qa'" />
+        <FinancialQA v-if="activeTab === 'qa'" :session-id="currentSessionId" />
         <KnowledgeBase v-else-if="activeTab === 'knowledge'" />
-        <ChatHistory v-else-if="activeTab === 'history'" />
+        <ChatHistory v-else-if="activeTab === 'history'" @open-session="handleOpenSession" />
         <RiskSummary v-else-if="activeTab === 'risk'" />
         <OpsDashboard v-else-if="activeTab === 'ops'" />
       </div>

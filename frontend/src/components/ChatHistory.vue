@@ -2,6 +2,8 @@
 import { ref, onMounted } from "vue";
 import { chatApi } from "../api/chat.js";
 
+const emit = defineEmits(["open-session"]);
+
 const history = ref([]);
 const isLoading = ref(false);
 
@@ -14,6 +16,10 @@ const fetchHistory = async () => {
   } finally {
     isLoading.value = false;
   }
+};
+
+const handleOpenSession = (id) => {
+  emit("open-session", id);
 };
 
 onMounted(fetchHistory);
@@ -36,10 +42,13 @@ onMounted(fetchHistory);
       </div>
     </div>
     <div v-else-if="history.length === 0" class="state-msg empty">
-      暂无历史记录
+      <div style="text-align: center;">
+        <div>暂无历史记录</div>
+        <div style="font-size: 12px; margin-top: 8px; color: #cbd5e1;">(TODO: 后端需要实现 GET /api/chat/sessions)</div>
+      </div>
     </div>
     <div v-else class="history-list">
-      <div v-for="item in history" :key="item.id" class="history-item">
+      <div v-for="item in history" :key="item.id" class="history-item" @click="handleOpenSession(item.id)">
         <div class="item-main">
           <div class="item-title">{{ item.title }}</div>
           <div class="item-preview">{{ item.lastMessage }}</div>
