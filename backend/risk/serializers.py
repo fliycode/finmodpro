@@ -20,6 +20,13 @@ class RiskExtractionSchemaSerializer(serializers.Serializer):
     events = RiskExtractionEventSerializer(many=True)
 
 
+class RiskBatchExtractionRequestSerializer(serializers.Serializer):
+    document_ids = serializers.ListField(
+        child=serializers.IntegerField(min_value=1),
+        allow_empty=False,
+    )
+
+
 class RiskEventSummarySerializer(serializers.ModelSerializer):
     document_id = serializers.IntegerField(source="document.id", read_only=True, allow_null=True)
     chunk_id = serializers.IntegerField(source="chunk.id", read_only=True, allow_null=True)

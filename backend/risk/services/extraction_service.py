@@ -1,11 +1,12 @@
 from django.db import transaction
 
 from common.exceptions import UpstreamServiceError
+from knowledgebase.models import Document
 from knowledgebase.models import DocumentChunk
 from llm.services.prompt_service import render_prompt
 from llm.services.runtime_service import get_chat_provider
 from risk.models import RiskEvent
-from risk.serializers import parse_risk_extraction_payload
+from risk.serializers import RiskEventSummarySerializer, parse_risk_extraction_payload
 
 
 def list_document_chunks(*, document):
@@ -93,3 +94,73 @@ def extract_risk_events_for_document(*, document):
             )
 
     return created_events
+
+
+def batch_extract_risk_events_for_documents(*, document_ids):
+    normalized_document_ids = list(dict.fromkeys(document_ids))
+    documents_by_id = {
+        document.id: document for document in Document.objects.filter(id__in=normalized_document_ids)
+    }
+
+    results = []
+    total_created_count = 0
+    for document_id in normalized_document_ids:
+        document = documents_by_id.get(document_id)
+        if document is None:
+            results.append(
+                {
+                    "document_id": document_id,
+                    "status": "not_found",
+                    "message": "文档不存在。",
+                    "created_count": 0,
+                    "risk_events": [],
+                }
+            )
+            continue
+
+        chunks = list_document_chunks(document=document)
+        if not chunks:
+            results.append(
+                {
+                    "document_id": document.id,
+                    "status": "no_chunks",
+                    "message": "文档暂无可抽取内容。",
+                    "created_count": 0,
+                    "risk_events": [],
+                }
+            )
+            continue
+
+        try:
+            created_events = extract_risk_events_for_document(document=document)
+        except UpstreamServiceError as exc:
+            result = {
+                "document_id": document.id,
+                "status": "failed",
+                "message": exc.message,
+                "created_count": 0,
+                "risk_events": [],
+                "error_code": exc.code,
+            }
+            if exc.provider:
+                result["provider"] = exc.provider
+            results.append(result)
+            continue
+
+        total_created_count += len(created_events)
+        results.append(
+            {
+                "document_id": document.id,
+                "status": "created" if created_events else "completed",
+                "message": "风险抽取完成。" if created_events else "未识别到风险事件。",
+                "created_count": len(created_events),
+                "risk_events": RiskEventSummarySerializer(created_events, many=True).data,
+            }
+        )
+
+    return {
+        "total_documents": len(normalized_document_ids),
+        "processed_documents": len(results),
+        "total_created_count": total_created_count,
+        "results": results,
+    }
