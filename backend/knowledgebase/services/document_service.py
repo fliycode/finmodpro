@@ -4,7 +4,7 @@ from pathlib import Path
 from knowledgebase.models import Document, DocumentChunk
 from knowledgebase.services.chunk_service import build_document_chunks
 from knowledgebase.services.parser_service import parse_document_file
-from rag.services.vector_store_service import index_document
+from knowledgebase.services.vector_service import index_document_chunks
 
 
 def _detect_doc_type(filename):
@@ -89,45 +89,58 @@ def _update_document_status(document, *, status, error_message=None):
     document.save(update_fields=update_fields)
 
 
+def _build_chunk_metadata(document, index):
+    return {
+        "document_id": document.id,
+        "document_title": document.title,
+        "doc_type": document.doc_type,
+        "source_date": document.source_date.isoformat() if document.source_date else None,
+        "chunk_index": index,
+        "page_label": f"chunk-{index + 1}",
+    }
+
+
+def parse_document(document):
+    parsed_text = parse_document_file(document)
+    document.parsed_text = parsed_text
+    document.error_message = ""
+    document.save(update_fields=["parsed_text", "error_message", "updated_at"])
+    _update_document_status(document, status=Document.STATUS_PARSED)
+    return parsed_text
+
+
+def chunk_document(document, parsed_text):
+    DocumentChunk.objects.filter(document=document).delete()
+    chunks = build_document_chunks(
+        parsed_text,
+        metadata_builder=lambda index: _build_chunk_metadata(document, index),
+    )
+    DocumentChunk.objects.bulk_create(
+        [
+            DocumentChunk(
+                document=document,
+                chunk_index=chunk["chunk_index"],
+                content=chunk["content"],
+                metadata=chunk["metadata"],
+            )
+            for chunk in chunks
+        ]
+    )
+    _update_document_status(document, status=Document.STATUS_CHUNKED)
+    return chunks
+
+
+def vectorize_document(document):
+    index_document_chunks(document)
+    _update_document_status(document, status=Document.STATUS_INDEXED)
+    return document
+
+
 def ingest_document(document):
     try:
-        parsed_text = parse_document_file(document)
-        document.parsed_text = parsed_text
-        document.error_message = ""
-        document.save(
-            update_fields=["parsed_text", "error_message", "updated_at"]
-        )
-        _update_document_status(document, status=Document.STATUS_PARSED)
-
-        DocumentChunk.objects.filter(document=document).delete()
-        chunks = build_document_chunks(
-            parsed_text,
-            metadata_builder=lambda index: {
-                "document_id": document.id,
-                "document_title": document.title,
-                "doc_type": document.doc_type,
-                "source_date": (
-                    document.source_date.isoformat() if document.source_date else None
-                ),
-                "chunk_index": index,
-                "page_label": f"chunk-{index + 1}",
-            },
-        )
-        DocumentChunk.objects.bulk_create(
-            [
-                DocumentChunk(
-                    document=document,
-                    chunk_index=chunk["chunk_index"],
-                    content=chunk["content"],
-                    metadata=chunk["metadata"],
-                )
-                for chunk in chunks
-            ]
-        )
-        _update_document_status(document, status=Document.STATUS_CHUNKED)
-
-        index_document(document)
-        _update_document_status(document, status=Document.STATUS_INDEXED)
+        parsed_text = parse_document(document)
+        chunk_document(document, parsed_text)
+        vectorize_document(document)
         return document
     except ValueError as exc:
         DocumentChunk.objects.filter(document=document).delete()
@@ -137,3 +150,12 @@ def ingest_document(document):
             error_message=str(exc),
         )
         raise
+
+
+def enqueue_document_ingestion(document):
+    from knowledgebase.tasks import ingest_document_task
+
+    document.error_message = ""
+    document.save(update_fields=["error_message", "updated_at"])
+    ingest_document_task.delay(document.id)
+    return document

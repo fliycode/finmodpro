@@ -9,7 +9,12 @@ from django.test import Client, TestCase, override_settings
 from authentication.models import User
 from authentication.services.jwt_service import generate_access_token
 from knowledgebase.models import Document
-from knowledgebase.services.document_service import create_document_from_upload, ingest_document
+from knowledgebase.services.document_service import (
+    create_document_from_upload,
+    ingest_document,
+    vectorize_document,
+)
+from knowledgebase.tasks import ingest_document_task
 from rag.services.vector_store_service import clear_store
 from rbac.services.rbac_service import ROLE_ADMIN, seed_roles_and_permissions
 
@@ -17,6 +22,8 @@ from rbac.services.rbac_service import ROLE_ADMIN, seed_roles_and_permissions
 @override_settings(
     JWT_SECRET_KEY="test-jwt-secret",
     JWT_ACCESS_TOKEN_LIFETIME_SECONDS=3600,
+    CELERY_TASK_ALWAYS_EAGER=True,
+    CELERY_TASK_EAGER_PROPAGATES=True,
 )
 class KnowledgebaseApiTests(TestCase):
     def setUp(self):
@@ -88,7 +95,7 @@ class KnowledgebaseApiTests(TestCase):
         self.assertEqual(ingest_response.status_code, 200)
         ingest_payload = ingest_response.json()
         self.assertEqual(set(ingest_payload.keys()), {"document", "message"})
-        self.assertEqual(ingest_payload["message"], "摄取完成。")
+        self.assertEqual(ingest_payload["message"], "摄取任务已提交。")
         self.assertEqual(ingest_payload["document"]["status"], "indexed")
         self.assertGreaterEqual(ingest_payload["document"]["chunk_count"], 1)
 
@@ -156,8 +163,11 @@ class KnowledgebaseDocumentServiceTests(TestCase):
         self.assertEqual(document.status, Document.STATUS_UPLOADED)
 
         with patch(
-            "knowledgebase.services.document_service.index_document",
-            side_effect=capture_index_call,
+            "knowledgebase.services.document_service.vectorize_document",
+            side_effect=lambda doc: (
+                capture_index_call(doc),
+                vectorize_document(doc),
+            )[1],
         ):
             ingest_document(document)
 
@@ -169,3 +179,21 @@ class KnowledgebaseDocumentServiceTests(TestCase):
         reparsed = Document.objects.get(id=document.id)
         self.assertEqual(reparsed.parsed_text, "revenue improved and margin recovered")
         self.assertEqual(reparsed.chunks.count(), 1)
+
+    def test_ingest_document_task_indexes_uploaded_document(self):
+        document = create_document_from_upload(
+            uploaded_file=SimpleUploadedFile(
+                "task.txt",
+                b"capital adequacy remained stable across the reporting period",
+                content_type="text/plain",
+            ),
+            title="Task doc",
+            source_date="2025-03-01",
+        )
+
+        ingest_document_task(document.id)
+
+        document.refresh_from_db()
+        self.assertEqual(document.status, Document.STATUS_INDEXED)
+        self.assertEqual(document.error_message, "")
+        self.assertEqual(document.chunks.count(), 1)
