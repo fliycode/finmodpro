@@ -1,0 +1,28 @@
+你将收到一篇金融文档的切块内容。请识别其中明确提到的风险事件，并严格输出 JSON。
+
+输出要求：
+1. 只返回一个 JSON 对象，不要返回 markdown 或额外说明。
+2. JSON 结构必须是：
+{{
+  "events": [
+    {{
+      "company_name": "公司名",
+      "risk_type": "风险类型，建议使用英文短词如 liquidity/credit/market/compliance/operation",
+      "risk_level": "low|medium|high|critical",
+      "event_time": "ISO 8601 时间字符串；若无法判断则为 null",
+      "summary": "一句话摘要",
+      "evidence_text": "直接证据原文",
+      "confidence_score": 0.000,
+      "chunk_id": 123
+    }}
+  ]
+}}
+3. 如果没有识别到风险事件，返回 {{"events": []}}。
+4. `chunk_id` 必须来自输入文本中的 `[chunk_id=...]` 标记。
+5. `confidence_score` 取值范围 0 到 1，保留三位小数。
+
+文档标题：{document_title}
+文档类型：{document_type}
+
+文档切块：
+{chunk_context}

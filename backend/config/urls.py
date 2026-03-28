@@ -12,6 +12,7 @@ urlpatterns = [
     path("api/knowledgebase/", include("knowledgebase.urls")),
     path("api/rag/", include("rag.urls")),
     path("api/chat/", include("chat.urls")),
+    path("api/risk/", include("risk.urls")),
 ]
 
 if settings.DEBUG:
