@@ -1,0 +1,31 @@
+from rest_framework.views import APIView
+
+from chat.serializers import ChatSessionSerializer, CreateChatSessionSerializer
+from chat.services.session_service import create_chat_session
+from common.api_response import error_response, success_response
+from rbac.services.authz_service import get_authenticated_user, user_has_permission
+
+
+class ChatSessionCreateView(APIView):
+    authentication_classes = []
+    permission_classes = []
+
+    def post(self, request):
+        user = get_authenticated_user(request)
+        if user is None:
+            return error_response(code=401, message="未认证。", status_code=401)
+        if not user_has_permission(user, "auth.ask_financial_qa"):
+            return error_response(code=403, message="无权限。", status_code=403)
+
+        serializer = CreateChatSessionSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        session = create_chat_session(
+            user=user,
+            title=serializer.validated_data.get("title", ""),
+            context_filters=serializer.validated_data.get("context_filters", {}),
+        )
+        return success_response(
+            data={"session": ChatSessionSerializer(session).data},
+            status_code=201,
+        )
