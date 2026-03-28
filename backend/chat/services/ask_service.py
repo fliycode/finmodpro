@@ -44,11 +44,13 @@ def ask_question(*, question, filters=None, top_k=5):
     retrieval_results = retrieve(query=question, filters=filters, top_k=top_k)
     retrieval_payload = build_retrieval_response(query=question, results=retrieval_results)
     citations = retrieval_payload["citations"]
+    duration_ms = int((time.monotonic() - started_at) * 1000)
     response_payload = {
         "question": question,
         "query": question,
         "answer": _build_answer(question, citations),
         "citations": citations,
+        "duration_ms": duration_ms,
     }
     create_retrieval_log(
         query=question,
@@ -56,6 +58,6 @@ def ask_question(*, question, filters=None, top_k=5):
         filters=filters or {},
         results=retrieval_results,
         source=RetrievalLog.SOURCE_CHAT_ASK,
-        duration_ms=int((time.monotonic() - started_at) * 1000),
+        duration_ms=duration_ms,
     )
     return response_payload
