@@ -10,6 +10,7 @@ urlpatterns = [
     path("api/auth/", include("authentication.urls")),
     path("api/", include("rbac.urls")),
     path("api/knowledgebase/", include("knowledgebase.urls")),
+    path("api/ops/", include("llm.urls")),
     path("api/rag/", include("rag.urls")),
     path("api/chat/", include("chat.urls")),
     path("api/risk/", include("risk.urls")),

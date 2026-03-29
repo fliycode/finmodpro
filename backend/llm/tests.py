@@ -4,9 +4,13 @@ from io import BytesIO
 from unittest.mock import patch
 from urllib.error import HTTPError, URLError
 
+from django.contrib.auth.models import Group
 from django.test import TestCase
+from django.test import Client, override_settings
 
 from common.exceptions import UpstreamRateLimitError, UpstreamServiceError
+from authentication.models import User
+from authentication.services.jwt_service import generate_access_token
 from llm.models import EvalRecord, ModelConfig
 from llm.services.model_config_service import get_active_model_config
 from llm.services.prompt_service import render_prompt
@@ -15,6 +19,7 @@ from llm.services.providers.ollama_provider import (
     OllamaEmbeddingProvider,
 )
 from llm.services.runtime_service import get_chat_provider, get_embedding_provider
+from rbac.services.rbac_service import ROLE_ADMIN, ROLE_MEMBER, seed_roles_and_permissions
 
 
 class _FakeHttpResponse:
@@ -195,3 +200,96 @@ class ProviderRuntimeTests(TestCase):
 
         self.assertIn("净利润情况如何？", prompt)
         self.assertIn("年报 chunk-1", prompt)
+
+
+@override_settings(
+    JWT_SECRET_KEY="test-jwt-secret",
+    JWT_ACCESS_TOKEN_LIFETIME_SECONDS=3600,
+)
+class ModelConfigListApiTests(TestCase):
+    def setUp(self):
+        self.client = Client()
+        seed_roles_and_permissions()
+
+        self.admin_user = User.objects.create_user(
+            username="ops-admin",
+            password="secret123",
+            email="ops-admin@example.com",
+        )
+        self.admin_user.groups.add(Group.objects.get(name=ROLE_ADMIN))
+        self.admin_access_token = generate_access_token(self.admin_user)
+
+        self.member_user = User.objects.create_user(
+            username="ops-member",
+            password="secret123",
+            email="ops-member@example.com",
+        )
+        self.member_user.groups.add(Group.objects.get(name=ROLE_MEMBER))
+        self.member_access_token = generate_access_token(self.member_user)
+
+    def test_list_model_configs_requires_authentication(self):
+        response = self.client.get("/api/ops/model-configs")
+
+        self.assertEqual(response.status_code, 401)
+        self.assertEqual(
+            response.json(),
+            {"code": 401, "message": "未认证。", "data": {}},
+        )
+
+    def test_list_model_configs_requires_manage_model_config_permission(self):
+        response = self.client.get(
+            "/api/ops/model-configs",
+            HTTP_AUTHORIZATION=f"Bearer {self.member_access_token}",
+        )
+
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(
+            response.json(),
+            {"code": 403, "message": "无权限。", "data": {}},
+        )
+
+    def test_list_model_configs_returns_serialized_rows(self):
+        replacement = ModelConfig.objects.create(
+            name="qwen-chat",
+            capability=ModelConfig.CAPABILITY_CHAT,
+            provider=ModelConfig.PROVIDER_OLLAMA,
+            model_name="qwen2.5:7b",
+            endpoint="http://localhost:11434",
+            options={"temperature": 0.1},
+            is_active=False,
+        )
+
+        response = self.client.get(
+            "/api/ops/model-configs",
+            HTTP_AUTHORIZATION=f"Bearer {self.admin_access_token}",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["code"], 0)
+        self.assertEqual(payload["message"], "ok")
+        self.assertEqual(payload["data"]["total"], 3)
+        self.assertEqual(
+            [item["name"] for item in payload["data"]["model_configs"]],
+            ["default-chat", "qwen-chat", "default-embedding"],
+        )
+
+        first_row = payload["data"]["model_configs"][0]
+        self.assertEqual(
+            set(first_row.keys()),
+            {
+                "id",
+                "name",
+                "capability",
+                "provider",
+                "model_name",
+                "endpoint",
+                "options",
+                "is_active",
+                "created_at",
+                "updated_at",
+            },
+        )
+        self.assertEqual(first_row["id"], get_active_model_config(ModelConfig.CAPABILITY_CHAT).id)
+        self.assertTrue(first_row["is_active"])
+        self.assertEqual(payload["data"]["model_configs"][1]["id"], replacement.id)

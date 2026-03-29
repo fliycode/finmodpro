@@ -193,6 +193,7 @@ class AdminManagementApiTests(TestCase):
                     "add_user",
                     "ask_financial_qa",
                     "change_user",
+                    "manage_model_config",
                     "review_risk_event",
                     "trigger_ingest",
                     "upload_document",
@@ -254,6 +255,7 @@ class AdminManagementApiTests(TestCase):
                     "add_user",
                     "ask_financial_qa",
                     "change_user",
+                    "manage_model_config",
                     "review_risk_event",
                     "trigger_ingest",
                     "upload_document",
@@ -333,6 +335,7 @@ class RbacPermissionSeedTests(TestCase):
                 "ask_financial_qa",
                 "view_chat_session",
                 "review_risk_event",
+                "manage_model_config",
                 "view_evaluation",
                 "view_audit_log",
             }.issubset(admin_permissions)
