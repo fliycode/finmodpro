@@ -14,7 +14,7 @@ from chat.models import ChatMessage, ChatSession
 from common.exceptions import UpstreamRateLimitError
 from knowledgebase.services.document_service import create_document_from_upload, ingest_document
 from rag.models import RetrievalLog
-from rag.services.vector_store_service import clear_store
+from rag.services.vector_store_service import clear_store, index_document
 from rbac.services.rbac_service import ROLE_ADMIN, seed_roles_and_permissions
 
 
@@ -46,6 +46,11 @@ class ChatAskApiTests(TestCase):
             return_value=FakeChatProvider(),
         )
         self.embedding_provider_patcher.start()
+        self.vector_index_patcher = patch(
+            "knowledgebase.services.document_service.index_document_chunks",
+            side_effect=index_document,
+        )
+        self.vector_index_patcher.start()
         self.chat_provider_patcher.start()
         self.media_root = tempfile.mkdtemp()
         self.override = override_settings(
@@ -81,6 +86,7 @@ class ChatAskApiTests(TestCase):
         self.chat_provider_patcher.stop()
         self.embedding_provider_patcher.stop()
         self.override.disable()
+        self.vector_index_patcher.stop()
         shutil.rmtree(self.media_root, ignore_errors=True)
         clear_store()
 
