@@ -8,6 +8,7 @@ export const joinUrl = (baseURL, path) => {
 };
 
 export const createApiConfig = (overrides = {}) => {
+  const isProd = typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.PROD;
   const envBaseUrl =
     typeof import.meta !== 'undefined' &&
     import.meta.env &&
@@ -15,7 +16,8 @@ export const createApiConfig = (overrides = {}) => {
       ? import.meta.env.VITE_API_BASE_URL
       : '';
 
-  const baseURL = (overrides.baseURL || envBaseUrl || FALLBACK_BASE_URL).replace(/\/+$/, '');
+  const defaultFallback = isProd ? '' : 'http://localhost:8000';
+  const baseURL = (overrides.baseURL || envBaseUrl || defaultFallback).replace(/\/+$/, '');
   
   const selectedFetch = overrides.fetchImpl || fetch;
 
