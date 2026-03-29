@@ -429,6 +429,20 @@ class ModelConfigActivationApiTests(TestCase):
             },
         )
 
+    def test_activation_returns_404_for_unknown_model_config(self):
+        response = self.client.patch(
+            "/api/ops/model-configs/999999/activation",
+            data=json.dumps({"is_active": True}),
+            content_type="application/json",
+            HTTP_AUTHORIZATION=f"Bearer {self.admin_access_token}",
+        )
+
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(
+            response.json(),
+            {"code": 404, "message": "模型配置不存在。", "data": {}},
+        )
+
 
 @override_settings(
     JWT_SECRET_KEY="test-jwt-secret",
@@ -676,6 +690,20 @@ class EvalRecordApiTests(TestCase):
         self.assertEqual(response.status_code, 403)
         self.assertEqual(response.json(), {"code": 403, "message": "无权限。", "data": {}})
 
+    def test_create_evaluation_returns_404_for_unknown_model_config(self):
+        response = self.client.post(
+            "/api/ops/evaluations",
+            data=json.dumps({"task_type": "qa", "model_config_id": 999999}),
+            content_type="application/json",
+            HTTP_AUTHORIZATION=f"Bearer {self.super_admin_access_token}",
+        )
+
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(
+            response.json(),
+            {"code": 404, "message": "模型配置不存在。", "data": {}},
+        )
+
     def test_create_evaluation_runs_smoke_suite_and_persists_record(self):
         response = self.client.post(
             "/api/ops/evaluations",
@@ -706,6 +734,12 @@ class EvalRecordApiTests(TestCase):
 
         self.assertEqual(response.status_code, 403)
         self.assertEqual(response.json(), {"code": 403, "message": "无权限。", "data": {}})
+
+    def test_list_evaluations_requires_authentication(self):
+        response = self.client.get("/api/ops/evaluations")
+
+        self.assertEqual(response.status_code, 401)
+        self.assertEqual(response.json(), {"code": 401, "message": "未认证。", "data": {}})
 
     def test_list_evaluations_returns_summary_rows(self):
         first_record = EvalRecord.objects.create(
