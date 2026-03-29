@@ -5,6 +5,7 @@ import FinancialQA from "./FinancialQA.vue";
 import ChatHistory from "./ChatHistory.vue";
 import RiskSummary from "./RiskSummary.vue";
 import OpsDashboard from "./OpsDashboard.vue";
+import ModelConfig from "./ModelConfig.vue";
 
 const props = defineProps({
   user: {
@@ -33,7 +34,8 @@ const tabs = [
   { id: "knowledge", label: "知识库管理", icon: "📚" },
   { id: "history", label: "历史会话", icon: "🕒" },
   { id: "risk", label: "风险与摘要", icon: "📊" },
-  { id: "ops", label: "工作台大盘", icon: "📈", adminOnly: true }
+  { id: "ops", label: "工作台大盘", icon: "📈", adminOnly: true },
+  { id: "model-config", label: "模型配置", icon: "🧠", adminOnly: true }
 ];
 
 const availableTabs = tabs.filter(tab => !tab.adminOnly || props.user.permissions.includes("admin") || props.user.groups.includes("admin") || props.user.groups.includes("super_admin"));
@@ -76,6 +78,7 @@ const availableTabs = tabs.filter(tab => !tab.adminOnly || props.user.permission
         <ChatHistory v-else-if="activeTab === 'history'" @open-session="handleOpenSession" />
         <RiskSummary v-else-if="activeTab === 'risk'" />
         <OpsDashboard v-else-if="activeTab === 'ops'" />
+        <ModelConfig v-else-if="activeTab === 'model-config'" />
       </div>
     </main>
   </div>
