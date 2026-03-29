@@ -39,7 +39,7 @@ export const llmApi = {
 
   async activateModelConfig(id, isActive) {
     const response = await apiConfig.fetchImpl(joinUrl(apiConfig.baseURL, `/api/ops/model-configs/${id}/activation/`), {
-      method: "POST",
+      method: "PATCH",
       headers: getHeaders(),
       body: JSON.stringify({ is_active: isActive }),
     });
