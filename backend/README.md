@@ -1,59 +1,70 @@
 # finmodpro-backend
 
-`finmodpro` 后端当前版本基于 Django 提供健康检查、JWT 登录闭环，以及基于 Django `User / Group / Permission` 的最小 RBAC 演示能力。
+`finmodpro` 后端当前版本基于 Django，已挂载系统检查、认证/RBAC、知识库、模型配置、RAG、聊天问答和风险分析相关 API。不同模块完成度不完全一致，但当前启动方式和功能范围不应再按“只有最小认证示例”理解。
 
-## 当前完成范围
+## 当前功能概览
 
 - 健康检查：`GET /api/health`
+- 工作台统计：`GET /api/dashboard/stats`
 - 注册：`POST /api/auth/register`
 - 登录：`POST /api/auth/login`
 - 当前用户资料：`GET /api/auth/me`
 - 管理员用户列表：`GET /api/admin/users`
 - 管理员角色列表：`GET /api/admin/groups`
 - 管理员更新用户角色：`PUT /api/admin/users/<id>/groups`
+- 知识库文档列表/新增：`/api/knowledgebase/documents`
+- 知识库文档入库：`/api/knowledgebase/documents/<id>/ingest`
+- 模型配置/Prompt 配置/评测：`/api/ops/...`
+- RAG 检索：`POST /api/rag/retrieval/query`
+- 聊天问答/会话：`/api/chat/...`
+- 风险事件/抽取/报告：`/api/risk/...`
 - 认证：仅 `access token`
 - RBAC：直接复用 Django `User / Group / Permission`
 - 注册默认角色：新用户自动加入 `member`
 - RBAC 初始化：`python manage.py seed_rbac`
-- 配置：已整理为面向 MySQL / Redis 的环境变量结构
-- 本地默认运行：SQLite + LocMemCache，避免没有 MySQL / Redis 时无法启动
+- 配置：已整理为面向 SQLite / MySQL、LocMemCache / Redis 的环境变量结构
+- 本地默认运行：SQLite + LocMemCache + 内存 Celery backend/broker
 
-## 当前未做
+说明：
+
+- 以上接口已在 [`config/urls.py`](/root/finmodpro/backend/config/urls.py) 挂载
+- 部分高级能力依赖模型、数据或进阶服务配置；当前 README 只保证启动说明和范围概览不误导
+
+## 当前仍有限制
 
 - `refresh token`
 - JWT 黑名单 / 退出登录
 - 邮箱验证码、找回密码
-- 实际 Redis 业务使用
-- 实际 MySQL 联通验证
+- 完整的进阶依赖本地部署说明
 
-## MVC 结构说明
+## 项目结构说明
 
-本阶段按 Django 习惯落成清晰分层：
+当前项目按 Django app 拆分：
 
 - `config/`
-  - 项目级配置与环境变量解析
-- `authentication/models.py`
-  - 认证域模型入口，当前复用 Django 内置 `User`
-- `authentication/services/`
-  - 认证业务与 JWT 生成/校验
-- `authentication/controllers/`
-  - 请求解析、参数校验、响应组装
-- `authentication/urls.py`
-  - 认证路由
-- `rbac/services/`
-  - Group / Permission 种子、用户角色摘要、管理员列表与角色覆盖 helper
-- `rbac/controllers/`
-  - 当前用户 RBAC profile 接口、管理员用户/角色管理接口
+  - 项目级配置、URL 和环境变量解析
+- `authentication/`
+  - 注册、登录、JWT 鉴权
+- `rbac/`
+  - 当前用户资料、管理员用户/角色管理、RBAC 种子命令
+- `knowledgebase/`
+  - 文档管理与入库
+- `llm/`
+  - 模型配置、Prompt 配置、评测记录
+- `rag/`
+  - 检索增强查询
+- `chat/`
+  - 问答与会话历史
+- `risk/`
+  - 风险事件抽取、审核、报告
+- `systemcheck/`
+  - 健康检查和工作台统计
 - `rbac/management/commands/seed_rbac.py`
   - 初始化 `super_admin` / `admin` / `member` 及默认权限映射
-- `systemcheck/controllers/`
-  - 健康检查控制层
-- `systemcheck/urls.py`
-  - 健康检查路由
 
 ## 环境变量
 
-可参考 [`.env.example`](/root/.openclaw/workspace/projects/finmodpro-backend/.env.example)。
+可参考 [`.env.example`](/root/finmodpro/backend/.env.example)。
 
 ### Django
 
@@ -90,6 +101,32 @@
 - 关闭时使用 Django 本地内存缓存
 - 打开后会切换到 Redis cache 配置
 
+### Celery
+
+- `CELERY_BROKER_URL`：默认 `memory://`
+- `CELERY_RESULT_BACKEND`：默认 `cache+memory://`
+- `CELERY_TASK_ALWAYS_EAGER`
+- `CELERY_TASK_EAGER_PROPAGATES`
+- `CELERY_TASK_STORE_EAGER_RESULT`
+
+说明：
+
+- 当前默认值适合本地开发
+- 更完整的消息队列方案后续补充
+
+### Knowledge Base / Milvus
+
+- `MILVUS_URI`：默认 `milvus.db`
+- `MILVUS_COLLECTION_NAME`
+- `KB_CHUNK_SIZE`
+- `KB_CHUNK_OVERLAP`
+- `KB_EMBEDDING_DIMENSION`
+
+说明：
+
+- 当前 `.env.example` 已给出本地默认值
+- 进阶依赖和更完整部署说明后续补充
+
 ### JWT
 
 - `JWT_SECRET_KEY`
@@ -107,11 +144,14 @@
 ## 运行方式
 
 ```bash
-cd /root/.openclaw/workspace/projects/finmodpro-backend
+cd /root/finmodpro/backend
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 cp .env.example .env
+set -a
+source .env
+set +a
 python manage.py migrate
 python manage.py seed_rbac
 python manage.py runserver 127.0.0.1:8000
@@ -119,7 +159,7 @@ python manage.py runserver 127.0.0.1:8000
 
 说明：
 
-- 当前项目未引入 `.env` 自动加载库，环境变量可通过 `export` 或进程前缀方式注入
+- 当前项目未引入 `.env` 自动加载库，`cp .env.example .env` 后还要显式加载环境变量
 - 如果直接本地启动，默认配置已可使用 SQLite 跑通
 - `seed_rbac` 建议在 `migrate` 后执行一次；命令幂等，可重复执行
 
@@ -135,7 +175,7 @@ python manage.py runserver 127.0.0.1:8000
 ## 测试方式
 
 ```bash
-cd /root/.openclaw/workspace/projects/finmodpro-backend
+cd /root/finmodpro/backend
 source .venv/bin/activate
 python manage.py test authentication systemcheck
 python manage.py test authentication rbac systemcheck
@@ -372,7 +412,7 @@ Content-Type: application/json
 执行：
 
 ```bash
-cd /root/.openclaw/workspace/projects/finmodpro-backend
+cd /root/finmodpro/backend
 source .venv/bin/activate
 python manage.py migrate
 python manage.py seed_rbac
@@ -398,4 +438,4 @@ python manage.py seed_rbac
 
 ## 当前边界说明
 
-这是“毕设演示可运行版本”，目标是稳定提供最小认证 + RBAC 闭环，而不是一次做完整企业级权限平台。当前方案明确直接复用 Django 内置 `User / Group / Permission`，不自建独立 RBAC 数据模型。
+这是“毕设演示可运行版本”。当前仓库已经进入多模块并行阶段，但不同模块成熟度不同；文档中的重点仍是提供不误导的启动说明、基础认证/RBAC 链路和当前已挂载 API 范围说明。RBAC 方案仍明确直接复用 Django 内置 `User / Group / Permission`，不自建独立 RBAC 数据模型。
