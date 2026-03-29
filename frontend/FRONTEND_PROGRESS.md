@@ -95,3 +95,7 @@
 - [ ] 丰富品牌卖点图标
 - [ ] 添加深色模式支持
 - [ ] 实现登录后的页面重定向逻辑
+
+## 2026-03-29 (模块 J：联调与异常修复)
+- [x] **修复模型配置启停方法**: 将 `src/api/llm.js` 中的 `activateModelConfig` 请求方法从 POST 改为 PATCH，以对齐后端 `ModelConfigActivationView`。
+- [x] **构建验证**: 运行 `npm run build` 确认生产环境构建通过。
