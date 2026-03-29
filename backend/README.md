@@ -29,13 +29,14 @@
 
 - 以上接口已在 [`config/urls.py`](/root/finmodpro/backend/config/urls.py) 挂载
 - 部分高级能力依赖模型、数据或进阶服务配置；当前 README 只保证启动说明和范围概览不误导
+- 依赖服务的本地启动说明见 [`backend/docs/dependency-services.md`](/root/finmodpro/backend/docs/dependency-services.md)
 
 ## 当前仍有限制
 
 - `refresh token`
 - JWT 黑名单 / 退出登录
 - 邮箱验证码、找回密码
-- 完整的进阶依赖本地部署说明
+- 一键式依赖编排（当前只提供手动启动说明）
 
 ## 项目结构说明
 
@@ -162,6 +163,7 @@ python manage.py runserver 127.0.0.1:8000
 - 当前项目未引入 `.env` 自动加载库，`cp .env.example .env` 后还要显式加载环境变量
 - 如果直接本地启动，默认配置已可使用 SQLite 跑通
 - `seed_rbac` 建议在 `migrate` 后执行一次；命令幂等，可重复执行
+- 如果你要切到 MySQL / Redis / Milvus / Ollama，请先看 [`backend/docs/dependency-services.md`](/root/finmodpro/backend/docs/dependency-services.md)
 
 示例：
 
