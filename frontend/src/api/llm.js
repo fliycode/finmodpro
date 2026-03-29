@@ -30,7 +30,7 @@ const parseResponse = async (response) => {
 export const llmApi = {
   // 模型配置
   async getModelConfigs() {
-    const response = await apiConfig.fetchImpl(joinUrl(apiConfig.baseURL, "/api/llm/model-configs/"), {
+    const response = await apiConfig.fetchImpl(joinUrl(apiConfig.baseURL, "/api/ops/model-configs/"), {
       method: "GET",
       headers: getHeaders(),
     });
@@ -38,7 +38,7 @@ export const llmApi = {
   },
 
   async activateModelConfig(id, isActive) {
-    const response = await apiConfig.fetchImpl(joinUrl(apiConfig.baseURL, `/api/llm/model-configs/${id}/activation/`), {
+    const response = await apiConfig.fetchImpl(joinUrl(apiConfig.baseURL, `/api/ops/model-configs/${id}/activation/`), {
       method: "POST",
       headers: getHeaders(),
       body: JSON.stringify({ is_active: isActive }),

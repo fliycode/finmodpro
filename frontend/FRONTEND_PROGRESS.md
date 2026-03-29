@@ -1,13 +1,13 @@
 # FinModPro 前端开发进度
 
 ## 2026-03-26 (去 mock 化与后端对齐)
-- [x] **知识库 API 联调**: `src/api/knowledgebase.js` 接入 `POST /api/v1/knowledgebase/upload` 和 `GET /api/v1/knowledgebase/documents`。
+- [x] **知识库 API 联调**: `src/api/knowledgebase.js` 接入 `POST /api/knowledgebase/documents` 和 `GET /api/knowledgebase/documents`。
   - 支持单文件上传（Multipart）。
   - 对齐文档处理状态：`uploaded`, `parsed`, `chunked`, `indexed`, `failed`。
-- [x] **RAG 问答 API 联调**: `src/api/qa.js` 接入 `POST /api/v1/rag/ask`。
+- [x] **RAG 问答 API 联调**: `src/api/qa.js` 接入 `POST /api/chat/ask`。
   - 适配引用 (Citations) 结构：支持 `document_title`, `doc_type`, `source_date`, `page_label`, `snippet` 等字段。
   - 在适配层处理后端字段差异（如 `rerank_score` 映射）。
-- [x] **对话历史 API 联调**: `src/api/chat.js` 接入 `/api/v1/chat/history` 和 `/api/v1/chat/sessions`。
+- [x] **对话历史 API 联调**: `src/api/chat.js` 接入 `/api/chat/history` 和 `/api/chat/sessions`。
   - 统一会话列表与详情的数据结构映射。
 - [x] **适配层收口**: 所有 API 模块统一使用 `config.js` 的配置与 `auth-storage.js` 的 Token。
 - [x] **构建验证**: 运行 `npm run build` 确认生产环境构建通过。

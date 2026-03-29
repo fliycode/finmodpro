@@ -210,8 +210,8 @@ const generateReport = async () => {
                 <td class="summary-cell">
                   <div class="summary-text" :title="item.summary">{{ item.summary }}</div>
                   <div class="evidence-text" v-if="item.evidence_text" :title="item.evidence_text">"{{ item.evidence_text }}"</div>
-                  <div class="meta-tags" v-if="item.confidence !== undefined || item.document_id">
-                    <span v-if="item.confidence !== undefined" class="meta-tag">置信度: {{ item.confidence }}</span>
+                  <div class="meta-tags" v-if="item.confidence_score !== undefined || item.confidence !== undefined || item.document_id">
+                    <span v-if="item.confidence_score !== undefined || item.confidence !== undefined" class="meta-tag">置信度: {{ Math.round((item.confidence_score !== undefined ? item.confidence_score : item.confidence) * 100) }}%</span>
                     <span v-if="item.document_id" class="meta-tag" :title="item.document_id">文档: {{ item.document_id.substring(0,8) }}...</span>
                   </div>
                 </td>
@@ -280,7 +280,7 @@ const generateReport = async () => {
         <div class="report-header">
           <h2>{{ generatedReport.title }}</h2>
           <div class="report-meta">
-            <span class="meta-item">生成时间: {{ formatDate(generatedReport.generated_at) }}</span>
+            <span class="meta-item">生成时间: {{ formatDate(generatedReport.created_at || generatedReport.generated_at) }}</span>
             <span class="meta-item">包含事件数: {{ generatedReport.source_metadata?.event_count || 0 }}</span>
             <span class="meta-item" v-if="generatedReport.source_metadata?.document_ids">涉及文档数: {{ generatedReport.source_metadata.document_ids.length }}</span>
           </div>
