@@ -22,7 +22,7 @@ from llm.services.providers.ollama_provider import (
     OllamaEmbeddingProvider,
 )
 from llm.services.runtime_service import get_chat_provider, get_embedding_provider
-from rbac.services.rbac_service import ROLE_ADMIN, ROLE_MEMBER, seed_roles_and_permissions
+from rbac.services.rbac_service import ROLE_ADMIN, ROLE_MEMBER, ROLE_SUPER_ADMIN, seed_roles_and_permissions
 
 
 class _FakeHttpResponse:
@@ -619,4 +619,144 @@ class PromptConfigUpdateApiTests(TestCase):
         self.assertEqual(
             render_prompt("chat/answer.txt", company_name="FinModPro", quarter="2025Q1"),
             "新模板：FinModPro / 2025Q1",
+        )
+
+
+@override_settings(
+    JWT_SECRET_KEY="test-jwt-secret",
+    JWT_ACCESS_TOKEN_LIFETIME_SECONDS=3600,
+)
+class EvalRecordApiTests(TestCase):
+    def setUp(self):
+        self.client = Client()
+        seed_roles_and_permissions()
+
+        self.admin_user = User.objects.create_user(
+            username="ops-eval-admin",
+            password="secret123",
+            email="ops-eval-admin@example.com",
+        )
+        self.admin_user.groups.add(Group.objects.get(name=ROLE_ADMIN))
+        self.admin_access_token = generate_access_token(self.admin_user)
+
+        self.super_admin_user = User.objects.create_user(
+            username="ops-eval-super-admin",
+            password="secret123",
+            email="ops-eval-super-admin@example.com",
+        )
+        self.super_admin_user.groups.add(Group.objects.get(name=ROLE_SUPER_ADMIN))
+        self.super_admin_access_token = generate_access_token(self.super_admin_user)
+
+        self.member_user = User.objects.create_user(
+            username="ops-eval-member",
+            password="secret123",
+            email="ops-eval-member@example.com",
+        )
+        self.member_user.groups.add(Group.objects.get(name=ROLE_MEMBER))
+        self.member_access_token = generate_access_token(self.member_user)
+
+    def test_create_evaluation_requires_authentication(self):
+        response = self.client.post(
+            "/api/ops/evaluations",
+            data=json.dumps({"task_type": "qa"}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 401)
+        self.assertEqual(response.json(), {"code": 401, "message": "未认证。", "data": {}})
+
+    def test_create_evaluation_requires_run_evaluation_permission(self):
+        response = self.client.post(
+            "/api/ops/evaluations",
+            data=json.dumps({"task_type": "qa"}),
+            content_type="application/json",
+            HTTP_AUTHORIZATION=f"Bearer {self.admin_access_token}",
+        )
+
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.json(), {"code": 403, "message": "无权限。", "data": {}})
+
+    def test_create_evaluation_runs_smoke_suite_and_persists_record(self):
+        response = self.client.post(
+            "/api/ops/evaluations",
+            data=json.dumps({"task_type": "qa", "version": "baseline-v1"}),
+            content_type="application/json",
+            HTTP_AUTHORIZATION=f"Bearer {self.super_admin_access_token}",
+        )
+
+        self.assertEqual(response.status_code, 201)
+        payload = response.json()
+        self.assertEqual(payload["code"], 0)
+        self.assertEqual(payload["data"]["eval_record"]["task_type"], "qa")
+        self.assertEqual(payload["data"]["eval_record"]["target_name"], "default-chat")
+        self.assertEqual(payload["data"]["eval_record"]["status"], "succeeded")
+        self.assertEqual(payload["data"]["eval_record"]["qa_accuracy"], "1.0000")
+        self.assertEqual(payload["data"]["eval_record"]["extraction_accuracy"], "1.0000")
+        self.assertEqual(payload["data"]["eval_record"]["version"], "baseline-v1")
+        self.assertEqual(payload["data"]["eval_record"]["metadata"]["evaluator_type"], "smoke")
+        self.assertEqual(payload["data"]["eval_record"]["metadata"]["qa_dataset_size"], 2)
+        self.assertEqual(payload["data"]["eval_record"]["metadata"]["extraction_dataset_size"], 2)
+        self.assertEqual(EvalRecord.objects.count(), 1)
+
+    def test_list_evaluations_requires_view_evaluation_permission(self):
+        response = self.client.get(
+            "/api/ops/evaluations",
+            HTTP_AUTHORIZATION=f"Bearer {self.member_access_token}",
+        )
+
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.json(), {"code": 403, "message": "无权限。", "data": {}})
+
+    def test_list_evaluations_returns_summary_rows(self):
+        first_record = EvalRecord.objects.create(
+            model_config=get_active_model_config(ModelConfig.CAPABILITY_CHAT),
+            target_name="default-chat",
+            task_type=EvalRecord.TASK_QA,
+            qa_accuracy=Decimal("0.9000"),
+            extraction_accuracy=Decimal("0.8000"),
+            average_latency_ms=Decimal("12.50"),
+            version="v1",
+            status=EvalRecord.STATUS_SUCCEEDED,
+            metadata={"evaluator_type": "smoke"},
+        )
+        second_record = EvalRecord.objects.create(
+            model_config=get_active_model_config(ModelConfig.CAPABILITY_CHAT),
+            target_name="default-chat",
+            task_type=EvalRecord.TASK_RISK_EXTRACTION,
+            qa_accuracy=Decimal("0.7000"),
+            extraction_accuracy=Decimal("0.9500"),
+            average_latency_ms=Decimal("10.00"),
+            version="v2",
+            status=EvalRecord.STATUS_SUCCEEDED,
+            metadata={"evaluator_type": "smoke"},
+        )
+
+        response = self.client.get(
+            "/api/ops/evaluations",
+            HTTP_AUTHORIZATION=f"Bearer {self.admin_access_token}",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["code"], 0)
+        self.assertEqual(payload["data"]["total"], 2)
+        self.assertEqual(
+            [item["id"] for item in payload["data"]["eval_records"]],
+            [second_record.id, first_record.id],
+        )
+        self.assertEqual(
+            set(payload["data"]["eval_records"][0].keys()),
+            {
+                "id",
+                "model_config_id",
+                "target_name",
+                "task_type",
+                "status",
+                "qa_accuracy",
+                "extraction_accuracy",
+                "average_latency_ms",
+                "version",
+                "metadata",
+                "created_at",
+            },
         )
