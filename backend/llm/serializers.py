@@ -18,3 +18,7 @@ class ModelConfigSummarySerializer(serializers.ModelSerializer):
             "created_at",
             "updated_at",
         )
+
+
+class ModelConfigActivationSerializer(serializers.Serializer):
+    is_active = serializers.BooleanField()
