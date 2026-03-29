@@ -1,7 +1,7 @@
 from django.urls import path
 
 from llm.controllers.model_config_controller import ModelConfigActivationView, ModelConfigListView
-from llm.controllers.prompt_config_controller import PromptConfigListView
+from llm.controllers.prompt_config_controller import PromptConfigListView, PromptConfigUpdateView
 
 
 urlpatterns = [
@@ -14,6 +14,16 @@ urlpatterns = [
         "model-configs/<int:model_config_id>/activation/",
         ModelConfigActivationView.as_view(),
         name="model-config-activation",
+    ),
+    path(
+        "prompt-configs/<path:key>",
+        PromptConfigUpdateView.as_view(),
+        name="prompt-config-update-legacy",
+    ),
+    path(
+        "prompt-configs/<path:key>/",
+        PromptConfigUpdateView.as_view(),
+        name="prompt-config-update",
     ),
     path("prompt-configs", PromptConfigListView.as_view(), name="prompt-config-list-legacy"),
     path("prompt-configs/", PromptConfigListView.as_view(), name="prompt-config-list"),

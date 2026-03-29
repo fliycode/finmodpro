@@ -13,5 +13,9 @@ def load_prompt_template(template_name):
     return template_path.read_text(encoding="utf-8")
 
 
+def clear_prompt_template_cache():
+    load_prompt_template.cache_clear()
+
+
 def render_prompt(template_name, **context):
     return load_prompt_template(template_name).format(**context)
