@@ -33,7 +33,7 @@ const tabs = [
   { id: "knowledge", label: "知识库管理", icon: "📚" },
   { id: "history", label: "历史会话", icon: "🕒" },
   { id: "risk", label: "风险与摘要", icon: "📊" },
-  { id: "ops", label: "运维大盘 (Ops)", icon: "⚙️", adminOnly: true }
+  { id: "ops", label: "工作台大盘", icon: "📈", adminOnly: true }
 ];
 
 const availableTabs = tabs.filter(tab => !tab.adminOnly || props.user.permissions.includes("admin") || props.user.groups.includes("admin") || props.user.groups.includes("super_admin"));
