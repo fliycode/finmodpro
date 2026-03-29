@@ -1,6 +1,9 @@
 import json
+import shutil
+import tempfile
 from decimal import Decimal
 from io import BytesIO
+from pathlib import Path
 from unittest.mock import patch
 from urllib.error import HTTPError, URLError
 
@@ -13,7 +16,7 @@ from authentication.models import User
 from authentication.services.jwt_service import generate_access_token
 from llm.models import EvalRecord, ModelConfig
 from llm.services.model_config_service import get_active_model_config
-from llm.services.prompt_service import render_prompt
+from llm.services.prompt_service import load_prompt_template, render_prompt
 from llm.services.providers.ollama_provider import (
     OllamaChatProvider,
     OllamaEmbeddingProvider,
@@ -499,3 +502,121 @@ class PromptConfigListApiTests(TestCase):
         self.assertIn("question", first_prompt["variables"])
         self.assertIn("context", first_prompt["variables"])
         self.assertIn("{question}", first_prompt["template"])
+
+
+@override_settings(
+    JWT_SECRET_KEY="test-jwt-secret",
+    JWT_ACCESS_TOKEN_LIFETIME_SECONDS=3600,
+)
+class PromptConfigUpdateApiTests(TestCase):
+    def setUp(self):
+        self.client = Client()
+        seed_roles_and_permissions()
+        self.temp_dir = Path(tempfile.mkdtemp(dir=Path.cwd()))
+        self.prompts_dir = self.temp_dir / "prompts"
+        (self.prompts_dir / "chat").mkdir(parents=True)
+        (self.prompts_dir / "risk").mkdir(parents=True)
+        (self.prompts_dir / "chat" / "answer.txt").write_text(
+            "问题：{question}\n资料：{context}\n",
+            encoding="utf-8",
+        )
+        (self.prompts_dir / "risk" / "extract.txt").write_text(
+            "标题：{document_title}\n切块：{chunk_context}\n",
+            encoding="utf-8",
+        )
+        load_prompt_template.cache_clear()
+
+        self.prompt_service_patch = patch("llm.services.prompt_service.PROMPTS_DIR", self.prompts_dir)
+        self.prompt_query_patch = patch("llm.services.prompt_query_service.PROMPTS_DIR", self.prompts_dir)
+        self.prompt_service_patch.start()
+        self.prompt_query_patch.start()
+
+        self.admin_user = User.objects.create_user(
+            username="ops-prompt-update-admin",
+            password="secret123",
+            email="ops-prompt-update-admin@example.com",
+        )
+        self.admin_user.groups.add(Group.objects.get(name=ROLE_ADMIN))
+        self.admin_access_token = generate_access_token(self.admin_user)
+
+        self.member_user = User.objects.create_user(
+            username="ops-prompt-update-member",
+            password="secret123",
+            email="ops-prompt-update-member@example.com",
+        )
+        self.member_user.groups.add(Group.objects.get(name=ROLE_MEMBER))
+        self.member_access_token = generate_access_token(self.member_user)
+
+    def tearDown(self):
+        self.prompt_query_patch.stop()
+        self.prompt_service_patch.stop()
+        load_prompt_template.cache_clear()
+        shutil.rmtree(self.temp_dir, ignore_errors=True)
+
+    def test_update_prompt_config_requires_authentication(self):
+        response = self.client.patch(
+            "/api/ops/prompt-configs/chat/answer.txt",
+            data=json.dumps({"template": "新的模板：{foo}"}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 401)
+        self.assertEqual(response.json(), {"code": 401, "message": "未认证。", "data": {}})
+
+    def test_update_prompt_config_requires_manage_model_config_permission(self):
+        response = self.client.patch(
+            "/api/ops/prompt-configs/chat/answer.txt",
+            data=json.dumps({"template": "新的模板：{foo}"}),
+            content_type="application/json",
+            HTTP_AUTHORIZATION=f"Bearer {self.member_access_token}",
+        )
+
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.json(), {"code": 403, "message": "无权限。", "data": {}})
+
+    def test_update_prompt_config_returns_404_for_unknown_key(self):
+        response = self.client.patch(
+            "/api/ops/prompt-configs/chat/missing.txt",
+            data=json.dumps({"template": "新的模板：{foo}"}),
+            content_type="application/json",
+            HTTP_AUTHORIZATION=f"Bearer {self.admin_access_token}",
+        )
+
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(response.json(), {"code": 404, "message": "Prompt 模板不存在。", "data": {}})
+
+    def test_update_prompt_config_rejects_invalid_key(self):
+        response = self.client.patch(
+            "/api/ops/prompt-configs/../secrets.txt",
+            data=json.dumps({"template": "新的模板：{foo}"}),
+            content_type="application/json",
+            HTTP_AUTHORIZATION=f"Bearer {self.admin_access_token}",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json(), {"code": 400, "message": "非法的 prompt key。", "data": {}})
+
+    def test_update_prompt_config_persists_template_and_refreshes_render_cache(self):
+        original_render = render_prompt("chat/answer.txt", question="Q1", context="C1")
+        self.assertIn("Q1", original_render)
+
+        response = self.client.patch(
+            "/api/ops/prompt-configs/chat/answer.txt",
+            data=json.dumps({"template": "新模板：{company_name} / {quarter}"}),
+            content_type="application/json",
+            HTTP_AUTHORIZATION=f"Bearer {self.admin_access_token}",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["code"], 0)
+        self.assertEqual(payload["data"]["prompt_config"]["key"], "chat/answer.txt")
+        self.assertEqual(payload["data"]["prompt_config"]["variables"], ["company_name", "quarter"])
+        self.assertEqual(
+            (self.prompts_dir / "chat" / "answer.txt").read_text(encoding="utf-8"),
+            "新模板：{company_name} / {quarter}",
+        )
+        self.assertEqual(
+            render_prompt("chat/answer.txt", company_name="FinModPro", quarter="2025Q1"),
+            "新模板：FinModPro / 2025Q1",
+        )

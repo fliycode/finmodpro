@@ -31,3 +31,7 @@ class PromptConfigSummarySerializer(serializers.Serializer):
     template = serializers.CharField()
     variables = serializers.ListField(child=serializers.CharField())
     updated_at = serializers.DateTimeField()
+
+
+class PromptConfigUpdateSerializer(serializers.Serializer):
+    template = serializers.CharField()
