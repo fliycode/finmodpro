@@ -16,7 +16,7 @@ from knowledgebase.services.document_service import (
     ingest_document,
     vectorize_document,
 )
-from knowledgebase.services.vector_service import index_document_chunks
+from rag.services.vector_store_service import index_document
 from knowledgebase.services.parser_service import ParserService
 from knowledgebase.tasks import ingest_document_task
 from rag.services.vector_store_service import clear_store
@@ -26,6 +26,14 @@ from rbac.services.rbac_service import ROLE_ADMIN, seed_roles_and_permissions
 class FakeEmbeddingProvider:
     def embed(self, *, texts, options=None):
         return [[float(index + 1) for index in range(64)] for _ in texts]
+
+
+def fake_index_document_chunks(document):
+    for chunk in document.chunks.all():
+        chunk.vector_id = str(chunk.id)
+        chunk.save(update_fields=["vector_id"])
+    index_document(document)
+
 
 
 @override_settings(
@@ -46,7 +54,7 @@ class KnowledgebaseApiTests(TestCase):
         self.embedding_provider_patcher.start()
         self.vector_index_patcher = patch(
             "knowledgebase.services.document_service.index_document_chunks",
-            side_effect=index_document_chunks,
+            side_effect=fake_index_document_chunks,
         )
         self.vector_index_patcher.start()
         self.media_root = tempfile.mkdtemp()
@@ -172,7 +180,7 @@ class KnowledgebaseDocumentServiceTests(TestCase):
         self.embedding_provider_patcher.start()
         self.vector_index_patcher = patch(
             "knowledgebase.services.document_service.index_document_chunks",
-            side_effect=index_document_chunks,
+            side_effect=fake_index_document_chunks,
         )
         self.vector_index_patcher.start()
         self.media_root = tempfile.mkdtemp()
