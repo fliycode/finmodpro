@@ -56,6 +56,7 @@ ROLE_PERMISSION_MAP = {
         "auth.ask_financial_qa",
         "auth.view_chat_session",
         "auth.review_risk_event",
+        "auth.manage_model_config",
         "auth.view_evaluation",
         "auth.view_audit_log",
     },
