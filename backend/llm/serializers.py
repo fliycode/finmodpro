@@ -22,3 +22,12 @@ class ModelConfigSummarySerializer(serializers.ModelSerializer):
 
 class ModelConfigActivationSerializer(serializers.Serializer):
     is_active = serializers.BooleanField()
+
+
+class PromptConfigSummarySerializer(serializers.Serializer):
+    key = serializers.CharField()
+    category = serializers.CharField()
+    name = serializers.CharField()
+    template = serializers.CharField()
+    variables = serializers.ListField(child=serializers.CharField())
+    updated_at = serializers.DateTimeField()

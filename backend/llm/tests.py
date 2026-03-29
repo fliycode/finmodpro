@@ -425,3 +425,77 @@ class ModelConfigActivationApiTests(TestCase):
                 "updated_at",
             },
         )
+
+
+@override_settings(
+    JWT_SECRET_KEY="test-jwt-secret",
+    JWT_ACCESS_TOKEN_LIFETIME_SECONDS=3600,
+)
+class PromptConfigListApiTests(TestCase):
+    def setUp(self):
+        self.client = Client()
+        seed_roles_and_permissions()
+
+        self.admin_user = User.objects.create_user(
+            username="ops-prompt-admin",
+            password="secret123",
+            email="ops-prompt-admin@example.com",
+        )
+        self.admin_user.groups.add(Group.objects.get(name=ROLE_ADMIN))
+        self.admin_access_token = generate_access_token(self.admin_user)
+
+        self.member_user = User.objects.create_user(
+            username="ops-prompt-member",
+            password="secret123",
+            email="ops-prompt-member@example.com",
+        )
+        self.member_user.groups.add(Group.objects.get(name=ROLE_MEMBER))
+        self.member_access_token = generate_access_token(self.member_user)
+
+    def test_list_prompt_configs_requires_authentication(self):
+        response = self.client.get("/api/ops/prompt-configs")
+
+        self.assertEqual(response.status_code, 401)
+        self.assertEqual(
+            response.json(),
+            {"code": 401, "message": "未认证。", "data": {}},
+        )
+
+    def test_list_prompt_configs_requires_manage_model_config_permission(self):
+        response = self.client.get(
+            "/api/ops/prompt-configs",
+            HTTP_AUTHORIZATION=f"Bearer {self.member_access_token}",
+        )
+
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(
+            response.json(),
+            {"code": 403, "message": "无权限。", "data": {}},
+        )
+
+    def test_list_prompt_configs_returns_existing_templates_and_variables(self):
+        response = self.client.get(
+            "/api/ops/prompt-configs",
+            HTTP_AUTHORIZATION=f"Bearer {self.admin_access_token}",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["code"], 0)
+        self.assertEqual(payload["message"], "ok")
+        self.assertEqual(payload["data"]["total"], 2)
+        self.assertEqual(
+            [item["key"] for item in payload["data"]["prompt_configs"]],
+            ["chat/answer.txt", "risk/extract.txt"],
+        )
+
+        first_prompt = payload["data"]["prompt_configs"][0]
+        self.assertEqual(
+            set(first_prompt.keys()),
+            {"key", "category", "name", "template", "variables", "updated_at"},
+        )
+        self.assertEqual(first_prompt["category"], "chat")
+        self.assertEqual(first_prompt["name"], "answer.txt")
+        self.assertIn("question", first_prompt["variables"])
+        self.assertIn("context", first_prompt["variables"])
+        self.assertIn("{question}", first_prompt["template"])
