@@ -50,5 +50,27 @@ export const riskApi = {
     });
 
     return parseResponse(response);
+  },
+
+  // Generate company risk report
+  async generateCompanyReport(data) {
+    const response = await apiConfig.fetchImpl(joinUrl(apiConfig.baseURL, `/api/risk/reports/company`), {
+      method: 'POST',
+      headers: getHeaders(),
+      body: JSON.stringify(data),
+    });
+
+    return parseResponse(response);
+  },
+
+  // Generate time range risk report
+  async generateTimeRangeReport(data) {
+    const response = await apiConfig.fetchImpl(joinUrl(apiConfig.baseURL, `/api/risk/reports/time-range`), {
+      method: 'POST',
+      headers: getHeaders(),
+      body: JSON.stringify(data),
+    });
+
+    return parseResponse(response);
   }
 };
