@@ -1,6 +1,6 @@
 from rest_framework import serializers
 
-from llm.models import ModelConfig
+from llm.models import EvalRecord, ModelConfig
 
 
 class ModelConfigSummarySerializer(serializers.ModelSerializer):
@@ -35,3 +35,29 @@ class PromptConfigSummarySerializer(serializers.Serializer):
 
 class PromptConfigUpdateSerializer(serializers.Serializer):
     template = serializers.CharField()
+
+
+class EvalRecordSummarySerializer(serializers.ModelSerializer):
+    model_config_id = serializers.IntegerField(source="model_config.id", allow_null=True)
+
+    class Meta:
+        model = EvalRecord
+        fields = (
+            "id",
+            "model_config_id",
+            "target_name",
+            "task_type",
+            "status",
+            "qa_accuracy",
+            "extraction_accuracy",
+            "average_latency_ms",
+            "version",
+            "metadata",
+            "created_at",
+        )
+
+
+class EvalRecordCreateSerializer(serializers.Serializer):
+    task_type = serializers.ChoiceField(choices=EvalRecord.TASK_CHOICES)
+    model_config_id = serializers.IntegerField(required=False)
+    version = serializers.CharField(required=False, allow_blank=True, max_length=128)
