@@ -30,11 +30,19 @@ const handleFileChange = async (event) => {
   
   isUploading.value = true;
   try {
-    await kbApi.uploadDocument(file);
+    const res = await kbApi.uploadDocument(file);
+    if (res.success && res.document && res.document.id) {
+      try {
+        await kbApi.ingestDocument(res.document.id);
+      } catch (ingestError) {
+        console.error("Ingest failed:", ingestError);
+        alert("文档已上传，但触发入库失败: " + (ingestError.message || "未知错误"));
+      }
+    }
     await fetchDocuments();
   } catch (error) {
     console.error("Upload failed:", error);
-    alert("上传失败");
+    alert("上传失败: " + (error.message || "未知错误"));
   } finally {
     isUploading.value = false;
     event.target.value = '';
