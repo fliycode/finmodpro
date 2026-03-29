@@ -37,7 +37,11 @@ class RagRetrievalApiTests(TestCase):
         )
         self.embedding_provider_patcher.start()
         self.media_root = tempfile.mkdtemp()
-        self.override = override_settings(MEDIA_ROOT=self.media_root)
+        self.override = override_settings(
+            MEDIA_ROOT=self.media_root,
+            MILVUS_URI=f"{self.media_root}/test-milvus.db",
+            MILVUS_COLLECTION_NAME="test_document_chunks",
+        )
         self.override.enable()
 
         self.user = User.objects.create_user(
@@ -280,7 +284,11 @@ class KnowledgebaseIngestFailureStateTests(TestCase):
         )
         self.embedding_provider_patcher.start()
         self.media_root = tempfile.mkdtemp()
-        self.override = override_settings(MEDIA_ROOT=self.media_root)
+        self.override = override_settings(
+            MEDIA_ROOT=self.media_root,
+            MILVUS_URI=f"{self.media_root}/test-milvus.db",
+            MILVUS_COLLECTION_NAME="test_document_chunks",
+        )
         self.override.enable()
 
     def tearDown(self):
