@@ -1,4 +1,5 @@
 import json
+from decimal import Decimal
 from io import BytesIO
 from unittest.mock import patch
 from urllib.error import HTTPError, URLError
@@ -6,7 +7,7 @@ from urllib.error import HTTPError, URLError
 from django.test import TestCase
 
 from common.exceptions import UpstreamRateLimitError, UpstreamServiceError
-from llm.models import ModelConfig
+from llm.models import EvalRecord, ModelConfig
 from llm.services.model_config_service import get_active_model_config
 from llm.services.prompt_service import render_prompt
 from llm.services.providers.ollama_provider import (
@@ -49,6 +50,63 @@ class ModelConfigServiceTests(TestCase):
         self.assertFalse(previous.is_active)
         self.assertTrue(replacement.is_active)
         self.assertEqual(get_active_model_config(ModelConfig.CAPABILITY_CHAT).id, replacement.id)
+
+
+class EvalRecordModelTests(TestCase):
+    def test_eval_record_can_be_created_with_metrics_and_version(self):
+        model_config = get_active_model_config(ModelConfig.CAPABILITY_CHAT)
+
+        record = EvalRecord.objects.create(
+            model_config=model_config,
+            target_name="default-chat",
+            task_type=EvalRecord.TASK_QA,
+            qa_accuracy=Decimal("0.8750"),
+            extraction_accuracy=Decimal("0.6500"),
+            average_latency_ms=Decimal("245.50"),
+            version="v1.0.0",
+            status=EvalRecord.STATUS_SUCCEEDED,
+            metadata={"dataset": "qa-smoke", "sample_count": 40},
+        )
+
+        self.assertEqual(record.model_config_id, model_config.id)
+        self.assertEqual(record.target_name, "default-chat")
+        self.assertEqual(record.task_type, EvalRecord.TASK_QA)
+        self.assertEqual(record.qa_accuracy, Decimal("0.8750"))
+        self.assertEqual(record.extraction_accuracy, Decimal("0.6500"))
+        self.assertEqual(record.average_latency_ms, Decimal("245.50"))
+        self.assertEqual(record.version, "v1.0.0")
+        self.assertEqual(record.status, EvalRecord.STATUS_SUCCEEDED)
+        self.assertEqual(record.metadata["dataset"], "qa-smoke")
+        self.assertIsNotNone(record.created_at)
+
+    def test_eval_record_supports_defaults_for_pending_runs(self):
+        record = EvalRecord.objects.create(
+            target_name="risk-extractor",
+            task_type=EvalRecord.TASK_RISK_EXTRACTION,
+        )
+
+        self.assertIsNone(record.model_config)
+        self.assertIsNone(record.qa_accuracy)
+        self.assertIsNone(record.extraction_accuracy)
+        self.assertEqual(record.average_latency_ms, Decimal("0"))
+        self.assertEqual(record.version, "")
+        self.assertEqual(record.status, EvalRecord.STATUS_PENDING)
+        self.assertEqual(record.metadata, {})
+
+    def test_eval_record_orders_newest_first_by_default(self):
+        older = EvalRecord.objects.create(
+            target_name="baseline-chat",
+            task_type=EvalRecord.TASK_QA,
+        )
+        newer = EvalRecord.objects.create(
+            target_name="candidate-chat",
+            task_type=EvalRecord.TASK_QA,
+        )
+
+        self.assertEqual(
+            list(EvalRecord.objects.values_list("id", flat=True)),
+            [newer.id, older.id],
+        )
 
 
 class ProviderRuntimeTests(TestCase):
