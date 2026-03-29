@@ -13,7 +13,7 @@ from common.exceptions import UpstreamRateLimitError
 from knowledgebase.models import Document
 from knowledgebase.services.document_service import create_document_from_upload, ingest_document
 from rag.models import RetrievalLog
-from rag.services.vector_store_service import clear_store
+from rag.services.vector_store_service import clear_store, index_document
 from rbac.services.rbac_service import ROLE_ADMIN, seed_roles_and_permissions
 
 
@@ -36,6 +36,11 @@ class RagRetrievalApiTests(TestCase):
             return_value=FakeEmbeddingProvider(),
         )
         self.embedding_provider_patcher.start()
+        self.vector_index_patcher = patch(
+            "knowledgebase.services.document_service.index_document_chunks",
+            side_effect=index_document,
+        )
+        self.vector_index_patcher.start()
         self.media_root = tempfile.mkdtemp()
         self.override = override_settings(
             MEDIA_ROOT=self.media_root,
@@ -89,6 +94,7 @@ class RagRetrievalApiTests(TestCase):
     def tearDown(self):
         self.embedding_provider_patcher.stop()
         self.override.disable()
+        self.vector_index_patcher.stop()
         shutil.rmtree(self.media_root, ignore_errors=True)
         clear_store()
 
@@ -283,6 +289,11 @@ class KnowledgebaseIngestFailureStateTests(TestCase):
             return_value=FakeEmbeddingProvider(),
         )
         self.embedding_provider_patcher.start()
+        self.vector_index_patcher = patch(
+            "knowledgebase.services.document_service.index_document_chunks",
+            side_effect=index_document,
+        )
+        self.vector_index_patcher.start()
         self.media_root = tempfile.mkdtemp()
         self.override = override_settings(
             MEDIA_ROOT=self.media_root,
@@ -294,6 +305,7 @@ class KnowledgebaseIngestFailureStateTests(TestCase):
     def tearDown(self):
         self.embedding_provider_patcher.stop()
         self.override.disable()
+        self.vector_index_patcher.stop()
         shutil.rmtree(self.media_root, ignore_errors=True)
         clear_store()
 

@@ -16,6 +16,7 @@ from knowledgebase.services.document_service import (
     ingest_document,
     vectorize_document,
 )
+from knowledgebase.services.vector_service import index_document_chunks
 from knowledgebase.services.parser_service import ParserService
 from knowledgebase.tasks import ingest_document_task
 from rag.services.vector_store_service import clear_store
@@ -43,6 +44,11 @@ class KnowledgebaseApiTests(TestCase):
             return_value=FakeEmbeddingProvider(),
         )
         self.embedding_provider_patcher.start()
+        self.vector_index_patcher = patch(
+            "knowledgebase.services.document_service.index_document_chunks",
+            side_effect=index_document_chunks,
+        )
+        self.vector_index_patcher.start()
         self.media_root = tempfile.mkdtemp()
         self.override = override_settings(MEDIA_ROOT=self.media_root)
         self.override.enable()
@@ -58,6 +64,7 @@ class KnowledgebaseApiTests(TestCase):
     def tearDown(self):
         self.embedding_provider_patcher.stop()
         self.override.disable()
+        self.vector_index_patcher.stop()
         shutil.rmtree(self.media_root, ignore_errors=True)
         clear_store()
 
@@ -163,6 +170,11 @@ class KnowledgebaseDocumentServiceTests(TestCase):
             return_value=FakeEmbeddingProvider(),
         )
         self.embedding_provider_patcher.start()
+        self.vector_index_patcher = patch(
+            "knowledgebase.services.document_service.index_document_chunks",
+            side_effect=index_document_chunks,
+        )
+        self.vector_index_patcher.start()
         self.media_root = tempfile.mkdtemp()
         self.milvus_uri = f"{self.media_root}/test-milvus.db"
         self.override = override_settings(
@@ -175,6 +187,7 @@ class KnowledgebaseDocumentServiceTests(TestCase):
     def tearDown(self):
         self.embedding_provider_patcher.stop()
         self.override.disable()
+        self.vector_index_patcher.stop()
         shutil.rmtree(self.media_root, ignore_errors=True)
         clear_store()
 
