@@ -1,22 +1,26 @@
 <script setup>
 import { ref, onMounted } from "vue";
 import { opsApi } from "../api/ops.js";
+import { dashboardApi } from "../api/dashboard.js";
 
-const stats = ref({});
+const dashboardStats = ref({});
 const logs = ref([]);
 const isLoading = ref(true);
+const errorMsg = ref("");
 
 const fetchData = async () => {
   isLoading.value = true;
+  errorMsg.value = "";
   try {
     const [statsRes, logsRes] = await Promise.all([
-      opsApi.getStats(),
+      dashboardApi.getStats(),
       opsApi.getLogs()
     ]);
-    stats.value = statsRes;
-    logs.value = logsRes;
+    dashboardStats.value = statsRes || {};
+    logs.value = logsRes || [];
   } catch (error) {
-    console.error("Ops data fetch failed:", error);
+    console.error("Dashboard data fetch failed:", error);
+    errorMsg.value = "加载大盘数据失败，请重试";
   } finally {
     isLoading.value = false;
   }
@@ -38,7 +42,7 @@ const getLogLevelColor = (level) => {
   <div class="ops-shell">
     <div class="header">
       <div class="title-group">
-        <h3>系统运维大盘</h3>
+        <h3>工作台大盘</h3>
         <span class="badge">管理员模式</span>
       </div>
       <button class="refresh-btn" @click="fetchData" :disabled="isLoading">
@@ -46,26 +50,24 @@ const getLogLevelColor = (level) => {
       </button>
     </div>
 
+    <div v-if="errorMsg" class="error-state">{{ errorMsg }}</div>
+
     <div class="grid">
       <div class="metric-card">
-        <div class="label">知识库总量</div>
-        <div class="value">{{ stats.kbCount || '--' }}</div>
-        <div class="trend positive">↑ 12% 本月</div>
+        <div class="label">知识库数</div>
+        <div class="value">{{ dashboardStats.knowledgebase_count !== undefined ? dashboardStats.knowledgebase_count : '--' }}</div>
       </div>
       <div class="metric-card">
-        <div class="label">活跃模型</div>
-        <div class="value">{{ stats.activeModels || '--' }}</div>
-        <div class="status-indicator">运行中</div>
+        <div class="label">文档总数</div>
+        <div class="value">{{ dashboardStats.document_count !== undefined ? dashboardStats.document_count : '--' }}</div>
       </div>
       <div class="metric-card">
-        <div class="label">平均响应时间</div>
-        <div class="value">1.2s</div>
-        <div class="trend positive">↓ 50ms</div>
+        <div class="label">风险事件数</div>
+        <div class="value">{{ dashboardStats.risk_event_count !== undefined ? dashboardStats.risk_event_count : '--' }}</div>
       </div>
       <div class="metric-card">
-        <div class="label">系统健康度</div>
-        <div class="value highlight">{{ stats.health || '--' }}</div>
-        <div class="sub-label">所有服务均正常</div>
+        <div class="label">待审核风险数</div>
+        <div class="value highlight">{{ dashboardStats.pending_risk_event_count !== undefined ? dashboardStats.pending_risk_event_count : '--' }}</div>
       </div>
     </div>
 
@@ -98,17 +100,14 @@ const getLogLevelColor = (level) => {
 .refresh-btn { padding: 8px 16px; background: white; border: 1px solid #e2e8f0; border-radius: 6px; font-size: 13px; cursor: pointer; transition: all 0.2s; }
 .refresh-btn:hover { background: #f8fafc; border-color: #cbd5e1; }
 
+.error-state { padding: 12px; background: #fef2f2; color: #ef4444; border-radius: 8px; font-size: 14px; text-align: center; border: 1px solid #fca5a5; }
+
 .grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 20px; }
 .metric-card { background: white; border-radius: 12px; padding: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); position: relative; overflow: hidden; }
 .metric-card::after { content: ''; position: absolute; top: 0; left: 0; width: 4px; height: 100%; background: #6366f1; opacity: 0.5; }
 .metric-card .label { color: #64748b; font-size: 13px; margin-bottom: 8px; font-weight: 500; }
 .metric-card .value { font-size: 24px; font-weight: 700; color: #1e293b; margin-bottom: 4px; }
-.metric-card .value.highlight { color: #10b981; }
-.trend { font-size: 11px; font-weight: 600; }
-.trend.positive { color: #10b981; }
-.status-indicator { font-size: 11px; color: #6366f1; display: flex; align-items: center; gap: 4px; }
-.status-indicator::before { content: ''; width: 6px; height: 6px; background: #6366f1; border-radius: 50%; }
-.sub-label { font-size: 11px; color: #94a3b8; }
+.metric-card .value.highlight { color: #f59e0b; }
 
 .logs-section { background: #1e293b; border-radius: 12px; padding: 24px; color: #f8fafc; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1); }
 .logs-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 12px; }
