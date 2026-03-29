@@ -293,3 +293,135 @@ class ModelConfigListApiTests(TestCase):
         self.assertEqual(first_row["id"], get_active_model_config(ModelConfig.CAPABILITY_CHAT).id)
         self.assertTrue(first_row["is_active"])
         self.assertEqual(payload["data"]["model_configs"][1]["id"], replacement.id)
+
+
+@override_settings(
+    JWT_SECRET_KEY="test-jwt-secret",
+    JWT_ACCESS_TOKEN_LIFETIME_SECONDS=3600,
+)
+class ModelConfigActivationApiTests(TestCase):
+    def setUp(self):
+        self.client = Client()
+        seed_roles_and_permissions()
+
+        self.admin_user = User.objects.create_user(
+            username="ops-activation-admin",
+            password="secret123",
+            email="ops-activation-admin@example.com",
+        )
+        self.admin_user.groups.add(Group.objects.get(name=ROLE_ADMIN))
+        self.admin_access_token = generate_access_token(self.admin_user)
+
+        self.member_user = User.objects.create_user(
+            username="ops-activation-member",
+            password="secret123",
+            email="ops-activation-member@example.com",
+        )
+        self.member_user.groups.add(Group.objects.get(name=ROLE_MEMBER))
+        self.member_access_token = generate_access_token(self.member_user)
+
+    def test_activation_requires_authentication(self):
+        model_config = get_active_model_config(ModelConfig.CAPABILITY_CHAT)
+
+        response = self.client.patch(
+            f"/api/ops/model-configs/{model_config.id}/activation",
+            data=json.dumps({"is_active": False}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 401)
+        self.assertEqual(
+            response.json(),
+            {"code": 401, "message": "未认证。", "data": {}},
+        )
+
+    def test_activation_requires_manage_model_config_permission(self):
+        model_config = get_active_model_config(ModelConfig.CAPABILITY_CHAT)
+
+        response = self.client.patch(
+            f"/api/ops/model-configs/{model_config.id}/activation",
+            data=json.dumps({"is_active": False}),
+            content_type="application/json",
+            HTTP_AUTHORIZATION=f"Bearer {self.member_access_token}",
+        )
+
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(
+            response.json(),
+            {"code": 403, "message": "无权限。", "data": {}},
+        )
+
+    def test_activation_enables_target_and_switches_same_capability(self):
+        previous = get_active_model_config(ModelConfig.CAPABILITY_CHAT)
+        replacement = ModelConfig.objects.create(
+            name="qwen-chat-active",
+            capability=ModelConfig.CAPABILITY_CHAT,
+            provider=ModelConfig.PROVIDER_OLLAMA,
+            model_name="qwen2.5:7b",
+            endpoint="http://localhost:11434",
+            options={"temperature": 0.1},
+            is_active=False,
+        )
+
+        response = self.client.patch(
+            f"/api/ops/model-configs/{replacement.id}/activation",
+            data=json.dumps({"is_active": True}),
+            content_type="application/json",
+            HTTP_AUTHORIZATION=f"Bearer {self.admin_access_token}",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["code"], 0)
+        self.assertEqual(payload["data"]["model_config"]["id"], replacement.id)
+        self.assertTrue(payload["data"]["model_config"]["is_active"])
+
+        previous.refresh_from_db()
+        replacement.refresh_from_db()
+        self.assertFalse(previous.is_active)
+        self.assertTrue(replacement.is_active)
+
+    def test_activation_can_disable_model_config(self):
+        active_model = get_active_model_config(ModelConfig.CAPABILITY_CHAT)
+
+        response = self.client.patch(
+            f"/api/ops/model-configs/{active_model.id}/activation",
+            data=json.dumps({"is_active": False}),
+            content_type="application/json",
+            HTTP_AUTHORIZATION=f"Bearer {self.admin_access_token}",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["code"], 0)
+        self.assertFalse(payload["data"]["model_config"]["is_active"])
+
+        active_model.refresh_from_db()
+        self.assertFalse(active_model.is_active)
+
+    def test_activation_returns_serialized_structure(self):
+        active_model = get_active_model_config(ModelConfig.CAPABILITY_EMBEDDING)
+
+        response = self.client.patch(
+            f"/api/ops/model-configs/{active_model.id}/activation",
+            data=json.dumps({"is_active": True}),
+            content_type="application/json",
+            HTTP_AUTHORIZATION=f"Bearer {self.admin_access_token}",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            set(response.json()["data"]["model_config"].keys()),
+            {
+                "id",
+                "name",
+                "capability",
+                "provider",
+                "model_name",
+                "endpoint",
+                "options",
+                "is_active",
+                "created_at",
+                "updated_at",
+            },
+        )
