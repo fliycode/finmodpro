@@ -4,7 +4,7 @@
 
 - Deploy path: `/opt/finmodpro`
 - Deploy branch: `main`
-- Frontend public port: `5173`
+- Frontend public port: `80`
 - Backend public port: `8000`
 - Backend health check: `http://127.0.0.1:8000/api/health/`
 - Compose entrypoint: `/opt/finmodpro/docker-compose.prod.yml`
@@ -48,7 +48,7 @@ Before the first GitHub Actions deploy, confirm the target host has:
 - a clone of this repository at `/opt/finmodpro`
 - permission to pull the repository
 - the server-side env files listed above
-- ports `5173` and `8000` available
+- ports `80` and `8000` available
 
 ## Local Validation Boundary
 
@@ -94,7 +94,7 @@ The script exits non-zero on any failure.
 `/opt/finmodpro/scripts/smoke-check.sh` checks:
 
 - `http://127.0.0.1:8000/api/health/`
-- `http://127.0.0.1:5173/`
+- `http://127.0.0.1:80/`
 
 It retries and exits non-zero if either endpoint never returns `200`.
 
