@@ -38,6 +38,14 @@ Recommended split:
 
 These files are sourced by `scripts/deploy.sh` before `docker compose -f docker-compose.prod.yml up -d --build`.
 
+For the current public deployment entrypoint at `http://47.85.103.76:5173`, `.env.backend` must allow that host and origin:
+
+- `DJANGO_ALLOWED_HOSTS=47.85.103.76,127.0.0.1,localhost`
+- `DJANGO_CSRF_TRUSTED_ORIGINS=http://47.85.103.76:5173,http://127.0.0.1:5173,http://localhost:5173`
+- `DJANGO_CORS_ALLOWED_ORIGINS=http://47.85.103.76:5173,http://127.0.0.1:5173,http://localhost:5173`
+
+If these values only contain localhost, Django will reject proxied requests with an HTML `400 Bad Request` before `login/register` reaches the auth controller.
+
 ## First Deploy Preconditions
 
 Before the first GitHub Actions deploy, confirm the target host has:
