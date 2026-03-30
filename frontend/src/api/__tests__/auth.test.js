@@ -17,6 +17,33 @@ test('createApiConfig prefers explicit baseURL and trims trailing slash', () => 
   assert.equal(config.baseURL, 'http://localhost:9000');
 });
 
+test('createApiConfig falls back to same-origin proxy for mismatched private production URLs', () => {
+  const config = createApiConfig({
+    isProd: true,
+    envBaseUrl: 'http://172.29.61.89:8000',
+    browserLocation: {
+      origin: 'http://47.85.103.76:5173',
+      hostname: '47.85.103.76',
+    },
+  });
+
+  assert.equal(config.baseURL, '');
+  assert.equal(joinUrl(config.baseURL, '/api/auth/login'), '/api/auth/login');
+});
+
+test('createApiConfig keeps configured public production URLs', () => {
+  const config = createApiConfig({
+    isProd: true,
+    envBaseUrl: 'http://47.85.103.76:8000',
+    browserLocation: {
+      origin: 'http://47.85.103.76:5173',
+      hostname: '47.85.103.76',
+    },
+  });
+
+  assert.equal(config.baseURL, 'http://47.85.103.76:8000');
+});
+
 test('login sends username and password only', async () => {
   let request;
   const authApi = createAuthApi({
