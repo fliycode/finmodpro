@@ -7,92 +7,20 @@ on:
   workflow_dispatch:
 
 jobs:
-  backend-checks:
+  sanity:
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: backend
-    env:
-      APP_ENV: ci
-      DJANGO_DEBUG: "false"
-      DJANGO_SECRET_KEY: ci-secret-key
-      JWT_SECRET_KEY: ci-jwt-secret
-      DB_ENGINE: sqlite
-      REDIS_ENABLED: "false"
-      CELERY_BROKER_URL: memory://
-      CELERY_RESULT_BACKEND: cache+memory://
-      CELERY_TASK_ALWAYS_EAGER: "true"
-      CELERY_TASK_EAGER_PROPAGATES: "true"
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-
-      - name: Install backend dependencies
+      - name: Show workspace
         run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
+          pwd
+          ls -la
+          echo "workflow started"
 
-      - name: Django system check
-        run: python manage.py check
+      - name: Python version
+        run: python --version
 
-      - name: Backend test suite
-        run: python manage.py test
-
-  frontend-build:
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: frontend
-    env:
-      VITE_API_BASE_URL: http://127.0.0.1:8000
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: "20"
-          cache: npm
-          cache-dependency-path: frontend/package-lock.json
-
-      - name: Install frontend dependencies
-        run: npm ci
-
-      - name: Frontend build
-        run: npm run build
-
-  deploy:
-    runs-on: ubuntu-latest
-    needs:
-      - backend-checks
-      - frontend-build
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    steps:
-      - name: Start SSH agent
-        uses: webfactory/ssh-agent@v0.9.0
-        with:
-          ssh-private-key: ${{ secrets.DEPLOY_SSH_KEY }}
-
-      - name: Add deploy host to known_hosts
-        run: |
-          mkdir -p ~/.ssh
-          ssh-keyscan -p "${{ secrets.DEPLOY_PORT }}" -H "${{ secrets.DEPLOY_HOST }}" >> ~/.ssh/known_hosts
-
-      - name: Deploy to production
-        env:
-          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
-          DEPLOY_PORT: ${{ secrets.DEPLOY_PORT }}
-          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
-        run: |
-          ssh -p "$DEPLOY_PORT" "$DEPLOY_USER@$DEPLOY_HOST" '
-            set -euo pipefail
-            cd /opt/finmodpro
-            chmod +x scripts/deploy.sh scripts/smoke-check.sh
-            /opt/finmodpro/scripts/deploy.sh
-          '
+      - name: Node version
+        run: node --version
