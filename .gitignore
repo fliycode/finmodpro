@@ -34,3 +34,6 @@ pnpm-debug.log*
 # Local environment
 .env
 .env.local
+
+# Local worktrees
+.worktrees/
