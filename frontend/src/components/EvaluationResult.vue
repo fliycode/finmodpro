@@ -1,11 +1,13 @@
 <script setup>
 import { ref, onMounted } from "vue";
 import { llmApi } from "../api/llm.js";
+import { useFlash } from "../lib/flash.js";
 
 const evaluations = ref([]);
 const isLoading = ref(false);
 const isTriggering = ref(false);
 const errorMsg = ref("");
+const flash = useFlash();
 
 const triggerForm = ref({
   task_type: "qa",
@@ -34,7 +36,7 @@ const triggerEvaluation = async () => {
     await fetchEvaluations();
   } catch (error) {
     console.error("Failed to trigger evaluation:", error);
-    alert(error.message || "触发评测失败");
+    flash.error(error.message || "触发评测失败");
   } finally {
     isTriggering.value = false;
   }

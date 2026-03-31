@@ -1,10 +1,12 @@
 <script setup>
 import { ref, onMounted, computed } from "vue";
 import { llmApi } from "../api/llm.js";
+import { useFlash } from "../lib/flash.js";
 
 const configs = ref([]);
 const isLoading = ref(false);
 const errorMsg = ref("");
+const flash = useFlash();
 
 const fetchConfigs = async () => {
   isLoading.value = true;
@@ -28,7 +30,7 @@ const toggleActivation = async (config) => {
     await llmApi.activateModelConfig(config.id, newStatus);
     await fetchConfigs(); // Refresh list after successful toggle
   } catch (error) {
-    alert(error.message || "操作失败");
+    flash.error(error.message || "操作失败");
   }
 };
 

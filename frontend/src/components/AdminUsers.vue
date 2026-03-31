@@ -1,6 +1,7 @@
 <script setup>
 import { ref, onMounted, computed } from 'vue';
 import { adminApi } from '../api/admin.js';
+import { useFlash } from '../lib/flash.js';
 
 const users = ref([]);
 const groups = ref([]);
@@ -12,6 +13,7 @@ const filterGroup = ref('');
 const selectedUser = ref(null);
 const showEditDrawer = ref(false);
 const isUpdating = ref(false);
+const flash = useFlash();
 
 const fetchData = async () => {
   isLoading.value = true;
@@ -68,7 +70,7 @@ const handleUpdateGroups = async () => {
     
     closeEditDrawer();
   } catch (err) {
-    alert(err.message || '更新失败');
+    flash.error(err.message || '更新失败');
   } finally {
     isUpdating.value = false;
   }

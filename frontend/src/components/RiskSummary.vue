@@ -1,8 +1,10 @@
 <script setup>
 import { ref, onMounted } from "vue";
 import { riskApi } from "../api/risk.js";
+import { useFlash } from "../lib/flash.js";
 
 const activeTab = ref("events"); // "events" or "reports"
+const flash = useFlash();
 
 // --- Risk Events ---
 const events = ref([]);
@@ -40,7 +42,7 @@ const handleReview = async (event, status) => {
     event.review_status = status;
   } catch (error) {
     console.error("Failed to review event:", error);
-    alert(error.message || "审核失败");
+    flash.error(error.message || "审核失败");
   }
 };
 
