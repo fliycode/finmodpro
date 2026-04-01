@@ -3,6 +3,7 @@ import json
 from django.contrib.auth.models import Group
 from django.test import Client, TestCase, override_settings
 
+from authentication.models import User
 from authentication.services.jwt_service import decode_access_token
 
 
@@ -110,3 +111,61 @@ class AuthenticationApiTests(TestCase):
 
         self.assertEqual(response.status_code, 401)
         self.assertEqual(response.json()["message"], "用户名或密码错误。")
+
+    def test_login_bootstraps_staff_user_rbac_for_permission_gated_modules(self):
+        staff_user = User.objects.create_user(
+            username="ops-admin",
+            password="secret123",
+            email="ops-admin@example.com",
+            is_staff=True,
+        )
+
+        login_response = self.client.post(
+            "/api/auth/login",
+            data=json.dumps(
+                {
+                    "username": "ops-admin",
+                    "password": "secret123",
+                }
+            ),
+            content_type="application/json",
+        )
+
+        self.assertEqual(login_response.status_code, 200)
+        access_token = login_response.json()["access_token"]
+
+        staff_user.refresh_from_db()
+        self.assertEqual(
+            sorted(staff_user.groups.values_list("name", flat=True)),
+            ["admin"],
+        )
+
+        profile_response = self.client.get(
+            "/api/auth/me",
+            HTTP_AUTHORIZATION=f"Bearer {access_token}",
+        )
+        self.assertEqual(profile_response.status_code, 200)
+        self.assertEqual(profile_response.json()["groups"], ["admin"])
+        self.assertTrue(
+            {
+                "view_dashboard",
+                "view_document",
+                "ask_financial_qa",
+                "manage_model_config",
+                "view_evaluation",
+            }.issubset(set(profile_response.json()["permissions"]))
+        )
+
+        for path in (
+            "/api/dashboard/stats",
+            "/api/knowledgebase/documents",
+            "/api/ops/model-configs",
+            "/api/ops/evaluations",
+            "/api/risk/events",
+        ):
+            with self.subTest(path=path):
+                response = self.client.get(
+                    path,
+                    HTTP_AUTHORIZATION=f"Bearer {access_token}",
+                )
+                self.assertNotIn(response.status_code, {401, 403})
