@@ -22,3 +22,19 @@ export const getNavItems = (area, profile) => {
 
   return navigationMap[area] ?? [];
 };
+
+export const getTopbarActions = (area, profile) => {
+  const actions = [];
+  const isAdmin = isAdminProfile(profile);
+
+  if (area === 'admin' && isAdmin) {
+    actions.push({ id: 'go-workspace', label: '返回工作区', to: '/workspace/qa' });
+  }
+
+  if (area === 'workspace' && isAdmin) {
+    actions.push({ id: 'go-admin', label: '进入管理台', to: '/admin/overview' });
+  }
+
+  actions.push({ id: 'logout', label: '退出登录', to: '/login' });
+  return actions;
+};

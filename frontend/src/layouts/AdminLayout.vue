@@ -10,7 +10,7 @@ import FlashStack from '../components/ui/FlashStack.vue';
   <div class="app-shell">
     <AppSidebar area="admin" />
     <div class="app-shell__main">
-      <AppTopbar title="管理控制台" switch-target="/workspace/qa" switch-label="进入工作区" />
+      <AppTopbar title="管理控制台" area="admin" switch-target="/workspace/qa" switch-label="进入工作区" />
       <FlashStack />
       <div class="app-shell__content">
         <RouterView />

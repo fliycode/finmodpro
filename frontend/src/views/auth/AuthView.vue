@@ -1,5 +1,5 @@
 <script setup>
-import { computed, reactive, ref } from 'vue';
+import { computed, onMounted, reactive, ref } from 'vue';
 import { useRouter } from 'vue-router';
 
 import { authApi } from '../../api/auth.js';
@@ -30,6 +30,13 @@ const switchMode = (nextMode) => {
   mode.value = nextMode;
   resetStatus();
 };
+
+onMounted(() => {
+  const flashMessage = authStorage.consumeFlashMessage();
+  if (flashMessage) {
+    status.value = { type: 'error', message: flashMessage };
+  }
+});
 
 const submit = async () => {
   resetStatus();
