@@ -4,23 +4,18 @@
 
 - Deploy path: `/opt/finmodpro`
 - Deploy branch: `main`
+- Repo host: GitHub (`https://github.com/fliycode/finmodpro.git`)
 - Frontend public port: `5173`
 - Backend public port: `8000`
 - Backend health check: `http://127.0.0.1:8000/api/health/`
 - Compose entrypoint: `/opt/finmodpro/docker-compose.prod.yml`
 - Server-side deploy script: `/opt/finmodpro/scripts/deploy.sh`
+- Polling script: `/opt/finmodpro/scripts/poll-deploy.sh`
 - Server-side smoke check script: `/opt/finmodpro/scripts/smoke-check.sh`
+- systemd service: `/etc/systemd/system/finmodpro-poll-deploy.service`
+- systemd timer: `/etc/systemd/system/finmodpro-poll-deploy.timer`
 
-This first version uses Docker Compose directly on the target server. Production secrets stay in GitHub Secrets or server-managed env files and must not be committed into the repository.
-
-## GitHub Secrets
-
-The workflow only requires these repository secrets:
-
-- `DEPLOY_HOST`
-- `DEPLOY_PORT`
-- `DEPLOY_USER`
-- `DEPLOY_SSH_KEY`
+Deployment is server-driven. GitHub remains the source-of-truth repo host, but GitHub Actions is not used for deployment.
 
 ## Server-side Environment Files
 
@@ -48,7 +43,7 @@ If these values only contain localhost, Django will reject proxied requests with
 
 ## First Deploy Preconditions
 
-Before the first GitHub Actions deploy, confirm the target host has:
+Before the first live deploy, confirm the target host has:
 
 - `git`
 - `docker`
@@ -58,30 +53,41 @@ Before the first GitHub Actions deploy, confirm the target host has:
 - the server-side env files listed above
 - ports `5173` and `8000` available
 
-## Local Validation Boundary
+## Polling Auto-Deploy
 
-The minimum local validation for this first version is:
-
-```bash
-docker compose -f docker-compose.prod.yml config
-```
-
-This validates Compose syntax and variable interpolation only. It does not prove a live deployment can:
-
-- pull code from GitHub on the target host
-- start the full stack successfully
-- pass smoke checks under production network conditions
-- satisfy MySQL / Redis / Milvus / Ollama runtime requirements
-
-## Script Source And Execution
-
-The first deployment requires a manual clone into `/opt/finmodpro`. After that, the GitHub Actions workflow SSHes to the server and executes:
+The host-local polling loop is the deployment entrypoint:
 
 ```bash
-/opt/finmodpro/scripts/deploy.sh
+/opt/finmodpro/scripts/poll-deploy.sh
 ```
 
-The latest repo version of `scripts/deploy.sh` becomes the source of truth after each `git pull`.
+It does the following:
+
+1. `cd /opt/finmodpro`
+2. `git fetch origin main --prune`
+3. read `/opt/finmodpro/.deploy-state/last_successful_deploy_commit` if it exists
+4. compare `origin/main` to the last successful deployed SHA
+5. if unchanged, exit cleanly with `no new commit to deploy`
+6. if changed, run `/opt/finmodpro/scripts/deploy.sh`
+7. only after a successful deploy, write the deployed SHA to `/opt/finmodpro/.deploy-state/last_successful_deploy_commit`
+
+Failed deploys do not advance the success marker.
+
+## systemd Timer
+
+Install these units on the host:
+
+- `/etc/systemd/system/finmodpro-poll-deploy.service`
+- `/etc/systemd/system/finmodpro-poll-deploy.timer`
+
+Recommended cadence: once per minute.
+
+After writing or updating the unit files:
+
+```bash
+systemctl daemon-reload
+systemctl enable --now finmodpro-poll-deploy.timer
+```
 
 ## Deploy Script Behavior
 
@@ -106,21 +112,13 @@ The script exits non-zero on any failure.
 
 It retries and exits non-zero if either endpoint never returns `200`.
 
-## GitHub Actions Workflow
+## Manual Operations
 
-`.github/workflows/ci-cd.yml` runs:
+Manual poll run:
 
-- backend `python manage.py check`
-- backend `python manage.py test`
-- frontend `npm run build`
-- deploy over SSH after a successful `push` to `main`
-
-Failure visibility is separated by stage:
-
-- backend checks
-- frontend build
-- SSH connection / remote deploy
-- smoke check
+```bash
+/opt/finmodpro/scripts/poll-deploy.sh
+```
 
 ## Rollback Baseline
 
