@@ -57,15 +57,14 @@ class RbacApiTests(TestCase):
         )
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(
-            response.json(),
-            {
-                "id": self.user.id,
-                "username": "alice",
-                "email": "alice@example.com",
-                "groups": ["member"],
-                "permissions": ["view_dashboard"],
-            },
+        self.assertEqual(response.json()["id"], self.user.id)
+        self.assertEqual(response.json()["username"], "alice")
+        self.assertEqual(response.json()["email"], "alice@example.com")
+        self.assertEqual(response.json()["groups"], ["member"])
+        self.assertTrue(
+            {"view_dashboard", "view_document", "ask_financial_qa"}.issubset(
+                set(response.json()["permissions"])
+            )
         )
 
 

@@ -1,7 +1,7 @@
 from django.contrib.auth import authenticate
 
 from authentication.models import User
-from rbac.services.rbac_service import assign_default_member_group
+from rbac.services.rbac_service import assign_default_member_group, ensure_user_role_bindings
 
 
 def build_user_summary(user):
@@ -27,4 +27,9 @@ def username_exists(username):
 
 
 def authenticate_user(*, username, password):
-    return authenticate(username=username, password=password)
+    user = authenticate(username=username, password=password)
+    if user is None:
+        return None
+
+    ensure_user_role_bindings(user)
+    return user

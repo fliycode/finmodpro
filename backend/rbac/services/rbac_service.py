@@ -116,9 +116,30 @@ def seed_roles_and_permissions():
     return seeded_groups
 
 
+def ensure_rbac_bootstrapped():
+    return seed_roles_and_permissions()
+
+
+def ensure_user_role_bindings(user):
+    groups = ensure_rbac_bootstrapped()
+
+    expected_role = ROLE_MEMBER
+    should_bind_expected_role = not user.groups.exists()
+    if user.is_superuser:
+        expected_role = ROLE_SUPER_ADMIN
+        should_bind_expected_role = True
+    elif user.is_staff:
+        expected_role = ROLE_ADMIN
+        should_bind_expected_role = True
+
+    if should_bind_expected_role and not user.groups.filter(name=expected_role).exists():
+        user.groups.add(groups[expected_role])
+
+    return groups[expected_role]
+
+
 def assign_default_member_group(user):
-    member_group, _ = Group.objects.get_or_create(name=ROLE_MEMBER)
-    user.groups.add(member_group)
+    member_group = ensure_user_role_bindings(user)
     return member_group
 
 
