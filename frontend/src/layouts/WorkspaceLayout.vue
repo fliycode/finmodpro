@@ -10,7 +10,7 @@ import FlashStack from '../components/ui/FlashStack.vue';
   <div class="app-shell">
     <AppSidebar area="workspace" />
     <div class="app-shell__main">
-      <AppTopbar title="业务工作区" />
+      <AppTopbar title="业务工作区" area="workspace" />
       <FlashStack />
       <div class="app-shell__content">
         <RouterView />

@@ -1,3 +1,5 @@
+import { AUTH_EXPIRED_MESSAGE, authStorage } from '../lib/auth-storage.js';
+
 const FALLBACK_BASE_URL = 'http://localhost:8000';
 
 const isPrivateIpv4Host = (host) => {
@@ -50,6 +52,25 @@ export const joinUrl = (baseURL, path) => {
   return `${normalizedBase}/${normalizedPath}`;
 };
 
+const handleUnauthorized = (browserWindow) => {
+  authStorage.clear();
+  authStorage.saveFlashMessage(AUTH_EXPIRED_MESSAGE);
+
+  if (!browserWindow) {
+    return;
+  }
+
+  if (typeof browserWindow.dispatchEvent === 'function' && typeof globalThis.CustomEvent === 'function') {
+    browserWindow.dispatchEvent(new CustomEvent('finmodpro:auth-expired', {
+      detail: { message: AUTH_EXPIRED_MESSAGE },
+    }));
+  }
+
+  if (browserWindow.location && browserWindow.location.pathname !== '/login' && typeof browserWindow.location.replace === 'function') {
+    browserWindow.location.replace('/login');
+  }
+};
+
 export const createApiConfig = (overrides = {}) => {
   const isProd =
     overrides.isProd ??
@@ -64,6 +85,9 @@ export const createApiConfig = (overrides = {}) => {
   const browserLocation =
     overrides.browserLocation ??
     (typeof window !== 'undefined' && window.location ? window.location : null);
+  const browserWindow =
+    overrides.browserWindow ??
+    (typeof window !== 'undefined' ? window : null);
 
   const defaultFallback = isProd ? '' : 'http://localhost:8000';
   const resolvedBaseURL = overrides.baseURL || envBaseUrl || defaultFallback;
@@ -72,8 +96,54 @@ export const createApiConfig = (overrides = {}) => {
       ? ''
       : resolvedBaseURL
   ).replace(/\/+$/, '');
-  
+
   const selectedFetch = overrides.fetchImpl || fetch;
+
+  const fetchImpl = async (url, options) => {
+    const response = await selectedFetch(url, options);
+    if (response.status === 401 && options?.auth) {
+      handleUnauthorized(browserWindow);
+    }
+    return response;
+  };
+
+  const getAuthHeaders = (headers = {}) => {
+    const token = authStorage.getToken();
+    const resolvedHeaders = {
+      'Content-Type': 'application/json',
+      ...(overrides.headers || {}),
+      ...headers,
+    };
+
+    if (token) {
+      resolvedHeaders.Authorization = `Bearer ${token}`;
+    }
+
+    return resolvedHeaders;
+  };
+
+  const parseJson = async (response) => response.json().catch(() => ({}));
+
+  const fetchJson = async (path, options = {}) => {
+    const response = await fetchImpl(joinUrl(baseURL, path), {
+      ...options,
+      headers: options.auth ? getAuthHeaders(options.headers) : {
+        'Content-Type': 'application/json',
+        ...(overrides.headers || {}),
+        ...(options.headers || {}),
+      },
+    });
+    const data = await parseJson(response);
+
+    if (!response.ok) {
+      if (response.status === 401 && options.auth) {
+        throw new Error(AUTH_EXPIRED_MESSAGE);
+      }
+      throw new Error(data.message || data.error || '请求失败，请稍后重试');
+    }
+
+    return data;
+  };
 
   return {
     baseURL,
@@ -81,7 +151,8 @@ export const createApiConfig = (overrides = {}) => {
       'Content-Type': 'application/json',
       ...(overrides.headers || {}),
     },
-    // Wrap fetch to avoid "Illegal invocation" due to incorrect `this` context
-    fetchImpl: (url, options) => selectedFetch(url, options),
+    fetchImpl,
+    fetchJson,
+    getAuthHeaders,
   };
 };
