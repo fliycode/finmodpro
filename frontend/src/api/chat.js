@@ -2,6 +2,21 @@ import { createApiConfig } from './config.js';
 
 const apiConfig = createApiConfig();
 
+const normalizeSession = (payload, fallbackSessionId = null) => {
+  const session = payload?.session ?? payload?.data?.session ?? payload?.data ?? payload ?? {};
+
+  if (!session || typeof session !== 'object' || Array.isArray(session)) {
+    return null;
+  }
+
+  return {
+    ...session,
+    id: session.id ?? session.session_id ?? session.sessionId ?? fallbackSessionId ?? null,
+    title: session.title ?? session.name ?? '新会话',
+    messages: Array.isArray(session.messages) ? session.messages : [],
+  };
+};
+
 export const chatApi = {
   async listHistory() {
     return [];
@@ -13,7 +28,8 @@ export const chatApi = {
       auth: true,
       body: JSON.stringify({ title }),
     });
-    return data.session;
+
+    return normalizeSession(data);
   },
 
   async getSession(sessionId) {
@@ -21,13 +37,16 @@ export const chatApi = {
       method: 'GET',
       auth: true,
     });
-    const session = data.session || {};
-    const rawMessages = session.messages || [];
+    const session = normalizeSession(data, sessionId) || {
+      id: sessionId,
+      title: '未命名会话',
+      messages: [],
+    };
 
     return {
-      id: session.id || sessionId,
+      id: session.id,
       title: session.title,
-      messages: rawMessages.map((msg) => ({
+      messages: session.messages.map((msg) => ({
         role: msg.role,
         content: msg.content,
       })),

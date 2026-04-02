@@ -11,7 +11,12 @@ from django.test import Client, TestCase, override_settings
 from authentication.models import User
 from authentication.services.jwt_service import generate_access_token
 from chat.models import ChatMessage, ChatSession
-from common.exceptions import UpstreamRateLimitError
+from common.exceptions import (
+    ModelNotConfiguredError,
+    ProviderConfigurationError,
+    UpstreamRateLimitError,
+    UpstreamServiceError,
+)
 from knowledgebase.services.document_service import create_document_from_upload, ingest_document
 from rag.models import RetrievalLog
 from rag.services.vector_store_service import clear_store, index_document
@@ -226,10 +231,125 @@ class ChatAskApiTests(TestCase):
                 "message": "上游模型服务触发限流，请稍后重试。",
                 "code": "upstream_rate_limited",
                 "provider": "openai",
+                "data": {
+                    "error": {
+                        "type": "rate_limited",
+                        "code": "upstream_rate_limited",
+                        "message": "上游模型服务触发限流，请稍后重试。",
+                        "provider": "openai",
+                        "details": {
+                            "upstream_message": "上游模型服务触发限流，请稍后重试。",
+                            "retry_after": 30,
+                        },
+                    }
+                },
             },
         )
         self.assertEqual(response["Retry-After"], "30")
         self.assertEqual(RetrievalLog.objects.count(), 0)
+
+    def test_chat_ask_returns_structured_error_when_chat_model_not_configured(self):
+        with patch(
+            "chat.controllers.ask_controller.ask_question",
+            side_effect=ModelNotConfiguredError("chat"),
+        ):
+            response = self.client.post(
+                "/api/chat/ask",
+                data=json.dumps({"question": "revenue"}),
+                content_type="application/json",
+                HTTP_AUTHORIZATION=f"Bearer {self.access_token}",
+            )
+
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(
+            response.json(),
+            {
+                "message": "当前未配置可用的对话模型，请先在模型配置中启用 chat 模型。",
+                "code": "chat_model_not_configured",
+                "data": {
+                    "error": {
+                        "type": "configuration_error",
+                        "code": "chat_model_not_configured",
+                        "message": "当前未配置可用的对话模型，请先在模型配置中启用 chat 模型。",
+                        "details": {"capability": "chat"},
+                    }
+                },
+            },
+        )
+
+    def test_chat_ask_returns_structured_error_when_provider_configuration_is_invalid(self):
+        with patch(
+            "chat.controllers.ask_controller.ask_question",
+            side_effect=ProviderConfigurationError(
+                "Unsupported provider: openai",
+                provider="openai",
+                details={"capability": "chat", "supported_providers": ["ollama"]},
+            ),
+        ):
+            response = self.client.post(
+                "/api/chat/ask",
+                data=json.dumps({"question": "revenue"}),
+                content_type="application/json",
+                HTTP_AUTHORIZATION=f"Bearer {self.access_token}",
+            )
+
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(
+            response.json(),
+            {
+                "message": "当前对话模型 provider 不可用，请检查模型配置。",
+                "code": "chat_provider_unavailable",
+                "provider": "openai",
+                "data": {
+                    "error": {
+                        "type": "configuration_error",
+                        "code": "chat_provider_unavailable",
+                        "message": "当前对话模型 provider 不可用，请检查模型配置。",
+                        "provider": "openai",
+                        "details": {
+                            "capability": "chat",
+                            "supported_providers": ["ollama"],
+                        },
+                    }
+                },
+            },
+        )
+
+    def test_chat_ask_returns_structured_error_when_upstream_is_unavailable(self):
+        with patch(
+            "chat.controllers.ask_controller.ask_question",
+            side_effect=UpstreamServiceError(
+                "模型服务暂不可用。",
+                status_code=503,
+                code="llm_provider_unavailable",
+                provider="ollama",
+            ),
+        ):
+            response = self.client.post(
+                "/api/chat/ask",
+                data=json.dumps({"question": "revenue"}),
+                content_type="application/json",
+                HTTP_AUTHORIZATION=f"Bearer {self.access_token}",
+            )
+
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(
+            response.json(),
+            {
+                "message": "对话模型服务当前不可用，请稍后重试。",
+                "code": "llm_provider_unavailable",
+                "provider": "ollama",
+                "data": {
+                    "error": {
+                        "type": "provider_unavailable",
+                        "code": "llm_provider_unavailable",
+                        "message": "对话模型服务当前不可用，请稍后重试。",
+                        "provider": "ollama",
+                        "details": {"upstream_message": "模型服务暂不可用。"},
+                    }
+                },
+            },
+        )
 
 
 @override_settings(
@@ -318,6 +438,9 @@ class ChatSessionCreateApiTests(TestCase):
         payload = response.json()
         self.assertEqual(payload["code"], 0)
         self.assertEqual(payload["message"], "ok")
+        self.assertIn("session_id", payload["data"])
+        self.assertEqual(payload["data"]["session_id"], payload["data"]["session"]["id"])
+        self.assertEqual(payload["data"]["session"]["session_id"], payload["data"]["session"]["id"])
         self.assertEqual(payload["data"]["session"]["title"], "新会话")
         self.assertEqual(payload["data"]["session"]["context_filters"], {})
         self.assertEqual(payload["data"]["session"]["user_id"], self.user.id)
