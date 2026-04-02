@@ -73,7 +73,7 @@ class OllamaApiMixin:
                     retry_after=exc.headers.get("Retry-After"),
                 ) from exc
             raise UpstreamServiceError(
-                "模型服务调用失败。",
+                "\u6a21\u578b\u670d\u52a1\u8c03\u7528\u5931\u8d25\u3002",
                 status_code=502,
                 code="llm_provider_error",
                 provider=self.provider_name,
@@ -89,8 +89,8 @@ class OllamaApiMixin:
                 },
             )
             raise UpstreamServiceError(
-                "模型服务暂不可用。",
-                status_code=502,
+                "\u6a21\u578b\u670d\u52a1\u6682\u4e0d\u53ef\u7528\u3002",
+                status_code=503,
                 code="llm_provider_unavailable",
                 provider=self.provider_name,
             ) from exc
@@ -111,7 +111,7 @@ class OllamaChatProvider(OllamaApiMixin, BaseChatProvider):
         content = message.get("content")
         if not content:
             raise UpstreamServiceError(
-                "模型服务返回了空响应。",
+                "\u6a21\u578b\u670d\u52a1\u8fd4\u56de\u4e86\u7a7a\u54cd\u5e94\u3002",
                 status_code=502,
                 code="llm_empty_response",
                 provider=self.provider_name,
@@ -133,7 +133,7 @@ class OllamaEmbeddingProvider(OllamaApiMixin, BaseEmbeddingProvider):
             vector = response_payload.get("embeddings")
             if not isinstance(vector, list) or not vector:
                 raise UpstreamServiceError(
-                    "模型服务返回了空向量。",
+                    "\u6a21\u578b\u670d\u52a1\u8fd4\u56de\u4e86\u7a7a\u5411\u91cf\u3002",
                     status_code=502,
                     code="llm_empty_embedding",
                     provider=self.provider_name,
@@ -141,7 +141,7 @@ class OllamaEmbeddingProvider(OllamaApiMixin, BaseEmbeddingProvider):
             first_vector = vector[0]
             if not isinstance(first_vector, list):
                 raise UpstreamServiceError(
-                    "模型服务返回了非法向量格式。",
+                    "\u6a21\u578b\u670d\u52a1\u8fd4\u56de\u4e86\u975e\u6cd5\u5411\u91cf\u683c\u5f0f\u3002",
                     status_code=502,
                     code="llm_invalid_embedding",
                     provider=self.provider_name,

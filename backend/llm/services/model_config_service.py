@@ -1,3 +1,4 @@
+from common.exceptions import ModelNotConfiguredError
 from llm.models import ModelConfig
 
 
@@ -8,5 +9,5 @@ def get_active_model_config(capability):
         .first()
     )
     if active_config is None:
-        raise ValueError(f"未配置启用中的 {capability} 模型。")
+        raise ModelNotConfiguredError(capability)
     return active_config

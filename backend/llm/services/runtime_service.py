@@ -1,3 +1,4 @@
+from common.exceptions import ProviderConfigurationError
 from llm.models import ModelConfig
 from llm.services.model_config_service import get_active_model_config
 from llm.services.providers.ollama_provider import (
@@ -8,7 +9,14 @@ from llm.services.providers.ollama_provider import (
 
 def _build_provider(model_config):
     if model_config.provider != ModelConfig.PROVIDER_OLLAMA:
-        raise ValueError(f"不支持的 provider: {model_config.provider}")
+        raise ProviderConfigurationError(
+            f"Unsupported provider: {model_config.provider}",
+            provider=model_config.provider,
+            details={
+                "capability": model_config.capability,
+                "supported_providers": [ModelConfig.PROVIDER_OLLAMA],
+            },
+        )
 
     if model_config.capability == ModelConfig.CAPABILITY_CHAT:
         return OllamaChatProvider(
@@ -24,7 +32,11 @@ def _build_provider(model_config):
             options=model_config.options,
         )
 
-    raise ValueError(f"不支持的 capability: {model_config.capability}")
+    raise ProviderConfigurationError(
+        f"Unsupported capability: {model_config.capability}",
+        provider=model_config.provider,
+        details={"capability": model_config.capability},
+    )
 
 
 def get_chat_provider():
