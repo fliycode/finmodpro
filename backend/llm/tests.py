@@ -149,6 +149,25 @@ class ProviderRuntimeTests(TestCase):
 
         self.assertIsInstance(chat_provider, DeepSeekChatProvider)
 
+    def test_runtime_service_deepseek_chat_placeholder_raises_not_implemented_error(self):
+        ModelConfig.objects.create(
+            name="deepseek-chat",
+            capability=ModelConfig.CAPABILITY_CHAT,
+            provider=ModelConfig.PROVIDER_DEEPSEEK,
+            model_name="deepseek-chat",
+            endpoint="https://api.deepseek.com",
+            options={"api_key": "test-key"},
+            is_active=True,
+        )
+
+        chat_provider = get_chat_provider()
+
+        with self.assertRaises(UpstreamServiceError) as context:
+            chat_provider.chat(messages=[{"role": "user", "content": "hello"}])
+
+        self.assertEqual(context.exception.code, "llm_provider_not_implemented")
+        self.assertEqual(context.exception.provider, "deepseek")
+
     def test_runtime_service_raises_clear_error_when_deepseek_api_key_missing(self):
         ModelConfig.objects.create(
             name="deepseek-chat",

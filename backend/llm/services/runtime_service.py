@@ -23,6 +23,8 @@ def _build_provider(model_config):
                 options=model_config.options,
             )
 
+        raise ValueError(f"不支持的 capability: {model_config.capability}")
+
     if model_config.provider == ModelConfig.PROVIDER_DEEPSEEK:
         if model_config.capability == ModelConfig.CAPABILITY_CHAT:
             return DeepSeekChatProvider(
