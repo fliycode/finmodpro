@@ -8,15 +8,24 @@ const isLoading = ref(false);
 const errorMsg = ref("");
 const flash = useFlash();
 
+const normalizeConfigs = (payload) => {
+  if (Array.isArray(payload)) return payload;
+  if (Array.isArray(payload?.results)) return payload.results;
+  if (Array.isArray(payload?.items)) return payload.items;
+  if (Array.isArray(payload?.model_configs)) return payload.model_configs;
+  return [];
+};
+
 const fetchConfigs = async () => {
   isLoading.value = true;
   errorMsg.value = "";
   try {
     const data = await llmApi.getModelConfigs();
-    configs.value = data || [];
+    configs.value = normalizeConfigs(data);
   } catch (error) {
     console.error("Failed to fetch model configs:", error);
     errorMsg.value = error.message || "加载模型配置失败";
+    configs.value = [];
   } finally {
     isLoading.value = false;
   }
