@@ -7,6 +7,7 @@ from knowledgebase.services.document_service import (
     build_document_list_response,
     build_document_response,
     create_document_from_upload,
+    get_document_for_user,
 )
 from rbac.services.authz_service import permission_required
 
@@ -16,7 +17,7 @@ from rbac.services.authz_service import permission_required
 @permission_required("auth.view_document")
 def document_list_create_view(request):
     if request.method == "GET":
-        return JsonResponse(build_document_list_response())
+        return JsonResponse(build_document_list_response(request.user))
 
     if not request.user.has_perm("auth.upload_document"):
         return JsonResponse({"message": "无权限。"}, status=403)
@@ -32,6 +33,9 @@ def document_list_create_view(request):
             uploaded_file=uploaded_file,
             title=title,
             source_date=source_date,
+            uploaded_by=request.user,
+            owner_id=request.POST.get("owner_id"),
+            visibility=request.POST.get("visibility"),
         )
     except ValueError as exc:
         return JsonResponse({"message": str(exc)}, status=400)
@@ -43,7 +47,7 @@ def document_list_create_view(request):
 @permission_required("auth.view_document")
 def document_detail_view(request, document_id):
     try:
-        document = Document.objects.get(id=document_id)
+        document = get_document_for_user(request.user, document_id)
     except Document.DoesNotExist:
         return JsonResponse({"message": "文档不存在。"}, status=404)
 

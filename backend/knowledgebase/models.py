@@ -1,7 +1,17 @@
+from django.conf import settings
 from django.db import models
 
 
 class Document(models.Model):
+    VISIBILITY_PRIVATE = "private"
+    VISIBILITY_INTERNAL = "internal"
+    VISIBILITY_PUBLIC = "public"
+    VISIBILITY_CHOICES = (
+        (VISIBILITY_PRIVATE, "Private"),
+        (VISIBILITY_INTERNAL, "Internal"),
+        (VISIBILITY_PUBLIC, "Public"),
+    )
+
     STATUS_UPLOADED = "uploaded"
     STATUS_PARSED = "parsed"
     STATUS_CHUNKED = "chunked"
@@ -19,6 +29,25 @@ class Document(models.Model):
     file = models.FileField(upload_to="knowledgebase/documents/")
     filename = models.CharField(max_length=255)
     doc_type = models.CharField(max_length=32)
+    uploaded_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        related_name="uploaded_documents",
+        on_delete=models.SET_NULL,
+        blank=True,
+        null=True,
+    )
+    owner = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        related_name="owned_documents",
+        on_delete=models.SET_NULL,
+        blank=True,
+        null=True,
+    )
+    visibility = models.CharField(
+        max_length=32,
+        choices=VISIBILITY_CHOICES,
+        default=VISIBILITY_INTERNAL,
+    )
     status = models.CharField(
         max_length=32,
         choices=STATUS_CHOICES,
@@ -45,6 +74,20 @@ class IngestionTask(models.Model):
         (STATUS_SUCCEEDED, "Succeeded"),
         (STATUS_FAILED, "Failed"),
     )
+    STEP_QUEUED = "queued"
+    STEP_PARSING = "parsing"
+    STEP_CHUNKING = "chunking"
+    STEP_INDEXING = "indexing"
+    STEP_COMPLETED = "completed"
+    STEP_FAILED = "failed"
+    STEP_CHOICES = (
+        (STEP_QUEUED, "Queued"),
+        (STEP_PARSING, "Parsing"),
+        (STEP_CHUNKING, "Chunking"),
+        (STEP_INDEXING, "Indexing"),
+        (STEP_COMPLETED, "Completed"),
+        (STEP_FAILED, "Failed"),
+    )
 
     document = models.ForeignKey(
         Document,
@@ -56,6 +99,11 @@ class IngestionTask(models.Model):
         max_length=32,
         choices=STATUS_CHOICES,
         default=STATUS_QUEUED,
+    )
+    current_step = models.CharField(
+        max_length=32,
+        choices=STEP_CHOICES,
+        default=STEP_QUEUED,
     )
     error_message = models.TextField(blank=True)
     started_at = models.DateTimeField(blank=True, null=True)
