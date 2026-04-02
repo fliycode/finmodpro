@@ -11,9 +11,11 @@ class ModelConfig(models.Model):
 
     PROVIDER_OLLAMA = "ollama"
     PROVIDER_DEEPSEEK = "deepseek"
+    PROVIDER_LANGCHAIN = "langchain"
     PROVIDER_CHOICES = (
         (PROVIDER_OLLAMA, "Ollama"),
         (PROVIDER_DEEPSEEK, "DeepSeek"),
+        (PROVIDER_LANGCHAIN, "LangChain"),
     )
 
     name = models.CharField(max_length=255)

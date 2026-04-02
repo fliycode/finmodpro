@@ -6,3 +6,8 @@ class BaseChatProvider:
 class BaseEmbeddingProvider:
     def embed(self, *, texts, options=None):
         raise NotImplementedError
+
+
+class BaseStructuredOutputProvider:
+    def generate(self, *, schema, messages, options=None):
+        raise NotImplementedError

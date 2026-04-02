@@ -17,12 +17,20 @@ from authentication.services.jwt_service import generate_access_token
 from llm.models import EvalRecord, ModelConfig
 from llm.services.model_config_service import get_active_model_config
 from llm.services.providers.deepseek_provider import DeepSeekChatProvider
+from llm.services.providers.langchain_chat_provider import LangChainChatProvider
+from llm.services.providers.langchain_structured_output import (
+    LangChainStructuredOutputProvider,
+)
 from llm.services.prompt_service import load_prompt_template, render_prompt
 from llm.services.providers.ollama_provider import (
     OllamaChatProvider,
     OllamaEmbeddingProvider,
 )
-from llm.services.runtime_service import get_chat_provider, get_embedding_provider
+from llm.services.runtime_service import (
+    get_chat_provider,
+    get_embedding_provider,
+    get_structured_output_provider,
+)
 from rbac.services.rbac_service import ROLE_ADMIN, ROLE_MEMBER, ROLE_SUPER_ADMIN, seed_roles_and_permissions
 
 
@@ -279,6 +287,127 @@ class ProviderRuntimeTests(TestCase):
 
         self.assertIsInstance(chat_provider, OllamaChatProvider)
         self.assertIsInstance(embedding_provider, OllamaEmbeddingProvider)
+
+    def test_runtime_service_builds_langchain_chat_provider_from_database(self):
+        ModelConfig.objects.create(
+            name="langchain-chat",
+            capability=ModelConfig.CAPABILITY_CHAT,
+            provider=ModelConfig.PROVIDER_LANGCHAIN,
+            model_name="deepseek-chat",
+            endpoint="https://api.deepseek.com",
+            options={"model_provider": "openai", "api_key": "test-key"},
+            is_active=True,
+        )
+
+        chat_provider = get_chat_provider()
+
+        self.assertIsInstance(chat_provider, LangChainChatProvider)
+
+    def test_runtime_service_builds_langchain_structured_output_provider_from_database(self):
+        ModelConfig.objects.create(
+            name="langchain-chat",
+            capability=ModelConfig.CAPABILITY_CHAT,
+            provider=ModelConfig.PROVIDER_LANGCHAIN,
+            model_name="deepseek-chat",
+            endpoint="https://api.deepseek.com",
+            options={"model_provider": "openai", "api_key": "test-key"},
+            is_active=True,
+        )
+
+        provider = get_structured_output_provider()
+
+        self.assertIsInstance(provider, LangChainStructuredOutputProvider)
+
+    def test_runtime_service_rejects_langchain_embedding_until_adapter_is_implemented(self):
+        ModelConfig.objects.create(
+            name="langchain-embedding",
+            capability=ModelConfig.CAPABILITY_EMBEDDING,
+            provider=ModelConfig.PROVIDER_LANGCHAIN,
+            model_name="text-embedding-3-large",
+            endpoint="https://api.openai.com",
+            options={"model_provider": "openai", "api_key": "test-key"},
+            is_active=True,
+        )
+
+        with self.assertRaises(ValueError) as context:
+            get_embedding_provider()
+
+        self.assertEqual(str(context.exception), "LangChain embedding adapter is deferred.")
+
+    @patch("llm.services.providers.langchain_chat_provider.init_chat_model")
+    def test_langchain_chat_provider_returns_message_content(self, mocked_init_chat_model):
+        model = mocked_init_chat_model.return_value
+        model.invoke.return_value.content = "LangChain chat response"
+
+        provider = LangChainChatProvider(
+            endpoint="https://api.deepseek.com",
+            model_name="deepseek-chat",
+            options={"model_provider": "openai", "api_key": "test-key"},
+        )
+
+        content = provider.chat(messages=[{"role": "user", "content": "hello"}])
+
+        self.assertEqual(content, "LangChain chat response")
+        mocked_init_chat_model.assert_called_once_with(
+            model="deepseek-chat",
+            model_provider="openai",
+            base_url="https://api.deepseek.com",
+            api_key="test-key",
+        )
+        model.invoke.assert_called_once_with([{"role": "user", "content": "hello"}])
+
+    @patch("llm.services.providers.langchain_structured_output.init_chat_model")
+    def test_langchain_structured_output_provider_returns_plain_python_data(self, mocked_init_chat_model):
+        schema = type("RiskSchema", (), {})
+        structured_model = mocked_init_chat_model.return_value.with_structured_output.return_value
+        structured_model.invoke.return_value = {"items": [{"risk_type": "liquidity"}]}
+
+        provider = LangChainStructuredOutputProvider(
+            endpoint="https://api.deepseek.com",
+            model_name="deepseek-chat",
+            options={"model_provider": "openai", "api_key": "test-key"},
+        )
+
+        payload = provider.generate(
+            schema=schema,
+            messages=[{"role": "user", "content": "extract"}],
+        )
+
+        self.assertEqual(payload, {"items": [{"risk_type": "liquidity"}]})
+        mocked_init_chat_model.return_value.with_structured_output.assert_called_once_with(schema)
+        structured_model.invoke.assert_called_once_with([{"role": "user", "content": "extract"}])
+
+    def test_langchain_chat_provider_raises_clear_error_when_model_provider_missing(self):
+        with self.assertRaises(UpstreamServiceError) as context:
+            LangChainChatProvider(
+                endpoint="https://api.deepseek.com",
+                model_name="deepseek-chat",
+                options={"api_key": "test-key"},
+            )
+
+        self.assertEqual(context.exception.provider, "langchain")
+        self.assertEqual(context.exception.code, "llm_misconfigured")
+        self.assertEqual(context.exception.message, "LangChain model_provider 未配置。")
+
+    def test_langchain_structured_output_provider_raises_clear_error_when_dependency_missing(self):
+        provider = LangChainStructuredOutputProvider(
+            endpoint="https://api.deepseek.com",
+            model_name="deepseek-chat",
+            options={"model_provider": "openai", "api_key": "test-key"},
+        )
+
+        with self.assertRaises(UpstreamServiceError) as context:
+            provider.generate(
+                schema=dict,
+                messages=[{"role": "user", "content": "extract"}],
+            )
+
+        self.assertEqual(context.exception.provider, "langchain")
+        self.assertEqual(context.exception.code, "llm_dependency_missing")
+        self.assertEqual(
+            context.exception.message,
+            "LangChain dependencies are not installed. Install backend requirements to enable LangChain adapters.",
+        )
 
     def test_prompt_template_is_rendered_from_prompts_directory(self):
         prompt = render_prompt(
