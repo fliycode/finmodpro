@@ -1,5 +1,6 @@
 from llm.models import ModelConfig
 from llm.services.model_config_service import get_active_model_config
+from llm.services.providers.deepseek_provider import DeepSeekChatProvider
 from llm.services.providers.ollama_provider import (
     OllamaChatProvider,
     OllamaEmbeddingProvider,
@@ -7,24 +8,32 @@ from llm.services.providers.ollama_provider import (
 
 
 def _build_provider(model_config):
-    if model_config.provider != ModelConfig.PROVIDER_OLLAMA:
-        raise ValueError(f"不支持的 provider: {model_config.provider}")
+    if model_config.provider == ModelConfig.PROVIDER_OLLAMA:
+        if model_config.capability == ModelConfig.CAPABILITY_CHAT:
+            return OllamaChatProvider(
+                endpoint=model_config.endpoint,
+                model_name=model_config.model_name,
+                options=model_config.options,
+            )
 
-    if model_config.capability == ModelConfig.CAPABILITY_CHAT:
-        return OllamaChatProvider(
-            endpoint=model_config.endpoint,
-            model_name=model_config.model_name,
-            options=model_config.options,
-        )
+        if model_config.capability == ModelConfig.CAPABILITY_EMBEDDING:
+            return OllamaEmbeddingProvider(
+                endpoint=model_config.endpoint,
+                model_name=model_config.model_name,
+                options=model_config.options,
+            )
 
-    if model_config.capability == ModelConfig.CAPABILITY_EMBEDDING:
-        return OllamaEmbeddingProvider(
-            endpoint=model_config.endpoint,
-            model_name=model_config.model_name,
-            options=model_config.options,
-        )
+    if model_config.provider == ModelConfig.PROVIDER_DEEPSEEK:
+        if model_config.capability == ModelConfig.CAPABILITY_CHAT:
+            return DeepSeekChatProvider(
+                endpoint=model_config.endpoint,
+                model_name=model_config.model_name,
+                options=model_config.options,
+            )
 
-    raise ValueError(f"不支持的 capability: {model_config.capability}")
+        raise ValueError(f"不支持的 capability: {model_config.capability}")
+
+    raise ValueError(f"不支持的 provider: {model_config.provider}")
 
 
 def get_chat_provider():

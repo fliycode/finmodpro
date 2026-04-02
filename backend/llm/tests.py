@@ -16,6 +16,7 @@ from authentication.models import User
 from authentication.services.jwt_service import generate_access_token
 from llm.models import EvalRecord, ModelConfig
 from llm.services.model_config_service import get_active_model_config
+from llm.services.providers.deepseek_provider import DeepSeekChatProvider
 from llm.services.prompt_service import load_prompt_template, render_prompt
 from llm.services.providers.ollama_provider import (
     OllamaChatProvider,
@@ -58,6 +59,21 @@ class ModelConfigServiceTests(TestCase):
         self.assertFalse(previous.is_active)
         self.assertTrue(replacement.is_active)
         self.assertEqual(get_active_model_config(ModelConfig.CAPABILITY_CHAT).id, replacement.id)
+
+    def test_model_config_supports_deepseek_provider(self):
+        model_config = ModelConfig.objects.create(
+            name="deepseek-chat",
+            capability=ModelConfig.CAPABILITY_CHAT,
+            provider=ModelConfig.PROVIDER_DEEPSEEK,
+            model_name="deepseek-chat",
+            endpoint="https://api.deepseek.com",
+            options={"api_key": "test-key"},
+            is_active=False,
+        )
+
+        model_config.refresh_from_db()
+
+        self.assertEqual(model_config.provider, ModelConfig.PROVIDER_DEEPSEEK)
 
 
 class EvalRecordModelTests(TestCase):
@@ -118,6 +134,57 @@ class EvalRecordModelTests(TestCase):
 
 
 class ProviderRuntimeTests(TestCase):
+    def test_runtime_service_builds_deepseek_chat_provider_from_database(self):
+        ModelConfig.objects.create(
+            name="deepseek-chat",
+            capability=ModelConfig.CAPABILITY_CHAT,
+            provider=ModelConfig.PROVIDER_DEEPSEEK,
+            model_name="deepseek-chat",
+            endpoint="https://api.deepseek.com",
+            options={"api_key": "test-key"},
+            is_active=True,
+        )
+
+        chat_provider = get_chat_provider()
+
+        self.assertIsInstance(chat_provider, DeepSeekChatProvider)
+
+    def test_runtime_service_raises_clear_error_when_deepseek_api_key_missing(self):
+        ModelConfig.objects.create(
+            name="deepseek-chat",
+            capability=ModelConfig.CAPABILITY_CHAT,
+            provider=ModelConfig.PROVIDER_DEEPSEEK,
+            model_name="deepseek-chat",
+            endpoint="https://api.deepseek.com",
+            options={},
+            is_active=True,
+        )
+
+        with self.assertRaises(UpstreamServiceError) as context:
+            get_chat_provider()
+
+        self.assertEqual(context.exception.provider, "deepseek")
+        self.assertEqual(context.exception.code, "llm_misconfigured")
+        self.assertEqual(context.exception.message, "DeepSeek API Key 未配置。")
+
+    def test_runtime_service_raises_clear_error_when_deepseek_endpoint_missing(self):
+        ModelConfig.objects.create(
+            name="deepseek-chat",
+            capability=ModelConfig.CAPABILITY_CHAT,
+            provider=ModelConfig.PROVIDER_DEEPSEEK,
+            model_name="deepseek-chat",
+            endpoint="",
+            options={"api_key": "test-key"},
+            is_active=True,
+        )
+
+        with self.assertRaises(UpstreamServiceError) as context:
+            get_chat_provider()
+
+        self.assertEqual(context.exception.provider, "deepseek")
+        self.assertEqual(context.exception.code, "llm_misconfigured")
+        self.assertEqual(context.exception.message, "DeepSeek endpoint 未配置。")
+
     @patch("urllib.request.urlopen")
     def test_ollama_chat_provider_returns_message_content(self, mocked_urlopen):
         mocked_urlopen.return_value = _FakeHttpResponse(
@@ -296,6 +363,27 @@ class ModelConfigListApiTests(TestCase):
         self.assertEqual(first_row["id"], get_active_model_config(ModelConfig.CAPABILITY_CHAT).id)
         self.assertTrue(first_row["is_active"])
         self.assertEqual(payload["data"]["model_configs"][1]["id"], replacement.id)
+
+    def test_list_model_configs_includes_deepseek_provider_value(self):
+        deepseek_config = ModelConfig.objects.create(
+            name="deepseek-chat",
+            capability=ModelConfig.CAPABILITY_CHAT,
+            provider=ModelConfig.PROVIDER_DEEPSEEK,
+            model_name="deepseek-chat",
+            endpoint="https://api.deepseek.com",
+            options={"api_key": "test-key"},
+            is_active=False,
+        )
+
+        response = self.client.get(
+            "/api/ops/model-configs",
+            HTTP_AUTHORIZATION=f"Bearer {self.admin_access_token}",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        model_configs = response.json()["data"]["model_configs"]
+        deepseek_row = next(item for item in model_configs if item["id"] == deepseek_config.id)
+        self.assertEqual(deepseek_row["provider"], ModelConfig.PROVIDER_DEEPSEEK)
 
 
 @override_settings(
