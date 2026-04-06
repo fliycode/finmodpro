@@ -146,8 +146,18 @@ const handleAsk = async () => {
 </script>
 
 <template>
-  <div class="qa-shell">
-    <div class="chat-window">
+  <div class="page-stack qa-page">
+    <section class="page-hero">
+      <div>
+        <div class="page-hero__eyebrow">Workspace / Financial QA</div>
+        <h1 class="page-hero__title">金融问答工作台</h1>
+        <p class="page-hero__subtitle">
+          面向业务分析场景的知识问答界面。强调连续对话、参考来源和回答可追溯性，信息密度做轻量收敛，便于长时间阅读。
+        </p>
+      </div>
+    </section>
+
+    <div class="chat-window ui-card">
       <div class="messages" ref="messagesContainer">
         <div v-for="(msg, index) in messages" :key="index" :class="['message', msg.role, msg.tone ? `tone-${msg.tone}` : '']">
           <div :class="getAvatarClass(msg.role)">{{ getAvatarLabel(msg.role) }}</div>
@@ -200,10 +210,10 @@ const handleAsk = async () => {
 </template>
 
 <style scoped>
-.qa-shell { height: calc(100vh - 160px); display: flex; flex-direction: column; }
-.chat-window { flex: 1; background: linear-gradient(180deg, #f8fafc 0%, #f1f5f9 100%); border-radius: 16px; box-shadow: 0 12px 30px -18px rgba(15, 23, 42, 0.35); display: flex; flex-direction: column; overflow: hidden; border: 1px solid #e2e8f0; }
-.messages { flex: 1; padding: 24px; overflow-y: auto; display: flex; flex-direction: column; gap: 24px; scroll-behavior: smooth; }
-.message { display: flex; gap: 16px; max-width: 85%; }
+.qa-page { min-height: calc(100vh - 180px); }
+.chat-window { flex: 1; min-height: calc(100vh - 360px); background: linear-gradient(180deg, #fbfdff 0%, #f6f9fc 100%); border-radius: 24px; display: flex; flex-direction: column; overflow: hidden; }
+.messages { flex: 1; padding: 28px; overflow-y: auto; display: flex; flex-direction: column; gap: 18px; scroll-behavior: smooth; }
+.message { display: flex; gap: 14px; max-width: min(86%, 920px); }
 .message.user { align-self: flex-end; flex-direction: row-reverse; }
 .message.system { align-self: center; color: #64748b; font-size: 13px; max-width: min(100%, 720px); }
 .message.system .message-content { align-items: center; }
@@ -213,13 +223,13 @@ const handleAsk = async () => {
 .message.system.tone-error .bubble { background: #fef2f2; border-color: #fca5a5; color: #b91c1c; }
 .message.system.tone-success .bubble { background: #ecfdf5; border-color: #86efac; color: #166534; }
 .avatar { width: 40px; height: 40px; display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 700; letter-spacing: 0.08em; color: #fff; border-radius: 14px; box-shadow: 0 10px 20px -16px rgba(15, 23, 42, 0.9); flex-shrink: 0; }
-.avatar-user { background: linear-gradient(135deg, #6366f1, #4f46e5); }
+.avatar-user { background: linear-gradient(135deg, #4f46e5, #4338ca); }
 .avatar-assistant { background: linear-gradient(135deg, #0f172a, #1d4ed8); }
 .avatar-system { background: linear-gradient(135deg, #64748b, #475569); }
 .message-content { display: flex; flex-direction: column; gap: 8px; flex: 1; max-width: 100%; }
-.bubble { padding: 14px 18px; border-radius: 18px; line-height: 1.7; word-break: break-word; font-size: 15px; letter-spacing: 0.2px; box-shadow: 0 10px 30px -24px rgba(15, 23, 42, 0.45); }
-.assistant .bubble { background: rgba(255, 255, 255, 0.96); color: #334155; border-top-left-radius: 6px; border: 1px solid #dbe4f0; }
-.user .bubble { background: linear-gradient(135deg, #6366f1, #4f46e5); color: white; border-top-right-radius: 6px; }
+.bubble { padding: 13px 16px; border-radius: 18px; line-height: 1.68; word-break: break-word; font-size: 14px; letter-spacing: 0.15px; box-shadow: 0 10px 30px -24px rgba(15, 23, 42, 0.45); }
+.assistant .bubble { background: rgba(255, 255, 255, 0.98); color: #334155; border-top-left-radius: 6px; border: 1px solid #dbe4f0; }
+.user .bubble { background: linear-gradient(135deg, #4f46e5, #4338ca); color: white; border-top-right-radius: 6px; }
 .bubble-error { background: #fff7f7 !important; color: #b91c1c !important; border: 1px solid #fecaca !important; }
 .duration-info { font-size: 11px; color: #94a3b8; margin-top: 8px; text-align: right; }
 .user .duration-info { display: none; }
@@ -242,10 +252,10 @@ const handleAsk = async () => {
 .cite-meta { display: flex; gap: 12px; color: #64748b; font-size: 11px; flex-wrap: wrap; align-items: center; }
 .cite-type { background: #e2e8f0; padding: 2px 6px; border-radius: 4px; font-size: 10px; text-transform: uppercase; color: #475569; }
 .cite-snippet { color: #334155; line-height: 1.5; font-size: 12px; white-space: normal; text-align: left; background: #f8fafc; padding: 8px; border-radius: 6px; border-left: 2px solid #6366f1; }
-.input-area { padding: 16px 24px; border-top: 1px solid #e2e8f0; display: flex; gap: 16px; background: rgba(255, 255, 255, 0.92); align-items: flex-end; backdrop-filter: blur(10px); }
-textarea { flex: 1; height: 50px; max-height: 150px; padding: 12px 16px; border: 1px solid #cbd5e1; border-radius: 12px; resize: none; font-family: inherit; transition: all 0.2s; background: #f8fafc; line-height: 1.5; box-shadow: inset 0 1px 2px rgba(0,0,0,0.05); }
+.input-area { padding: 18px 24px 22px; border-top: 1px solid #e2e8f0; display: flex; gap: 14px; background: rgba(255, 255, 255, 0.94); align-items: flex-end; backdrop-filter: blur(10px); }
+textarea { flex: 1; height: 52px; max-height: 150px; padding: 13px 16px; border: 1px solid #cbd5e1; border-radius: 14px; resize: none; font-family: inherit; transition: all 0.2s; background: #f8fafc; line-height: 1.55; box-shadow: inset 0 1px 2px rgba(0,0,0,0.05); }
 textarea:focus { outline: none; border-color: #6366f1; background: white; box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.1); }
-.send-btn { height: 50px; padding: 0 28px; background: linear-gradient(135deg, #6366f1, #4f46e5); color: white; border: none; border-radius: 12px; cursor: pointer; font-weight: 600; font-size: 15px; transition: all 0.2s; box-shadow: 0 2px 4px rgba(99, 102, 241, 0.2); }
-.send-btn:hover:not(:disabled) { box-shadow: 0 4px 6px rgba(99, 102, 241, 0.3); transform: translateY(-1px); }
+.send-btn { height: 52px; padding: 0 24px; background: linear-gradient(135deg, #4f46e5, #4338ca); color: white; border: none; border-radius: 14px; cursor: pointer; font-weight: 700; font-size: 14px; transition: all 0.2s; box-shadow: 0 8px 20px -16px rgba(79, 70, 229, 0.75); }
+.send-btn:hover:not(:disabled) { box-shadow: 0 10px 24px -16px rgba(79, 70, 229, 0.85); transform: translateY(-1px); }
 .send-btn:disabled { opacity: 0.6; cursor: not-allowed; box-shadow: none; transform: none; }
 </style>
