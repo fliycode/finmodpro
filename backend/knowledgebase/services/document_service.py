@@ -144,6 +144,19 @@ def _build_process_result(document, ingestion_task):
 def serialize_document(document, include_content_preview=False, include_content=False):
     ingestion_task = _get_latest_ingestion_task(document)
     original_url = _build_file_url(document)
+
+    try:
+        chunk_count = document.chunks.count()
+    except Exception:
+        chunk_count = 0
+
+    try:
+        vector_count = document.chunks.exclude(vector_id="").count()
+    except Exception:
+        vector_count = 0
+
+    parsed_text = document.parsed_text or ""
+
     payload = {
         "id": document.id,
         "title": document.title,
@@ -151,15 +164,15 @@ def serialize_document(document, include_content_preview=False, include_content=
         "doc_type": document.doc_type,
         "status": document.status,
         "visibility": document.visibility,
-        "uploader": _serialize_user(document.uploaded_by),
-        "uploaded_by": _serialize_user(document.uploaded_by),
-        "owner": _serialize_user(document.owner),
+        "uploader": _serialize_user(getattr(document, "uploaded_by", None)),
+        "uploaded_by": _serialize_user(getattr(document, "uploaded_by", None)),
+        "owner": _serialize_user(getattr(document, "owner", None)),
         "source_date": document.source_date.isoformat() if document.source_date else None,
-        "file_path": document.file.name,
+        "file_path": getattr(document.file, "name", ""),
         "original_url": original_url,
         "preview_url": original_url,
-        "chunk_count": document.chunks.count(),
-        "vector_count": document.chunks.exclude(vector_id="").count(),
+        "chunk_count": chunk_count,
+        "vector_count": vector_count,
         "error_message": document.error_message or None,
         "process_result": _build_process_result(document, ingestion_task),
         "latest_ingestion_task": _serialize_ingestion_task(ingestion_task),
@@ -167,11 +180,11 @@ def serialize_document(document, include_content_preview=False, include_content=
         "updated_at": document.updated_at.isoformat(),
     }
     if include_content_preview:
-        payload["parsed_text_preview"] = document.parsed_text[:200]
-        payload["preview_text"] = document.parsed_text[:200]
+        payload["parsed_text_preview"] = parsed_text[:200]
+        payload["preview_text"] = parsed_text[:200]
     if include_content:
-        payload["parsed_text"] = document.parsed_text
-        payload["extracted_text"] = document.parsed_text
+        payload["parsed_text"] = parsed_text
+        payload["extracted_text"] = parsed_text
     return payload
 
 
