@@ -3,6 +3,7 @@ import { computed } from 'vue';
 import { RouterLink } from 'vue-router';
 
 import AppIcon from './AppIcon.vue';
+import finmodproMark from '../../assets/finmodpro-mark.svg';
 import { getNavItems } from '../../config/navigation.js';
 import { authStorage } from '../../lib/auth-storage.js';
 
@@ -20,7 +21,7 @@ const items = computed(() => getNavItems(props.area, profile.value));
 <template>
   <aside class="app-sidebar">
     <div class="app-sidebar__brand">
-      <span class="app-sidebar__brand-mark">Fin</span>
+      <img class="app-sidebar__brand-logo" :src="finmodproMark" alt="FinModPro" />
       <div>
         <strong>FinModPro</strong>
         <p>{{ props.area === 'admin' ? '管理控制台' : '业务工作区' }}</p>
