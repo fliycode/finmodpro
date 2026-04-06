@@ -10,6 +10,29 @@ const logs = ref([]);
 const isLoading = ref(true);
 const errorMsg = ref("");
 
+const normalizeStats = (payload) => {
+  const data = payload?.data && typeof payload.data === 'object' ? payload.data : payload;
+  return {
+    knowledgebase_count: data?.knowledgebase_count ?? data?.kbCount ?? data?.knowledge_base_count ?? 0,
+    document_count: data?.document_count ?? data?.docCount ?? data?.documents_count ?? 0,
+    risk_event_count: data?.risk_event_count ?? data?.riskCount ?? data?.risk_events_count ?? 0,
+    pending_risk_event_count: data?.pending_risk_event_count ?? data?.pendingRiskCount ?? data?.pending_count ?? 0,
+  };
+};
+
+const normalizeLogs = (payload) => {
+  const list = Array.isArray(payload)
+    ? payload
+    : Array.isArray(payload?.logs)
+      ? payload.logs
+      : Array.isArray(payload?.items)
+        ? payload.items
+        : Array.isArray(payload?.data)
+          ? payload.data
+          : [];
+  return list;
+};
+
 const fetchData = async () => {
   isLoading.value = true;
   errorMsg.value = "";
@@ -18,8 +41,8 @@ const fetchData = async () => {
       dashboardApi.getStats(),
       opsApi.getLogs()
     ]);
-    dashboardStats.value = statsRes || {};
-    logs.value = logsRes || [];
+    dashboardStats.value = normalizeStats(statsRes);
+    logs.value = normalizeLogs(logsRes);
   } catch (error) {
     console.error("Dashboard data fetch failed:", error);
     errorMsg.value = "加载大盘数据失败，请重试";

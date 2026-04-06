@@ -16,12 +16,38 @@ const triggerForm = ref({
   version: "v1.0"
 });
 
+const normalizeEvaluations = (payload) => {
+  const list = Array.isArray(payload)
+    ? payload
+    : Array.isArray(payload?.results)
+      ? payload.results
+      : Array.isArray(payload?.items)
+        ? payload.items
+        : Array.isArray(payload?.evaluations)
+          ? payload.evaluations
+          : Array.isArray(payload?.data)
+            ? payload.data
+            : [];
+
+  return list.map((item, index) => ({
+    id: item.id ?? item.evaluation_id ?? index,
+    task_type: item.task_type ?? item.taskType ?? item.type ?? '--',
+    version: item.version ?? item.eval_version ?? item.tag ?? '--',
+    status: item.status ?? item.state ?? 'pending',
+    qa_accuracy: item.qa_accuracy ?? item.qaAccuracy ?? item.accuracy ?? null,
+    extraction_accuracy: item.extraction_accuracy ?? item.extractionAccuracy ?? item.extract_accuracy ?? null,
+    average_latency_ms: item.average_latency_ms ?? item.avg_latency_ms ?? item.latency_ms ?? null,
+    created_at: item.created_at ?? item.createdAt ?? item.started_at ?? item.updated_at ?? '',
+    raw: item,
+  }));
+};
+
 const fetchEvaluations = async () => {
   isLoading.value = true;
   errorMsg.value = "";
   try {
     const data = await llmApi.getEvaluations();
-    evaluations.value = data || [];
+    evaluations.value = normalizeEvaluations(data);
   } catch (error) {
     console.error("Failed to fetch evaluations:", error);
     errorMsg.value = error.message || "加载评测记录失败";

@@ -10,11 +10,29 @@ const errorMsg = ref("");
 const flash = useFlash();
 
 const normalizeConfigs = (payload) => {
-  if (Array.isArray(payload)) return payload;
-  if (Array.isArray(payload?.results)) return payload.results;
-  if (Array.isArray(payload?.items)) return payload.items;
-  if (Array.isArray(payload?.model_configs)) return payload.model_configs;
-  return [];
+  const list = Array.isArray(payload)
+    ? payload
+    : Array.isArray(payload?.results)
+      ? payload.results
+      : Array.isArray(payload?.items)
+        ? payload.items
+        : Array.isArray(payload?.model_configs)
+          ? payload.model_configs
+          : Array.isArray(payload?.data)
+            ? payload.data
+            : [];
+
+  return list.map((item, index) => ({
+    id: item.id ?? item.config_id ?? index,
+    name: item.name ?? item.config_name ?? item.model_name ?? `config-${index}`,
+    provider: item.provider ?? item.vendor ?? '--',
+    model_name: item.model_name ?? item.model ?? item.name ?? '--',
+    endpoint: item.endpoint ?? item.api_base ?? item.base_url ?? '',
+    capability: item.capability ?? item.model_type ?? item.type ?? 'chat',
+    is_active: item.is_active ?? item.active ?? item.enabled ?? false,
+    updated_at: item.updated_at ?? item.updatedAt ?? item.modified_at ?? item.created_at ?? '',
+    raw: item,
+  }));
 };
 
 const fetchConfigs = async () => {
@@ -45,8 +63,8 @@ const toggleActivation = async (config) => {
   }
 };
 
-const chatConfigs = computed(() => configs.value.filter((c) => c.capability === "chat"));
-const embeddingConfigs = computed(() => configs.value.filter((c) => c.capability === "embedding"));
+const chatConfigs = computed(() => configs.value.filter((c) => ["chat", "llm", "generation"].includes(String(c.capability).toLowerCase())));
+const embeddingConfigs = computed(() => configs.value.filter((c) => ["embedding", "embed", "vector"].includes(String(c.capability).toLowerCase())));
 
 const formatDate = (dateStr) => {
   if (!dateStr) return "N/A";
