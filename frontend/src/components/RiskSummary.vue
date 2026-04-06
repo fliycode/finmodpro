@@ -154,16 +154,6 @@ const generateReport = async () => {
 
 <template>
   <div class="page-stack risk-page">
-    <section class="page-hero">
-      <div>
-        <div class="page-hero__eyebrow">Workspace / Risk Control</div>
-        <h1 class="page-hero__title">风险监测与报告工作台</h1>
-        <p class="page-hero__subtitle">
-          统一风险事件审核与报告生成两类操作。这里强调筛选效率、表格可读性与报告沉浸阅读，整体密度比管理后台更克制一些。
-        </p>
-      </div>
-    </section>
-
     <el-card class="ui-card risk-summary-shell" shadow="never">
       <el-tabs v-model="activeTab" class="risk-tabs">
         <el-tab-pane label="风险事件审核" name="events">

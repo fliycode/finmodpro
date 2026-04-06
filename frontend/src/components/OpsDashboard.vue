@@ -2,14 +2,15 @@
 import { computed, onMounted, ref } from 'vue';
 import { ElMessage } from 'element-plus';
 
-import { opsApi } from '../api/ops.js';
 import { dashboardApi } from '../api/dashboard.js';
+import { opsApi } from '../api/ops.js';
 import AppSectionCard from './ui/AppSectionCard.vue';
 
 const dashboardStats = ref({});
 const logs = ref([]);
 const isLoading = ref(true);
 const errorMsg = ref('');
+const refreshedAt = ref('');
 
 const normalizeStats = (payload) => {
   const data = payload?.data && typeof payload.data === 'object' ? payload.data : payload;
@@ -31,31 +32,53 @@ const normalizeStats = (payload) => {
 };
 
 const normalizeLogs = (payload) => {
-  const list = Array.isArray(payload)
-    ? payload
-    : Array.isArray(payload?.logs)
-      ? payload.logs
-      : Array.isArray(payload?.items)
-        ? payload.items
-        : Array.isArray(payload?.data)
-          ? payload.data
-          : [];
-  return list;
+  if (Array.isArray(payload)) {
+    return payload;
+  }
+
+  if (Array.isArray(payload?.logs)) {
+    return payload.logs;
+  }
+
+  if (Array.isArray(payload?.items)) {
+    return payload.items;
+  }
+
+  if (Array.isArray(payload?.data)) {
+    return payload.data;
+  }
+
+  return [];
 };
+
+const formatTimestamp = (date) => (
+  new Intl.DateTimeFormat('zh-CN', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+  }).format(date)
+);
 
 const fetchData = async () => {
   isLoading.value = true;
   errorMsg.value = '';
+
   try {
     const [statsRes, logsRes] = await Promise.all([
       dashboardApi.getStats(),
       opsApi.getLogs(),
     ]);
+
     dashboardStats.value = normalizeStats(statsRes);
     logs.value = normalizeLogs(logsRes);
+    refreshedAt.value = formatTimestamp(new Date());
   } catch (error) {
     console.error('Dashboard data fetch failed:', error);
-    errorMsg.value = '加载仪表盘数据失败，请稍后重试';
+    errorMsg.value = '加载管理员总览失败，请稍后重试。';
     ElMessage.error(errorMsg.value);
   } finally {
     isLoading.value = false;
@@ -64,117 +87,235 @@ const fetchData = async () => {
 
 onMounted(fetchData);
 
-const overviewMetrics = computed(() => [
-  { key: 'knowledgebase_count', label: '知识库', value: dashboardStats.value.knowledgebase_count ?? '--', trend: '+12%', tone: 'blue' },
-  { key: 'document_count', label: '文档总量', value: dashboardStats.value.document_count ?? '--', trend: '+8%', tone: 'cyan' },
-  { key: 'risk_event_count', label: '风险事件', value: dashboardStats.value.risk_event_count ?? '--', trend: '+5%', tone: 'violet' },
-  { key: 'pending_risk_event_count', label: '待处理事项', value: dashboardStats.value.pending_risk_event_count ?? '--', trend: '需关注', tone: 'orange', alert: true },
-]);
+const getLogLevelTone = (level) => {
+  const tones = {
+    INFO: 'info',
+    WARN: 'warning',
+    ERROR: 'risk',
+  };
 
-const kpiCards = computed(() => [
-  { label: '活跃模型', value: dashboardStats.value.active_model_count ?? '--', desc: '当前可用推理配置' },
-  { label: '今日请求', value: dashboardStats.value.request_count ?? '--', desc: '累计平台调用量' },
-  { label: '成功率', value: dashboardStats.value.success_rate ?? '--', desc: '综合任务完成表现' },
-  { label: '预警数', value: dashboardStats.value.warning_count ?? '--', desc: '需人工关注项' },
-]);
-
-const quickPanels = computed(() => [
-  {
-    title: '平台运行态势',
-    value: dashboardStats.value.success_rate ?? '98.6%',
-    meta: '核心链路稳定',
-    bars: [82, 74, 91, 68, 87, 79, 94],
-  },
-  {
-    title: '数据资源热度',
-    value: dashboardStats.value.document_count ?? 0,
-    meta: '文档与知识持续累积',
-    bars: [46, 58, 63, 71, 66, 78, 84],
-  },
-]);
-
-const recentActivity = computed(() => logs.value.slice(0, 5));
+  return tones[level] || 'neutral';
+};
 
 const getLogLevelColor = (level) => {
   const colors = {
-    INFO: '#10b981',
-    WARN: '#f59e0b',
-    ERROR: '#ef4444',
+    INFO: '#2457c5',
+    WARN: '#b7791f',
+    ERROR: '#c4493d',
   };
-  return colors[level] || '#64748b';
+
+  return colors[level] || '#5a677d';
 };
+
+const overviewMetrics = computed(() => [
+  {
+    key: 'knowledgebase_count',
+    label: '知识库',
+    value: dashboardStats.value.knowledgebase_count ?? '--',
+    note: '当前已纳管知识库',
+  },
+  {
+    key: 'document_count',
+    label: '文档总量',
+    value: dashboardStats.value.document_count ?? '--',
+    note: '用于检索与入库处理',
+  },
+  {
+    key: 'active_model_count',
+    label: '启用模型',
+    value: dashboardStats.value.active_model_count ?? '--',
+    note: '当前参与服务的模型配置',
+  },
+  {
+    key: 'request_count',
+    label: '今日请求',
+    value: dashboardStats.value.request_count ?? '--',
+    note: '平台累计调用规模',
+  },
+]);
+
+const pendingFocus = computed(() => [
+  {
+    id: 'pending-risk',
+    title: '待审风险',
+    value: dashboardStats.value.pending_risk_event_count ?? '--',
+    desc: '优先处理未完成审核的风险事件，避免积压进入报告流程。',
+    tone: 'risk',
+  },
+  {
+    id: 'warning-count',
+    title: '异常提醒',
+    value: dashboardStats.value.warning_count ?? '--',
+    desc: '汇总系统告警与待关注事项，适合值守时快速判断。',
+    tone: 'warning',
+  },
+  {
+    id: 'risk-total',
+    title: '风险事件总量',
+    value: dashboardStats.value.risk_event_count ?? '--',
+    desc: '反映当前平台风险识别与审核压力的总体规模。',
+    tone: 'neutral',
+  },
+]);
+
+const systemPosture = computed(() => {
+  const pending = Number(dashboardStats.value.pending_risk_event_count ?? 0);
+  const warnings = Number(dashboardStats.value.warning_count ?? 0);
+
+  if (pending >= 5 || warnings >= 5) {
+    return {
+      label: '需重点跟进',
+      desc: '待处理事项较多，建议优先查看风险审查与异常日志。',
+      tone: 'risk',
+    };
+  }
+
+  if (pending > 0 || warnings > 1) {
+    return {
+      label: '总体稳定',
+      desc: '平台可持续运行，但仍有若干事项需要值守关注。',
+      tone: 'warning',
+    };
+  }
+
+  return {
+    label: '运行平稳',
+    desc: '当前链路无明显积压，适合继续推进模型与知识库治理。',
+    tone: 'info',
+  };
+});
+
+const operationalPanels = computed(() => [
+  {
+    id: 'success-rate',
+    label: '综合成功率',
+    value: dashboardStats.value.success_rate ?? '--',
+    detail: '用于观察问答、检索与管理动作的完成质量。',
+  },
+  {
+    id: 'active-models',
+    label: '模型配置状态',
+    value: `${dashboardStats.value.active_model_count ?? '--'} 个`,
+    detail: '当前在线配置可支撑问答、抽取与知识库处理。',
+  },
+  {
+    id: 'document-scale',
+    label: '知识资产规模',
+    value: `${dashboardStats.value.document_count ?? '--'} 份`,
+    detail: '文档与知识库数量持续扩展时需同步关注索引质量。',
+  },
+]);
+
+const healthChecklist = computed(() => [
+  {
+    id: 'chain',
+    label: '核心链路',
+    status: systemPosture.value.label,
+    desc: systemPosture.value.desc,
+    tone: systemPosture.value.tone,
+  },
+  {
+    id: 'models',
+    label: '模型服务',
+    status: `${dashboardStats.value.active_model_count ?? '--'} 个在线`,
+    desc: '重点关注配置切换、评测结果与启停一致性。',
+    tone: 'info',
+  },
+  {
+    id: 'knowledge',
+    label: '知识资产',
+    status: `${dashboardStats.value.knowledgebase_count ?? '--'} 个知识库`,
+    desc: '建议结合文档量和检索反馈定期做入库质量检查。',
+    tone: 'neutral',
+  },
+]);
+
+const recentActivity = computed(() => logs.value.slice(0, 4));
+
+const evidenceLogs = computed(() => logs.value.slice(0, 8));
 </script>
 
 <template>
   <div class="page-stack admin-page">
-    <section class="dashboard-hero">
-      <div class="dashboard-hero__content">
-        <div class="dashboard-hero__eyebrow">Admin / Dashboard</div>
-        <h1 class="dashboard-hero__title">仪表盘</h1>
-        <p class="dashboard-hero__subtitle">集中查看平台运行、数据资产、风险待办与系统动态。</p>
-      </div>
-      <div class="dashboard-hero__actions">
-        <div class="dashboard-hero__badge">
-          <span class="dashboard-hero__badge-label">当前状态</span>
-          <strong>稳定运行</strong>
+    <section class="overview-strip">
+      <div class="overview-strip__main">
+        <p class="overview-strip__eyebrow">今日态势</p>
+        <div class="overview-strip__headline">
+          <h1 class="overview-strip__title">{{ systemPosture.label }}</h1>
+          <p class="overview-strip__summary">{{ systemPosture.desc }}</p>
         </div>
-        <el-button type="primary" @click="fetchData" :loading="isLoading">刷新数据</el-button>
+        <div class="overview-strip__meta">
+          <span>最近刷新：{{ refreshedAt || '未更新' }}</span>
+          <span>异常事项：{{ dashboardStats.warning_count ?? '--' }}</span>
+          <span>待审风险：{{ dashboardStats.pending_risk_event_count ?? '--' }}</span>
+        </div>
+      </div>
+
+      <div class="overview-strip__actions">
+        <div class="overview-strip__status" :class="`is-${systemPosture.tone}`">
+          <span class="overview-strip__status-label">当前判断</span>
+          <strong>{{ systemPosture.label }}</strong>
+        </div>
+        <div class="overview-strip__buttons">
+          <el-button plain>查看待审风险</el-button>
+          <el-button type="primary" @click="fetchData" :loading="isLoading">刷新运行状态</el-button>
+        </div>
       </div>
     </section>
 
     <el-alert v-if="errorMsg" :title="errorMsg" type="error" show-icon :closable="false" />
 
-    <section class="dashboard-grid dashboard-grid--metrics">
-      <article
-        v-for="metric in overviewMetrics"
-        :key="metric.key"
-        class="dashboard-metric"
-        :class="[`dashboard-metric--${metric.tone}`, { 'is-alert': metric.alert }]"
-      >
-        <div class="dashboard-metric__top">
-          <span class="dashboard-metric__label">{{ metric.label }}</span>
-          <span class="dashboard-metric__trend">{{ metric.trend }}</span>
-        </div>
-        <div class="dashboard-metric__value">{{ metric.value }}</div>
+    <section class="overview-metrics">
+      <article v-for="metric in overviewMetrics" :key="metric.key" class="overview-metric">
+        <span class="overview-metric__label">{{ metric.label }}</span>
+        <strong class="overview-metric__value">{{ metric.value }}</strong>
+        <p class="overview-metric__note">{{ metric.note }}</p>
       </article>
     </section>
 
-    <section class="dashboard-grid dashboard-grid--main">
-      <AppSectionCard title="核心指标" desc="从模型、请求、成功率与预警数观察平台总体表现。" admin>
-        <div class="dashboard-kpi-grid">
-          <article v-for="card in kpiCards" :key="card.label" class="dashboard-kpi-card">
-            <span class="dashboard-kpi-card__label">{{ card.label }}</span>
-            <strong class="dashboard-kpi-card__value">{{ card.value }}</strong>
-            <span class="dashboard-kpi-card__desc">{{ card.desc }}</span>
+    <section class="overview-main">
+      <AppSectionCard title="待处理焦点" desc="优先用于判断今天需要人工跟进的事项。" admin>
+        <div class="focus-list">
+          <article v-for="item in pendingFocus" :key="item.id" class="focus-item" :class="`is-${item.tone}`">
+            <div class="focus-item__head">
+              <span class="focus-item__title">{{ item.title }}</span>
+              <strong class="focus-item__value">{{ item.value }}</strong>
+            </div>
+            <p class="focus-item__desc">{{ item.desc }}</p>
           </article>
         </div>
       </AppSectionCard>
 
-      <AppSectionCard title="运行看板" desc="以更视觉化的方式呈现平台节奏与资源热度。" admin>
-        <div class="dashboard-panel-stack">
-          <article v-for="panel in quickPanels" :key="panel.title" class="dashboard-mini-panel">
-            <div class="dashboard-mini-panel__header">
-              <div>
-                <h3>{{ panel.title }}</h3>
-                <p>{{ panel.meta }}</p>
-              </div>
-              <strong>{{ panel.value }}</strong>
+      <AppSectionCard title="运行摘要" desc="用更适合管理判断的方式概览平台负载与服务质量。" admin>
+        <div class="summary-grid">
+          <article v-for="panel in operationalPanels" :key="panel.id" class="summary-panel">
+            <span class="summary-panel__label">{{ panel.label }}</span>
+            <strong class="summary-panel__value">{{ panel.value }}</strong>
+            <p class="summary-panel__detail">{{ panel.detail }}</p>
+          </article>
+        </div>
+      </AppSectionCard>
+
+      <AppSectionCard title="系统状态" desc="保留管理员真正需要的判断信息，而不是装饰性图表。" admin>
+        <div class="health-list">
+          <article v-for="item in healthChecklist" :key="item.id" class="health-item">
+            <div class="health-item__meta">
+              <span class="health-item__label">{{ item.label }}</span>
+              <span class="health-item__badge" :class="`is-${item.tone}`">{{ item.status }}</span>
             </div>
-            <div class="dashboard-mini-panel__bars">
-              <span v-for="(bar, index) in panel.bars" :key="`${panel.title}-${index}`" :style="{ height: `${bar}%` }" />
-            </div>
+            <p class="health-item__desc">{{ item.desc }}</p>
           </article>
         </div>
       </AppSectionCard>
     </section>
 
-    <section class="dashboard-grid dashboard-grid--bottom">
-      <AppSectionCard title="最近动态" desc="保留更像仪表盘的近期事件摘要。" admin>
-        <div class="dashboard-activity-list">
-          <article v-for="(log, index) in recentActivity" :key="`${log.timestamp}-${index}`" class="dashboard-activity-item">
-            <div class="dashboard-activity-item__dot" :style="{ backgroundColor: getLogLevelColor(log.level) }" />
-            <div class="dashboard-activity-item__content">
-              <div class="dashboard-activity-item__meta">
+    <section class="overview-evidence">
+      <AppSectionCard title="最近活动" desc="作为管理首页的事件摘要，而不是独立日志墙。" admin>
+        <div class="activity-list">
+          <article v-for="(log, index) in recentActivity" :key="`${log.timestamp}-${index}`" class="activity-item">
+            <span class="activity-item__dot" :style="{ backgroundColor: getLogLevelColor(log.level) }" />
+            <div class="activity-item__content">
+              <div class="activity-item__meta">
                 <span>{{ log.module }}</span>
                 <span>{{ log.timestamp }}</span>
               </div>
@@ -184,23 +325,21 @@ const getLogLevelColor = (level) => {
         </div>
       </AppSectionCard>
 
-      <AppSectionCard title="实时系统日志" desc="用于快速定位运行状态、错误和服务波动。" admin>
+      <AppSectionCard title="运行证据" desc="保留必要日志证据，帮助快速定位波动来源。" admin>
         <template #header>
-          <div class="log-actions">
-            <span class="log-count">{{ logs.length }} 条记录</span>
-          </div>
+          <span class="evidence-count">{{ evidenceLogs.length }} 条记录</span>
         </template>
 
-        <div class="logs-section">
-          <div class="logs-container">
-            <div v-if="logs.length === 0" class="logs-empty">暂无系统日志</div>
-            <div v-for="(log, index) in logs" :key="index" class="log-line">
-              <span class="log-time">[{{ log.timestamp }}]</span>
-              <span class="log-level" :style="{ color: getLogLevelColor(log.level) }">{{ log.level }}</span>
-              <span class="log-module">[{{ log.module }}]</span>
-              <span class="log-msg">{{ log.message }}</span>
+        <div class="evidence-log-list">
+          <div v-if="evidenceLogs.length === 0" class="evidence-log-list__empty">暂无运行日志</div>
+          <article v-for="(log, index) in evidenceLogs" :key="`${log.timestamp}-${index}`" class="evidence-log">
+            <div class="evidence-log__head">
+              <span class="evidence-log__badge" :class="`is-${getLogLevelTone(log.level)}`">{{ log.level }}</span>
+              <span>{{ log.module }}</span>
+              <span>{{ log.timestamp }}</span>
             </div>
-          </div>
+            <p class="evidence-log__message">{{ log.message }}</p>
+          </article>
         </div>
       </AppSectionCard>
     </section>
@@ -212,368 +351,434 @@ const getLogLevelColor = (level) => {
   gap: 24px;
 }
 
-.dashboard-hero {
-  display: flex;
-  align-items: stretch;
-  justify-content: space-between;
-  gap: 20px;
-  padding: 28px 30px;
+.overview-strip {
+  display: grid;
+  grid-template-columns: minmax(0, 1.3fr) minmax(280px, 0.7fr);
+  gap: 24px;
+  padding: 28px;
   border-radius: 28px;
-  background: linear-gradient(135deg, #0f172a 0%, #172554 52%, #2563eb 100%);
-  color: #eff6ff;
-  box-shadow: 0 28px 54px -34px rgba(15, 23, 42, 0.65);
+  border: 1px solid var(--line-soft);
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.98), rgba(248, 250, 252, 0.96)),
+    linear-gradient(180deg, rgba(36, 87, 197, 0.04), rgba(255, 255, 255, 0));
+  box-shadow: var(--shadow-soft);
 }
 
-.dashboard-hero__content {
+.overview-strip__main,
+.overview-strip__actions {
   display: flex;
   flex-direction: column;
-  gap: 10px;
 }
 
-.dashboard-hero__eyebrow {
+.overview-strip__main {
+  gap: 16px;
+}
+
+.overview-strip__eyebrow {
   font-size: 12px;
   font-weight: 700;
   letter-spacing: 0.14em;
   text-transform: uppercase;
-  color: rgba(191, 219, 254, 0.92);
+  color: var(--text-muted);
 }
 
-.dashboard-hero__title {
-  margin: 0;
-  font-size: 34px;
-  line-height: 1.1;
-  color: #f8fafc;
-}
-
-.dashboard-hero__subtitle {
-  margin: 0;
-  color: rgba(226, 232, 240, 0.82);
-  line-height: 1.75;
-}
-
-.dashboard-hero__actions {
+.overview-strip__headline {
   display: flex;
-  align-items: flex-end;
-  gap: 14px;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.overview-strip__title {
+  margin: 0;
+  font-size: clamp(32px, 4vw, 44px);
+  line-height: 1.04;
+  color: var(--text-primary);
+}
+
+.overview-strip__summary {
+  max-width: 720px;
+  color: var(--text-secondary);
+  line-height: 1.7;
+}
+
+.overview-strip__meta {
+  display: flex;
+  gap: 12px;
   flex-wrap: wrap;
 }
 
-.dashboard-hero__badge {
-  min-width: 132px;
-  padding: 14px 16px;
-  border-radius: 18px;
-  background: rgba(255, 255, 255, 0.12);
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  backdrop-filter: blur(10px);
-}
-
-.dashboard-hero__badge-label {
-  display: block;
-  font-size: 12px;
-  color: rgba(191, 219, 254, 0.82);
-  margin-bottom: 6px;
-}
-
-.dashboard-grid {
-  display: grid;
-  gap: 20px;
-}
-
-.dashboard-grid--metrics {
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-}
-
-.dashboard-grid--main,
-.dashboard-grid--bottom {
-  grid-template-columns: minmax(0, 1.15fr) minmax(0, 0.85fr);
-}
-
-.dashboard-metric {
-  position: relative;
-  overflow: hidden;
-  padding: 22px;
-  border-radius: 22px;
-  background: linear-gradient(180deg, #ffffff, #f8fafc);
-  border: 1px solid rgba(226, 232, 240, 0.9);
-  box-shadow: 0 20px 34px -28px rgba(15, 23, 42, 0.28);
-}
-
-.dashboard-metric::after {
-  content: '';
-  position: absolute;
-  inset: auto 0 0 0;
-  height: 4px;
-  opacity: 0.9;
-}
-
-.dashboard-metric--blue::after { background: linear-gradient(90deg, #2563eb, #60a5fa); }
-.dashboard-metric--cyan::after { background: linear-gradient(90deg, #0891b2, #67e8f9); }
-.dashboard-metric--violet::after { background: linear-gradient(90deg, #7c3aed, #c4b5fd); }
-.dashboard-metric--orange::after { background: linear-gradient(90deg, #f59e0b, #fb923c); }
-
-.dashboard-metric__top {
-  display: flex;
+.overview-strip__meta span {
+  display: inline-flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  margin-bottom: 16px;
-}
-
-.dashboard-metric__label {
-  color: #64748b;
-  font-size: 13px;
-  font-weight: 700;
-}
-
-.dashboard-metric__trend {
-  font-size: 12px;
-  color: #2563eb;
-  background: #eff6ff;
+  min-height: 34px;
+  padding: 0 12px;
   border-radius: 999px;
-  padding: 5px 9px;
+  background: var(--surface-3);
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 600;
 }
 
-.dashboard-metric.is-alert .dashboard-metric__trend {
-  color: #c2410c;
-  background: #fff7ed;
-}
-
-.dashboard-metric__value {
-  font-size: 34px;
-  font-weight: 800;
-  color: #0f172a;
-}
-
-.dashboard-kpi-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+.overview-strip__actions {
+  justify-content: space-between;
   gap: 16px;
 }
 
-.dashboard-kpi-card {
+.overview-strip__status {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 6px;
   padding: 18px;
-  border-radius: 18px;
-  background: linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
-  border: 1px solid rgba(191, 219, 254, 0.58);
+  border-radius: 22px;
+  border: 1px solid var(--line-soft);
+  background: var(--surface-2);
 }
 
-.dashboard-kpi-card__label {
-  font-size: 13px;
-  color: #64748b;
+.overview-strip__status-label {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.overview-strip__status strong {
+  font-size: 24px;
+  color: var(--text-primary);
+}
+
+.overview-strip__status.is-info {
+  border-color: rgba(36, 87, 197, 0.18);
+}
+
+.overview-strip__status.is-warning {
+  border-color: rgba(183, 121, 31, 0.22);
+}
+
+.overview-strip__status.is-risk {
+  border-color: rgba(196, 73, 61, 0.2);
+}
+
+.overview-strip__buttons {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.overview-metrics {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 18px;
+}
+
+.overview-metric {
+  padding: 20px 22px;
+  border-radius: 22px;
+  border: 1px solid var(--line-soft);
+  background: var(--surface-2);
+  box-shadow: var(--shadow-soft);
+}
+
+.overview-metric__label {
+  display: block;
+  margin-bottom: 12px;
+  color: var(--text-muted);
+  font-size: 12px;
   font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
 }
 
-.dashboard-kpi-card__value {
-  font-size: 26px;
-  color: #0f172a;
+.overview-metric__value {
+  display: block;
+  margin-bottom: 8px;
+  color: var(--text-primary);
+  font-size: 32px;
+  line-height: 1;
 }
 
-.dashboard-kpi-card__desc {
-  color: #64748b;
+.overview-metric__note {
+  color: var(--text-secondary);
   font-size: 13px;
   line-height: 1.6;
 }
 
-.dashboard-panel-stack {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
+.overview-main,
+.overview-evidence {
+  display: grid;
+  gap: 20px;
 }
 
-.dashboard-mini-panel {
+.overview-main {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(320px, 0.9fr);
+}
+
+.overview-evidence {
+  grid-template-columns: minmax(0, 0.95fr) minmax(0, 1.05fr);
+}
+
+.focus-list,
+.health-list,
+.activity-list {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.focus-item {
   padding: 18px;
   border-radius: 18px;
-  background: linear-gradient(135deg, #eff6ff, #ffffff);
-  border: 1px solid rgba(191, 219, 254, 0.8);
+  border: 1px solid var(--line-soft);
+  background: var(--surface-2);
 }
 
-.dashboard-mini-panel__header {
+.focus-item.is-risk {
+  border-color: rgba(196, 73, 61, 0.18);
+}
+
+.focus-item.is-warning {
+  border-color: rgba(183, 121, 31, 0.22);
+}
+
+.focus-item__head {
   display: flex;
-  align-items: flex-start;
+  align-items: baseline;
   justify-content: space-between;
-  gap: 14px;
-  margin-bottom: 18px;
+  gap: 12px;
+  margin-bottom: 10px;
 }
 
-.dashboard-mini-panel__header h3 {
-  margin: 0 0 6px;
-  font-size: 17px;
-  color: #0f172a;
+.focus-item__title {
+  color: var(--text-primary);
+  font-size: 15px;
+  font-weight: 700;
 }
 
-.dashboard-mini-panel__header p {
-  color: #64748b;
+.focus-item__value {
+  color: var(--text-primary);
+  font-size: 28px;
+  line-height: 1;
+}
+
+.focus-item__desc,
+.summary-panel__detail,
+.health-item__desc,
+.activity-item__content p,
+.evidence-log__message {
+  color: var(--text-secondary);
   font-size: 13px;
+  line-height: 1.7;
 }
 
-.dashboard-mini-panel__header strong {
-  font-size: 24px;
-  color: #1d4ed8;
-}
-
-.dashboard-mini-panel__bars {
-  display: flex;
-  align-items: flex-end;
-  gap: 8px;
-  height: 80px;
-}
-
-.dashboard-mini-panel__bars span {
-  flex: 1;
-  border-radius: 999px 999px 6px 6px;
-  background: linear-gradient(180deg, #60a5fa, #2563eb);
-  min-height: 18px;
-}
-
-.dashboard-activity-list {
+.summary-grid {
   display: flex;
   flex-direction: column;
   gap: 14px;
 }
 
-.dashboard-activity-item {
+.summary-panel {
+  padding: 18px;
+  border-radius: 18px;
+  border: 1px solid var(--line-soft);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(238, 242, 246, 0.9));
+}
+
+.summary-panel__label {
+  display: block;
+  margin-bottom: 10px;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.summary-panel__value {
+  display: block;
+  margin-bottom: 8px;
+  color: var(--text-primary);
+  font-size: 26px;
+}
+
+.health-item {
+  padding: 16px 0;
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.health-item:first-child {
+  padding-top: 0;
+}
+
+.health-item:last-child {
+  padding-bottom: 0;
+  border-bottom: 0;
+}
+
+.health-item__meta,
+.activity-item__meta,
+.evidence-log__head {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.health-item__meta {
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.health-item__label {
+  color: var(--text-primary);
+  font-weight: 700;
+}
+
+.health-item__badge,
+.evidence-log__badge,
+.evidence-count {
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;
+  padding: 0 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.health-item__badge.is-info,
+.evidence-log__badge.is-info {
+  background: rgba(36, 87, 197, 0.12);
+  color: #2457c5;
+}
+
+.health-item__badge.is-warning,
+.evidence-log__badge.is-warning {
+  background: rgba(183, 121, 31, 0.12);
+  color: #9a6618;
+}
+
+.health-item__badge.is-risk,
+.evidence-log__badge.is-risk {
+  background: rgba(196, 73, 61, 0.12);
+  color: #b43f34;
+}
+
+.health-item__badge.is-neutral {
+  background: var(--surface-3);
+  color: var(--text-secondary);
+}
+
+.activity-item {
   display: flex;
   gap: 12px;
   align-items: flex-start;
-  padding: 14px 0;
-  border-bottom: 1px solid rgba(226, 232, 240, 0.8);
+  padding: 16px 0;
+  border-bottom: 1px solid var(--line-soft);
 }
 
-.dashboard-activity-item:last-child {
-  border-bottom: 0;
+.activity-item:first-child {
+  padding-top: 0;
+}
+
+.activity-item:last-child {
   padding-bottom: 0;
+  border-bottom: 0;
 }
 
-.dashboard-activity-item__dot {
+.activity-item__dot {
   width: 10px;
   height: 10px;
+  margin-top: 8px;
   border-radius: 999px;
-  margin-top: 6px;
   flex-shrink: 0;
 }
 
-.dashboard-activity-item__content {
+.activity-item__content {
   display: flex;
   flex-direction: column;
   gap: 6px;
 }
 
-.dashboard-activity-item__meta {
-  display: flex;
-  gap: 10px;
-  flex-wrap: wrap;
-  color: #64748b;
+.activity-item__meta,
+.evidence-log__head {
+  color: var(--text-muted);
   font-size: 12px;
   font-weight: 600;
 }
 
-.dashboard-activity-item__content p {
-  margin: 0;
-  color: #0f172a;
-  line-height: 1.6;
+.evidence-count {
+  background: var(--surface-3);
+  color: var(--text-secondary);
 }
 
-.log-actions {
-  margin-left: auto;
-}
-
-.log-count {
-  font-size: 12px;
-  color: #94a3b8;
-  background: rgba(15, 23, 42, 0.04);
-  padding: 6px 10px;
-  border-radius: 999px;
-}
-
-.logs-section {
-  background: linear-gradient(180deg, #0f172a 0%, #111827 100%);
-  border-radius: 22px;
-  padding: 24px;
-  color: #f8fafc;
-  box-shadow: 0 28px 50px -34px rgba(15, 23, 42, 0.8);
-  border: 1px solid rgba(148, 163, 184, 0.12);
-}
-
-.logs-container {
-  font-family: 'Fira Code', monospace;
-  font-size: 12px;
-  line-height: 1.7;
-  max-height: 460px;
-  overflow-y: auto;
-  padding-right: 8px;
-}
-
-.logs-container::-webkit-scrollbar {
-  width: 6px;
-}
-
-.logs-container::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-.logs-container::-webkit-scrollbar-thumb {
-  background: rgba(255,255,255,0.12);
-  border-radius: 10px;
-}
-
-.log-line {
-  margin-bottom: 8px;
+.evidence-log-list {
   display: flex;
-  gap: 8px;
-  white-space: pre-wrap;
-  word-break: break-all;
-  padding: 6px 0;
-  border-bottom: 1px dashed rgba(148, 163, 184, 0.08);
+  flex-direction: column;
+  gap: 12px;
 }
 
-.log-time {
-  color: #64748b;
-  flex-shrink: 0;
-}
-
-.log-level {
-  font-weight: 700;
-  min-width: 45px;
-  flex-shrink: 0;
-}
-
-.log-module {
-  color: #a78bfa;
-  flex-shrink: 0;
-}
-
-.log-msg {
-  color: #e2e8f0;
-}
-
-.logs-empty {
+.evidence-log-list__empty {
+  padding: 32px 18px;
+  border-radius: 18px;
+  background: var(--surface-3);
+  color: var(--text-muted);
   text-align: center;
-  padding: 40px;
-  color: #64748b;
 }
 
-@media (max-width: 1200px) {
-  .dashboard-grid--metrics {
+.evidence-log {
+  padding: 16px 18px;
+  border-radius: 18px;
+  border: 1px solid var(--line-soft);
+  background: var(--surface-2);
+}
+
+.evidence-log__head {
+  margin-bottom: 8px;
+}
+
+@media (max-width: 1280px) {
+  .overview-main {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .dashboard-grid--main,
-  .dashboard-grid--bottom {
-    grid-template-columns: 1fr;
+  .overview-main :deep(.admin-section-card:last-child) {
+    grid-column: 1 / -1;
   }
 }
 
-@media (max-width: 640px) {
-  .dashboard-grid--metrics,
-  .dashboard-kpi-grid {
+@media (max-width: 1100px) {
+  .overview-strip,
+  .overview-evidence,
+  .overview-main {
     grid-template-columns: 1fr;
   }
 
-  .dashboard-hero {
+  .overview-metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 720px) {
+  .overview-strip {
+    padding: 22px;
+  }
+
+  .overview-strip__buttons {
+    justify-content: flex-start;
+  }
+
+  .overview-metrics {
+    grid-template-columns: 1fr;
+  }
+
+  .overview-strip__meta,
+  .health-item__meta {
     flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .focus-item__head {
+    flex-direction: column;
+    align-items: flex-start;
   }
 }
 </style>

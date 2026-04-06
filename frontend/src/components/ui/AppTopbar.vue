@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
+import { computed, onBeforeUnmount, onMounted } from 'vue';
 import { RouterLink, useRouter } from 'vue-router';
 
 import finmodproMark from '../../assets/finmodpro-mark.svg';
@@ -11,6 +11,14 @@ const props = defineProps({
   title: {
     type: String,
     default: 'FinModPro',
+  },
+  eyebrow: {
+    type: String,
+    default: 'FinModPro',
+  },
+  subtitle: {
+    type: String,
+    default: '',
   },
   area: {
     type: String,
@@ -29,6 +37,8 @@ const props = defineProps({
 const router = useRouter();
 const flash = useFlash();
 const profile = computed(() => authStorage.getProfile());
+const profileName = computed(() => profile.value?.user?.username || '当前用户');
+const roleLabel = computed(() => (props.area === 'admin' ? '管理员端' : '用户端'));
 const actions = computed(() => {
   const base = getTopbarActions(props.area, profile.value);
   if (props.switchTarget && props.switchLabel && !base.some((item) => item.to === props.switchTarget)) {
@@ -36,7 +46,6 @@ const actions = computed(() => {
   }
   return base;
 });
-const authExpiredMessage = ref('');
 
 const handleLogout = async () => {
   authStorage.clear();
@@ -44,8 +53,7 @@ const handleLogout = async () => {
 };
 
 const handleAuthExpired = async (event) => {
-  authExpiredMessage.value = event?.detail?.message || AUTH_EXPIRED_MESSAGE;
-  flash.error(authExpiredMessage.value);
+  flash.error(event?.detail?.message || AUTH_EXPIRED_MESSAGE);
 };
 
 onMounted(() => {
@@ -61,14 +69,18 @@ onBeforeUnmount(() => {
   <header class="app-topbar">
     <div class="app-topbar__title-group">
       <img class="app-topbar__brand-logo" :src="finmodproMark" alt="FinModPro" />
-      <div>
-        <p class="app-topbar__eyebrow">FinModPro</p>
+      <div class="app-topbar__copy">
+        <p class="app-topbar__eyebrow">{{ props.eyebrow }}</p>
         <h2>{{ props.title }}</h2>
+        <p v-if="props.subtitle" class="app-topbar__subtitle">{{ props.subtitle }}</p>
       </div>
     </div>
 
     <div class="app-topbar__actions">
-      <span class="app-topbar__user">{{ profile.user.username || '当前用户' }}</span>
+      <div class="app-topbar__identity">
+        <span class="app-topbar__role">{{ roleLabel }}</span>
+        <span class="app-topbar__user">{{ profileName }}</span>
+      </div>
       <template v-for="action in actions" :key="action.id">
         <button v-if="action.id === 'logout'" type="button" class="app-topbar__button" @click="handleLogout">
           {{ action.label }}
