@@ -2,6 +2,9 @@
 import { ref, onMounted } from "vue";
 import { riskApi } from "../api/risk.js";
 import { useFlash } from "../lib/flash.js";
+import AppSectionCard from "./ui/AppSectionCard.vue";
+import AppToolbar from "./ui/AppToolbar.vue";
+import MetaChips from "./ui/MetaChips.vue";
 
 const activeTab = ref("events");
 const flash = useFlash();
@@ -83,6 +86,18 @@ const getReviewTagType = (status) => {
   return 'info';
 };
 
+const getEventMetaChips = (item) => {
+  const chips = [];
+  if (item.confidence_score !== undefined || item.confidence !== undefined) {
+    const value = item.confidence_score !== undefined ? item.confidence_score : item.confidence;
+    chips.push({ key: 'confidence', label: `置信度: ${Math.round(value * 100)}%` });
+  }
+  if (item.document_id) {
+    chips.push({ key: 'document', label: `文档: ${item.document_id.substring(0, 8)}...`, title: item.document_id });
+  }
+  return chips;
+};
+
 const formatDate = (dateStr) => {
   if (!dateStr) return "N/A";
   try {
@@ -153,110 +168,97 @@ const generateReport = async () => {
       <el-tabs v-model="activeTab" class="risk-tabs">
         <el-tab-pane label="风险事件审核" name="events">
           <div class="tab-content risk-events-content">
-            <div class="section-heading">
-              <h3 class="section-heading__title">待处理风险事件</h3>
-              <p class="section-heading__desc">按公司、类型、等级和审核状态快速缩小范围，减少表格视觉噪音。</p>
-            </div>
+            <AppSectionCard title="待处理风险事件" desc="按公司、类型、等级和审核状态快速缩小范围，减少表格视觉噪音。" shadow="never">
+              <AppToolbar>
+                <el-form :inline="true" class="admin-form-row">
+                  <el-form-item>
+                    <el-input v-model="filters.company_name" placeholder="公司名称" clearable @keyup.enter="applyFilters" />
+                  </el-form-item>
+                  <el-form-item>
+                    <el-input v-model="filters.risk_type" placeholder="风险类型" clearable @keyup.enter="applyFilters" />
+                  </el-form-item>
+                  <el-form-item>
+                    <el-select v-model="filters.risk_level" placeholder="全部等级" clearable>
+                      <el-option label="高风险" value="high" />
+                      <el-option label="中风险" value="medium" />
+                      <el-option label="低风险" value="low" />
+                    </el-select>
+                  </el-form-item>
+                  <el-form-item>
+                    <el-select v-model="filters.review_status" placeholder="全部状态" clearable>
+                      <el-option label="待审核" value="pending" />
+                      <el-option label="已确认" value="approved" />
+                      <el-option label="已忽略" value="rejected" />
+                    </el-select>
+                  </el-form-item>
+                  <el-form-item>
+                    <el-button type="primary" @click="applyFilters" :loading="isEventsLoading">查询</el-button>
+                    <el-button @click="resetFilters" :disabled="isEventsLoading">重置</el-button>
+                  </el-form-item>
+                </el-form>
+              </AppToolbar>
 
-            <el-form :inline="true" class="toolbar">
-              <el-form-item>
-                <el-input v-model="filters.company_name" placeholder="公司名称" clearable @keyup.enter="applyFilters" />
-              </el-form-item>
-              <el-form-item>
-                <el-input v-model="filters.risk_type" placeholder="风险类型" clearable @keyup.enter="applyFilters" />
-              </el-form-item>
-              <el-form-item>
-                <el-select v-model="filters.risk_level" placeholder="全部等级" clearable>
-                  <el-option label="高风险" value="high" />
-                  <el-option label="中风险" value="medium" />
-                  <el-option label="低风险" value="low" />
-                </el-select>
-              </el-form-item>
-              <el-form-item>
-                <el-select v-model="filters.review_status" placeholder="全部状态" clearable>
-                  <el-option label="待审核" value="pending" />
-                  <el-option label="已确认" value="approved" />
-                  <el-option label="已忽略" value="rejected" />
-                </el-select>
-              </el-form-item>
-              <el-form-item>
-                <el-button type="primary" @click="applyFilters" :loading="isEventsLoading">查询</el-button>
-                <el-button @click="resetFilters" :disabled="isEventsLoading">重置</el-button>
-              </el-form-item>
-            </el-form>
+              <el-alert v-if="eventsErrorMsg" :title="eventsErrorMsg" type="error" show-icon :closable="false" />
 
-            <el-alert v-if="eventsErrorMsg" :title="eventsErrorMsg" type="error" show-icon :closable="false" />
-
-            <el-table v-else :data="events" stripe style="width: 100%" v-loading="isEventsLoading">
-              <el-table-column prop="company_name" label="公司名" min-width="160">
-                <template #default="scope">
-                  <span class="company-name">{{ scope.row.company_name || '未知公司' }}</span>
-                </template>
-              </el-table-column>
-              <el-table-column prop="risk_type" label="风险类型" width="140">
-                <template #default="scope">
-                  <el-tag effect="plain">{{ scope.row.risk_type }}</el-tag>
-                </template>
-              </el-table-column>
-              <el-table-column label="风险等级" width="120">
-                <template #default="scope">
-                  <el-tag :type="getRiskTagType(scope.row.risk_level)">
-                    {{ (scope.row.risk_level || 'unknown').toUpperCase() }}
-                  </el-tag>
-                </template>
-              </el-table-column>
-              <el-table-column label="事件时间" min-width="180">
-                <template #default="scope">
-                  <span class="muted-text">{{ formatDate(scope.row.event_date || scope.row.created_at) }}</span>
-                </template>
-              </el-table-column>
-              <el-table-column label="摘要 / 证据" min-width="320">
-                <template #default="scope">
-                  <div class="summary-block">
-                    <div class="summary-text">{{ scope.row.summary }}</div>
-                    <div v-if="scope.row.evidence_text" class="summary-block__quote">"{{ scope.row.evidence_text }}"</div>
-                    <div v-if="scope.row.confidence_score !== undefined || scope.row.confidence !== undefined || scope.row.document_id" class="meta-chip-row">
-                      <span v-if="scope.row.confidence_score !== undefined || scope.row.confidence !== undefined" class="meta-chip">
-                        置信度: {{ Math.round((scope.row.confidence_score !== undefined ? scope.row.confidence_score : scope.row.confidence) * 100) }}%
-                      </span>
-                      <span v-if="scope.row.document_id" class="meta-chip" :title="scope.row.document_id">
-                        文档: {{ scope.row.document_id.substring(0, 8) }}...
-                      </span>
+              <el-table v-else :data="events" stripe style="width: 100%" v-loading="isEventsLoading">
+                <el-table-column prop="company_name" label="公司名" min-width="160">
+                  <template #default="scope">
+                    <span class="company-name">{{ scope.row.company_name || '未知公司' }}</span>
+                  </template>
+                </el-table-column>
+                <el-table-column prop="risk_type" label="风险类型" width="140">
+                  <template #default="scope">
+                    <el-tag effect="plain">{{ scope.row.risk_type }}</el-tag>
+                  </template>
+                </el-table-column>
+                <el-table-column label="风险等级" width="120">
+                  <template #default="scope">
+                    <el-tag :type="getRiskTagType(scope.row.risk_level)">
+                      {{ (scope.row.risk_level || 'unknown').toUpperCase() }}
+                    </el-tag>
+                  </template>
+                </el-table-column>
+                <el-table-column label="事件时间" min-width="180">
+                  <template #default="scope">
+                    <span class="muted-text">{{ formatDate(scope.row.event_date || scope.row.created_at) }}</span>
+                  </template>
+                </el-table-column>
+                <el-table-column label="摘要 / 证据" min-width="320">
+                  <template #default="scope">
+                    <div class="summary-block">
+                      <div class="summary-text">{{ scope.row.summary }}</div>
+                      <div v-if="scope.row.evidence_text" class="summary-block__quote">"{{ scope.row.evidence_text }}"</div>
+                      <MetaChips :items="getEventMetaChips(scope.row)" />
                     </div>
-                  </div>
+                  </template>
+                </el-table-column>
+                <el-table-column label="审核状态" width="120">
+                  <template #default="scope">
+                    <el-tag :type="getReviewTagType((scope.row.review_status || 'pending').toLowerCase())">
+                      {{ getReviewStatusText(scope.row.review_status) }}
+                    </el-tag>
+                  </template>
+                </el-table-column>
+                <el-table-column label="操作" width="160" fixed="right">
+                  <template #default="scope">
+                    <div v-if="((scope.row.review_status || 'pending').toLowerCase() === 'pending')" class="inline-actions">
+                      <el-button type="success" plain size="small" @click="handleReview(scope.row, 'approved')">确认</el-button>
+                      <el-button type="danger" plain size="small" @click="handleReview(scope.row, 'rejected')">忽略</el-button>
+                    </div>
+                    <span v-else class="muted-text">-</span>
+                  </template>
+                </el-table-column>
+                <template #empty>
+                  <div class="admin-empty-state">暂无风险事件。</div>
                 </template>
-              </el-table-column>
-              <el-table-column label="审核状态" width="120">
-                <template #default="scope">
-                  <el-tag :type="getReviewTagType((scope.row.review_status || 'pending').toLowerCase())">
-                    {{ getReviewStatusText(scope.row.review_status) }}
-                  </el-tag>
-                </template>
-              </el-table-column>
-              <el-table-column label="操作" width="160" fixed="right">
-                <template #default="scope">
-                  <div v-if="((scope.row.review_status || 'pending').toLowerCase() === 'pending')" class="inline-actions">
-                    <el-button type="success" plain size="small" @click="handleReview(scope.row, 'approved')">确认</el-button>
-                    <el-button type="danger" plain size="small" @click="handleReview(scope.row, 'rejected')">忽略</el-button>
-                  </div>
-                  <span v-else class="muted-text">-</span>
-                </template>
-              </el-table-column>
-              <template #empty>
-                <div class="admin-empty-state">暂无风险事件。</div>
-              </template>
-            </el-table>
+              </el-table>
+            </AppSectionCard>
           </div>
         </el-tab-pane>
 
         <el-tab-pane label="风险报告生成" name="reports">
           <div class="tab-content risk-reports-content">
-            <el-card class="report-form-card" shadow="never">
-              <div class="section-heading">
-                <h3 class="section-heading__title">生成风险报告</h3>
-                <p class="section-heading__desc">支持按公司或时间区间生成，便于给管理层或业务侧直接复用。</p>
-              </div>
-
+            <AppSectionCard title="生成风险报告" desc="支持按公司或时间区间生成，便于给管理层或业务侧直接复用。" shadow="never">
               <el-form label-width="92px" class="risk-report-form">
                 <el-form-item label="报告类型">
                   <el-radio-group v-model="reportType">
@@ -283,7 +285,7 @@ const generateReport = async () => {
               </el-form>
 
               <el-alert v-if="reportErrorMsg" :title="reportErrorMsg" type="error" show-icon :closable="false" />
-            </el-card>
+            </AppSectionCard>
 
             <el-card v-if="generatedReport" class="report-result ui-card" shadow="never">
               <div class="report-header">
@@ -339,11 +341,9 @@ const generateReport = async () => {
 <style scoped>
 .risk-summary-shell { min-height: 760px; }
 .tab-content { display: flex; flex-direction: column; gap: 22px; }
-.toolbar { display: flex; flex-wrap: wrap; gap: 12px; }
 .company-name { font-weight: 700; white-space: nowrap; color: #1e293b; }
 .summary-text { font-weight: 600; color: #334155; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .risk-reports-content { gap: 22px; }
-.report-form-card { border-radius: 18px; }
 .risk-report-form :deep(.el-date-editor),
 .risk-report-form :deep(.el-input) { width: 100%; max-width: 360px; }
 .report-result { padding: 30px; }

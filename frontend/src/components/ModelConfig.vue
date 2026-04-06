@@ -2,6 +2,7 @@
 import { ref, onMounted, computed } from "vue";
 import { llmApi } from "../api/llm.js";
 import { useFlash } from "../lib/flash.js";
+import AppSectionCard from "./ui/AppSectionCard.vue";
 
 const configs = ref([]);
 const isLoading = ref(false);
@@ -72,14 +73,7 @@ const formatDate = (dateStr) => {
 
     <el-alert v-if="errorMsg" :title="errorMsg" type="error" show-icon :closable="false" />
 
-    <el-card class="ui-card ui-card--admin admin-section-card" shadow="never">
-      <template #header>
-        <div class="section-heading">
-          <h3 class="section-heading__title">对话模型 (Chat)</h3>
-          <div class="section-heading__desc">仅能启用一个对话模型用于问答。启用新模型将自动停用当前启用的模型。</div>
-        </div>
-      </template>
-
+    <AppSectionCard title="对话模型 (Chat)" desc="仅能启用一个对话模型用于问答。启用新模型将自动停用当前启用的模型。" admin>
       <div v-if="isLoading && chatConfigs.length === 0" class="admin-empty-state">加载中...</div>
       <div v-else-if="chatConfigs.length === 0" class="admin-empty-state">暂无对话模型配置</div>
       <el-table v-else :data="chatConfigs" stripe style="width: 100%">
@@ -111,16 +105,9 @@ const formatDate = (dateStr) => {
           </template>
         </el-table-column>
       </el-table>
-    </el-card>
+    </AppSectionCard>
 
-    <el-card class="ui-card ui-card--admin admin-section-card" shadow="never">
-      <template #header>
-        <div class="section-heading">
-          <h3 class="section-heading__title">向量模型 (Embedding)</h3>
-          <div class="section-heading__desc">仅能启用一个向量模型用于知识库处理。启用新模型将自动停用当前启用的模型。</div>
-        </div>
-      </template>
-
+    <AppSectionCard title="向量模型 (Embedding)" desc="仅能启用一个向量模型用于知识库处理。启用新模型将自动停用当前启用的模型。" admin>
       <div v-if="isLoading && embeddingConfigs.length === 0" class="admin-empty-state">加载中...</div>
       <div v-else-if="embeddingConfigs.length === 0" class="admin-empty-state">暂无向量模型配置</div>
       <el-table v-else :data="embeddingConfigs" stripe style="width: 100%">
@@ -152,6 +139,6 @@ const formatDate = (dateStr) => {
           </template>
         </el-table-column>
       </el-table>
-    </el-card>
+    </AppSectionCard>
   </div>
 </template>
