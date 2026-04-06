@@ -278,15 +278,6 @@ textarea {
   height: auto;
 }
 
-.auth-layout__eyebrow {
-  color: #2563eb;
-  font-size: 13px;
-  font-weight: 700;
-  letter-spacing: 0.18em;
-  text-transform: uppercase;
-  margin-bottom: 12px;
-}
-
 .auth-layout__headline {
   margin: 0;
   max-width: 760px;
@@ -297,50 +288,25 @@ textarea {
   color: #0f172a;
 }
 
-.auth-layout__metrics {
+.auth-layout__brand-text {
   display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
+  flex-direction: column;
+  gap: 2px;
 }
 
-.auth-layout__metric-chip {
-  display: inline-flex;
-  align-items: center;
-  min-height: 38px;
-  padding: 0 14px;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.65);
-  border: 1px solid rgba(148, 163, 184, 0.28);
-  color: #1d4ed8;
+.auth-layout__brand-name {
+  font-size: 26px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  color: #0f172a;
+  text-transform: uppercase;
+}
+
+.auth-layout__brand-subname {
   font-size: 13px;
   font-weight: 700;
-  box-shadow: 0 10px 24px -22px rgba(15, 23, 42, 0.35);
-}
-
-.auth-layout__capabilities {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 16px;
-}
-
-.auth-layout__capability-card {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  min-height: 80px;
-  padding: 0 20px;
-  border-radius: 20px;
-  background: rgba(255, 255, 255, 0.48);
-  border: 1px solid rgba(191, 219, 254, 0.65);
-  backdrop-filter: blur(14px);
-  box-shadow: 0 20px 30px -28px rgba(30, 64, 175, 0.28);
-}
-
-.auth-layout__capability-title {
-  margin: 0;
-  font-size: 16px;
-  color: #1e3a8a;
-  font-weight: 700;
+  color: #2563eb;
+  letter-spacing: 0.12em;
 }
 
 .auth-layout__panel {
@@ -875,8 +841,8 @@ textarea {
     gap: 12px;
   }
 
-  .auth-layout__wordmark {
-    width: 170px;
+  .auth-layout__brand-name {
+    font-size: 22px;
   }
 
   .auth-layout__headline {

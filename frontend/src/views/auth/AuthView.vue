@@ -18,6 +18,7 @@ const loading = ref(false);
 const status = ref({ type: '', message: '' });
 const passwordVisible = ref(false);
 const confirmPasswordVisible = ref(false);
+const submitted = ref(false);
 const form = reactive({
   username: '',
   email: '',
@@ -26,7 +27,8 @@ const form = reactive({
   agreeTerms: false,
 });
 
-const errors = computed(() => validateAuthForm(mode.value, form));
+const validationErrors = computed(() => validateAuthForm(mode.value, form));
+const errors = computed(() => (submitted.value ? validationErrors.value : {}));
 
 const resetStatus = () => {
   status.value = { type: '', message: '' };
@@ -34,6 +36,7 @@ const resetStatus = () => {
 
 const switchMode = (nextMode) => {
   mode.value = nextMode;
+  submitted.value = false;
   passwordVisible.value = false;
   confirmPasswordVisible.value = false;
   resetStatus();
@@ -48,9 +51,10 @@ onMounted(() => {
 
 const submit = async () => {
   resetStatus();
+  submitted.value = true;
 
-  const validationErrors = errors.value;
-  if (Object.keys(validationErrors).length > 0 || loading.value) {
+  const currentValidationErrors = validationErrors.value;
+  if (Object.keys(currentValidationErrors).length > 0 || loading.value) {
     return;
   }
 
@@ -81,6 +85,7 @@ const submit = async () => {
 
     status.value = { type: 'success', message: '注册成功，请使用新账号登录。' };
     mode.value = 'login';
+    submitted.value = false;
     form.password = '';
     form.confirmPassword = '';
   } catch (error) {
