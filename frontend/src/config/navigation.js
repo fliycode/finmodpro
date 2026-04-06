@@ -8,7 +8,7 @@ export const navigationMap = {
     { id: 'risk', label: '风险与摘要', to: '/workspace/risk', icon: 'shield' },
   ],
   admin: [
-    { id: 'admin-overview', label: '运营总览', to: '/admin/overview', icon: 'dashboard' },
+    { id: 'admin-overview', label: '仪表盘', to: '/admin/overview', icon: 'dashboard' },
     { id: 'admin-users', label: '用户管理', to: '/admin/users', icon: 'users' },
     { id: 'admin-models', label: '模型配置', to: '/admin/models', icon: 'sliders' },
     { id: 'admin-evaluation', label: '评测结果', to: '/admin/evaluation', icon: 'beaker' },
