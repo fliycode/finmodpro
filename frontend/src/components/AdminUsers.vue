@@ -94,6 +94,7 @@ const filteredUsers = computed(() => {
 });
 
 const openEditDrawer = (user) => {
+  if (!user) return;
   selectedUser.value = {
     ...JSON.parse(JSON.stringify(user)),
     groups: Array.isArray(user.groups) ? [...user.groups] : [],
@@ -162,16 +163,16 @@ const handleUpdateGroups = async () => {
         <el-table-column prop="username" label="用户名" min-width="160" />
         <el-table-column prop="email" label="邮箱" min-width="220" />
         <el-table-column label="角色组" min-width="220">
-          <template #default="{ row }">
-            <div v-if="row.groups.length" class="tag-list">
-              <el-tag v-for="groupName in row.groups" :key="groupName" size="small">{{ groupName }}</el-tag>
+          <template #default="scope">
+            <div v-if="scope && scope.row && scope.row.groups && scope.row.groups.length" class="tag-list">
+              <el-tag v-for="groupName in scope.row.groups" :key="groupName" size="small">{{ groupName }}</el-tag>
             </div>
             <span v-else class="muted-text">无角色</span>
           </template>
         </el-table-column>
         <el-table-column label="操作" width="140" fixed="right">
-          <template #default="{ row }">
-            <el-button type="primary" plain size="small" @click="openEditDrawer(row)">编辑角色</el-button>
+          <template #default="scope">
+            <el-button type="primary" plain size="small" @click="openEditDrawer(scope && scope.row ? scope.row : null)">编辑角色</el-button>
           </template>
         </el-table-column>
         <template #empty>
