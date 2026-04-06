@@ -39,6 +39,8 @@ export const qaApi = {
       return {
         answer: data.answer || data.content || data.response || data.text || '',
         citations,
+        answer_mode: data.answer_mode || 'cited',
+        answer_notice: data.answer_notice || '',
         duration_ms: data.duration_ms || 0,
       };
     } catch (error) {

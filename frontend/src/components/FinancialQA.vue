@@ -168,6 +168,8 @@ const handleAsk = async () => {
       role: 'assistant',
       content: response.answer || '未获取到回答，请稍后重试。',
       citations: response.citations,
+      answer_mode: response.answer_mode,
+      answer_notice: response.answer_notice,
       duration_ms: response.duration_ms,
     });
   } catch (error) {
@@ -212,6 +214,9 @@ const handleAsk = async () => {
               {{ msg.content }}
               <div v-if="msg.duration_ms" class="duration-info">
                 耗时: {{ (msg.duration_ms / 1000).toFixed(2) }}s
+              </div>
+              <div v-if="msg.answer_notice" class="answer-notice">
+                {{ msg.answer_notice }}
               </div>
             </div>
 
@@ -444,6 +449,16 @@ const handleAsk = async () => {
   color: #94a3b8;
   margin-top: 8px;
   text-align: right;
+}
+
+.answer-notice {
+  margin-top: 8px;
+  font-size: 12px;
+  color: #8a6a12;
+  background: #fff8e6;
+  border: 1px solid #f6d68a;
+  border-radius: 10px;
+  padding: 8px 10px;
 }
 
 .user .duration-info {

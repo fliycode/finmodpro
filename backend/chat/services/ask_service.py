@@ -21,7 +21,15 @@ def _build_context(citations):
 
 def _build_answer(question, citations):
     if not citations:
-        return f"针对“{question}”，当前知识库中未检索到相关资料，无法生成基于引用的回答。"
+        provider = get_chat_provider()
+        return provider.chat(
+            messages=[
+                {
+                    "role": "user",
+                    "content": question,
+                }
+            ]
+        )
 
     prompt = render_prompt(
         "chat/answer.txt",
@@ -50,6 +58,12 @@ def ask_question(*, question, filters=None, top_k=5):
         "query": question,
         "answer": _build_answer(question, citations),
         "citations": citations,
+        "answer_mode": "cited" if citations else "fallback",
+        "answer_notice": (
+            None
+            if citations
+            else "当前回答未命中知识库引用，仅基于通用模型能力生成，请注意甄别。"
+        ),
         "duration_ms": duration_ms,
     }
     create_retrieval_log(
