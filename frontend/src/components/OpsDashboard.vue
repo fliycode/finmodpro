@@ -39,33 +39,36 @@ const getLogLevelColor = (level) => {
 </script>
 
 <template>
-  <div class="ops-shell">
-    <div class="header">
-      <div class="title-group">
-        <h3>工作台大盘</h3>
-        <span class="badge">管理员模式</span>
+  <div class="page-stack admin-page">
+    <section class="page-hero page-hero--admin">
+      <div>
+        <div class="page-hero__eyebrow">Admin / Overview</div>
+        <h1 class="page-hero__title">管理控制台总览</h1>
+        <p class="page-hero__subtitle">
+          后台页面强化控制台感：更深的底色、更强的状态信息和更明确的监控反馈，用来和业务工作区形成明显区隔。
+        </p>
       </div>
-      <button class="refresh-btn" @click="fetchData" :disabled="isLoading">
+      <button class="refresh-btn refresh-btn--hero" @click="fetchData" :disabled="isLoading">
         {{ isLoading ? '刷新中...' : '刷新数据' }}
       </button>
-    </div>
+    </section>
 
     <div v-if="errorMsg" class="error-state">{{ errorMsg }}</div>
 
     <div class="grid">
-      <div class="metric-card">
+      <div class="metric-card ui-card ui-card--admin">
         <div class="label">知识库数</div>
         <div class="value">{{ dashboardStats.knowledgebase_count !== undefined ? dashboardStats.knowledgebase_count : '--' }}</div>
       </div>
-      <div class="metric-card">
+      <div class="metric-card ui-card ui-card--admin">
         <div class="label">文档总数</div>
         <div class="value">{{ dashboardStats.document_count !== undefined ? dashboardStats.document_count : '--' }}</div>
       </div>
-      <div class="metric-card">
+      <div class="metric-card ui-card ui-card--admin">
         <div class="label">风险事件数</div>
         <div class="value">{{ dashboardStats.risk_event_count !== undefined ? dashboardStats.risk_event_count : '--' }}</div>
       </div>
-      <div class="metric-card">
+      <div class="metric-card ui-card ui-card--admin metric-card--alert">
         <div class="label">待审核风险数</div>
         <div class="value highlight">{{ dashboardStats.pending_risk_event_count !== undefined ? dashboardStats.pending_risk_event_count : '--' }}</div>
       </div>
@@ -73,7 +76,10 @@ const getLogLevelColor = (level) => {
 
     <div class="logs-section">
       <div class="logs-header">
-        <h4>实时系统日志</h4>
+        <div>
+          <h4>实时系统日志</h4>
+          <p class="logs-subtitle">用于快速定位运行状态、错误和服务波动。</p>
+        </div>
         <div class="log-actions">
           <span class="log-count">{{ logs.length }} 条记录</span>
         </div>
@@ -92,40 +98,34 @@ const getLogLevelColor = (level) => {
 </template>
 
 <style scoped>
-.ops-shell { display: flex; flex-direction: column; gap: 24px; }
-.header { display: flex; align-items: center; justify-content: space-between; }
-.title-group { display: flex; align-items: center; gap: 12px; }
-.header h3 { margin: 0; color: #1e293b; }
-.badge { background: #fee2e2; color: #991b1b; padding: 2px 8px; border-radius: 12px; font-size: 11px; font-weight: 700; text-transform: uppercase; }
-.refresh-btn { padding: 8px 16px; background: white; border: 1px solid #e2e8f0; border-radius: 6px; font-size: 13px; cursor: pointer; transition: all 0.2s; }
-.refresh-btn:hover { background: #f8fafc; border-color: #cbd5e1; }
-
-.error-state { padding: 12px; background: #fef2f2; color: #ef4444; border-radius: 8px; font-size: 14px; text-align: center; border: 1px solid #fca5a5; }
-
+.admin-page { gap: 26px; }
+.error-state { padding: 14px 16px; background: #fef2f2; color: #ef4444; border-radius: 14px; font-size: 14px; text-align: center; border: 1px solid #fca5a5; }
 .grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 20px; }
-.metric-card { background: white; border-radius: 12px; padding: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); position: relative; overflow: hidden; }
-.metric-card::after { content: ''; position: absolute; top: 0; left: 0; width: 4px; height: 100%; background: #6366f1; opacity: 0.5; }
-.metric-card .label { color: #64748b; font-size: 13px; margin-bottom: 8px; font-weight: 500; }
-.metric-card .value { font-size: 24px; font-weight: 700; color: #1e293b; margin-bottom: 4px; }
-.metric-card .value.highlight { color: #f59e0b; }
-
-.logs-section { background: #1e293b; border-radius: 12px; padding: 24px; color: #f8fafc; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1); }
-.logs-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 12px; }
-.logs-header h4 { margin: 0; font-size: 16px; color: #e2e8f0; }
-.log-count { font-size: 12px; color: #94a3b8; }
-
-.logs-container { font-family: 'Fira Code', monospace; font-size: 12px; line-height: 1.6; max-height: 400px; overflow-y: auto; padding-right: 8px; }
+.metric-card { position: relative; overflow: hidden; padding: 22px; }
+.metric-card::after { content: ''; position: absolute; top: 0; left: 0; width: 5px; height: 100%; background: linear-gradient(180deg, #2563eb, #60a5fa); opacity: 0.95; }
+.metric-card--alert::after { background: linear-gradient(180deg, #f59e0b, #f97316); }
+.metric-card .label { color: #64748b; font-size: 13px; margin-bottom: 10px; font-weight: 600; }
+.metric-card .value { font-size: 28px; font-weight: 800; color: #0f172a; margin-bottom: 4px; }
+.metric-card .value.highlight { color: #c2410c; }
+.refresh-btn { padding: 10px 16px; background: white; border: 1px solid #dbe4f0; border-radius: 10px; font-size: 13px; cursor: pointer; transition: all 0.2s; font-weight: 700; }
+.refresh-btn:hover { background: #f8fafc; border-color: #cbd5e1; }
+.refresh-btn--hero { background: rgba(255, 255, 255, 0.12); color: #f8fafc; border-color: rgba(255,255,255,0.2); }
+.refresh-btn--hero:hover { background: rgba(255,255,255,0.18); }
+.logs-section { background: linear-gradient(180deg, #0f172a 0%, #111827 100%); border-radius: 22px; padding: 24px; color: #f8fafc; box-shadow: 0 28px 50px -34px rgba(15, 23, 42, 0.8); border: 1px solid rgba(148, 163, 184, 0.12); }
+.logs-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 18px; border-bottom: 1px solid rgba(255,255,255,0.08); padding-bottom: 14px; gap: 16px; }
+.logs-header h4 { margin: 0; font-size: 18px; color: #e2e8f0; }
+.logs-subtitle { margin-top: 6px; font-size: 13px; color: rgba(148, 163, 184, 0.88); }
+.log-count { font-size: 12px; color: #94a3b8; background: rgba(255,255,255,0.06); padding: 6px 10px; border-radius: 999px; }
+.logs-container { font-family: 'Fira Code', monospace; font-size: 12px; line-height: 1.7; max-height: 460px; overflow-y: auto; padding-right: 8px; }
 .logs-container::-webkit-scrollbar { width: 6px; }
 .logs-container::-webkit-scrollbar-track { background: transparent; }
-.logs-container::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 10px; }
-
-.log-line { margin-bottom: 6px; display: flex; gap: 8px; white-space: pre-wrap; word-break: break-all; }
+.logs-container::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.12); border-radius: 10px; }
+.log-line { margin-bottom: 8px; display: flex; gap: 8px; white-space: pre-wrap; word-break: break-all; padding: 6px 0; border-bottom: 1px dashed rgba(148, 163, 184, 0.08); }
 .log-time { color: #64748b; flex-shrink: 0; }
 .log-level { font-weight: 700; min-width: 45px; flex-shrink: 0; }
-.log-module { color: #a855f7; flex-shrink: 0; }
+.log-module { color: #a78bfa; flex-shrink: 0; }
 .log-msg { color: #e2e8f0; }
 .logs-empty { text-align: center; padding: 40px; color: #64748b; }
-
 @media (max-width: 1200px) {
   .grid { grid-template-columns: repeat(2, 1fr); }
 }
