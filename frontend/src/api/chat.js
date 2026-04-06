@@ -19,7 +19,20 @@ const normalizeSession = (payload, fallbackSessionId = null) => {
 
 export const chatApi = {
   async listHistory() {
-    return [];
+    const data = await apiConfig.fetchJson('/api/chat/sessions', {
+      method: 'GET',
+      auth: true,
+    });
+
+    const sessions = data?.data?.sessions ?? data?.sessions ?? [];
+    return Array.isArray(sessions)
+      ? sessions.map((session) => ({
+          id: session.id ?? session.session_id ?? null,
+          title: session.title ?? session.name ?? '新会话',
+          lastMessagePreview: session.last_message_preview ?? '',
+          updatedAt: session.updated_at ?? session.updatedAt ?? '',
+        }))
+      : [];
   },
 
   async createSession(title = '新会话') {
