@@ -12,3 +12,4 @@ milvus-lite==2.5.1
 setuptools>=75
 langchain
 langchain-openai
+langchain-milvus

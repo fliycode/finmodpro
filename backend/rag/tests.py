@@ -10,9 +10,10 @@ from django.test import Client, TestCase, override_settings
 from authentication.models import User
 from authentication.services.jwt_service import generate_access_token
 from common.exceptions import UpstreamRateLimitError
-from knowledgebase.models import Document
+from knowledgebase.models import Document, DocumentChunk
 from knowledgebase.services.document_service import create_document_from_upload, ingest_document
 from rag.models import RetrievalLog
+from rag.services.embedding_service import tokenize
 from rag.services.vector_store_service import clear_store, index_document
 from rbac.services.rbac_service import ROLE_ADMIN, seed_roles_and_permissions
 
@@ -20,6 +21,57 @@ from rbac.services.rbac_service import ROLE_ADMIN, seed_roles_and_permissions
 class FakeEmbeddingProvider:
     def embed(self, *, texts, options=None):
         return [[float(index + 1) for index in range(64)] for _ in texts]
+
+
+def fake_vector_search(*, query, filters=None, top_k=5):
+    query_tokens = set(tokenize(query))
+    results = []
+    queryset = DocumentChunk.objects.select_related("document").order_by("id")
+    for chunk in queryset:
+        metadata = chunk.metadata or {}
+        document = chunk.document
+        document_id = filters.get("document_id") if filters else None
+        if document_id not in (None, "") and document.id != int(document_id):
+            continue
+        doc_type = filters.get("doc_type") if filters else None
+        if doc_type and document.doc_type != doc_type:
+            continue
+        source_date_from = filters.get("source_date_from") if filters else None
+        if source_date_from and (
+            document.source_date is None or document.source_date.isoformat() < source_date_from
+        ):
+            continue
+        source_date_to = filters.get("source_date_to") if filters else None
+        if source_date_to and (
+            document.source_date is None or document.source_date.isoformat() > source_date_to
+        ):
+            continue
+
+        searchable_tokens = set(
+            tokenize(f"{metadata.get('document_title') or document.title}\n{chunk.content}")
+        )
+        overlap = len(query_tokens & searchable_tokens)
+        if overlap <= 0:
+            continue
+        score = overlap / max(len(query_tokens), 1)
+        results.append(
+            {
+                "document_id": document.id,
+                "chunk_id": chunk.id,
+                "document_title": metadata.get("document_title") or document.title,
+                "doc_type": metadata.get("doc_type") or document.doc_type,
+                "source_date": metadata.get("source_date")
+                or (document.source_date.isoformat() if document.source_date else None),
+                "page_label": metadata.get("page_label", f"chunk-{chunk.chunk_index + 1}"),
+                "snippet": chunk.content,
+                "metadata": metadata,
+                "score": score,
+                "vector_score": score,
+                "keyword_score": 0.0,
+            }
+        )
+    results.sort(key=lambda item: (item["score"], item["chunk_id"]), reverse=True)
+    return results[: int(top_k)]
 
 
 @override_settings(
@@ -36,6 +88,11 @@ class RagRetrievalApiTests(TestCase):
             return_value=FakeEmbeddingProvider(),
         )
         self.embedding_provider_patcher.start()
+        self.vector_search_patcher = patch(
+            "knowledgebase.services.vector_service.VectorService.search",
+            side_effect=fake_vector_search,
+        )
+        self.vector_search_patcher.start()
         self.vector_index_patcher = patch(
             "knowledgebase.services.document_service.index_document_chunks",
             side_effect=index_document,
@@ -93,6 +150,7 @@ class RagRetrievalApiTests(TestCase):
 
     def tearDown(self):
         self.embedding_provider_patcher.stop()
+        self.vector_search_patcher.stop()
         self.override.disable()
         self.vector_index_patcher.stop()
         shutil.rmtree(self.media_root, ignore_errors=True)
@@ -179,6 +237,32 @@ class RagRetrievalApiTests(TestCase):
         self.assertEqual(len(payload["results"]), 1)
         self.assertEqual(payload["results"][0]["document_title"], "Treasury hedging note")
         self.assertIn("foreign exchange exposure", payload["results"][0]["snippet"])
+
+    @patch("knowledgebase.services.vector_service.VectorService.search")
+    def test_retrieval_query_uses_milvus_backing_store(self, mocked_search):
+        mocked_search.return_value = [
+            {
+                "document_id": self.first_document.id,
+                "chunk_id": self.first_document.chunks.first().id,
+                "document_title": "Revenue memo",
+                "doc_type": "txt",
+                "source_date": "2025-01-15",
+                "page_label": "chunk-1",
+                "snippet": "cash flow revenue",
+                "metadata": {"document_id": self.first_document.id},
+                "score": 0.91,
+            }
+        ]
+
+        response = self.client.post(
+            "/api/rag/retrieval/query",
+            data=json.dumps({"query": "cash flow revenue"}),
+            content_type="application/json",
+            HTTP_AUTHORIZATION=f"Bearer {self.access_token}",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        mocked_search.assert_called_once()
 
     def test_retrieval_filters_still_apply_to_keyword_hits(self):
         response = self.client.post(
@@ -289,6 +373,11 @@ class KnowledgebaseIngestFailureStateTests(TestCase):
             return_value=FakeEmbeddingProvider(),
         )
         self.embedding_provider_patcher.start()
+        self.vector_search_patcher = patch(
+            "knowledgebase.services.vector_service.VectorService.search",
+            side_effect=fake_vector_search,
+        )
+        self.vector_search_patcher.start()
         self.vector_index_patcher = patch(
             "knowledgebase.services.document_service.index_document_chunks",
             side_effect=index_document,
@@ -304,6 +393,7 @@ class KnowledgebaseIngestFailureStateTests(TestCase):
 
     def tearDown(self):
         self.embedding_provider_patcher.stop()
+        self.vector_search_patcher.stop()
         self.override.disable()
         self.vector_index_patcher.stop()
         shutil.rmtree(self.media_root, ignore_errors=True)

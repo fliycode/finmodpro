@@ -38,6 +38,8 @@ REDIS_PORT = get_int_env("REDIS_PORT", 6379)
 REDIS_DB = get_int_env("REDIS_DB", 0)
 REDIS_PASSWORD = get_env("REDIS_PASSWORD", "")
 MILVUS_URI = get_env("MILVUS_URI", str(BASE_DIR / "milvus.db"))
+MILVUS_TOKEN = get_env("MILVUS_TOKEN", "")
+MILVUS_DB_NAME = get_env("MILVUS_DB_NAME", "")
 MILVUS_COLLECTION_NAME = get_env(
     "MILVUS_COLLECTION_NAME",
     "knowledgebase_document_chunks",
