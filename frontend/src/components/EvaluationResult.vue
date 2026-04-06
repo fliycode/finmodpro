@@ -143,34 +143,34 @@ const formatPercent = (val) => {
     <AppSectionCard title="评测记录" desc="展示任务状态、准确率和平均延迟，便于快速比较模型表现。" admin>
       <el-table :data="evaluations" stripe style="width: 100%" v-loading="isLoading">
         <el-table-column prop="task_type" label="任务类型" min-width="140">
-          <template #default="scope">
-            <el-tag effect="plain">{{ scope.row.task_type }}</el-tag>
+          <template #default="{ row }">
+            <el-tag effect="plain">{{ row.task_type }}</el-tag>
           </template>
         </el-table-column>
         <el-table-column prop="version" label="版本" width="140">
-          <template #default="scope">
-            {{ scope.row.version || '--' }}
+          <template #default="{ row }">
+            {{ row.version || '--' }}
           </template>
         </el-table-column>
         <el-table-column label="状态" width="120">
-          <template #default="scope">
-            <el-tag :type="getStatusTagType(scope.row.status)">
-              {{ getStatusText(scope.row.status) }}
+          <template #default="{ row }">
+            <el-tag :type="getStatusTagType(row.status)">
+              {{ getStatusText(row.status) }}
             </el-tag>
           </template>
         </el-table-column>
         <el-table-column label="QA 准确率" width="120">
-          <template #default="scope">{{ formatPercent(scope.row.qa_accuracy) }}</template>
+          <template #default="{ row }">{{ formatPercent(row.qa_accuracy) }}</template>
         </el-table-column>
         <el-table-column label="提取准确率" width="120">
-          <template #default="scope">{{ formatPercent(scope.row.extraction_accuracy) }}</template>
+          <template #default="{ row }">{{ formatPercent(row.extraction_accuracy) }}</template>
         </el-table-column>
         <el-table-column label="平均延迟 (ms)" width="140">
-          <template #default="scope">{{ scope.row.average_latency_ms !== null ? scope.row.average_latency_ms : '--' }}</template>
+          <template #default="{ row }">{{ row.average_latency_ms !== null ? row.average_latency_ms : '--' }}</template>
         </el-table-column>
         <el-table-column label="创建时间" min-width="180">
-          <template #default="scope">
-            <span class="muted-text">{{ formatDate(scope.row.created_at) }}</span>
+          <template #default="{ row }">
+            <span class="muted-text">{{ formatDate(row.created_at) }}</span>
           </template>
         </el-table-column>
         <template #empty>
