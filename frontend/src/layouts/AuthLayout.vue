@@ -1,26 +1,10 @@
 <script setup>
-import finmodproLogo from '../assets/finmodpro-logo.svg';
+import finmodproMark from '../assets/finmodpro-mark.svg';
+import finmodproWordmark from '../assets/finmodpro-wordmark.svg';
 
-const capabilityItems = [
-  {
-    title: '财务建模',
-    description: '多维指标分析、结构化测算与模型推演。',
-  },
-  {
-    title: '知识检索',
-    description: '文档入库、语义召回与问答辅助一体化。',
-  },
-  {
-    title: '风险决策',
-    description: '风险识别、过程跟踪与报告输出闭环。',
-  },
-];
+const capabilityItems = ['财务建模', '知识搜索', '风险决策'];
 
-const trustMetrics = [
-  '统一认证入口',
-  '角色化工作台',
-  '面向财务与风控场景',
-];
+const trustMetrics = ['统一入口', '角色化工作台', '智能分析'];
 </script>
 
 <template>
@@ -28,13 +12,13 @@ const trustMetrics = [
     <section class="auth-layout__brand">
       <div class="auth-layout__brand-shell">
         <div class="auth-layout__brand-top">
-          <img class="auth-layout__logo" :src="finmodproLogo" alt="FinModPro" />
+          <div class="auth-layout__brand-lockup">
+            <img class="auth-layout__brand-mark" :src="finmodproMark" alt="FinModPro" />
+            <img class="auth-layout__wordmark" :src="finmodproWordmark" alt="FinModPro" />
+          </div>
           <div>
-            <p class="auth-layout__eyebrow">FINANCIAL MODELING PLATFORM</p>
-            <h1>从财务数据到风险洞察，一站式完成建模、检索与决策支持。</h1>
-            <p class="auth-layout__subtitle">
-              FinModPro 面向财务分析、知识管理与风控场景，提供统一工作台、智能问答与结构化决策辅助能力。
-            </p>
+            <p class="auth-layout__eyebrow">金融建模平台</p>
+            <h1 class="auth-layout__headline">从数据到洞察，辅助更稳的财务与风险决策</h1>
           </div>
         </div>
 
@@ -45,12 +29,8 @@ const trustMetrics = [
         </div>
 
         <div class="auth-layout__capabilities">
-          <article v-for="item in capabilityItems" :key="item.title" class="auth-layout__capability-card">
-            <div class="auth-layout__capability-dot" />
-            <div>
-              <h2 class="auth-layout__capability-title">{{ item.title }}</h2>
-              <p class="auth-layout__capability-desc">{{ item.description }}</p>
-            </div>
+          <article v-for="item in capabilityItems" :key="item" class="auth-layout__capability-card">
+            <h2 class="auth-layout__capability-title">{{ item }}</h2>
           </article>
         </div>
       </div>

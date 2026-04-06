@@ -116,11 +116,7 @@ const submit = async () => {
 
     <div class="auth-card__body">
       <div class="auth-card__heading">
-        <p class="auth-card__eyebrow">FinModPro Workspace</p>
-        <h2>{{ mode === 'login' ? '欢迎回到智能建模工作台' : '创建你的平台账户' }}</h2>
-        <p class="auth-card__hint">
-          {{ mode === 'login' ? '登录后继续处理模型、文档与风险任务。' : '注册后即可进入对应角色的工作区与管理空间。' }}
-        </p>
+        <p class="auth-card__eyebrow">FinModPro</p>
       </div>
 
       <div v-if="status.message" class="auth-card__status" :class="`is-${status.type}`">
@@ -202,9 +198,7 @@ const submit = async () => {
           {{ loading ? '提交中...' : mode === 'login' ? '进入工作台' : '创建并继续' }}
         </button>
       
-        <p class="auth-card__footnote">
-          {{ mode === 'login' ? '使用统一身份认证访问知识库、建模与风险分析模块。' : '默认根据角色配置跳转到对应首页。' }}
-        </p>
+        <div class="auth-card__footnote" />
       </form>
     </div>
   </div>
