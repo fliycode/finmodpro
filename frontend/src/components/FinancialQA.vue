@@ -17,6 +17,9 @@ const query = ref("");
 const messages = ref([{ role: "system", content: "您好，我是您的金融助手。请输入您的问题。" }]);
 const isAsking = ref(false);
 const messagesContainer = ref(null);
+const sessionOptions = ref([]);
+const isLoadingSessions = ref(false);
+const isHydratingSession = ref(false);
 
 const getAvatarLabel = (role) => {
   if (role === 'user') return '我';
@@ -47,6 +50,17 @@ const pushSystemMessage = (content, tone = 'info') => {
   messages.value.push({ role: 'system', content, tone });
 };
 
+const refreshSessionOptions = async () => {
+  isLoadingSessions.value = true;
+  try {
+    sessionOptions.value = await chatApi.listHistory();
+  } catch (error) {
+    console.error('加载会话列表失败:', error);
+  } finally {
+    isLoadingSessions.value = false;
+  }
+};
+
 const scrollToBottom = async () => {
   await nextTick();
   if (messagesContainer.value) {
@@ -72,34 +86,54 @@ const syncSessionRoute = async (sessionId) => {
 
 const loadSession = async (id) => {
   if (!id) return;
+  isHydratingSession.value = true;
   try {
     const session = await chatApi.getSession(id);
     if (session.messages && session.messages.length > 0) {
-      messages.value = [{ role: "system", content: "已加载历史会话...", tone: 'success' }, ...session.messages];
+      messages.value = session.messages;
     } else {
       messages.value = [{ role: "system", content: `已加载会话：${session.title || '无标题'}`, tone: 'success' }];
     }
   } catch (error) {
     console.error("加载会话失败:", error);
     messages.value = [{ role: "system", content: "加载会话失败，请刷新页面后重试。", tone: 'error' }];
+  } finally {
+    isHydratingSession.value = false;
   }
   await scrollToBottom();
 };
 
 watch(() => props.sessionId, (newId) => {
   currentSessionId.value = newId;
-  if (newId) {
+  if (newId && !isHydratingSession.value && !isAsking.value) {
     loadSession(newId);
-  } else {
+  } else if (!newId) {
     messages.value = [{ role: "system", content: "您好，我是您的金融助手。请输入您的问题。", tone: 'info' }];
   }
 });
 
-onMounted(() => {
+onMounted(async () => {
+  await refreshSessionOptions();
   if (currentSessionId.value) {
     loadSession(currentSessionId.value);
   }
 });
+
+const handleSessionChange = async (event) => {
+  const nextId = event.target.value;
+  currentSessionId.value = nextId || null;
+
+  if (nextId) {
+    await syncSessionRoute(nextId);
+    await loadSession(nextId);
+    return;
+  }
+
+  const nextQuery = { ...router.currentRoute.value.query };
+  delete nextQuery.session;
+  await router.replace({ query: nextQuery });
+  messages.value = [{ role: 'system', content: '您好，我是您的金融助手。请输入您的问题。', tone: 'info' }];
+};
 
 const handleAsk = async () => {
   if (!query.value.trim() || isAsking.value) return;
@@ -117,6 +151,7 @@ const handleAsk = async () => {
         const session = await chatApi.createSession(currentQuery.substring(0, 50));
         if (session?.id) {
           currentSessionId.value = session.id;
+          await refreshSessionOptions();
           await syncSessionRoute(session.id);
         }
       } catch (err) {
@@ -147,15 +182,27 @@ const handleAsk = async () => {
 
 <template>
   <div class="page-stack qa-page">
-    <section class="page-hero">
-      <div>
+    <div class="qa-toolbar ui-card">
+      <div class="qa-toolbar__title-group">
         <div class="page-hero__eyebrow">Workspace / Financial QA</div>
-        <h1 class="page-hero__title">金融问答工作台</h1>
-        <p class="page-hero__subtitle">
-          面向业务分析场景的知识问答界面。强调连续对话、参考来源和回答可追溯性，信息密度做轻量收敛，便于长时间阅读。
-        </p>
+        <h1 class="qa-toolbar__title">智能问答</h1>
       </div>
-    </section>
+      <div class="qa-toolbar__controls">
+        <label class="qa-toolbar__session-picker">
+          <span>历史对话</span>
+          <select
+            :value="currentSessionId || ''"
+            :disabled="isLoadingSessions || isAsking"
+            @change="handleSessionChange"
+          >
+            <option value="">新对话</option>
+            <option v-for="session in sessionOptions" :key="session.id" :value="session.id">
+              {{ session.title }}
+            </option>
+          </select>
+        </label>
+      </div>
+    </div>
 
     <div class="chat-window ui-card">
       <div class="messages" ref="messagesContainer">
@@ -211,6 +258,12 @@ const handleAsk = async () => {
 
 <style scoped>
 .qa-page { min-height: calc(100vh - 180px); }
+.qa-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 20px 24px; }
+.qa-toolbar__title-group { display: flex; flex-direction: column; gap: 6px; }
+.qa-toolbar__title { margin: 0; font-size: 28px; color: #0f172a; }
+.qa-toolbar__controls { display: flex; align-items: center; gap: 12px; }
+.qa-toolbar__session-picker { display: flex; flex-direction: column; gap: 6px; font-size: 13px; color: #64748b; font-weight: 600; }
+.qa-toolbar__session-picker select { min-width: 240px; height: 42px; border-radius: 12px; border: 1px solid #cbd5e1; background: #fff; padding: 0 12px; color: #0f172a; }
 .chat-window { flex: 1; min-height: calc(100vh - 360px); background: linear-gradient(180deg, #fbfdff 0%, #f6f9fc 100%); border-radius: 24px; display: flex; flex-direction: column; overflow: hidden; }
 .messages { flex: 1; padding: 28px; overflow-y: auto; display: flex; flex-direction: column; gap: 18px; scroll-behavior: smooth; }
 .message { display: flex; gap: 14px; max-width: min(86%, 920px); }
