@@ -18,7 +18,9 @@ from common.exceptions import (
     UpstreamServiceError,
 )
 from knowledgebase.services.document_service import create_document_from_upload, ingest_document
+from knowledgebase.models import DocumentChunk
 from rag.models import RetrievalLog
+from rag.services.embedding_service import tokenize
 from rag.services.vector_store_service import clear_store, index_document
 from rbac.services.rbac_service import ROLE_ADMIN, seed_roles_and_permissions
 
@@ -31,6 +33,53 @@ class FakeEmbeddingProvider:
 class FakeChatProvider:
     def chat(self, *, messages, options=None):
         return messages[0]["content"]
+
+    def stream(self, *, messages, options=None):
+        content = self.chat(messages=messages, options=options)
+        for chunk in [content[:12], content[12:]]:
+            if chunk:
+                yield chunk
+
+
+def fake_vector_search(*, query, filters=None, top_k=5):
+    query_tokens = set(tokenize(query))
+    results = []
+    queryset = DocumentChunk.objects.select_related("document").order_by("id")
+    for chunk in queryset:
+        metadata = chunk.metadata or {}
+        document = chunk.document
+        document_id = filters.get("document_id") if filters else None
+        if document_id not in (None, "") and document.id != int(document_id):
+            continue
+        doc_type = filters.get("doc_type") if filters else None
+        if doc_type and document.doc_type != doc_type:
+            continue
+
+        searchable_tokens = set(
+            tokenize(f"{metadata.get('document_title') or document.title}\n{chunk.content}")
+        )
+        overlap = len(query_tokens & searchable_tokens)
+        if overlap <= 0:
+            continue
+        score = overlap / max(len(query_tokens), 1)
+        results.append(
+            {
+                "document_id": document.id,
+                "chunk_id": chunk.id,
+                "document_title": metadata.get("document_title") or document.title,
+                "doc_type": metadata.get("doc_type") or document.doc_type,
+                "source_date": metadata.get("source_date")
+                or (document.source_date.isoformat() if document.source_date else None),
+                "page_label": metadata.get("page_label", f"chunk-{chunk.chunk_index + 1}"),
+                "snippet": chunk.content,
+                "metadata": metadata,
+                "score": score,
+                "vector_score": score,
+                "keyword_score": 0.0,
+            }
+        )
+    results.sort(key=lambda item: (item["score"], item["chunk_id"]), reverse=True)
+    return results[: int(top_k)]
 
 
     def test_chat_ask_returns_structured_error_when_deepseek_auth_fails(self):
@@ -97,6 +146,11 @@ class ChatAskApiTests(TestCase):
             return_value=FakeChatProvider(),
         )
         self.embedding_provider_patcher.start()
+        self.vector_search_patcher = patch(
+            "knowledgebase.services.vector_service.VectorService.search",
+            side_effect=fake_vector_search,
+        )
+        self.vector_search_patcher.start()
         self.vector_index_patcher = patch(
             "knowledgebase.services.document_service.index_document_chunks",
             side_effect=index_document,
@@ -136,6 +190,7 @@ class ChatAskApiTests(TestCase):
     def tearDown(self):
         self.chat_provider_patcher.stop()
         self.embedding_provider_patcher.stop()
+        self.vector_search_patcher.stop()
         self.override.disable()
         self.vector_index_patcher.stop()
         shutil.rmtree(self.media_root, ignore_errors=True)
@@ -232,6 +287,35 @@ class ChatAskApiTests(TestCase):
         self.assertIn("Outlook memo", payload["answer"])
         self.assertIn("duration_ms", payload)
         self.assertGreaterEqual(payload["duration_ms"], 0)
+
+    def test_chat_stream_returns_initial_metadata_event_and_chunks(self):
+        response = self.client.post(
+            "/api/chat/ask/stream",
+            data=json.dumps({"question": "revenue and margin outlook", "top_k": 2}),
+            content_type="application/json",
+            HTTP_AUTHORIZATION=f"Bearer {self.access_token}",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["Content-Type"], "text/event-stream")
+        body = b"".join(response.streaming_content).decode("utf-8")
+        self.assertIn('event: meta', body)
+        self.assertIn('"answer_mode": "cited"', body)
+        self.assertIn('event: chunk', body)
+        self.assertIn('event: done', body)
+
+    def test_chat_stream_fallback_reports_notice_when_no_citations(self):
+        response = self.client.post(
+            "/api/chat/ask/stream",
+            data=json.dumps({"query": "foreign exchange exposure", "filters": {"doc_type": "pdf"}}),
+            content_type="application/json",
+            HTTP_AUTHORIZATION=f"Bearer {self.access_token}",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        body = b"".join(response.streaming_content).decode("utf-8")
+        self.assertIn('"answer_mode": "fallback"', body)
+        self.assertIn("answer_notice", body)
 
     def test_chat_ask_requires_question_or_query(self):
         response = self.client.post(

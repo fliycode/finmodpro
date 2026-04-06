@@ -1,10 +1,10 @@
 import json
 
-from django.http import JsonResponse
+from django.http import JsonResponse, StreamingHttpResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
 
-from chat.services.ask_service import ask_question
+from chat.services.ask_service import ask_question, stream_question
 from common.exceptions import (
     ModelNotConfiguredError,
     ProviderConfigurationError,
@@ -116,14 +116,15 @@ def _build_upstream_error_response(exc):
     return response
 
 
-@csrf_exempt
-@require_POST
-@permission_required("auth.ask_financial_qa")
-def chat_ask_view(request):
+def _build_sse_event(event, data):
+    return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
+
+
+def _parse_request_payload(request):
     payload = _parse_json_body(request)
     if payload is None:
-        return JsonResponse(
-            {"message": "\u8bf7\u6c42\u4f53\u5fc5\u987b\u662f\u5408\u6cd5 JSON\u3002"},
+        return None, JsonResponse(
+            {"message": "请求体必须是合法 JSON。"},
             status=400,
         )
 
@@ -132,21 +133,31 @@ def chat_ask_view(request):
     top_k = payload.get("top_k", 5)
 
     if not question:
-        return JsonResponse(
-            {"message": "question \u6216 query \u4e3a\u5fc5\u586b\u9879\u3002"},
+        return None, JsonResponse(
+            {"message": "question 或 query 为必填项。"},
             status=400,
         )
     if not isinstance(filters, dict):
-        return JsonResponse(
-            {"message": "filters \u5fc5\u987b\u662f\u5bf9\u8c61\u3002"},
+        return None, JsonResponse(
+            {"message": "filters 必须是对象。"},
             status=400,
         )
+    return {"question": question, "filters": filters, "top_k": top_k}, None
+
+
+@csrf_exempt
+@require_POST
+@permission_required("auth.ask_financial_qa")
+def chat_ask_view(request):
+    parsed_request, error_response = _parse_request_payload(request)
+    if error_response is not None:
+        return error_response
 
     try:
         response_payload = ask_question(
-            question=question,
-            filters=filters,
-            top_k=top_k,
+            question=parsed_request["question"],
+            filters=parsed_request["filters"],
+            top_k=parsed_request["top_k"],
         )
     except ServiceConfigurationError as exc:
         return _build_configuration_error_response(exc)
@@ -156,3 +167,56 @@ def chat_ask_view(request):
         return JsonResponse({"message": str(exc)}, status=400)
 
     return JsonResponse(response_payload)
+
+
+@csrf_exempt
+@require_POST
+@permission_required("auth.ask_financial_qa")
+def chat_ask_stream_view(request):
+    parsed_request, error_response = _parse_request_payload(request)
+    if error_response is not None:
+        return error_response
+
+    try:
+        event_iterator = stream_question(
+            question=parsed_request["question"],
+            filters=parsed_request["filters"],
+            top_k=parsed_request["top_k"],
+        )
+    except ServiceConfigurationError as exc:
+        return _build_configuration_error_response(exc)
+    except UpstreamServiceError as exc:
+        return _build_upstream_error_response(exc)
+    except ValueError as exc:
+        return JsonResponse({"message": str(exc)}, status=400)
+
+    def stream_response():
+        try:
+            for event in event_iterator:
+                yield _build_sse_event(event["event"], event["data"])
+        except ServiceConfigurationError as exc:
+            yield _build_sse_event(
+                "error",
+                _build_error_payload(
+                    message=exc.message,
+                    code=exc.code,
+                    error_type="configuration_error",
+                    provider=exc.provider,
+                    details=exc.details,
+                )["data"]["error"],
+            )
+        except UpstreamServiceError as exc:
+            yield _build_sse_event(
+                "error",
+                {
+                    "type": "upstream_error",
+                    "code": exc.code,
+                    "message": exc.message,
+                    "provider": exc.provider,
+                },
+            )
+
+    response = StreamingHttpResponse(stream_response(), content_type="text/event-stream")
+    response["Cache-Control"] = "no-cache"
+    response["X-Accel-Buffering"] = "no"
+    return response

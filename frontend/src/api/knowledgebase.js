@@ -3,8 +3,6 @@ import { authStorage } from '../lib/auth-storage.js';
 
 const apiConfig = createApiConfig();
 
-const ACTIVE_PROCESSING_STATUSES = ['uploaded', 'parsed', 'chunked', 'processing', 'pending'];
-
 const parseResponse = async (response) => {
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
@@ -17,140 +15,175 @@ const getHeaders = () => {
   const token = authStorage.getToken();
   const headers = { ...apiConfig.headers };
   if (token) {
-    headers['Authorization'] = `Bearer ${token}`;
+    headers.Authorization = `Bearer ${token}`;
   }
   return headers;
 };
 
-const normalizeSize = (size, fallbackFileSize) => {
-  if (typeof size === 'string' && size.trim()) {
-    return size;
-  }
-
-  const numericSize = Number(size ?? fallbackFileSize);
-  if (!Number.isFinite(numericSize) || numericSize <= 0) {
-    return 'N/A';
-  }
-
-  if (numericSize >= 1024 * 1024) {
-    return `${(numericSize / 1024 / 1024).toFixed(2)}MB`;
-  }
-
-  if (numericSize >= 1024) {
-    return `${(numericSize / 1024).toFixed(2)}KB`;
-  }
-
-  return `${numericSize}B`;
-};
-
-const normalizeTime = (value) => {
+const formatDateTime = (value) => {
   if (!value) {
     return 'N/A';
   }
 
-  if (typeof value === 'string') {
-    return value;
-  }
-
-  try {
-    return new Date(value).toLocaleString();
-  } catch {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
     return 'N/A';
   }
+
+  return new Intl.DateTimeFormat('zh-CN', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).format(date).replace(/\//g, '-');
 };
 
-const normalizeStatus = (status) => {
-  const rawStatus = String(status || 'uploaded').toLowerCase();
-
-  if (rawStatus === 'pending' || rawStatus === 'uploading') return 'uploaded';
-  if (rawStatus === 'processing' || rawStatus === 'parsing') return 'parsed';
-  if (rawStatus === 'chunking') return 'chunked';
-  if (rawStatus === 'completed' || rawStatus === 'success' || rawStatus === 'indexed') return 'indexed';
-  if (rawStatus === 'error') return 'failed';
-
-  return ['uploaded', 'parsed', 'chunked', 'indexed', 'failed'].includes(rawStatus)
-    ? rawStatus
-    : 'uploaded';
+const normalizeSize = (size, fallbackFileSize) => {
+  const numericSize = Number(size ?? fallbackFileSize);
+  if (!Number.isFinite(numericSize) || numericSize <= 0) {
+    return 'N/A';
+  }
+  if (numericSize >= 1024 * 1024) {
+    return `${(numericSize / 1024 / 1024).toFixed(2)} MB`;
+  }
+  if (numericSize >= 1024) {
+    return `${(numericSize / 1024).toFixed(2)} KB`;
+  }
+  return `${numericSize} B`;
 };
 
-const getProcessStep = (status) => {
-  const normalizedStatus = normalizeStatus(status);
-
-  if (normalizedStatus === 'uploaded') {
-    return {
-      code: 'uploaded',
-      label: '已上传',
-      detail: '文档已入库，等待解析任务执行。',
-      progress: 20,
-      isTerminal: false,
-    };
+const normalizePerson = (person) => {
+  if (!person || typeof person !== 'object') {
+    return null;
   }
+  return {
+    id: person.id ?? null,
+    username: person.username || '',
+    email: person.email || '',
+    displayName: person.username || person.email || '未设置',
+  };
+};
 
-  if (normalizedStatus === 'parsed') {
-    return {
-      code: 'parsed',
-      label: '解析中',
-      detail: '正在抽取正文与元数据。',
-      progress: 50,
-      isTerminal: false,
-    };
-  }
+const buildProcessStep = (document, task) => {
+  const status = String(document.status || '').toLowerCase();
+  const step = String(task?.current_step || '').toLowerCase();
+  const taskStatus = String(task?.status || '').toLowerCase();
 
-  if (normalizedStatus === 'chunked') {
-    return {
-      code: 'chunked',
-      label: '切块中',
-      detail: '正在切分片段并准备索引。',
-      progress: 75,
-      isTerminal: false,
-    };
-  }
-
-  if (normalizedStatus === 'indexed') {
+  if (status === 'indexed' || step === 'completed' || taskStatus === 'succeeded') {
     return {
       code: 'indexed',
-      label: '已索引',
-      detail: '文档已可用于检索与问答。',
+      label: '已入库',
+      detail: '文档已完成切块和向量写入，可用于问答检索。',
       progress: 100,
       isTerminal: true,
+      isSearchReady: true,
+    };
+  }
+
+  if (status === 'failed' || step === 'failed' || taskStatus === 'failed') {
+    return {
+      code: 'failed',
+      label: '处理失败',
+      detail: task?.error_message || document.error_message || '处理链路中断，请查看失败原因。',
+      progress: 100,
+      isTerminal: true,
+      isSearchReady: false,
+    };
+  }
+
+  if (step === 'indexing') {
+    return {
+      code: 'indexing',
+      label: '向量化中',
+      detail: '正在写入 Milvus 向量库。',
+      progress: 85,
+      isTerminal: false,
+      isSearchReady: false,
+    };
+  }
+
+  if (status === 'chunked' || step === 'chunking') {
+    return {
+      code: 'chunking',
+      label: '切块中',
+      detail: '正在切分文档片段。',
+      progress: 60,
+      isTerminal: false,
+      isSearchReady: false,
+    };
+  }
+
+  if (status === 'parsed' || step === 'parsing' || taskStatus === 'running') {
+    return {
+      code: 'parsing',
+      label: '解析中',
+      detail: '正在抽取正文和元数据。',
+      progress: 35,
+      isTerminal: false,
+      isSearchReady: false,
+    };
+  }
+
+  if (taskStatus === 'queued' || step === 'queued') {
+    return {
+      code: 'queued',
+      label: '待处理',
+      detail: '文件已保存，等待处理任务执行。',
+      progress: 10,
+      isTerminal: false,
+      isSearchReady: false,
     };
   }
 
   return {
-    code: 'failed',
-    label: '处理失败',
-    detail: '处理链路中断，请查看失败原因。',
-    progress: 100,
-    isTerminal: true,
+    code: 'uploaded',
+    label: '已上传',
+    detail: '文件已保存，尚未开始处理。',
+    progress: 5,
+    isTerminal: false,
+    isSearchReady: false,
   };
 };
 
 const normalizeDocument = (doc, fallback = {}) => {
-  const normalizedStatus = normalizeStatus(doc.status || fallback.status);
-  const processStep = getProcessStep(normalizedStatus);
-  const uploader = doc.uploader || doc.owner || doc.uploaded_by || doc.created_by || doc.createdBy || fallback.uploader || '未知';
-  const sourceType = doc.source_type || doc.sourceType || fallback.sourceType || '本地上传';
-  const processResult = doc.process_result || doc.result || doc.summary || doc.message || doc.error || fallback.processResult || processStep.detail;
-  const originalUrl = doc.original_url || doc.originalUrl || doc.file_url || doc.fileUrl || doc.download_url || doc.downloadUrl || fallback.originalUrl || '';
-  const previewUrl = doc.preview_url || doc.previewUrl || doc.viewer_url || doc.viewerUrl || fallback.previewUrl || originalUrl;
-  const extractedText = doc.extracted_text || doc.content || doc.text || doc.raw_text || fallback.extractedText || '';
-  const chunkCount = doc.chunk_count || doc.chunks || doc.segment_count || fallback.chunkCount || null;
+  const uploader = normalizePerson(doc.uploader || doc.uploaded_by);
+  const owner = normalizePerson(doc.owner);
+  const latestTask = doc.latest_ingestion_task || null;
+  const processStep = buildProcessStep(doc, latestTask);
 
   return {
-    id: doc.id || doc._id || doc.doc_id || fallback.id || '',
-    name: doc.name || doc.filename || doc.title || fallback.name || '未命名文档',
-    status: normalizedStatus,
-    uploadTime: normalizeTime(doc.uploadTime || doc.created_at || doc.upload_time || doc.createdAt || fallback.uploadTime),
-    size: normalizeSize(doc.size || doc.filesize || doc.file_size, fallback.fileSize),
-    uploader: typeof uploader === 'object' ? (uploader.name || uploader.username || uploader.email || '未知') : String(uploader || '未知'),
-    owner: typeof uploader === 'object' ? (uploader.name || uploader.username || uploader.email || '未知') : String(uploader || '未知'),
-    sourceType,
+    id: doc.id || fallback.id || '',
+    title: doc.title || doc.filename || fallback.title || '未命名文档',
+    filename: doc.filename || doc.title || fallback.filename || '未命名文档',
+    status: String(doc.status || fallback.status || 'uploaded').toLowerCase(),
+    visibility: doc.visibility || 'internal',
+    uploader,
+    owner,
+    uploaderName: uploader?.displayName || '未设置',
+    ownerName: owner?.displayName || '未设置',
+    uploadTime: formatDateTime(doc.created_at || fallback.created_at),
+    updateTime: formatDateTime(doc.updated_at || fallback.updated_at),
+    sourceDate: doc.source_date || 'N/A',
+    size: normalizeSize(doc.size || doc.file_size, fallback.fileSize),
     processStep,
-    processResult: String(processResult || processStep.detail),
-    originalUrl,
-    previewUrl,
-    extractedText,
-    chunkCount: chunkCount == null ? null : Number(chunkCount),
+    processResult: doc.process_result || processStep.detail,
+    processError: doc.error_message || latestTask?.error_message || '',
+    latestTask: latestTask ? {
+      ...latestTask,
+      createdAtText: formatDateTime(latestTask.created_at),
+      updatedAtText: formatDateTime(latestTask.updated_at),
+      startedAtText: formatDateTime(latestTask.started_at),
+      finishedAtText: formatDateTime(latestTask.finished_at),
+    } : null,
+    chunkCount: Number(doc.chunk_count || 0),
+    vectorCount: Number(doc.vector_count || 0),
+    isSearchReady: processStep.isSearchReady,
+    originalUrl: doc.original_url || '',
+    previewUrl: doc.preview_url || doc.original_url || '',
+    extractedText: doc.extracted_text || doc.parsed_text || '',
+    parsedTextPreview: doc.parsed_text_preview || doc.preview_text || '',
   };
 };
 
@@ -162,7 +195,6 @@ export const kbApi = {
       auth: true,
     });
     const data = await parseResponse(response);
-
     const docs = Array.isArray(data) ? data : (data.documents || data.data || []);
     return docs.map((doc) => normalizeDocument(doc));
   },
@@ -184,17 +216,11 @@ export const kbApi = {
     });
 
     const data = await parseResponse(response);
-    const doc = data.document || data;
-
     return {
       success: true,
-      document: normalizeDocument(doc, {
-        name: file.name,
-        status: 'uploaded',
-        uploadTime: new Date().toLocaleString(),
+      document: normalizeDocument(data.document || data, {
+        title: file.name,
         fileSize: file.size,
-        uploader: '当前用户',
-        processResult: '文档已上传，等待任务执行。',
       }),
     };
   },
@@ -205,7 +231,11 @@ export const kbApi = {
       headers: getHeaders(),
       auth: true,
     });
-    return parseResponse(response);
+    const data = await parseResponse(response);
+    return {
+      ...data,
+      document: data.document ? normalizeDocument(data.document) : null,
+    };
   },
 
   async getDocumentDetail(documentId) {
@@ -220,6 +250,8 @@ export const kbApi = {
   },
 
   isProcessingStatus(status) {
-    return ACTIVE_PROCESSING_STATUSES.includes(String(status || '').toLowerCase());
+    return ['uploaded', 'queued', 'parsed', 'chunked', 'processing', 'pending', 'indexing'].includes(
+      String(status || '').toLowerCase(),
+    );
   },
 };

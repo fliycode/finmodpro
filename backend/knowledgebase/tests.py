@@ -188,6 +188,34 @@ class KnowledgebaseApiTests(TestCase):
         self.assertEqual(response.status_code, 403)
         self.assertEqual(response.json(), {"message": "无权限。"})
 
+    def test_document_list_returns_uploader_and_latest_ingestion_task(self):
+        document = create_document_from_upload(
+            uploaded_file=SimpleUploadedFile(
+                "status.txt",
+                b"funding profile stayed stable",
+                content_type="text/plain",
+            ),
+            title="Status doc",
+            source_date="2025-04-01",
+            uploaded_by=self.user,
+        )
+        enqueue_document_ingestion(document)
+
+        response = self.client.get(
+            "/api/knowledgebase/documents",
+            HTTP_AUTHORIZATION=f"Bearer {self.access_token}",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        item = response.json()["documents"][0]
+        self.assertEqual(item["uploader"]["username"], "kb-admin")
+        self.assertEqual(item["owner"]["username"], "kb-admin")
+        self.assertIn("latest_ingestion_task", item)
+        self.assertGreaterEqual(item["chunk_count"], 1)
+        self.assertGreaterEqual(item["vector_count"], 1)
+        self.assertEqual(item["latest_ingestion_task"]["status"], "succeeded")
+        self.assertEqual(item["latest_ingestion_task"]["current_step"], "completed")
+
     def test_list_and_detail_only_return_documents_visible_to_request_user(self):
         owner = User.objects.create_user(
             username="kb-owner",
