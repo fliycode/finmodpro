@@ -99,26 +99,26 @@ const formatDate = (dateStr) => {
         <el-table-column prop="provider" label="Provider" width="140" />
         <el-table-column prop="model_name" label="模型名" min-width="180" />
         <el-table-column label="API Endpoint" min-width="220">
-          <template #default="scope">
-            <span class="mono-text">{{ scope.row.endpoint || '默认' }}</span>
+          <template #default="{ row }">
+            <span class="mono-text">{{ row.endpoint || '默认' }}</span>
           </template>
         </el-table-column>
         <el-table-column label="状态" width="120">
-          <template #default="scope">
-            <el-tag :type="scope.row.is_active ? 'success' : 'info'">
-              {{ scope.row.is_active ? '已启用' : '未启用' }}
+          <template #default="{ row }">
+            <el-tag :type="row.is_active ? 'success' : 'info'">
+              {{ row.is_active ? '已启用' : '未启用' }}
             </el-tag>
           </template>
         </el-table-column>
         <el-table-column label="更新时间" min-width="180">
-          <template #default="scope">
-            <span class="muted-text">{{ formatDate(scope.row.updated_at) }}</span>
+          <template #default="{ row }">
+            <span class="muted-text">{{ formatDate(row.updated_at) }}</span>
           </template>
         </el-table-column>
         <el-table-column label="操作" width="120" fixed="right">
-          <template #default="scope">
-            <el-button :type="scope.row.is_active ? 'danger' : 'primary'" plain size="small" @click="toggleActivation(scope.row)">
-              {{ scope.row.is_active ? '停用' : '启用' }}
+          <template #default="{ row }">
+            <el-button :type="row.is_active ? 'danger' : 'primary'" plain size="small" @click="toggleActivation(row)">
+              {{ row.is_active ? '停用' : '启用' }}
             </el-button>
           </template>
         </el-table-column>
@@ -133,26 +133,26 @@ const formatDate = (dateStr) => {
         <el-table-column prop="provider" label="Provider" width="140" />
         <el-table-column prop="model_name" label="模型名" min-width="180" />
         <el-table-column label="API Endpoint" min-width="220">
-          <template #default="scope">
-            <span class="mono-text">{{ scope.row.endpoint || '默认' }}</span>
+          <template #default="{ row }">
+            <span class="mono-text">{{ row.endpoint || '默认' }}</span>
           </template>
         </el-table-column>
         <el-table-column label="状态" width="120">
-          <template #default="scope">
-            <el-tag :type="scope.row.is_active ? 'success' : 'info'">
-              {{ scope.row.is_active ? '已启用' : '未启用' }}
+          <template #default="{ row }">
+            <el-tag :type="row.is_active ? 'success' : 'info'">
+              {{ row.is_active ? '已启用' : '未启用' }}
             </el-tag>
           </template>
         </el-table-column>
         <el-table-column label="更新时间" min-width="180">
-          <template #default="scope">
-            <span class="muted-text">{{ formatDate(scope.row.updated_at) }}</span>
+          <template #default="{ row }">
+            <span class="muted-text">{{ formatDate(row.updated_at) }}</span>
           </template>
         </el-table-column>
         <el-table-column label="操作" width="120" fixed="right">
-          <template #default="scope">
-            <el-button :type="scope.row.is_active ? 'danger' : 'primary'" plain size="small" @click="toggleActivation(scope.row)">
-              {{ scope.row.is_active ? '停用' : '启用' }}
+          <template #default="{ row }">
+            <el-button :type="row.is_active ? 'danger' : 'primary'" plain size="small" @click="toggleActivation(row)">
+              {{ row.is_active ? '停用' : '启用' }}
             </el-button>
           </template>
         </el-table-column>
