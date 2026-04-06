@@ -17,6 +17,51 @@ const showEditDrawer = ref(false);
 const isUpdating = ref(false);
 const flash = useFlash();
 
+const normalizeUsers = (payload) => {
+  if (Array.isArray(payload)) return payload;
+  if (Array.isArray(payload?.users)) return payload.users;
+  if (Array.isArray(payload?.items)) return payload.items;
+  if (Array.isArray(payload?.results)) return payload.results;
+  if (Array.isArray(payload?.data)) return payload.data;
+  return [];
+};
+
+const normalizeGroups = (payload) => {
+  const list = Array.isArray(payload)
+    ? payload
+    : Array.isArray(payload?.groups)
+      ? payload.groups
+      : Array.isArray(payload?.items)
+        ? payload.items
+        : Array.isArray(payload?.results)
+          ? payload.results
+          : Array.isArray(payload?.data)
+            ? payload.data
+            : [];
+
+  return list.map((group, index) => {
+    if (typeof group === 'string') {
+      return { id: group, name: group };
+    }
+    return {
+      id: group.id ?? group.name ?? index,
+      name: group.name ?? group.group_name ?? String(group.id ?? index),
+    };
+  });
+};
+
+const normalizeUserRecord = (user, index) => ({
+  id: user.id ?? user.user_id ?? index,
+  username: user.username ?? user.name ?? user.email ?? `user-${index}`,
+  email: user.email ?? user.mail ?? '--',
+  groups: Array.isArray(user.groups)
+    ? user.groups.map((group) => (typeof group === 'string' ? group : group.name ?? group.group_name ?? String(group.id ?? ''))).filter(Boolean)
+    : Array.isArray(user.roles)
+      ? user.roles.map((role) => (typeof role === 'string' ? role : role.name ?? String(role.id ?? ''))).filter(Boolean)
+      : [],
+  raw: user,
+});
+
 const fetchData = async () => {
   isLoading.value = true;
   error.value = '';
@@ -25,8 +70,8 @@ const fetchData = async () => {
       adminApi.listUsers(),
       adminApi.listGroups()
     ]);
-    users.value = usersData;
-    groups.value = groupsData;
+    users.value = normalizeUsers(usersData).map(normalizeUserRecord);
+    groups.value = normalizeGroups(groupsData);
   } catch (err) {
     error.value = err.message || '加载数据失败';
   } finally {
@@ -49,7 +94,10 @@ const filteredUsers = computed(() => {
 });
 
 const openEditDrawer = (user) => {
-  selectedUser.value = JSON.parse(JSON.stringify(user));
+  selectedUser.value = {
+    ...JSON.parse(JSON.stringify(user)),
+    groups: Array.isArray(user.groups) ? [...user.groups] : [],
+  };
   showEditDrawer.value = true;
 };
 
