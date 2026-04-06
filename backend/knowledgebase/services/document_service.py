@@ -116,8 +116,11 @@ def _serialize_ingestion_task(ingestion_task):
 
 
 def _get_latest_ingestion_task(document):
-    if hasattr(document, "_prefetched_objects_cache") and "ingestion_tasks" in document._prefetched_objects_cache:
-        tasks = document._prefetched_objects_cache["ingestion_tasks"]
+    if (
+        hasattr(document, "_prefetched_objects_cache")
+        and "ingestion_tasks" in document._prefetched_objects_cache
+    ):
+        tasks = list(document._prefetched_objects_cache["ingestion_tasks"])
         return tasks[-1] if tasks else None
     return document.ingestion_tasks.order_by("id").last()
 
