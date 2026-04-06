@@ -188,7 +188,7 @@ class ChatAskApiTests(TestCase):
         self.assertEqual(retrieval_log.source, RetrievalLog.SOURCE_CHAT_ASK)
         self.assertIsNotNone(retrieval_log.duration_ms)
 
-    def test_chat_ask_accepts_query_alias_and_returns_empty_citations_when_no_match(self):
+    def test_chat_ask_accepts_query_alias_and_falls_back_to_model_answer_when_no_match(self):
         response = self.client.post(
             "/api/chat/ask",
             data=json.dumps(
@@ -202,10 +202,16 @@ class ChatAskApiTests(TestCase):
         )
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json()["question"], "foreign exchange exposure")
-        self.assertEqual(response.json()["query"], "foreign exchange exposure")
-        self.assertEqual(response.json()["citations"], [])
-        self.assertIn("未检索到相关资料", response.json()["answer"])
+        payload = response.json()
+        self.assertEqual(payload["question"], "foreign exchange exposure")
+        self.assertEqual(payload["query"], "foreign exchange exposure")
+        self.assertEqual(payload["citations"], [])
+        self.assertEqual(payload["answer_mode"], "fallback")
+        self.assertEqual(
+            payload["answer_notice"],
+            "当前回答未命中知识库引用，仅基于通用模型能力生成，请注意甄别。",
+        )
+        self.assertIn("foreign exchange exposure", payload["answer"])
         self.assertEqual(RetrievalLog.objects.count(), 1)
         retrieval_log = RetrievalLog.objects.get()
         self.assertEqual(retrieval_log.result_count, 0)
