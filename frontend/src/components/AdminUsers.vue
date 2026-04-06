@@ -2,6 +2,8 @@
 import { ref, onMounted, computed } from 'vue';
 import { adminApi } from '../api/admin.js';
 import { useFlash } from '../lib/flash.js';
+import AppSectionCard from './ui/AppSectionCard.vue';
+import AppToolbar from './ui/AppToolbar.vue';
 
 const users = ref([]);
 const groups = ref([]);
@@ -76,7 +78,6 @@ const handleUpdateGroups = async () => {
     isUpdating.value = false;
   }
 };
-
 </script>
 
 <template>
@@ -94,24 +95,19 @@ const handleUpdateGroups = async () => {
 
     <el-alert v-if="error" :title="error" type="error" show-icon :closable="false" />
 
-    <el-card class="ui-card ui-card--admin" shadow="never">
-      <template #header>
-        <div class="section-heading">
-          <h3 class="section-heading__title">用户列表</h3>
-          <div class="section-heading__desc">支持按用户名、邮箱和角色组快速筛选，并通过抽屉修改所属角色。</div>
-        </div>
-      </template>
-
-      <el-form :inline="true" class="admin-form-row">
-        <el-form-item>
-          <el-input v-model="searchQuery" placeholder="搜索用户名或邮箱..." clearable />
-        </el-form-item>
-        <el-form-item>
-          <el-select v-model="filterGroup" placeholder="所有角色" clearable>
-            <el-option v-for="g in groups" :key="g.id" :label="g.name" :value="g.name" />
-          </el-select>
-        </el-form-item>
-      </el-form>
+    <AppSectionCard title="用户列表" desc="支持按用户名、邮箱和角色组快速筛选，并通过抽屉修改所属角色。" admin>
+      <AppToolbar>
+        <el-form :inline="true" class="admin-form-row">
+          <el-form-item>
+            <el-input v-model="searchQuery" placeholder="搜索用户名或邮箱..." clearable />
+          </el-form-item>
+          <el-form-item>
+            <el-select v-model="filterGroup" placeholder="所有角色" clearable>
+              <el-option v-for="g in groups" :key="g.id" :label="g.name" :value="g.name" />
+            </el-select>
+          </el-form-item>
+        </el-form>
+      </AppToolbar>
 
       <el-table :data="filteredUsers" stripe style="width: 100%" v-loading="isLoading">
         <el-table-column prop="id" label="ID" width="90" />
@@ -134,7 +130,7 @@ const handleUpdateGroups = async () => {
           <div class="admin-empty-state">未找到匹配的用户</div>
         </template>
       </el-table>
-    </el-card>
+    </AppSectionCard>
 
     <el-drawer v-model="showEditDrawer" size="420px" :with-header="true" destroy-on-close>
       <template #header>
