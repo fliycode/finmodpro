@@ -2,6 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 import { RouterLink, useRouter } from 'vue-router';
 
+import finmodproMark from '../../assets/finmodpro-mark.svg';
 import { getTopbarActions } from '../../config/navigation.js';
 import { AUTH_EXPIRED_MESSAGE, authStorage } from '../../lib/auth-storage.js';
 import { useFlash } from '../../lib/flash.js';
@@ -58,9 +59,12 @@ onBeforeUnmount(() => {
 
 <template>
   <header class="app-topbar">
-    <div>
-      <p class="app-topbar__eyebrow">FinModPro</p>
-      <h2>{{ props.title }}</h2>
+    <div class="app-topbar__title-group">
+      <img class="app-topbar__brand-logo" :src="finmodproMark" alt="FinModPro" />
+      <div>
+        <p class="app-topbar__eyebrow">FinModPro</p>
+        <h2>{{ props.title }}</h2>
+      </div>
     </div>
 
     <div class="app-topbar__actions">

@@ -7,11 +7,17 @@ import { validateAuthForm } from '../../lib/auth-form.js';
 import { authStorage } from '../../lib/auth-storage.js';
 import { resolveHomeRoute } from '../../lib/session-state.js';
 
+const userIcon = '◉';
+const mailIcon = '✉';
+const lockIcon = '◆';
+
 const router = useRouter();
 
 const mode = ref('login');
 const loading = ref(false);
 const status = ref({ type: '', message: '' });
+const passwordVisible = ref(false);
+const confirmPasswordVisible = ref(false);
 const form = reactive({
   username: '',
   email: '',
@@ -28,6 +34,8 @@ const resetStatus = () => {
 
 const switchMode = (nextMode) => {
   mode.value = nextMode;
+  passwordVisible.value = false;
+  confirmPasswordVisible.value = false;
   resetStatus();
 };
 
@@ -107,10 +115,13 @@ const submit = async () => {
     </div>
 
     <div class="auth-card__body">
-      <h2>{{ mode === 'login' ? '欢迎回来' : '创建账户' }}</h2>
-      <p class="auth-card__hint">
-        {{ mode === 'login' ? '请输入账号密码继续访问。' : '注册后将按角色进入对应首页。' }}
-      </p>
+      <div class="auth-card__heading">
+        <p class="auth-card__eyebrow">FinModPro Workspace</p>
+        <h2>{{ mode === 'login' ? '欢迎回到智能建模工作台' : '创建你的平台账户' }}</h2>
+        <p class="auth-card__hint">
+          {{ mode === 'login' ? '登录后继续处理模型、文档与风险任务。' : '注册后即可进入对应角色的工作区与管理空间。' }}
+        </p>
+      </div>
 
       <div v-if="status.message" class="auth-card__status" :class="`is-${status.type}`">
         {{ status.message }}
@@ -119,30 +130,63 @@ const submit = async () => {
       <form class="auth-form" @submit.prevent="submit">
         <label class="auth-form__field">
           <span>用户名</span>
-          <input v-model="form.username" type="text" :disabled="loading" placeholder="请输入用户名" />
+          <div class="auth-form__control">
+            <span class="auth-form__icon" aria-hidden="true">{{ userIcon }}</span>
+            <input v-model="form.username" type="text" :disabled="loading" placeholder="请输入用户名" />
+          </div>
           <small v-if="errors.username" class="auth-form__error">{{ errors.username }}</small>
         </label>
 
         <label v-if="mode === 'register'" class="auth-form__field">
           <span>电子邮箱</span>
-          <input v-model="form.email" type="email" :disabled="loading" placeholder="name@company.com" />
+          <div class="auth-form__control">
+            <span class="auth-form__icon" aria-hidden="true">{{ mailIcon }}</span>
+            <input v-model="form.email" type="email" :disabled="loading" placeholder="name@company.com" />
+          </div>
           <small v-if="errors.email" class="auth-form__error">{{ errors.email }}</small>
         </label>
 
         <label class="auth-form__field">
           <span>密码</span>
-          <input v-model="form.password" type="password" :disabled="loading" placeholder="请输入密码" />
+          <div class="auth-form__control auth-form__control--password">
+            <span class="auth-form__icon" aria-hidden="true">{{ lockIcon }}</span>
+            <input
+              v-model="form.password"
+              :type="passwordVisible ? 'text' : 'password'"
+              :disabled="loading"
+              placeholder="请输入密码"
+            />
+            <button
+              type="button"
+              class="auth-form__toggle"
+              :disabled="loading"
+              @click="passwordVisible = !passwordVisible"
+            >
+              {{ passwordVisible ? '隐藏' : '显示' }}
+            </button>
+          </div>
           <small v-if="errors.password" class="auth-form__error">{{ errors.password }}</small>
         </label>
 
         <label v-if="mode === 'register'" class="auth-form__field">
           <span>确认密码</span>
-          <input
-            v-model="form.confirmPassword"
-            type="password"
-            :disabled="loading"
-            placeholder="请再次输入密码"
-          />
+          <div class="auth-form__control auth-form__control--password">
+            <span class="auth-form__icon" aria-hidden="true">{{ lockIcon }}</span>
+            <input
+              v-model="form.confirmPassword"
+              :type="confirmPasswordVisible ? 'text' : 'password'"
+              :disabled="loading"
+              placeholder="请再次输入密码"
+            />
+            <button
+              type="button"
+              class="auth-form__toggle"
+              :disabled="loading"
+              @click="confirmPasswordVisible = !confirmPasswordVisible"
+            >
+              {{ confirmPasswordVisible ? '隐藏' : '显示' }}
+            </button>
+          </div>
           <small v-if="errors.confirmPassword" class="auth-form__error">{{ errors.confirmPassword }}</small>
         </label>
 
@@ -155,8 +199,12 @@ const submit = async () => {
         </small>
 
         <button class="auth-form__submit" type="submit" :disabled="loading">
-          {{ loading ? '提交中...' : mode === 'login' ? '登录' : '注册' }}
+          {{ loading ? '提交中...' : mode === 'login' ? '进入工作台' : '创建并继续' }}
         </button>
+      
+        <p class="auth-card__footnote">
+          {{ mode === 'login' ? '使用统一身份认证访问知识库、建模与风险分析模块。' : '默认根据角色配置跳转到对应首页。' }}
+        </p>
       </form>
     </div>
   </div>
