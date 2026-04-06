@@ -28,6 +28,30 @@ export const llmApi = {
     }));
   },
 
+  async createModelConfig(payload) {
+    return unwrap(await apiConfig.fetchJson('/api/ops/model-configs/', {
+      method: 'POST',
+      auth: true,
+      body: JSON.stringify(payload),
+    }));
+  },
+
+  async updateModelConfig(id, payload) {
+    return unwrap(await apiConfig.fetchJson(`/api/ops/model-configs/${id}/`, {
+      method: 'PATCH',
+      auth: true,
+      body: JSON.stringify(payload),
+    }));
+  },
+
+  async testModelConfigConnection(payload) {
+    return unwrap(await apiConfig.fetchJson('/api/ops/model-configs/test-connection/', {
+      method: 'POST',
+      auth: true,
+      body: JSON.stringify(payload),
+    }));
+  },
+
   async getEvaluations() {
     return unwrap(await apiConfig.fetchJson('/api/ops/evaluations', {
       method: 'GET',

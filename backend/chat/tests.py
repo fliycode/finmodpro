@@ -33,6 +33,52 @@ class FakeChatProvider:
         return messages[0]["content"]
 
 
+    def test_chat_ask_returns_structured_error_when_deepseek_auth_fails(self):
+        with patch(
+            "chat.controllers.ask_controller.ask_question",
+            side_effect=UpstreamServiceError(
+                "invalid api key",
+                status_code=502,
+                code="llm_provider_auth_failed",
+                provider="deepseek",
+            ),
+        ):
+            response = self.client.post(
+                "/api/chat/ask",
+                data=json.dumps({"question": "revenue"}),
+                content_type="application/json",
+                HTTP_AUTHORIZATION=f"Bearer {self.access_token}",
+            )
+
+        self.assertEqual(response.status_code, 502)
+        payload = response.json()
+        self.assertEqual(payload["code"], "llm_provider_auth_failed")
+        self.assertEqual(payload["provider"], "deepseek")
+        self.assertEqual(payload["data"]["error"]["type"], "provider_auth_failed")
+
+    def test_chat_ask_returns_structured_error_when_deepseek_model_is_invalid(self):
+        with patch(
+            "chat.controllers.ask_controller.ask_question",
+            side_effect=UpstreamServiceError(
+                "model not found",
+                status_code=502,
+                code="llm_provider_invalid_model",
+                provider="deepseek",
+            ),
+        ):
+            response = self.client.post(
+                "/api/chat/ask",
+                data=json.dumps({"question": "revenue"}),
+                content_type="application/json",
+                HTTP_AUTHORIZATION=f"Bearer {self.access_token}",
+            )
+
+        self.assertEqual(response.status_code, 502)
+        payload = response.json()
+        self.assertEqual(payload["code"], "llm_provider_invalid_model")
+        self.assertEqual(payload["provider"], "deepseek")
+        self.assertEqual(payload["data"]["error"]["type"], "provider_invalid_model")
+
 @override_settings(
     JWT_SECRET_KEY="test-jwt-secret",
     JWT_ACCESS_TOKEN_LIFETIME_SECONDS=3600,
