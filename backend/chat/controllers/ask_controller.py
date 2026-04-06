@@ -84,6 +84,12 @@ def _build_upstream_error_response(exc):
             "\u8bf7\u7a0d\u540e\u91cd\u8bd5\u3002"
         )
         error_type = "rate_limited"
+    elif exc.code == "llm_provider_auth_failed":
+        message = "\u5f53\u524d\u5bf9\u8bdd\u6a21\u578b\u8ba4\u8bc1\u5931\u8d25\uff0c\u8bf7\u8054\u7cfb\u7ba1\u7406\u5458\u68c0\u67e5 API Key\u3002"
+        error_type = "provider_auth_failed"
+    elif exc.code == "llm_provider_invalid_model":
+        message = "\u5f53\u524d\u5bf9\u8bdd\u6a21\u578b\u540d\u79f0\u65e0\u6548\uff0c\u8bf7\u8054\u7cfb\u7ba1\u7406\u5458\u68c0\u67e5\u6a21\u578b\u914d\u7f6e\u3002"
+        error_type = "provider_invalid_model"
     else:
         message = (
             "\u5bf9\u8bdd\u6a21\u578b\u4e0a\u6e38\u670d\u52a1\u8c03\u7528\u5931\u8d25\uff0c"

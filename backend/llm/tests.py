@@ -4,7 +4,7 @@ import tempfile
 from decimal import Decimal
 from io import BytesIO
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 from urllib.error import HTTPError, URLError
 
 from django.contrib.auth.models import Group
@@ -21,6 +21,7 @@ from llm.services.providers.ollama_provider import (
     OllamaChatProvider,
     OllamaEmbeddingProvider,
 )
+from llm.services.providers.deepseek_provider import DeepSeekChatProvider
 from llm.services.runtime_service import get_chat_provider, get_embedding_provider
 from rbac.services.rbac_service import ROLE_ADMIN, ROLE_MEMBER, ROLE_SUPER_ADMIN, seed_roles_and_permissions
 
@@ -58,6 +59,20 @@ class ModelConfigServiceTests(TestCase):
         self.assertFalse(previous.is_active)
         self.assertTrue(replacement.is_active)
         self.assertEqual(get_active_model_config(ModelConfig.CAPABILITY_CHAT).id, replacement.id)
+
+    def test_model_config_supports_deepseek_provider(self):
+        config = ModelConfig.objects.create(
+            name="deepseek-chat",
+            capability=ModelConfig.CAPABILITY_CHAT,
+            provider=ModelConfig.PROVIDER_DEEPSEEK,
+            model_name="deepseek-chat",
+            endpoint="https://api.deepseek.com",
+            options={"api_key": "sk-test-123456", "temperature": 0.2, "max_tokens": 1024},
+            is_active=False,
+        )
+
+        self.assertEqual(config.provider, ModelConfig.PROVIDER_DEEPSEEK)
+        self.assertEqual(config.options["api_key"], "sk-test-123456")
 
 
 class EvalRecordModelTests(TestCase):
@@ -194,6 +209,45 @@ class ProviderRuntimeTests(TestCase):
         self.assertIsInstance(chat_provider, OllamaChatProvider)
         self.assertIsInstance(embedding_provider, OllamaEmbeddingProvider)
 
+    @patch("llm.services.providers.deepseek_provider.init_chat_model")
+    def test_runtime_service_builds_deepseek_chat_provider(self, mocked_init_chat_model):
+        mocked_client = Mock()
+        mocked_client.invoke.return_value = type("Response", (), {"content": "pong"})()
+        mocked_init_chat_model.return_value = mocked_client
+        ModelConfig.objects.filter(capability=ModelConfig.CAPABILITY_CHAT).update(is_active=False)
+        ModelConfig.objects.create(
+            name="deepseek-active",
+            capability=ModelConfig.CAPABILITY_CHAT,
+            provider=ModelConfig.PROVIDER_DEEPSEEK,
+            model_name="deepseek-chat",
+            endpoint="https://api.deepseek.com",
+            options={"api_key": "sk-test", "temperature": 0.3, "max_tokens": 512},
+            is_active=True,
+        )
+
+        provider = get_chat_provider()
+        result = provider.chat(messages=[{"role": "user", "content": "hello"}])
+
+        self.assertIsInstance(provider, DeepSeekChatProvider)
+        self.assertEqual(result, "pong")
+        mocked_init_chat_model.assert_called_once()
+
+    @patch("llm.services.providers.deepseek_provider.init_chat_model")
+    def test_deepseek_chat_provider_maps_auth_error(self, mocked_init_chat_model):
+        mocked_client = Mock()
+        mocked_client.invoke.side_effect = Exception("401 invalid api key")
+        mocked_init_chat_model.return_value = mocked_client
+        provider = DeepSeekChatProvider(
+            endpoint="https://api.deepseek.com",
+            model_name="deepseek-chat",
+            options={"api_key": "sk-test"},
+        )
+
+        with self.assertRaises(UpstreamServiceError) as context:
+            provider.chat(messages=[{"role": "user", "content": "hello"}])
+
+        self.assertEqual(context.exception.code, "llm_provider_auth_failed")
+
     def test_prompt_template_is_rendered_from_prompts_directory(self):
         prompt = render_prompt(
             "chat/answer.txt",
@@ -288,6 +342,8 @@ class ModelConfigListApiTests(TestCase):
                 "model_name",
                 "endpoint",
                 "options",
+                "has_api_key",
+                "api_key_masked",
                 "is_active",
                 "created_at",
                 "updated_at",
@@ -296,6 +352,30 @@ class ModelConfigListApiTests(TestCase):
         self.assertEqual(first_row["id"], get_active_model_config(ModelConfig.CAPABILITY_CHAT).id)
         self.assertTrue(first_row["is_active"])
         self.assertEqual(payload["data"]["model_configs"][1]["id"], replacement.id)
+
+    def test_list_model_configs_masks_api_key(self):
+        ModelConfig.objects.create(
+            name="deepseek-chat",
+            capability=ModelConfig.CAPABILITY_CHAT,
+            provider=ModelConfig.PROVIDER_DEEPSEEK,
+            model_name="deepseek-chat",
+            endpoint="https://api.deepseek.com",
+            options={"api_key": "sk-test-123456"},
+            is_active=False,
+        )
+
+        response = self.client.get(
+            "/api/ops/model-configs",
+            HTTP_AUTHORIZATION=f"Bearer {self.admin_access_token}",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        deepseek_row = next(
+            item for item in response.json()["data"]["model_configs"] if item["provider"] == "deepseek"
+        )
+        self.assertTrue(deepseek_row["has_api_key"])
+        self.assertEqual(deepseek_row["api_key_masked"], "sk-tes******3456")
+        self.assertNotIn("sk-test-123456", json.dumps(deepseek_row))
 
 
 @override_settings(
@@ -423,11 +503,64 @@ class ModelConfigActivationApiTests(TestCase):
                 "model_name",
                 "endpoint",
                 "options",
+                "has_api_key",
+                "api_key_masked",
                 "is_active",
                 "created_at",
                 "updated_at",
             },
         )
+
+    def test_admin_can_create_deepseek_model_config(self):
+        response = self.client.post(
+            "/api/ops/model-configs/",
+            data=json.dumps(
+                {
+                    "name": "deepseek-prod",
+                    "capability": "chat",
+                    "provider": "deepseek",
+                    "model_name": "deepseek-chat",
+                    "endpoint": "https://api.deepseek.com",
+                    "options": {
+                        "api_key": "sk-test-123456",
+                        "temperature": 0.2,
+                        "max_tokens": 1024,
+                    },
+                    "is_active": True,
+                }
+            ),
+            content_type="application/json",
+            HTTP_AUTHORIZATION=f"Bearer {self.admin_access_token}",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["data"]["model_config"]["provider"], "deepseek")
+        self.assertTrue(payload["data"]["model_config"]["has_api_key"])
+
+    @patch("llm.services.providers.deepseek_provider.init_chat_model")
+    def test_admin_can_test_deepseek_connection(self, mocked_init_chat_model):
+        mocked_client = Mock()
+        mocked_client.invoke.return_value = type("Response", (), {"content": "pong"})()
+        mocked_init_chat_model.return_value = mocked_client
+
+        response = self.client.post(
+            "/api/ops/model-configs/test-connection/",
+            data=json.dumps(
+                {
+                    "capability": "chat",
+                    "provider": "deepseek",
+                    "model_name": "deepseek-chat",
+                    "endpoint": "https://api.deepseek.com",
+                    "options": {"api_key": "sk-test"},
+                }
+            ),
+            content_type="application/json",
+            HTTP_AUTHORIZATION=f"Bearer {self.admin_access_token}",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["data"]["ok"], True)
 
     def test_activation_returns_404_for_unknown_model_config(self):
         response = self.client.patch(

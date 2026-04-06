@@ -1,5 +1,6 @@
 from common.exceptions import ProviderConfigurationError
 from llm.models import ModelConfig
+from llm.services.providers.deepseek_provider import DeepSeekChatProvider
 from llm.services.model_config_service import get_active_model_config
 from llm.services.providers.ollama_provider import (
     OllamaChatProvider,
@@ -8,13 +9,32 @@ from llm.services.providers.ollama_provider import (
 
 
 def _build_provider(model_config):
+    if model_config.provider == ModelConfig.PROVIDER_DEEPSEEK:
+        if model_config.capability != ModelConfig.CAPABILITY_CHAT:
+            raise ProviderConfigurationError(
+                f"Unsupported capability: {model_config.capability}",
+                provider=model_config.provider,
+                details={
+                    "capability": model_config.capability,
+                    "supported_capabilities": [ModelConfig.CAPABILITY_CHAT],
+                },
+            )
+        return DeepSeekChatProvider(
+            endpoint=model_config.endpoint,
+            model_name=model_config.model_name,
+            options=model_config.options,
+        )
+
     if model_config.provider != ModelConfig.PROVIDER_OLLAMA:
         raise ProviderConfigurationError(
             f"Unsupported provider: {model_config.provider}",
             provider=model_config.provider,
             details={
                 "capability": model_config.capability,
-                "supported_providers": [ModelConfig.PROVIDER_OLLAMA],
+                "supported_providers": [
+                    ModelConfig.PROVIDER_OLLAMA,
+                    ModelConfig.PROVIDER_DEEPSEEK,
+                ],
             },
         )
 

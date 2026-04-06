@@ -1,13 +1,38 @@
 from django.urls import path
 
 from llm.controllers.evaluation_controller import EvalRecordListCreateView
-from llm.controllers.model_config_controller import ModelConfigActivationView, ModelConfigListView
+from llm.controllers.model_config_controller import (
+    ModelConfigActivationView,
+    ModelConfigConnectionTestView,
+    ModelConfigDetailView,
+    ModelConfigListView,
+)
 from llm.controllers.prompt_config_controller import PromptConfigListView, PromptConfigUpdateView
 
 
 urlpatterns = [
     path("evaluations", EvalRecordListCreateView.as_view(), name="evaluation-list-create-legacy"),
     path("evaluations/", EvalRecordListCreateView.as_view(), name="evaluation-list-create"),
+    path(
+        "model-configs/test-connection",
+        ModelConfigConnectionTestView.as_view(),
+        name="model-config-test-connection-legacy",
+    ),
+    path(
+        "model-configs/test-connection/",
+        ModelConfigConnectionTestView.as_view(),
+        name="model-config-test-connection",
+    ),
+    path(
+        "model-configs/<int:model_config_id>",
+        ModelConfigDetailView.as_view(),
+        name="model-config-detail-legacy",
+    ),
+    path(
+        "model-configs/<int:model_config_id>/",
+        ModelConfigDetailView.as_view(),
+        name="model-config-detail",
+    ),
     path(
         "model-configs/<int:model_config_id>/activation",
         ModelConfigActivationView.as_view(),
