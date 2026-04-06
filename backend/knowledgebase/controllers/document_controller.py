@@ -1,3 +1,4 @@
+from django.db import DatabaseError, OperationalError, ProgrammingError
 from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_GET, require_http_methods
@@ -17,7 +18,16 @@ from rbac.services.authz_service import permission_required
 @permission_required("auth.view_document")
 def document_list_create_view(request):
     if request.method == "GET":
-        return JsonResponse(build_document_list_response(request.user))
+        try:
+            return JsonResponse(build_document_list_response(request.user))
+        except (OperationalError, ProgrammingError, DatabaseError) as exc:
+            return JsonResponse(
+                {
+                    "message": "知识库数据表尚未初始化，请先执行后端迁移与 RBAC 初始化。",
+                    "detail": str(exc),
+                },
+                status=503,
+            )
 
     if not request.user.has_perm("auth.upload_document"):
         return JsonResponse({"message": "无权限。"}, status=403)
