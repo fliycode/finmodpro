@@ -39,6 +39,7 @@ const handleReview = async (event, status) => {
   try {
     await riskApi.reviewEvent(event.id || event.event_id, status);
     event.review_status = status;
+    flash.success(`风险事件已${status === 'approved' ? '确认' : '忽略'}`);
   } catch (error) {
     console.error("Failed to review event:", error);
     flash.error(error.message || "审核失败");
@@ -59,15 +60,6 @@ const resetFilters = () => {
   fetchEvents();
 };
 
-const getRiskLevelColor = (level) => {
-  const colors = {
-    high: "#ef4444",
-    medium: "#f59e0b",
-    low: "#10b981"
-  };
-  return colors[level?.toLowerCase()] || "#64748b";
-};
-
 const getReviewStatusText = (status) => {
   const texts = {
     pending: "待审核",
@@ -77,13 +69,18 @@ const getReviewStatusText = (status) => {
   return texts[status?.toLowerCase()] || status || "待审核";
 };
 
-const getReviewStatusColor = (status) => {
-  const colors = {
-    pending: "#f59e0b",
-    approved: "#10b981",
-    rejected: "#ef4444"
-  };
-  return colors[status?.toLowerCase()] || "#64748b";
+const getRiskTagType = (level) => {
+  if (level === 'high') return 'danger';
+  if (level === 'medium') return 'warning';
+  if (level === 'low') return 'success';
+  return 'info';
+};
+
+const getReviewTagType = (status) => {
+  if (status === 'approved') return 'success';
+  if (status === 'rejected') return 'danger';
+  if (status === 'pending') return 'warning';
+  return 'info';
 };
 
 const formatDate = (dateStr) => {
@@ -130,6 +127,7 @@ const generateReport = async () => {
       });
     }
     generatedReport.value = data.report || data.data?.report || data;
+    flash.success('风险报告生成成功');
   } catch (error) {
     console.error("Failed to generate report:", error);
     reportErrorMsg.value = error.message || "生成报告失败";
@@ -151,260 +149,203 @@ const generateReport = async () => {
       </div>
     </section>
 
-    <div class="risk-summary-shell ui-card">
-      <div class="tabs">
-        <button :class="['tab-btn', { active: activeTab === 'events' }]" @click="activeTab = 'events'">风险事件审核</button>
-        <button :class="['tab-btn', { active: activeTab === 'reports' }]" @click="activeTab = 'reports'">风险报告生成</button>
-      </div>
+    <el-card class="ui-card risk-summary-shell" shadow="never">
+      <el-tabs v-model="activeTab" class="risk-tabs">
+        <el-tab-pane label="风险事件审核" name="events">
+          <div class="tab-content risk-events-content">
+            <div class="section-heading">
+              <h3 class="section-heading__title">待处理风险事件</h3>
+              <p class="section-heading__desc">按公司、类型、等级和审核状态快速缩小范围，减少表格视觉噪音。</p>
+            </div>
 
-      <div v-if="activeTab === 'events'" class="tab-content risk-events-content">
-        <div class="section-heading">
-          <h3 class="section-heading__title">待处理风险事件</h3>
-          <p class="section-heading__desc">按公司、类型、等级和审核状态快速缩小范围，减少表格视觉噪音。</p>
-        </div>
+            <el-form :inline="true" class="toolbar">
+              <el-form-item>
+                <el-input v-model="filters.company_name" placeholder="公司名称" clearable @keyup.enter="applyFilters" />
+              </el-form-item>
+              <el-form-item>
+                <el-input v-model="filters.risk_type" placeholder="风险类型" clearable @keyup.enter="applyFilters" />
+              </el-form-item>
+              <el-form-item>
+                <el-select v-model="filters.risk_level" placeholder="全部等级" clearable>
+                  <el-option label="高风险" value="high" />
+                  <el-option label="中风险" value="medium" />
+                  <el-option label="低风险" value="low" />
+                </el-select>
+              </el-form-item>
+              <el-form-item>
+                <el-select v-model="filters.review_status" placeholder="全部状态" clearable>
+                  <el-option label="待审核" value="pending" />
+                  <el-option label="已确认" value="approved" />
+                  <el-option label="已忽略" value="rejected" />
+                </el-select>
+              </el-form-item>
+              <el-form-item>
+                <el-button type="primary" @click="applyFilters" :loading="isEventsLoading">查询</el-button>
+                <el-button @click="resetFilters" :disabled="isEventsLoading">重置</el-button>
+              </el-form-item>
+            </el-form>
 
-        <div class="toolbar">
-          <input type="text" v-model="filters.company_name" placeholder="公司名称" class="filter-input" @keyup.enter="applyFilters" />
-          <input type="text" v-model="filters.risk_type" placeholder="风险类型" class="filter-input" @keyup.enter="applyFilters" />
+            <el-alert v-if="eventsErrorMsg" :title="eventsErrorMsg" type="error" show-icon :closable="false" />
 
-          <select v-model="filters.risk_level" class="filter-select" @change="applyFilters">
-            <option value="">全部等级</option>
-            <option value="high">高风险</option>
-            <option value="medium">中风险</option>
-            <option value="low">低风险</option>
-          </select>
-
-          <select v-model="filters.review_status" class="filter-select" @change="applyFilters">
-            <option value="">全部状态</option>
-            <option value="pending">待审核</option>
-            <option value="approved">已确认</option>
-            <option value="rejected">已忽略</option>
-          </select>
-
-          <button class="primary-btn" @click="applyFilters" :disabled="isEventsLoading">查询</button>
-          <button class="secondary-btn" @click="resetFilters" :disabled="isEventsLoading">重置</button>
-        </div>
-
-        <div class="content-area">
-          <div v-if="isEventsLoading && events.length === 0" class="state-msg">加载中...</div>
-
-          <div v-else-if="eventsErrorMsg" class="state-msg error">
-            <div class="error-icon">⚠️</div>
-            <p>{{ eventsErrorMsg }}</p>
-            <button class="primary-btn mt-4" @click="fetchEvents">重试</button>
-          </div>
-
-          <div v-else-if="events.length === 0" class="state-msg empty">
-            <div class="empty-icon">🛡️</div>
-            <p>暂无风险事件。</p>
-          </div>
-
-          <div v-else class="table-container">
-            <table class="risk-table">
-              <thead>
-                <tr>
-                  <th>公司名</th>
-                  <th>风险类型</th>
-                  <th>风险等级</th>
-                  <th>事件时间</th>
-                  <th>摘要 / 证据</th>
-                  <th>审核状态</th>
-                  <th>操作</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr v-for="(item, index) in events" :key="item.id || item.event_id || index">
-                  <td class="company-name">{{ item.company_name || '未知公司' }}</td>
-                  <td><span class="risk-type">{{ item.risk_type }}</span></td>
-                  <td>
-                    <span class="risk-level" :style="{ backgroundColor: getRiskLevelColor(item.risk_level) }">
-                      {{ (item.risk_level || 'UNKNOWN').toUpperCase() }}
-                    </span>
-                  </td>
-                  <td class="event-date">{{ formatDate(item.event_date || item.created_at) }}</td>
-                  <td class="summary-cell">
-                    <div class="summary-text" :title="item.summary">{{ item.summary }}</div>
-                    <div class="evidence-text" v-if="item.evidence_text" :title="item.evidence_text">"{{ item.evidence_text }}"</div>
-                    <div class="meta-tags" v-if="item.confidence_score !== undefined || item.confidence !== undefined || item.document_id">
-                      <span v-if="item.confidence_score !== undefined || item.confidence !== undefined" class="meta-tag">置信度: {{ Math.round((item.confidence_score !== undefined ? item.confidence_score : item.confidence) * 100) }}%</span>
-                      <span v-if="item.document_id" class="meta-tag" :title="item.document_id">文档: {{ item.document_id.substring(0,8) }}...</span>
+            <el-table v-else :data="events" stripe style="width: 100%" v-loading="isEventsLoading">
+              <el-table-column prop="company_name" label="公司名" min-width="160">
+                <template #default="scope">
+                  <span class="company-name">{{ scope.row.company_name || '未知公司' }}</span>
+                </template>
+              </el-table-column>
+              <el-table-column prop="risk_type" label="风险类型" width="140">
+                <template #default="scope">
+                  <el-tag effect="plain">{{ scope.row.risk_type }}</el-tag>
+                </template>
+              </el-table-column>
+              <el-table-column label="风险等级" width="120">
+                <template #default="scope">
+                  <el-tag :type="getRiskTagType(scope.row.risk_level)">
+                    {{ (scope.row.risk_level || 'unknown').toUpperCase() }}
+                  </el-tag>
+                </template>
+              </el-table-column>
+              <el-table-column label="事件时间" min-width="180">
+                <template #default="scope">
+                  <span class="muted-text">{{ formatDate(scope.row.event_date || scope.row.created_at) }}</span>
+                </template>
+              </el-table-column>
+              <el-table-column label="摘要 / 证据" min-width="320">
+                <template #default="scope">
+                  <div class="summary-block">
+                    <div class="summary-text">{{ scope.row.summary }}</div>
+                    <div v-if="scope.row.evidence_text" class="summary-block__quote">"{{ scope.row.evidence_text }}"</div>
+                    <div v-if="scope.row.confidence_score !== undefined || scope.row.confidence !== undefined || scope.row.document_id" class="meta-chip-row">
+                      <span v-if="scope.row.confidence_score !== undefined || scope.row.confidence !== undefined" class="meta-chip">
+                        置信度: {{ Math.round((scope.row.confidence_score !== undefined ? scope.row.confidence_score : scope.row.confidence) * 100) }}%
+                      </span>
+                      <span v-if="scope.row.document_id" class="meta-chip" :title="scope.row.document_id">
+                        文档: {{ scope.row.document_id.substring(0, 8) }}...
+                      </span>
                     </div>
-                  </td>
-                  <td>
-                    <span class="review-status" :style="{ color: getReviewStatusColor(item.review_status) }">
-                      {{ getReviewStatusText(item.review_status) }}
-                    </span>
-                  </td>
-                  <td class="action-cell">
-                    <div class="actions" v-if="((item.review_status || 'pending').toLowerCase() === 'pending')">
-                      <button class="action-btn approve" @click="handleReview(item, 'approved')">确认</button>
-                      <button class="action-btn reject" @click="handleReview(item, 'rejected')">忽略</button>
-                    </div>
-                    <div v-else class="actions-done">-</div>
-                  </td>
-                </tr>
-              </tbody>
-            </table>
+                  </div>
+                </template>
+              </el-table-column>
+              <el-table-column label="审核状态" width="120">
+                <template #default="scope">
+                  <el-tag :type="getReviewTagType((scope.row.review_status || 'pending').toLowerCase())">
+                    {{ getReviewStatusText(scope.row.review_status) }}
+                  </el-tag>
+                </template>
+              </el-table-column>
+              <el-table-column label="操作" width="160" fixed="right">
+                <template #default="scope">
+                  <div v-if="((scope.row.review_status || 'pending').toLowerCase() === 'pending')" class="inline-actions">
+                    <el-button type="success" plain size="small" @click="handleReview(scope.row, 'approved')">确认</el-button>
+                    <el-button type="danger" plain size="small" @click="handleReview(scope.row, 'rejected')">忽略</el-button>
+                  </div>
+                  <span v-else class="muted-text">-</span>
+                </template>
+              </el-table-column>
+              <template #empty>
+                <div class="admin-empty-state">暂无风险事件。</div>
+              </template>
+            </el-table>
           </div>
-        </div>
-      </div>
+        </el-tab-pane>
 
-      <div v-else-if="activeTab === 'reports'" class="tab-content risk-reports-content">
-        <div class="report-form-card">
-          <div class="section-heading">
-            <h3 class="section-heading__title">生成风险报告</h3>
-            <p class="section-heading__desc">支持按公司或时间区间生成，便于给管理层或业务侧直接复用。</p>
-          </div>
-
-          <div class="form-group row-group">
-            <label>报告类型:</label>
-            <div class="radio-group">
-              <label class="radio-label">
-                <input type="radio" v-model="reportType" value="company" />
-                按公司维度
-              </label>
-              <label class="radio-label">
-                <input type="radio" v-model="reportType" value="time-range" />
-                按时间区间
-              </label>
-            </div>
-          </div>
-
-          <div class="form-group" v-if="reportType === 'company'">
-            <label>公司名称 <span class="required">*</span>:</label>
-            <input type="text" v-model="reportForm.company_name" placeholder="例如: 某某科技公司" class="form-input" />
-          </div>
-
-          <div class="form-group row-group-inputs">
-            <div class="input-col">
-              <label>开始日期 <span v-if="reportType === 'time-range'" class="required">*</span>:</label>
-              <input type="date" v-model="reportForm.period_start" class="form-input" />
-            </div>
-            <div class="input-col">
-              <label>结束日期 <span v-if="reportType === 'time-range'" class="required">*</span>:</label>
-              <input type="date" v-model="reportForm.period_end" class="form-input" />
-            </div>
-          </div>
-
-          <div class="form-actions">
-            <button class="primary-btn generate-btn" @click="generateReport" :disabled="isReportLoading">
-              {{ isReportLoading ? '正在生成中...' : '生成报告' }}
-            </button>
-          </div>
-          <div v-if="reportErrorMsg" class="error-text mt-4">{{ reportErrorMsg }}</div>
-        </div>
-
-        <div class="report-result ui-card" v-if="generatedReport">
-          <div class="report-header">
-            <h2>{{ generatedReport.title }}</h2>
-            <div class="report-meta">
-              <span class="meta-item">生成时间: {{ formatDate(generatedReport.created_at || generatedReport.generated_at) }}</span>
-              <span class="meta-item">包含事件数: {{ generatedReport.source_metadata?.event_count || 0 }}</span>
-              <span class="meta-item" v-if="generatedReport.source_metadata?.document_ids">涉及文档数: {{ generatedReport.source_metadata.document_ids.length }}</span>
-            </div>
-          </div>
-
-          <div class="report-section summary-section">
-            <h3>高管摘要</h3>
-            <p class="summary-content">{{ generatedReport.summary }}</p>
-          </div>
-
-          <div class="report-section metadata-section" v-if="generatedReport.source_metadata">
-            <h3>风险概况</h3>
-            <div class="stats-grid">
-              <div class="stat-card" v-if="generatedReport.source_metadata.risk_level_counts">
-                <h4>风险等级分布</h4>
-                <ul>
-                  <li v-for="(count, level) in generatedReport.source_metadata.risk_level_counts" :key="level">
-                    <span class="stat-label">{{ String(level).toUpperCase() }}</span>
-                    <span class="stat-value">{{ count }}</span>
-                  </li>
-                </ul>
+        <el-tab-pane label="风险报告生成" name="reports">
+          <div class="tab-content risk-reports-content">
+            <el-card class="report-form-card" shadow="never">
+              <div class="section-heading">
+                <h3 class="section-heading__title">生成风险报告</h3>
+                <p class="section-heading__desc">支持按公司或时间区间生成，便于给管理层或业务侧直接复用。</p>
               </div>
-              <div class="stat-card" v-if="generatedReport.source_metadata.risk_type_counts">
-                <h4>风险类型分布</h4>
-                <ul>
-                  <li v-for="(count, type) in generatedReport.source_metadata.risk_type_counts" :key="type">
-                    <span class="stat-label">{{ type }}</span>
-                    <span class="stat-value">{{ count }}</span>
-                  </li>
-                </ul>
-              </div>
-            </div>
-          </div>
 
-          <div class="report-section content-section">
-            <h3>报告详情</h3>
-            <div class="markdown-content">{{ generatedReport.content }}</div>
+              <el-form label-width="92px" class="risk-report-form">
+                <el-form-item label="报告类型">
+                  <el-radio-group v-model="reportType">
+                    <el-radio value="company">按公司维度</el-radio>
+                    <el-radio value="time-range">按时间区间</el-radio>
+                  </el-radio-group>
+                </el-form-item>
+
+                <el-form-item v-if="reportType === 'company'" label="公司名称">
+                  <el-input v-model="reportForm.company_name" placeholder="例如: 某某科技公司" clearable />
+                </el-form-item>
+
+                <el-form-item label="开始日期">
+                  <el-date-picker v-model="reportForm.period_start" type="date" value-format="YYYY-MM-DD" placeholder="选择开始日期" />
+                </el-form-item>
+
+                <el-form-item label="结束日期">
+                  <el-date-picker v-model="reportForm.period_end" type="date" value-format="YYYY-MM-DD" placeholder="选择结束日期" />
+                </el-form-item>
+
+                <el-form-item>
+                  <el-button type="primary" @click="generateReport" :loading="isReportLoading">生成报告</el-button>
+                </el-form-item>
+              </el-form>
+
+              <el-alert v-if="reportErrorMsg" :title="reportErrorMsg" type="error" show-icon :closable="false" />
+            </el-card>
+
+            <el-card v-if="generatedReport" class="report-result ui-card" shadow="never">
+              <div class="report-header">
+                <h2>{{ generatedReport.title }}</h2>
+                <div class="report-meta">
+                  <span class="meta-item">生成时间: {{ formatDate(generatedReport.created_at || generatedReport.generated_at) }}</span>
+                  <span class="meta-item">包含事件数: {{ generatedReport.source_metadata?.event_count || 0 }}</span>
+                  <span v-if="generatedReport.source_metadata?.document_ids" class="meta-item">涉及文档数: {{ generatedReport.source_metadata.document_ids.length }}</span>
+                </div>
+              </div>
+
+              <div class="report-section summary-section">
+                <h3>高管摘要</h3>
+                <p class="summary-content">{{ generatedReport.summary }}</p>
+              </div>
+
+              <div v-if="generatedReport.source_metadata" class="report-section metadata-section">
+                <h3>风险概况</h3>
+                <div class="stats-grid">
+                  <div v-if="generatedReport.source_metadata.risk_level_counts" class="stat-card">
+                    <h4>风险等级分布</h4>
+                    <ul>
+                      <li v-for="(count, level) in generatedReport.source_metadata.risk_level_counts" :key="level">
+                        <span class="stat-label">{{ String(level).toUpperCase() }}</span>
+                        <span class="stat-value">{{ count }}</span>
+                      </li>
+                    </ul>
+                  </div>
+                  <div v-if="generatedReport.source_metadata.risk_type_counts" class="stat-card">
+                    <h4>风险类型分布</h4>
+                    <ul>
+                      <li v-for="(count, type) in generatedReport.source_metadata.risk_type_counts" :key="type">
+                        <span class="stat-label">{{ type }}</span>
+                        <span class="stat-value">{{ count }}</span>
+                      </li>
+                    </ul>
+                  </div>
+                </div>
+              </div>
+
+              <div class="report-section content-section">
+                <h3>报告详情</h3>
+                <div class="markdown-content">{{ generatedReport.content }}</div>
+              </div>
+            </el-card>
           </div>
-        </div>
-      </div>
-    </div>
+        </el-tab-pane>
+      </el-tabs>
+    </el-card>
   </div>
 </template>
 
 <style scoped>
-.risk-summary-shell { display: flex; flex-direction: column; min-height: 760px; overflow: hidden; }
-.tabs { display: flex; border-bottom: 1px solid #e2e8f0; padding: 0 28px; background: linear-gradient(180deg, #f8fbff 0%, #f8fafc 100%); }
-.tab-btn { padding: 18px 24px; border: none; background: transparent; font-size: 14px; font-weight: 700; color: #64748b; cursor: pointer; border-bottom: 2px solid transparent; transition: all 0.2s; margin-right: 8px; }
-.tab-btn:hover { color: #334155; }
-.tab-btn.active { color: #4f46e5; border-bottom-color: #4f46e5; }
-.tab-content { padding: 28px; flex: 1; display: flex; flex-direction: column; gap: 22px; overflow-y: auto; }
+.risk-summary-shell { min-height: 760px; }
+.tab-content { display: flex; flex-direction: column; gap: 22px; }
 .toolbar { display: flex; flex-wrap: wrap; gap: 12px; }
-.filter-input, .filter-select, .form-input { padding: 11px 14px; border: 1px solid #dbe4f0; border-radius: 12px; outline: none; transition: border-color 0.2s, box-shadow 0.2s; font-family: inherit; background: #fff; }
-.filter-input { flex: 1; min-width: 160px; }
-.filter-select { min-width: 132px; }
-.filter-input:focus, .filter-select:focus, .form-input:focus { border-color: #6366f1; box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.08); }
-.primary-btn { padding: 0 22px; height: 44px; background: linear-gradient(135deg, #4f46e5, #4338ca); color: white; border: none; border-radius: 12px; cursor: pointer; font-weight: 700; transition: background 0.2s, transform 0.2s; white-space: nowrap; }
-.primary-btn:hover:not(:disabled) { transform: translateY(-1px); }
-.primary-btn:disabled { opacity: 0.7; cursor: not-allowed; }
-.secondary-btn { padding: 0 22px; height: 44px; background: #f8fafc; color: #475569; border: 1px solid #dbe4f0; border-radius: 12px; cursor: pointer; font-weight: 600; transition: all 0.2s; white-space: nowrap; }
-.secondary-btn:hover:not(:disabled) { background: #eef2f7; }
-.content-area { flex: 1; display: flex; flex-direction: column; }
-.state-msg { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 48px; text-align: center; color: #94a3b8; border: 2px dashed #e2e8f0; border-radius: 16px; background: #f8fafc; }
-.empty-icon, .error-icon { font-size: 48px; margin-bottom: 16px; opacity: 0.5; }
-.error-icon { color: #ef4444; opacity: 1; }
-.mt-4 { margin-top: 16px; }
-.table-container { overflow-x: auto; border: 1px solid #e2e8f0; border-radius: 16px; background: white; }
-.risk-table { width: 100%; border-collapse: collapse; text-align: left; font-size: 13px; }
-.risk-table th { background: #f8fafc; padding: 14px 16px; font-weight: 700; color: #475569; border-bottom: 1px solid #e2e8f0; white-space: nowrap; }
-.risk-table td { padding: 14px 16px; border-bottom: 1px solid #f1f5f9; vertical-align: top; color: #1e293b; line-height: 1.55; }
-.risk-table tr:last-child td { border-bottom: none; }
-.risk-table tr:hover { background: #fafcff; }
-.company-name { font-weight: 700; white-space: nowrap; }
-.risk-type { background: #eef2ff; padding: 4px 8px; border-radius: 999px; font-size: 12px; color: #4f46e5; white-space: nowrap; }
-.risk-level { font-size: 11px; font-weight: 700; color: white; padding: 4px 8px; border-radius: 999px; white-space: nowrap; }
-.event-date { color: #64748b; font-size: 12px; white-space: nowrap; }
-.summary-cell { min-width: 260px; max-width: 420px; }
-.summary-text { font-weight: 600; margin-bottom: 8px; color: #334155; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
-.evidence-text { font-size: 12px; color: #475569; font-style: italic; background: #f8fafc; padding: 8px 10px; border-left: 3px solid #cbd5e1; border-radius: 0 8px 8px 0; margin-bottom: 8px; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
-.meta-tags { display: flex; gap: 8px; flex-wrap: wrap; }
-.meta-tag { font-size: 11px; color: #64748b; background: #f1f5f9; padding: 3px 7px; border-radius: 999px; }
-.review-status { font-weight: 700; white-space: nowrap; }
-.action-cell { white-space: nowrap; }
-.actions { display: flex; gap: 8px; }
-.actions-done { color: #94a3b8; font-weight: 500; padding-left: 8px; }
-.action-btn { padding: 7px 14px; border-radius: 10px; font-size: 12px; font-weight: 700; cursor: pointer; transition: all 0.2s; border: none; }
-.action-btn.approve { background: #10b981; color: white; }
-.action-btn.approve:hover { background: #059669; }
-.action-btn.reject { background: white; color: #ef4444; border: 1px solid #fecaca; }
-.action-btn.reject:hover { background: #fef2f2; }
+.company-name { font-weight: 700; white-space: nowrap; color: #1e293b; }
+.summary-text { font-weight: 600; color: #334155; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .risk-reports-content { gap: 22px; }
-.report-form-card { background: #fff; border: 1px solid #e2e8f0; border-radius: 18px; padding: 24px; }
-.form-group { margin-bottom: 16px; }
-.row-group { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
-.row-group label { margin-bottom: 0; min-width: 80px; }
-.form-group label { display: block; margin-bottom: 8px; font-weight: 600; color: #475569; font-size: 14px; }
-.required { color: #ef4444; }
-.form-input { width: 100%; max-width: 420px; font-size: 14px; }
-.row-group-inputs { display: flex; gap: 16px; max-width: 460px; }
-.input-col { flex: 1; }
-.radio-group { display: flex; gap: 20px; flex-wrap: wrap; }
-.radio-label { display: flex; align-items: center; gap: 8px; font-weight: 500 !important; cursor: pointer; font-size: 14px; }
-.radio-label input[type="radio"] { accent-color: #6366f1; width: 16px; height: 16px; cursor: pointer; }
-.form-actions { margin-top: 24px; }
-.generate-btn { height: 46px; font-size: 14px; padding: 0 28px; }
-.error-text { color: #ef4444; font-size: 14px; }
+.report-form-card { border-radius: 18px; }
+.risk-report-form :deep(.el-date-editor),
+.risk-report-form :deep(.el-input) { width: 100%; max-width: 360px; }
 .report-result { padding: 30px; }
 .report-header { margin-bottom: 28px; border-bottom: 1px solid #f1f5f9; padding-bottom: 22px; }
 .report-header h2 { margin: 0 0 16px 0; color: #0f172a; font-size: 24px; line-height: 1.3; }
@@ -424,8 +365,6 @@ const generateReport = async () => {
 .stat-value { font-weight: 700; color: #1e293b; background: #f1f5f9; padding: 2px 8px; border-radius: 999px; font-size: 12px; }
 .markdown-content { font-size: 14px; line-height: 1.78; color: #334155; white-space: pre-wrap; font-family: inherit; background: white; padding: 24px; border: 1px solid #e2e8f0; border-radius: 14px; }
 @media (max-width: 900px) {
-  .tabs { padding: 0 18px; }
-  .tab-content { padding: 20px; }
-  .row-group-inputs { flex-direction: column; max-width: none; }
+  .report-result { padding: 20px; }
 }
 </style>
