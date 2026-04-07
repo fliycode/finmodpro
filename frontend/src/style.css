@@ -1,4 +1,9 @@
 :root {
+  font-family: 'Segoe UI', 'PingFang SC', 'Noto Sans SC', sans-serif;
+  line-height: 1.5;
+  font-weight: 400;
+  color: #211913;
+  background: #f5efe6;
   --page-bg: #f3f5f7;
   --surface-1: rgba(255, 255, 255, 0.92);
   --surface-2: #ffffff;
@@ -62,6 +67,38 @@
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  min-width: 320px;
+  background: #f5efe6;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  background: #f5efe6;
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
+}
+
+a {
+  color: inherit;
+}
+
+#app {
+  min-height: 100vh;
 
   @media (max-width: 1024px) {
     font-size: 16px;
