@@ -1,61 +1,68 @@
-import { createApiConfig, joinUrl } from './config.js';
-import { authStorage } from '../lib/auth-storage.js';
+import { createApiConfig } from './config.js';
 
 const apiConfig = createApiConfig();
 
-const parseResponse = async (response) => {
-  const data = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    throw new Error(data.message || '请求失败，请稍后重试');
-  }
-  return data;
-};
+const normalizeSession = (payload, fallbackSessionId = null) => {
+  const session = payload?.session ?? payload?.data?.session ?? payload?.data ?? payload ?? {};
 
-const getHeaders = () => {
-  const token = authStorage.getToken();
-  const headers = { ...apiConfig.headers };
-  if (token) {
-    headers['Authorization'] = `Bearer ${token}`;
+  if (!session || typeof session !== 'object' || Array.isArray(session)) {
+    return null;
   }
-  return headers;
+
+  return {
+    ...session,
+    id: session.id ?? session.session_id ?? session.sessionId ?? fallbackSessionId ?? null,
+    title: session.title ?? session.name ?? '新会话',
+    messages: Array.isArray(session.messages) ? session.messages : [],
+  };
 };
 
 export const chatApi = {
-  // List chat history
   async listHistory() {
-    // TODO: Backend does not have GET /api/chat/sessions yet.
-    // Return empty array for now instead of fake data.
-    return [];
+    const data = await apiConfig.fetchJson('/api/chat/sessions', {
+      method: 'GET',
+      auth: true,
+    });
+
+    const sessions = data?.data?.sessions ?? data?.sessions ?? [];
+    return Array.isArray(sessions)
+      ? sessions.map((session) => ({
+          id: session.id ?? session.session_id ?? null,
+          title: session.title ?? session.name ?? '新会话',
+          lastMessagePreview: session.last_message_preview ?? '',
+          updatedAt: session.updated_at ?? session.updatedAt ?? '',
+        }))
+      : [];
   },
 
-  // Create a new session
   async createSession(title = '新会话') {
-    const response = await apiConfig.fetchImpl(joinUrl(apiConfig.baseURL, `/api/chat/sessions`), {
+    const data = await apiConfig.fetchJson('/api/chat/sessions', {
       method: 'POST',
-      headers: getHeaders(),
+      auth: true,
       body: JSON.stringify({ title }),
     });
-    const data = await parseResponse(response);
-    return data.session;
+
+    return normalizeSession(data);
   },
-  
-  // Get a single chat session
+
   async getSession(sessionId) {
-    const response = await apiConfig.fetchImpl(joinUrl(apiConfig.baseURL, `/api/chat/sessions/${sessionId}`), {
+    const data = await apiConfig.fetchJson(`/api/chat/sessions/${sessionId}`, {
       method: 'GET',
-      headers: getHeaders(),
+      auth: true,
     });
-    const data = await parseResponse(response);
-    const session = data.session || {};
-    
-    const rawMessages = session.messages || [];
-    return {
-      id: session.id || sessionId,
-      title: session.title,
-      messages: rawMessages.map(msg => ({
-        role: msg.role,
-        content: msg.content
-      }))
+    const session = normalizeSession(data, sessionId) || {
+      id: sessionId,
+      title: '未命名会话',
+      messages: [],
     };
-  }
+
+    return {
+      id: session.id,
+      title: session.title,
+      messages: session.messages.map((msg) => ({
+        role: msg.role,
+        content: msg.content,
+      })),
+    };
+  },
 };

@@ -2,6 +2,9 @@ const TOKEN_KEY = 'finmodpro_token';
 const USER_KEY = 'finmodpro_user';
 const GROUPS_KEY = 'finmodpro_groups';
 const PERMISSIONS_KEY = 'finmodpro_permissions';
+const FLASH_KEY = 'finmodpro_flash_message';
+
+export const AUTH_EXPIRED_MESSAGE = '登录已过期，请重新登录';
 
 export const authStorage = {
   saveToken(token) {
@@ -29,6 +32,16 @@ export const authStorage = {
     } catch (e) {
       return { user: {}, groups: [], permissions: [] };
     }
+  },
+  saveFlashMessage(message) {
+    localStorage.setItem(FLASH_KEY, message);
+  },
+  consumeFlashMessage() {
+    const message = localStorage.getItem(FLASH_KEY);
+    if (message) {
+      localStorage.removeItem(FLASH_KEY);
+    }
+    return message;
   },
   clear() {
     localStorage.removeItem(TOKEN_KEY);

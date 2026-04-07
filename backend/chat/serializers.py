@@ -10,11 +10,13 @@ class CreateChatSessionSerializer(serializers.Serializer):
 
 class ChatSessionSerializer(serializers.ModelSerializer):
     user_id = serializers.IntegerField(source="user.id", read_only=True)
+    session_id = serializers.IntegerField(source="id", read_only=True)
 
     class Meta:
         model = ChatSession
         fields = [
             "id",
+            "session_id",
             "user_id",
             "title",
             "context_filters",

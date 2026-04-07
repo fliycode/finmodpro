@@ -45,8 +45,12 @@ class ChatSessionCreateView(APIView):
             title=serializer.validated_data.get("title", ""),
             context_filters=serializer.validated_data.get("context_filters", {}),
         )
+        session_payload = ChatSessionSerializer(session).data
         return success_response(
-            data={"session": ChatSessionSerializer(session).data},
+            data={
+                "session": session_payload,
+                "session_id": session.id,
+            },
             status_code=201,
         )
 

@@ -10,8 +10,10 @@ class ModelConfig(models.Model):
     )
 
     PROVIDER_OLLAMA = "ollama"
+    PROVIDER_DEEPSEEK = "deepseek"
     PROVIDER_CHOICES = (
         (PROVIDER_OLLAMA, "Ollama"),
+        (PROVIDER_DEEPSEEK, "DeepSeek"),
     )
 
     name = models.CharField(max_length=255)

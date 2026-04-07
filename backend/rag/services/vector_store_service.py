@@ -1,6 +1,7 @@
 from datetime import date
 
 from knowledgebase.models import DocumentChunk
+from knowledgebase.services.vector_service import VectorService
 from rag.services.embedding_service import build_embedding, cosine_similarity, tokenize
 
 
@@ -10,11 +11,24 @@ _VECTOR_STORE = {}
 def clear_store():
     _VECTOR_STORE.clear()
     try:
-        from knowledgebase.services.vector_service import VectorService
-
         VectorService().clear()
     except Exception:
         return
+
+
+def index_document(document):
+    document_vectors = []
+    for chunk in DocumentChunk.objects.filter(document=document).order_by("chunk_index"):
+        document_vectors.append(
+            {
+                "document_id": document.id,
+                "chunk_id": chunk.id,
+                "content": chunk.content,
+                "metadata": chunk.metadata,
+                "embedding": build_embedding(chunk.content),
+            }
+        )
+    _VECTOR_STORE[document.id] = document_vectors
 
 
 def _normalize_source_date(raw_value):
@@ -53,71 +67,32 @@ def _matches_filters(metadata, filters):
     return True
 
 
-def index_document(document):
-    document_vectors = []
-    for chunk in DocumentChunk.objects.filter(document=document).order_by("chunk_index"):
-        document_vectors.append(
-            {
-                "document_id": document.id,
-                "chunk_id": chunk.id,
-                "content": chunk.content,
-                "metadata": chunk.metadata,
-                "embedding": build_embedding(chunk.content),
-            }
-        )
-    _VECTOR_STORE[document.id] = document_vectors
-
-
-def _serialize_scored_item(item, score, *, vector_score=0.0, keyword_score=0.0):
-    metadata = item["metadata"]
+def _serialize_chunk_result(chunk, score, *, keyword_score=0.0):
+    metadata = chunk.metadata or {}
     return {
-        "document_id": item["document_id"],
-        "chunk_id": item["chunk_id"],
-        "document_title": metadata.get("document_title"),
-        "doc_type": metadata.get("doc_type"),
-        "source_date": metadata.get("source_date"),
-        "page_label": metadata.get(
-            "page_label",
-            f"chunk-{int(metadata.get('chunk_index', 0)) + 1}",
-        ),
-        "snippet": item["content"],
+        "document_id": chunk.document_id,
+        "chunk_id": chunk.id,
+        "document_title": metadata.get("document_title") or chunk.document.title,
+        "doc_type": metadata.get("doc_type") or chunk.document.doc_type,
+        "source_date": metadata.get("source_date")
+        or (chunk.document.source_date.isoformat() if chunk.document.source_date else None),
+        "page_label": metadata.get("page_label", f"chunk-{chunk.chunk_index + 1}"),
+        "snippet": chunk.content,
         "metadata": metadata,
         "score": score,
-        "vector_score": vector_score,
+        "vector_score": 0.0,
         "keyword_score": keyword_score,
     }
 
 
-def _vector_search(query, filters=None, limit=5):
-    query_embedding = build_embedding(query)
-    scored = []
-    for document_vectors in _VECTOR_STORE.values():
-        for item in document_vectors:
-            if not _matches_filters(item["metadata"], filters or {}):
-                continue
-            vector_score = cosine_similarity(query_embedding, item["embedding"])
-            if vector_score <= 0:
-                continue
-            scored.append(
-                _serialize_scored_item(
-                    item,
-                    vector_score,
-                    vector_score=vector_score,
-                    keyword_score=0.0,
-                )
-            )
-
-    scored.sort(key=lambda item: item["score"], reverse=True)
-    return scored[: int(limit)]
-
-
-def _keyword_match_score(query, item):
+def _keyword_match_score(query, chunk):
     query_tokens = tokenize(query)
     if not query_tokens:
         return 0.0
 
-    title = (item["metadata"].get("document_title") or "").lower()
-    content = (item["content"] or "").lower()
+    metadata = chunk.metadata or {}
+    title = (metadata.get("document_title") or chunk.document.title or "").lower()
+    content = (chunk.content or "").lower()
     searchable_text = f"{title}\n{content}"
     content_tokens = tokenize(searchable_text)
     if not content_tokens:
@@ -138,25 +113,17 @@ def _keyword_match_score(query, item):
 
 
 def _keyword_search(query, filters=None, limit=5):
-    scored = []
-    for document_vectors in _VECTOR_STORE.values():
-        for item in document_vectors:
-            if not _matches_filters(item["metadata"], filters or {}):
-                continue
-            keyword_score = _keyword_match_score(query, item)
-            if keyword_score <= 0:
-                continue
-            scored.append(
-                _serialize_scored_item(
-                    item,
-                    keyword_score,
-                    vector_score=0.0,
-                    keyword_score=keyword_score,
-                )
-            )
-
-    scored.sort(key=lambda item: item["score"], reverse=True)
-    return scored[: int(limit)]
+    results = []
+    queryset = DocumentChunk.objects.select_related("document").order_by("id")
+    for chunk in queryset:
+        if not _matches_filters(chunk.metadata or {}, filters or {}):
+            continue
+        keyword_score = _keyword_match_score(query, chunk)
+        if keyword_score <= 0:
+            continue
+        results.append(_serialize_chunk_result(chunk, keyword_score, keyword_score=keyword_score))
+    results.sort(key=lambda item: item["score"], reverse=True)
+    return results[: int(limit)]
 
 
 def _merge_scored_results(vector_results, keyword_results):
@@ -167,19 +134,22 @@ def _merge_scored_results(vector_results, keyword_results):
         if existing is None:
             merged[key] = result
             continue
-        existing["vector_score"] = max(existing["vector_score"], result["vector_score"])
-        existing["keyword_score"] = max(existing["keyword_score"], result["keyword_score"])
+        existing["vector_score"] = max(existing.get("vector_score", 0.0), result.get("vector_score", 0.0))
+        existing["keyword_score"] = max(existing.get("keyword_score", 0.0), result.get("keyword_score", 0.0))
+        existing["score"] = max(existing.get("score", 0.0), result.get("score", 0.0))
 
     merged_results = []
     for result in merged.values():
-        result["score"] = (result["vector_score"] * 0.7) + (result["keyword_score"] * 0.3)
+        result["score"] = (result.get("vector_score", 0.0) * 0.7) + (
+            result.get("keyword_score", 0.0) * 0.3
+        )
         merged_results.append(result)
 
     merged_results.sort(
         key=lambda item: (
             item["score"],
-            item["keyword_score"],
-            item["vector_score"],
+            item.get("keyword_score", 0.0),
+            item.get("vector_score", 0.0),
             item["chunk_id"],
         ),
         reverse=True,
@@ -189,6 +159,6 @@ def _merge_scored_results(vector_results, keyword_results):
 
 def query_store(query, filters=None, top_k=5):
     candidate_limit = max(int(top_k), 1) * 2
-    vector_results = _vector_search(query, filters=filters, limit=candidate_limit)
+    vector_results = VectorService().search(query=query, filters=filters, top_k=candidate_limit)
     keyword_results = _keyword_search(query, filters=filters, limit=candidate_limit)
     return _merge_scored_results(vector_results, keyword_results)[: int(top_k)]
