@@ -6,6 +6,7 @@ from knowledgebase.models import Document
 from knowledgebase.services.document_service import (
     build_document_response,
     enqueue_document_ingestion,
+    get_document_for_user,
 )
 from rbac.services.authz_service import permission_required
 
@@ -15,17 +16,17 @@ from rbac.services.authz_service import permission_required
 @permission_required("auth.trigger_ingest")
 def document_ingest_view(request, document_id):
     try:
-        document = Document.objects.get(id=document_id)
+        document = get_document_for_user(request.user, document_id)
     except Document.DoesNotExist:
         return JsonResponse({"message": "文档不存在。"}, status=404)
 
-    document = enqueue_document_ingestion(document)
+    ingestion_task, created = enqueue_document_ingestion(document)
     document.refresh_from_db()
 
     return JsonResponse(
         build_document_response(
             document,
             include_content_preview=True,
-            message="摄取任务已提交。",
+            message="摄取任务已提交。" if created else "已有进行中的摄取任务。",
         )
     )

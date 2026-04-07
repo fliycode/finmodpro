@@ -13,6 +13,7 @@ from knowledgebase.services.chunk_service import build_document_chunks
 from knowledgebase.services.document_service import (
     create_document_from_upload,
     enqueue_document_ingestion,
+    get_document_for_user,
     ingest_document,
     vectorize_document,
 )
@@ -96,6 +97,13 @@ class KnowledgebaseApiTests(TestCase):
         self.assertEqual(set(upload_payload.keys()), {"document"})
         self.assertEqual(upload_payload["document"]["status"], "uploaded")
         self.assertEqual(upload_payload["document"]["doc_type"], "txt")
+        self.assertEqual(upload_payload["document"]["visibility"], "internal")
+        self.assertEqual(upload_payload["document"]["uploader"]["username"], "kb-admin")
+        self.assertEqual(upload_payload["document"]["owner"]["username"], "kb-admin")
+        self.assertEqual(
+            upload_payload["document"]["process_result"],
+            "文档已上传，等待摄取任务执行。",
+        )
         self.assertTrue(
             upload_payload["document"]["file_path"].startswith("knowledgebase/documents/")
         )
@@ -107,6 +115,10 @@ class KnowledgebaseApiTests(TestCase):
         self.assertEqual(list_response.status_code, 200)
         self.assertEqual(list_response.json()["total"], 1)
         self.assertEqual(len(list_response.json()["documents"]), 1)
+        self.assertEqual(
+            list_response.json()["documents"][0]["uploader"]["username"],
+            "kb-admin",
+        )
 
         document_id = upload_payload["document"]["id"]
         detail_response = self.client.get(
@@ -116,6 +128,14 @@ class KnowledgebaseApiTests(TestCase):
         self.assertEqual(detail_response.status_code, 200)
         self.assertEqual(set(detail_response.json().keys()), {"document"})
         self.assertEqual(detail_response.json()["document"]["title"], "2025 Q4 report")
+        self.assertEqual(
+            detail_response.json()["document"]["parsed_text"],
+            "",
+        )
+        self.assertEqual(
+            detail_response.json()["document"]["preview_url"],
+            detail_response.json()["document"]["original_url"],
+        )
 
         ingest_response = self.client.post(
             f"/api/knowledgebase/documents/{document_id}/ingest",
@@ -127,12 +147,17 @@ class KnowledgebaseApiTests(TestCase):
         self.assertEqual(ingest_payload["message"], "摄取任务已提交。")
         self.assertEqual(ingest_payload["document"]["status"], "indexed")
         self.assertGreaterEqual(ingest_payload["document"]["chunk_count"], 1)
+        self.assertEqual(
+            ingest_payload["document"]["process_result"],
+            "文档已完成解析、切块与索引，可用于检索。",
+        )
 
         document = Document.objects.get(id=document_id)
         ingestion_task = IngestionTask.objects.get(document=document)
         self.assertEqual(document.status, Document.STATUS_INDEXED)
         self.assertEqual(document.chunks.count(), ingest_payload["document"]["chunk_count"])
         self.assertEqual(ingestion_task.status, IngestionTask.STATUS_SUCCEEDED)
+        self.assertEqual(ingestion_task.current_step, IngestionTask.STEP_COMPLETED)
         self.assertEqual(ingestion_task.retry_count, 0)
         self.assertEqual(ingestion_task.error_message, "")
         self.assertIsNotNone(ingestion_task.started_at)
@@ -163,6 +188,98 @@ class KnowledgebaseApiTests(TestCase):
         self.assertEqual(response.status_code, 403)
         self.assertEqual(response.json(), {"message": "无权限。"})
 
+    def test_document_list_returns_uploader_and_latest_ingestion_task(self):
+        document = create_document_from_upload(
+            uploaded_file=SimpleUploadedFile(
+                "status.txt",
+                b"funding profile stayed stable",
+                content_type="text/plain",
+            ),
+            title="Status doc",
+            source_date="2025-04-01",
+            uploaded_by=self.user,
+        )
+        enqueue_document_ingestion(document)
+
+        response = self.client.get(
+            "/api/knowledgebase/documents",
+            HTTP_AUTHORIZATION=f"Bearer {self.access_token}",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        item = response.json()["documents"][0]
+        self.assertEqual(item["uploader"]["username"], "kb-admin")
+        self.assertEqual(item["owner"]["username"], "kb-admin")
+        self.assertIn("latest_ingestion_task", item)
+        self.assertGreaterEqual(item["chunk_count"], 1)
+        self.assertGreaterEqual(item["vector_count"], 1)
+        self.assertEqual(item["latest_ingestion_task"]["status"], "succeeded")
+        self.assertEqual(item["latest_ingestion_task"]["current_step"], "completed")
+
+    def test_list_and_detail_only_return_documents_visible_to_request_user(self):
+        owner = User.objects.create_user(
+            username="kb-owner",
+            password="secret123",
+            email="owner@example.com",
+        )
+        owner.groups.add(Group.objects.get(name="member"))
+        owner_token = generate_access_token(owner)
+
+        stranger = User.objects.create_user(
+            username="kb-stranger",
+            password="secret123",
+            email="stranger@example.com",
+        )
+        stranger.groups.add(Group.objects.get(name="member"))
+        stranger_token = generate_access_token(stranger)
+
+        private_document = create_document_from_upload(
+            uploaded_file=SimpleUploadedFile(
+                "private.txt",
+                b"private content",
+                content_type="text/plain",
+            ),
+            title="Private doc",
+            source_date="2025-03-01",
+            uploaded_by=owner,
+            visibility=Document.VISIBILITY_PRIVATE,
+        )
+        shared_document = create_document_from_upload(
+            uploaded_file=SimpleUploadedFile(
+                "shared.txt",
+                b"shared content",
+                content_type="text/plain",
+            ),
+            title="Shared doc",
+            source_date="2025-03-01",
+            uploaded_by=owner,
+            visibility=Document.VISIBILITY_INTERNAL,
+        )
+
+        owner_list_response = self.client.get(
+            "/api/knowledgebase/documents",
+            HTTP_AUTHORIZATION=f"Bearer {owner_token}",
+        )
+        self.assertEqual(owner_list_response.status_code, 200)
+        self.assertEqual(owner_list_response.json()["total"], 2)
+
+        stranger_list_response = self.client.get(
+            "/api/knowledgebase/documents",
+            HTTP_AUTHORIZATION=f"Bearer {stranger_token}",
+        )
+        self.assertEqual(stranger_list_response.status_code, 200)
+        self.assertEqual(stranger_list_response.json()["total"], 1)
+        self.assertEqual(
+            stranger_list_response.json()["documents"][0]["id"],
+            shared_document.id,
+        )
+
+        hidden_detail_response = self.client.get(
+            f"/api/knowledgebase/documents/{private_document.id}",
+            HTTP_AUTHORIZATION=f"Bearer {stranger_token}",
+        )
+        self.assertEqual(hidden_detail_response.status_code, 404)
+
 
 @override_settings(
     JWT_SECRET_KEY="test-jwt-secret",
@@ -172,6 +289,7 @@ class KnowledgebaseApiTests(TestCase):
 )
 class KnowledgebaseDocumentServiceTests(TestCase):
     def setUp(self):
+        seed_roles_and_permissions()
         clear_store()
         self.embedding_provider_patcher = patch(
             "knowledgebase.services.embedding_service.get_embedding_provider",
@@ -208,6 +326,7 @@ class KnowledgebaseDocumentServiceTests(TestCase):
             ),
             title="Stages doc",
             source_date="2025-03-01",
+            visibility=Document.VISIBILITY_PRIVATE,
         )
         observed_statuses = []
 
@@ -258,6 +377,7 @@ class KnowledgebaseDocumentServiceTests(TestCase):
         self.assertEqual(document.chunks.count(), 1)
         self.assertTrue(document.chunks.exclude(vector_id="").exists())
         self.assertEqual(ingestion_task.status, IngestionTask.STATUS_SUCCEEDED)
+        self.assertEqual(ingestion_task.current_step, IngestionTask.STEP_COMPLETED)
         self.assertIsNotNone(ingestion_task.started_at)
         self.assertIsNotNone(ingestion_task.finished_at)
 
@@ -272,10 +392,12 @@ class KnowledgebaseDocumentServiceTests(TestCase):
             source_date="2025-03-01",
         )
 
-        enqueue_document_ingestion(document)
+        ingestion_task, created = enqueue_document_ingestion(document)
 
-        ingestion_task = IngestionTask.objects.get(document=document)
+        self.assertTrue(created)
+        ingestion_task.refresh_from_db()
         self.assertEqual(ingestion_task.status, IngestionTask.STATUS_SUCCEEDED)
+        self.assertEqual(ingestion_task.current_step, IngestionTask.STEP_COMPLETED)
         self.assertEqual(ingestion_task.retry_count, 0)
         self.assertTrue(ingestion_task.celery_task_id)
         self.assertIsNotNone(ingestion_task.started_at)
@@ -305,9 +427,33 @@ class KnowledgebaseDocumentServiceTests(TestCase):
         self.assertEqual(document.status, Document.STATUS_FAILED)
         self.assertEqual(document.error_message, "解析失败")
         self.assertEqual(ingestion_task.status, IngestionTask.STATUS_FAILED)
+        self.assertEqual(ingestion_task.current_step, IngestionTask.STEP_FAILED)
         self.assertEqual(ingestion_task.error_message, "解析失败")
         self.assertIsNotNone(ingestion_task.started_at)
         self.assertIsNotNone(ingestion_task.finished_at)
+
+    def test_get_document_for_user_allows_owner_to_access_private_document(self):
+        owner = User.objects.create_user(
+            username="private-owner",
+            password="secret123",
+            email="private-owner@example.com",
+        )
+        owner.groups.add(Group.objects.get(name="member"))
+        document = create_document_from_upload(
+            uploaded_file=SimpleUploadedFile(
+                "owner.txt",
+                b"owner scoped content",
+                content_type="text/plain",
+            ),
+            title="Owner doc",
+            source_date="2025-03-01",
+            uploaded_by=owner,
+            visibility=Document.VISIBILITY_PRIVATE,
+        )
+
+        visible_document = get_document_for_user(owner, document.id)
+
+        self.assertEqual(visible_document.id, document.id)
 
     def test_parser_service_cleans_whitespace_and_blank_lines(self):
         cleaned = ParserService().clean_text(

@@ -11,9 +11,16 @@ from django.test import Client, TestCase, override_settings
 from authentication.models import User
 from authentication.services.jwt_service import generate_access_token
 from chat.models import ChatMessage, ChatSession
-from common.exceptions import UpstreamRateLimitError
+from common.exceptions import (
+    ModelNotConfiguredError,
+    ProviderConfigurationError,
+    UpstreamRateLimitError,
+    UpstreamServiceError,
+)
 from knowledgebase.services.document_service import create_document_from_upload, ingest_document
+from knowledgebase.models import DocumentChunk
 from rag.models import RetrievalLog
+from rag.services.embedding_service import tokenize
 from rag.services.vector_store_service import clear_store, index_document
 from rbac.services.rbac_service import ROLE_ADMIN, seed_roles_and_permissions
 
@@ -27,6 +34,99 @@ class FakeChatProvider:
     def chat(self, *, messages, options=None):
         return messages[0]["content"]
 
+    def stream(self, *, messages, options=None):
+        content = self.chat(messages=messages, options=options)
+        for chunk in [content[:12], content[12:]]:
+            if chunk:
+                yield chunk
+
+
+def fake_vector_search(*, query, filters=None, top_k=5):
+    query_tokens = set(tokenize(query))
+    results = []
+    queryset = DocumentChunk.objects.select_related("document").order_by("id")
+    for chunk in queryset:
+        metadata = chunk.metadata or {}
+        document = chunk.document
+        document_id = filters.get("document_id") if filters else None
+        if document_id not in (None, "") and document.id != int(document_id):
+            continue
+        doc_type = filters.get("doc_type") if filters else None
+        if doc_type and document.doc_type != doc_type:
+            continue
+
+        searchable_tokens = set(
+            tokenize(f"{metadata.get('document_title') or document.title}\n{chunk.content}")
+        )
+        overlap = len(query_tokens & searchable_tokens)
+        if overlap <= 0:
+            continue
+        score = overlap / max(len(query_tokens), 1)
+        results.append(
+            {
+                "document_id": document.id,
+                "chunk_id": chunk.id,
+                "document_title": metadata.get("document_title") or document.title,
+                "doc_type": metadata.get("doc_type") or document.doc_type,
+                "source_date": metadata.get("source_date")
+                or (document.source_date.isoformat() if document.source_date else None),
+                "page_label": metadata.get("page_label", f"chunk-{chunk.chunk_index + 1}"),
+                "snippet": chunk.content,
+                "metadata": metadata,
+                "score": score,
+                "vector_score": score,
+                "keyword_score": 0.0,
+            }
+        )
+    results.sort(key=lambda item: (item["score"], item["chunk_id"]), reverse=True)
+    return results[: int(top_k)]
+
+
+    def test_chat_ask_returns_structured_error_when_deepseek_auth_fails(self):
+        with patch(
+            "chat.controllers.ask_controller.ask_question",
+            side_effect=UpstreamServiceError(
+                "invalid api key",
+                status_code=502,
+                code="llm_provider_auth_failed",
+                provider="deepseek",
+            ),
+        ):
+            response = self.client.post(
+                "/api/chat/ask",
+                data=json.dumps({"question": "revenue"}),
+                content_type="application/json",
+                HTTP_AUTHORIZATION=f"Bearer {self.access_token}",
+            )
+
+        self.assertEqual(response.status_code, 502)
+        payload = response.json()
+        self.assertEqual(payload["code"], "llm_provider_auth_failed")
+        self.assertEqual(payload["provider"], "deepseek")
+        self.assertEqual(payload["data"]["error"]["type"], "provider_auth_failed")
+
+    def test_chat_ask_returns_structured_error_when_deepseek_model_is_invalid(self):
+        with patch(
+            "chat.controllers.ask_controller.ask_question",
+            side_effect=UpstreamServiceError(
+                "model not found",
+                status_code=502,
+                code="llm_provider_invalid_model",
+                provider="deepseek",
+            ),
+        ):
+            response = self.client.post(
+                "/api/chat/ask",
+                data=json.dumps({"question": "revenue"}),
+                content_type="application/json",
+                HTTP_AUTHORIZATION=f"Bearer {self.access_token}",
+            )
+
+        self.assertEqual(response.status_code, 502)
+        payload = response.json()
+        self.assertEqual(payload["code"], "llm_provider_invalid_model")
+        self.assertEqual(payload["provider"], "deepseek")
+        self.assertEqual(payload["data"]["error"]["type"], "provider_invalid_model")
 
 @override_settings(
     JWT_SECRET_KEY="test-jwt-secret",
@@ -46,6 +146,11 @@ class ChatAskApiTests(TestCase):
             return_value=FakeChatProvider(),
         )
         self.embedding_provider_patcher.start()
+        self.vector_search_patcher = patch(
+            "knowledgebase.services.vector_service.VectorService.search",
+            side_effect=fake_vector_search,
+        )
+        self.vector_search_patcher.start()
         self.vector_index_patcher = patch(
             "knowledgebase.services.document_service.index_document_chunks",
             side_effect=index_document,
@@ -85,6 +190,7 @@ class ChatAskApiTests(TestCase):
     def tearDown(self):
         self.chat_provider_patcher.stop()
         self.embedding_provider_patcher.stop()
+        self.vector_search_patcher.stop()
         self.override.disable()
         self.vector_index_patcher.stop()
         shutil.rmtree(self.media_root, ignore_errors=True)
@@ -137,7 +243,7 @@ class ChatAskApiTests(TestCase):
         self.assertEqual(retrieval_log.source, RetrievalLog.SOURCE_CHAT_ASK)
         self.assertIsNotNone(retrieval_log.duration_ms)
 
-    def test_chat_ask_accepts_query_alias_and_returns_empty_citations_when_no_match(self):
+    def test_chat_ask_accepts_query_alias_and_falls_back_to_model_answer_when_no_match(self):
         response = self.client.post(
             "/api/chat/ask",
             data=json.dumps(
@@ -151,10 +257,16 @@ class ChatAskApiTests(TestCase):
         )
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json()["question"], "foreign exchange exposure")
-        self.assertEqual(response.json()["query"], "foreign exchange exposure")
-        self.assertEqual(response.json()["citations"], [])
-        self.assertIn("未检索到相关资料", response.json()["answer"])
+        payload = response.json()
+        self.assertEqual(payload["question"], "foreign exchange exposure")
+        self.assertEqual(payload["query"], "foreign exchange exposure")
+        self.assertEqual(payload["citations"], [])
+        self.assertEqual(payload["answer_mode"], "fallback")
+        self.assertEqual(
+            payload["answer_notice"],
+            "当前回答未命中知识库引用，仅基于通用模型能力生成，请注意甄别。",
+        )
+        self.assertIn("foreign exchange exposure", payload["answer"])
         self.assertEqual(RetrievalLog.objects.count(), 1)
         retrieval_log = RetrievalLog.objects.get()
         self.assertEqual(retrieval_log.result_count, 0)
@@ -175,6 +287,35 @@ class ChatAskApiTests(TestCase):
         self.assertIn("Outlook memo", payload["answer"])
         self.assertIn("duration_ms", payload)
         self.assertGreaterEqual(payload["duration_ms"], 0)
+
+    def test_chat_stream_returns_initial_metadata_event_and_chunks(self):
+        response = self.client.post(
+            "/api/chat/ask/stream",
+            data=json.dumps({"question": "revenue and margin outlook", "top_k": 2}),
+            content_type="application/json",
+            HTTP_AUTHORIZATION=f"Bearer {self.access_token}",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["Content-Type"], "text/event-stream")
+        body = b"".join(response.streaming_content).decode("utf-8")
+        self.assertIn('event: meta', body)
+        self.assertIn('"answer_mode": "cited"', body)
+        self.assertIn('event: chunk', body)
+        self.assertIn('event: done', body)
+
+    def test_chat_stream_fallback_reports_notice_when_no_citations(self):
+        response = self.client.post(
+            "/api/chat/ask/stream",
+            data=json.dumps({"query": "foreign exchange exposure", "filters": {"doc_type": "pdf"}}),
+            content_type="application/json",
+            HTTP_AUTHORIZATION=f"Bearer {self.access_token}",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        body = b"".join(response.streaming_content).decode("utf-8")
+        self.assertIn('"answer_mode": "fallback"', body)
+        self.assertIn("answer_notice", body)
 
     def test_chat_ask_requires_question_or_query(self):
         response = self.client.post(
@@ -226,10 +367,125 @@ class ChatAskApiTests(TestCase):
                 "message": "上游模型服务触发限流，请稍后重试。",
                 "code": "upstream_rate_limited",
                 "provider": "openai",
+                "data": {
+                    "error": {
+                        "type": "rate_limited",
+                        "code": "upstream_rate_limited",
+                        "message": "上游模型服务触发限流，请稍后重试。",
+                        "provider": "openai",
+                        "details": {
+                            "upstream_message": "上游模型服务触发限流，请稍后重试。",
+                            "retry_after": 30,
+                        },
+                    }
+                },
             },
         )
         self.assertEqual(response["Retry-After"], "30")
         self.assertEqual(RetrievalLog.objects.count(), 0)
+
+    def test_chat_ask_returns_structured_error_when_chat_model_not_configured(self):
+        with patch(
+            "chat.controllers.ask_controller.ask_question",
+            side_effect=ModelNotConfiguredError("chat"),
+        ):
+            response = self.client.post(
+                "/api/chat/ask",
+                data=json.dumps({"question": "revenue"}),
+                content_type="application/json",
+                HTTP_AUTHORIZATION=f"Bearer {self.access_token}",
+            )
+
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(
+            response.json(),
+            {
+                "message": "当前未配置可用的对话模型，请先在模型配置中启用 chat 模型。",
+                "code": "chat_model_not_configured",
+                "data": {
+                    "error": {
+                        "type": "configuration_error",
+                        "code": "chat_model_not_configured",
+                        "message": "当前未配置可用的对话模型，请先在模型配置中启用 chat 模型。",
+                        "details": {"capability": "chat"},
+                    }
+                },
+            },
+        )
+
+    def test_chat_ask_returns_structured_error_when_provider_configuration_is_invalid(self):
+        with patch(
+            "chat.controllers.ask_controller.ask_question",
+            side_effect=ProviderConfigurationError(
+                "Unsupported provider: openai",
+                provider="openai",
+                details={"capability": "chat", "supported_providers": ["ollama"]},
+            ),
+        ):
+            response = self.client.post(
+                "/api/chat/ask",
+                data=json.dumps({"question": "revenue"}),
+                content_type="application/json",
+                HTTP_AUTHORIZATION=f"Bearer {self.access_token}",
+            )
+
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(
+            response.json(),
+            {
+                "message": "当前对话模型 provider 不可用，请检查模型配置。",
+                "code": "chat_provider_unavailable",
+                "provider": "openai",
+                "data": {
+                    "error": {
+                        "type": "configuration_error",
+                        "code": "chat_provider_unavailable",
+                        "message": "当前对话模型 provider 不可用，请检查模型配置。",
+                        "provider": "openai",
+                        "details": {
+                            "capability": "chat",
+                            "supported_providers": ["ollama"],
+                        },
+                    }
+                },
+            },
+        )
+
+    def test_chat_ask_returns_structured_error_when_upstream_is_unavailable(self):
+        with patch(
+            "chat.controllers.ask_controller.ask_question",
+            side_effect=UpstreamServiceError(
+                "模型服务暂不可用。",
+                status_code=503,
+                code="llm_provider_unavailable",
+                provider="ollama",
+            ),
+        ):
+            response = self.client.post(
+                "/api/chat/ask",
+                data=json.dumps({"question": "revenue"}),
+                content_type="application/json",
+                HTTP_AUTHORIZATION=f"Bearer {self.access_token}",
+            )
+
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(
+            response.json(),
+            {
+                "message": "对话模型服务当前不可用，请稍后重试。",
+                "code": "llm_provider_unavailable",
+                "provider": "ollama",
+                "data": {
+                    "error": {
+                        "type": "provider_unavailable",
+                        "code": "llm_provider_unavailable",
+                        "message": "对话模型服务当前不可用，请稍后重试。",
+                        "provider": "ollama",
+                        "details": {"upstream_message": "模型服务暂不可用。"},
+                    }
+                },
+            },
+        )
 
 
 @override_settings(
@@ -318,6 +574,9 @@ class ChatSessionCreateApiTests(TestCase):
         payload = response.json()
         self.assertEqual(payload["code"], 0)
         self.assertEqual(payload["message"], "ok")
+        self.assertIn("session_id", payload["data"])
+        self.assertEqual(payload["data"]["session_id"], payload["data"]["session"]["id"])
+        self.assertEqual(payload["data"]["session"]["session_id"], payload["data"]["session"]["id"])
         self.assertEqual(payload["data"]["session"]["title"], "新会话")
         self.assertEqual(payload["data"]["session"]["context_filters"], {})
         self.assertEqual(payload["data"]["session"]["user_id"], self.user.id)
