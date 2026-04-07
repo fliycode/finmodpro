@@ -37,10 +37,12 @@ const emit = defineEmits([
   <section class="auth-entry">
     <div class="auth-entry__mesh"></div>
     <div class="auth-entry__grid"></div>
+    <div class="auth-entry__orb auth-entry__orb--one"></div>
+    <div class="auth-entry__orb auth-entry__orb--two"></div>
 
     <div class="auth-entry__shell">
       <aside class="brand-column">
-        <div class="brand-column__topline">Financial modeling workspace</div>
+        <div class="brand-column__topline">LLM-powered financial risk platform</div>
 
         <div class="brand-lockup">
           <div class="brand-lockup__icon-wrap">
@@ -48,13 +50,13 @@ const emit = defineEmits([
           </div>
           <div class="brand-lockup__copy">
             <h1>FinModPro</h1>
-            <p>统一财务建模与分析工作区入口</p>
+            <p>基于大模型的金融风控平台</p>
           </div>
         </div>
 
         <div class="brand-column__statement">
-          <h2>更干净的进入方式，更一致的工作区体验。</h2>
-          <p>保留登录效率，收掉展示噪音，让入口页回到产品本身。</p>
+          <h2>连接知识、建模与研判，让风险分析更快形成业务结论。</h2>
+          <p>围绕金融场景整合智能问答、风险摘要与建模协作能力，帮助团队在统一平台内完成洞察生成、过程复核与结果交付。</p>
         </div>
       </aside>
 
@@ -202,7 +204,8 @@ const emit = defineEmits([
 }
 
 .auth-entry__mesh,
-.auth-entry__grid {
+.auth-entry__grid,
+.auth-entry__orb {
   position: absolute;
   inset: 0;
   pointer-events: none;
@@ -222,6 +225,34 @@ const emit = defineEmits([
     linear-gradient(90deg, rgba(148, 163, 184, 0.08) 1px, transparent 1px);
   background-size: 40px 40px;
   mask-image: radial-gradient(circle at center, black 44%, transparent 88%);
+}
+
+.auth-entry__orb {
+  inset: auto;
+  border-radius: 999px;
+  filter: blur(18px);
+  opacity: 0.9;
+  mix-blend-mode: screen;
+}
+
+.auth-entry__orb--one {
+  top: 12%;
+  left: 7%;
+  width: 300px;
+  height: 300px;
+  background:
+    radial-gradient(circle, rgba(59, 130, 246, 0.28) 0%, rgba(96, 165, 250, 0.14) 36%, rgba(59, 130, 246, 0) 72%);
+  animation: orbFloatOne 14s ease-in-out infinite;
+}
+
+.auth-entry__orb--two {
+  right: 5%;
+  bottom: 10%;
+  width: 360px;
+  height: 360px;
+  background:
+    radial-gradient(circle, rgba(15, 23, 42, 0.18) 0%, rgba(37, 99, 235, 0.12) 42%, rgba(15, 23, 42, 0) 76%);
+  animation: orbFloatTwo 16s ease-in-out infinite;
 }
 
 .auth-entry__shell {
@@ -256,8 +287,8 @@ const emit = defineEmits([
   gap: 28px;
   padding: 56px;
   background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.52), rgba(255, 255, 255, 0)),
-    linear-gradient(135deg, rgba(241, 245, 249, 0.88), rgba(226, 232, 240, 0.62));
+    linear-gradient(180deg, rgba(255, 255, 255, 0.46), rgba(255, 255, 255, 0)),
+    linear-gradient(160deg, rgba(241, 245, 249, 0.92), rgba(219, 234, 254, 0.62) 58%, rgba(226, 232, 240, 0.66));
 }
 
 .brand-column::after {
@@ -333,6 +364,15 @@ const emit = defineEmits([
   flex-direction: column;
   gap: 14px;
   max-width: 520px;
+  padding: 22px 24px 24px;
+  border-radius: 24px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.62), rgba(255, 255, 255, 0.3)),
+    linear-gradient(135deg, rgba(255, 255, 255, 0.18), rgba(191, 219, 254, 0.18));
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.7),
+    0 16px 36px rgba(37, 99, 235, 0.08);
 }
 
 .brand-column__statement h2 {
@@ -616,6 +656,28 @@ const emit = defineEmits([
   }
 }
 
+@keyframes orbFloatOne {
+  0%,
+  100% {
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+
+  50% {
+    transform: translate3d(18px, -14px, 0) scale(1.08);
+  }
+}
+
+@keyframes orbFloatTwo {
+  0%,
+  100% {
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+
+  50% {
+    transform: translate3d(-22px, 16px, 0) scale(1.06);
+  }
+}
+
 @keyframes iconPulse {
   0%,
   100% {
@@ -701,6 +763,7 @@ const emit = defineEmits([
 @media (prefers-reduced-motion: reduce) {
   .auth-entry__shell,
   .auth-entry__mesh,
+  .auth-entry__orb,
   .brand-column,
   .form-card,
   .brand-lockup__icon,
