@@ -4,61 +4,61 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 const props = defineProps({
   activeTab: {
     type: String,
-    required: true
+    required: true,
   },
   showPassword: {
     type: Boolean,
-    required: true
+    required: true,
   },
   isLoading: {
     type: Boolean,
-    required: true
+    required: true,
   },
   status: {
     type: Object,
-    required: true
+    required: true,
   },
   formData: {
     type: Object,
-    required: true
+    required: true,
   },
   errors: {
     type: Object,
-    required: true
-  }
+    required: true,
+  },
 });
 
 const emit = defineEmits([
   'toggle-tab',
   'submit',
-  'toggle-password'
+  'toggle-password',
 ]);
 
 const brandStatement =
   '一站式风控平台，连接文档、问答与模型，快速完成从风险识别到报告生成。';
 
 const streamedStatement = ref('');
-const typingTimer = ref(null);
+let typingTimer = null;
 
 const panelTitle = computed(() => (props.activeTab === 'login' ? '欢迎回来' : '创建账号'));
 const panelEyebrow = computed(() => (props.activeTab === 'login' ? 'Welcome back' : 'Create account'));
 const submitLabel = computed(() => (props.activeTab === 'login' ? '登录' : '创建账号'));
 
 const playStatementStream = () => {
-  if (typingTimer.value) {
-    clearInterval(typingTimer.value);
+  if (typingTimer) {
+    clearInterval(typingTimer);
   }
 
   streamedStatement.value = '';
 
   let index = 0;
-  typingTimer.value = setInterval(() => {
+  typingTimer = setInterval(() => {
     index += 1;
     streamedStatement.value = brandStatement.slice(0, index);
 
     if (index >= brandStatement.length) {
-      clearInterval(typingTimer.value);
-      typingTimer.value = null;
+      clearInterval(typingTimer);
+      typingTimer = null;
     }
   }, 36);
 };
@@ -68,8 +68,8 @@ onMounted(() => {
 });
 
 onBeforeUnmount(() => {
-  if (typingTimer.value) {
-    clearInterval(typingTimer.value);
+  if (typingTimer) {
+    clearInterval(typingTimer);
   }
 });
 </script>
@@ -78,10 +78,6 @@ onBeforeUnmount(() => {
   <section class="auth-entry">
     <div class="auth-entry__mesh"></div>
     <div class="auth-entry__grid"></div>
-
-    <div class="auth-entry__shell">
-      <aside class="brand-column">
-        <div class="brand-column__topline">Financial modeling workspace</div>
     <div class="auth-entry__orb auth-entry__orb--one"></div>
     <div class="auth-entry__orb auth-entry__orb--two"></div>
 
@@ -95,14 +91,11 @@ onBeforeUnmount(() => {
           </div>
           <div class="brand-lockup__copy">
             <h1>FinModPro</h1>
-            <p>统一财务建模与分析工作区入口</p>
             <p>基于大模型的金融风控平台</p>
           </div>
         </div>
 
         <div class="brand-column__statement">
-          <h2>更干净的进入方式，更一致的工作区体验。</h2>
-          <p>保留登录效率，收掉展示噪音，让入口页回到产品本身。</p>
           <h2>{{ streamedStatement }}<span class="stream-caret" aria-hidden="true"></span></h2>
         </div>
       </aside>
@@ -130,48 +123,6 @@ onBeforeUnmount(() => {
             </button>
           </div>
 
-          <div class="panel-intro">
-            <span class="panel-intro__eyebrow">
-              {{ activeTab === 'login' ? 'Welcome back' : 'Create account' }}
-            </span>
-            <h2>{{ activeTab === 'login' ? '欢迎回来' : '创建账号' }}</h2>
-          </div>
-
-          <div v-if="status.message" :class="['status-box', status.type]" role="status" aria-live="polite">
-            {{ status.message }}
-          </div>
-
-          <form class="auth-form" novalidate @submit="emit('submit', $event)">
-            <div class="form-group">
-              <label for="username">用户名</label>
-              <input
-                id="username"
-                v-model="formData.username"
-                type="text"
-                :placeholder="activeTab === 'register' ? '例如：finance.ops' : '请输入用户名'"
-                :class="{ 'input-error': errors.username }"
-                :disabled="isLoading"
-              />
-              <span v-if="errors.username" class="error-msg">{{ errors.username }}</span>
-            </div>
-
-            <div v-if="activeTab === 'register'" class="form-group">
-              <label for="email">电子邮箱</label>
-              <input
-                id="email"
-                v-model="formData.email"
-                type="email"
-                placeholder="name@company.com"
-                :class="{ 'input-error': errors.email }"
-                :disabled="isLoading"
-              />
-              <span v-if="errors.email" class="error-msg">{{ errors.email }}</span>
-            </div>
-
-            <div class="form-group">
-              <div class="label-row">
-                <label for="password">密码</label>
-                <a v-if="activeTab === 'login'" href="#" class="inline-link">忘记密码？</a>
           <Transition name="auth-panel" mode="out-in">
             <div :key="activeTab" class="auth-panel-shell">
               <div class="panel-intro">
@@ -263,12 +214,6 @@ onBeforeUnmount(() => {
                 </button>
               </form>
             </div>
-
-            <button type="submit" class="primary-button" :disabled="isLoading">
-              <span v-if="isLoading" class="loader"></span>
-              <span v-else>{{ activeTab === 'login' ? '登录' : '创建账号' }}</span>
-            </button>
-          </form>
           </Transition>
         </div>
       </section>
@@ -301,7 +246,6 @@ onBeforeUnmount(() => {
 }
 
 .auth-entry__mesh,
-.auth-entry__grid {
 .auth-entry__grid,
 .auth-entry__orb {
   position: absolute;
@@ -314,15 +258,6 @@ onBeforeUnmount(() => {
     radial-gradient(circle at 24% 24%, rgba(255, 255, 255, 0.78), transparent 28%),
     radial-gradient(circle at 78% 14%, rgba(191, 219, 254, 0.38), transparent 22%);
   animation: meshDrift 18s ease-in-out infinite;
-}
-
-.auth-entry__grid {
-  opacity: 0.5;
-  background-image:
-    linear-gradient(rgba(148, 163, 184, 0.08) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(148, 163, 184, 0.08) 1px, transparent 1px);
-  background-size: 40px 40px;
-  mask-image: radial-gradient(circle at center, black 44%, transparent 88%);
 }
 
 .auth-entry__grid {
@@ -394,8 +329,6 @@ onBeforeUnmount(() => {
   gap: 28px;
   padding: 56px;
   background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.52), rgba(255, 255, 255, 0)),
-    linear-gradient(135deg, rgba(241, 245, 249, 0.88), rgba(226, 232, 240, 0.62));
     linear-gradient(180deg, rgba(255, 255, 255, 0.46), rgba(255, 255, 255, 0)),
     linear-gradient(160deg, rgba(241, 245, 249, 0.92), rgba(219, 234, 254, 0.62) 58%, rgba(226, 232, 240, 0.66));
 }
@@ -460,8 +393,7 @@ onBeforeUnmount(() => {
   letter-spacing: -0.05em;
 }
 
-.brand-lockup__copy p,
-.brand-column__statement p {
+.brand-lockup__copy p {
   margin: 10px 0 0;
   color: var(--entry-muted);
   line-height: 1.7;
@@ -472,13 +404,6 @@ onBeforeUnmount(() => {
   display: flex;
   flex-direction: column;
   gap: 14px;
-  max-width: 520px;
-}
-
-.brand-column__statement h2 {
-  font-size: clamp(1.9rem, 2.6vw, 3rem);
-  line-height: 1.08;
-  letter-spacing: -0.04em;
   max-width: 620px;
   min-height: 176px;
   padding: 26px 30px 30px;
@@ -533,12 +458,6 @@ onBeforeUnmount(() => {
   animation-delay: 140ms;
 }
 
-.auth-panel-shell {
-  display: flex;
-  flex-direction: column;
-  gap: 24px;
-}
-
 .tabs {
   display: inline-grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -574,6 +493,12 @@ onBeforeUnmount(() => {
 .tab-btn:hover:not(:disabled) {
   transform: translateY(-1px);
   color: var(--entry-ink);
+}
+
+.auth-panel-shell {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
 }
 
 .panel-intro {
@@ -829,7 +754,6 @@ onBeforeUnmount(() => {
   }
 
   50% {
-    transform: translate3d(-8px, 12px, 0) scale(1.03);
     transform: translate3d(-22px, 16px, 0) scale(1.06);
   }
 }
@@ -919,6 +843,11 @@ onBeforeUnmount(() => {
     height: 54px;
   }
 
+  .brand-column__statement {
+    min-height: 152px;
+    padding: 22px 22px 24px;
+  }
+
   .tabs {
     width: 100%;
   }
@@ -931,9 +860,6 @@ onBeforeUnmount(() => {
 @media (prefers-reduced-motion: reduce) {
   .auth-entry__shell,
   .auth-entry__mesh,
-  .brand-column,
-  .form-card,
-  .brand-lockup__icon,
   .auth-entry__orb,
   .brand-column,
   .form-card,
