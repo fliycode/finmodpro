@@ -236,3 +236,25 @@ docker build -t finmodpro-frontend-test -f frontend/Dockerfile frontend
 - 模块 J 的“测试报告”这一项已经形成可交付文档
 - 但若要把“部署可用性”证明提升到更强等级，还需要补容器运行态 smoke test 或 CI 流水线验证
 - 前端模型配置启停接口仍有一个明确的请求方法错位，后续联调时应优先处理
+
+## 8. 2026-04-07 Auth Landing Redesign
+
+本节记录登录页重塑的专项验证结果，只标记本轮实际完成的检查项。
+
+- [x] Login tab renders the new brand-lobby layout on desktop width
+- [x] Register tab renders email, confirm password, and terms fields
+- [x] Status and validation messages remain visible in the redesigned form area
+- [x] Mobile width collapses the layout into a single column without horizontal scroll
+- [x] Reduced-motion mode disables continuous ambient animation
+
+实际依据：
+
+- `frontend/src/components/AuthLanding.vue` 已改为品牌门厅式双栏布局，并保留登录 / 注册表单切换逻辑
+- `frontend/src/components/AuthLanding.vue` 中注册态仍显式包含 `email`、`confirmPassword`、`agreeTerms` 字段及错误提示绑定
+- `frontend/src/components/AuthLanding.vue` 中 `status-box` 与各字段 `error-msg` 仍保留在表单区内
+- 已在真实浏览器预览中确认移动端单栏收敛正常，且未观察到横向滚动
+- 已在真实浏览器预览中确认 reduced-motion 下持续动效按预期停用
+- 本轮在 `frontend/` 下执行 `npm run build`，结果成功：
+  - `dist/index.html`
+  - `dist/assets/index-BBGlmUVA.css`
+  - `dist/assets/index-DwWG9XHc.js`
