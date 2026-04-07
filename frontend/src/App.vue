@@ -336,6 +336,3 @@ const isAdmin = computed(() => permissionHelper.isAdmin());
   margin: 0 auto;
 }
 </style>
-<template>
-  <RouterView />
-</template>
