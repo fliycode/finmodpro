@@ -1,4 +1,6 @@
 <script setup>
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
+
 const props = defineProps({
   activeTab: {
     type: String,
@@ -31,6 +33,45 @@ const emit = defineEmits([
   'submit',
   'toggle-password'
 ]);
+
+const brandStatement =
+  '一站式风控平台，连接文档、问答与模型，快速完成从风险识别到报告生成。';
+
+const streamedStatement = ref('');
+const typingTimer = ref(null);
+
+const panelTitle = computed(() => (props.activeTab === 'login' ? '欢迎回来' : '创建账号'));
+const panelEyebrow = computed(() => (props.activeTab === 'login' ? 'Welcome back' : 'Create account'));
+const submitLabel = computed(() => (props.activeTab === 'login' ? '登录' : '创建账号'));
+
+const playStatementStream = () => {
+  if (typingTimer.value) {
+    clearInterval(typingTimer.value);
+  }
+
+  streamedStatement.value = '';
+
+  let index = 0;
+  typingTimer.value = setInterval(() => {
+    index += 1;
+    streamedStatement.value = brandStatement.slice(0, index);
+
+    if (index >= brandStatement.length) {
+      clearInterval(typingTimer.value);
+      typingTimer.value = null;
+    }
+  }, 36);
+};
+
+onMounted(() => {
+  playStatementStream();
+});
+
+onBeforeUnmount(() => {
+  if (typingTimer.value) {
+    clearInterval(typingTimer.value);
+  }
+});
 </script>
 
 <template>
@@ -55,7 +96,7 @@ const emit = defineEmits([
         </div>
 
         <div class="brand-column__statement">
-          <h2>一站式风控平台，连接文档、问答与模型，快速完成从风险识别到报告生成。</h2>
+          <h2>{{ streamedStatement }}<span class="stream-caret" aria-hidden="true"></span></h2>
         </div>
       </aside>
 
@@ -82,96 +123,98 @@ const emit = defineEmits([
             </button>
           </div>
 
-          <div class="panel-intro">
-            <span class="panel-intro__eyebrow">
-              {{ activeTab === 'login' ? 'Welcome back' : 'Create account' }}
-            </span>
-            <h2>{{ activeTab === 'login' ? '欢迎回来' : '创建账号' }}</h2>
-          </div>
-
-          <div v-if="status.message" :class="['status-box', status.type]" role="status" aria-live="polite">
-            {{ status.message }}
-          </div>
-
-          <form class="auth-form" novalidate @submit="emit('submit', $event)">
-            <div class="form-group">
-              <label for="username">用户名</label>
-              <input
-                id="username"
-                v-model="formData.username"
-                type="text"
-                :placeholder="activeTab === 'register' ? '例如：finance.ops' : '请输入用户名'"
-                :class="{ 'input-error': errors.username }"
-                :disabled="isLoading"
-              />
-              <span v-if="errors.username" class="error-msg">{{ errors.username }}</span>
-            </div>
-
-            <div v-if="activeTab === 'register'" class="form-group">
-              <label for="email">电子邮箱</label>
-              <input
-                id="email"
-                v-model="formData.email"
-                type="email"
-                placeholder="name@company.com"
-                :class="{ 'input-error': errors.email }"
-                :disabled="isLoading"
-              />
-              <span v-if="errors.email" class="error-msg">{{ errors.email }}</span>
-            </div>
-
-            <div class="form-group">
-              <div class="label-row">
-                <label for="password">密码</label>
-                <a v-if="activeTab === 'login'" href="#" class="inline-link">忘记密码？</a>
+          <Transition name="auth-panel" mode="out-in">
+            <div :key="activeTab" class="auth-panel-shell">
+              <div class="panel-intro">
+                <span class="panel-intro__eyebrow">{{ panelEyebrow }}</span>
+                <h2>{{ panelTitle }}</h2>
               </div>
-              <div class="password-input-wrapper">
-                <input
-                  id="password"
-                  v-model="formData.password"
-                  :type="showPassword ? 'text' : 'password'"
-                  placeholder="••••••••"
-                  :class="{ 'input-error': errors.password }"
-                  :disabled="isLoading"
-                />
-                <button
-                  type="button"
-                  class="toggle-pwd"
-                  :disabled="isLoading"
-                  @click="emit('toggle-password')"
-                >
-                  {{ showPassword ? '隐藏' : '显示' }}
+
+              <div v-if="status.message" :class="['status-box', status.type]" role="status" aria-live="polite">
+                {{ status.message }}
+              </div>
+
+              <form class="auth-form" novalidate @submit="emit('submit', $event)">
+                <div class="form-group">
+                  <label for="username">用户名</label>
+                  <input
+                    id="username"
+                    v-model="formData.username"
+                    type="text"
+                    :placeholder="activeTab === 'register' ? '例如：finance.ops' : '请输入用户名'"
+                    :class="{ 'input-error': errors.username }"
+                    :disabled="isLoading"
+                  />
+                  <span v-if="errors.username" class="error-msg">{{ errors.username }}</span>
+                </div>
+
+                <div v-if="activeTab === 'register'" class="form-group">
+                  <label for="email">电子邮箱</label>
+                  <input
+                    id="email"
+                    v-model="formData.email"
+                    type="email"
+                    placeholder="name@company.com"
+                    :class="{ 'input-error': errors.email }"
+                    :disabled="isLoading"
+                  />
+                  <span v-if="errors.email" class="error-msg">{{ errors.email }}</span>
+                </div>
+
+                <div class="form-group">
+                  <div class="label-row">
+                    <label for="password">密码</label>
+                    <a v-if="activeTab === 'login'" href="#" class="inline-link">忘记密码？</a>
+                  </div>
+                  <div class="password-input-wrapper">
+                    <input
+                      id="password"
+                      v-model="formData.password"
+                      :type="showPassword ? 'text' : 'password'"
+                      placeholder="••••••••"
+                      :class="{ 'input-error': errors.password }"
+                      :disabled="isLoading"
+                    />
+                    <button
+                      type="button"
+                      class="toggle-pwd"
+                      :disabled="isLoading"
+                      @click="emit('toggle-password')"
+                    >
+                      {{ showPassword ? '隐藏' : '显示' }}
+                    </button>
+                  </div>
+                  <span v-if="errors.password" class="error-msg">{{ errors.password }}</span>
+                </div>
+
+                <div v-if="activeTab === 'register'" class="form-group">
+                  <label for="confirmPassword">确认密码</label>
+                  <input
+                    id="confirmPassword"
+                    v-model="formData.confirmPassword"
+                    :type="showPassword ? 'text' : 'password'"
+                    placeholder="再次输入密码"
+                    :class="{ 'input-error': errors.confirmPassword }"
+                    :disabled="isLoading"
+                  />
+                  <span v-if="errors.confirmPassword" class="error-msg">{{ errors.confirmPassword }}</span>
+                </div>
+
+                <div v-if="activeTab === 'register'" class="form-group checkbox-group">
+                  <label class="checkbox-label" for="agreeTerms">
+                    <input id="agreeTerms" v-model="formData.agreeTerms" type="checkbox" :disabled="isLoading" />
+                    <span>我同意 <a href="#" class="inline-link">服务条款</a> 与 <a href="#" class="inline-link">隐私政策</a></span>
+                  </label>
+                  <span v-if="errors.agreeTerms" class="error-msg">{{ errors.agreeTerms }}</span>
+                </div>
+
+                <button type="submit" class="primary-button" :disabled="isLoading">
+                  <span v-if="isLoading" class="loader"></span>
+                  <span v-else>{{ submitLabel }}</span>
                 </button>
-              </div>
-              <span v-if="errors.password" class="error-msg">{{ errors.password }}</span>
+              </form>
             </div>
-
-            <div v-if="activeTab === 'register'" class="form-group">
-              <label for="confirmPassword">确认密码</label>
-              <input
-                id="confirmPassword"
-                v-model="formData.confirmPassword"
-                :type="showPassword ? 'text' : 'password'"
-                placeholder="再次输入密码"
-                :class="{ 'input-error': errors.confirmPassword }"
-                :disabled="isLoading"
-              />
-              <span v-if="errors.confirmPassword" class="error-msg">{{ errors.confirmPassword }}</span>
-            </div>
-
-            <div v-if="activeTab === 'register'" class="form-group checkbox-group">
-              <label class="checkbox-label" for="agreeTerms">
-                <input id="agreeTerms" v-model="formData.agreeTerms" type="checkbox" :disabled="isLoading" />
-                <span>我同意 <a href="#" class="inline-link">服务条款</a> 与 <a href="#" class="inline-link">隐私政策</a></span>
-              </label>
-              <span v-if="errors.agreeTerms" class="error-msg">{{ errors.agreeTerms }}</span>
-            </div>
-
-            <button type="submit" class="primary-button" :disabled="isLoading">
-              <span v-if="isLoading" class="loader"></span>
-              <span v-else>{{ activeTab === 'login' ? '登录' : '创建账号' }}</span>
-            </button>
-          </form>
+          </Transition>
         </div>
       </section>
     </div>
@@ -362,8 +405,9 @@ const emit = defineEmits([
   display: flex;
   flex-direction: column;
   gap: 14px;
-  max-width: 520px;
-  padding: 22px 24px 24px;
+  max-width: 620px;
+  min-height: 176px;
+  padding: 26px 30px 30px;
   border-radius: 24px;
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.62), rgba(255, 255, 255, 0.3)),
@@ -375,9 +419,21 @@ const emit = defineEmits([
 }
 
 .brand-column__statement h2 {
-  font-size: clamp(1.9rem, 2.6vw, 3rem);
-  line-height: 1.08;
+  font-size: clamp(1.95rem, 2.65vw, 3.1rem);
+  line-height: 1.16;
   letter-spacing: -0.04em;
+  max-width: 560px;
+}
+
+.stream-caret {
+  display: inline-block;
+  width: 0.12em;
+  height: 0.96em;
+  margin-left: 0.08em;
+  vertical-align: -0.08em;
+  border-radius: 999px;
+  background: rgba(29, 78, 216, 0.72);
+  animation: caretBlink 1s steps(1) infinite;
 }
 
 .form-column {
@@ -401,6 +457,12 @@ const emit = defineEmits([
     0 18px 42px rgba(15, 23, 42, 0.06),
     inset 0 1px 0 rgba(255, 255, 255, 0.8);
   animation-delay: 140ms;
+}
+
+.auth-panel-shell {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
 }
 
 .tabs {
@@ -450,6 +512,26 @@ const emit = defineEmits([
   font-size: clamp(1.9rem, 2vw, 2.35rem);
   line-height: 1.08;
   letter-spacing: -0.04em;
+}
+
+.auth-panel-enter-active,
+.auth-panel-leave-active {
+  transition:
+    opacity 260ms ease,
+    transform 320ms cubic-bezier(0.2, 0.8, 0.2, 1),
+    filter 320ms ease;
+}
+
+.auth-panel-enter-from {
+  opacity: 0;
+  transform: translateY(14px);
+  filter: blur(8px);
+}
+
+.auth-panel-leave-to {
+  opacity: 0;
+  transform: translateY(-10px);
+  filter: blur(6px);
 }
 
 .status-box {
@@ -688,6 +770,18 @@ const emit = defineEmits([
   }
 }
 
+@keyframes caretBlink {
+  0%,
+  49% {
+    opacity: 1;
+  }
+
+  50%,
+  100% {
+    opacity: 0;
+  }
+}
+
 @keyframes statusFade {
   from {
     opacity: 0;
@@ -766,6 +860,7 @@ const emit = defineEmits([
   .brand-column,
   .form-card,
   .brand-lockup__icon,
+  .stream-caret,
   .status-box,
   .loader {
     animation: none !important;
