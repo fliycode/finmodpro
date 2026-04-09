@@ -3,6 +3,7 @@ set -euo pipefail
 
 BACKEND_HEALTH_URL="http://127.0.0.1:8000/api/health/"
 FRONTEND_URL="http://127.0.0.1:5173/"
+FRONTEND_API_HEALTH_URL="http://127.0.0.1:5173/api/health/"
 MAX_ATTEMPTS="${SMOKE_CHECK_ATTEMPTS:-20}"
 SLEEP_SECONDS="${SMOKE_CHECK_SLEEP_SECONDS:-3}"
 COMPOSE_FILE="${COMPOSE_FILE:-docker-compose.prod.yml}"
@@ -48,6 +49,7 @@ check_compose_service_running() {
 
 check_url "$BACKEND_HEALTH_URL" "backend health"
 check_url "$FRONTEND_URL" "frontend root"
+check_url "$FRONTEND_API_HEALTH_URL" "frontend proxied api"
 
 if command -v docker >/dev/null 2>&1 \
   && docker compose -f "$COMPOSE_FILE" config --services 2>/dev/null | grep -qx "celery-worker"; then
