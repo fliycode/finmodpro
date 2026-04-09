@@ -68,6 +68,55 @@ services:
       retries: 10
       start_period: 45s
 
+  celery-worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    command: ["celery", "-A", "config", "worker", "-l", "info", "--concurrency", "1"]
+    environment:
+      APP_ENV: production
+      DJANGO_DEBUG: ${DJANGO_DEBUG:-false}
+      DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:-change-me-in-.env.backend}
+      DJANGO_ALLOWED_HOSTS: ${DJANGO_ALLOWED_HOSTS:-47.85.103.76,127.0.0.1,localhost}
+      DJANGO_CORS_ALLOWED_ORIGINS: ${DJANGO_CORS_ALLOWED_ORIGINS:-http://47.85.103.76:5173,http://127.0.0.1:5173,http://localhost:5173}
+      DJANGO_CSRF_TRUSTED_ORIGINS: ${DJANGO_CSRF_TRUSTED_ORIGINS:-http://47.85.103.76:5173,http://127.0.0.1:5173,http://localhost:5173}
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:-change-me-jwt-in-.env.backend}
+      DB_ENGINE: ${DB_ENGINE:-mysql}
+      DB_NAME: ${DB_NAME:-finmodpro}
+      DB_HOST: mysql
+      DB_PORT: ${DB_PORT:-3306}
+      DB_USER: ${DB_USER:-finmodpro}
+      DB_PASSWORD: ${DB_PASSWORD:-finmodpro}
+      DB_CONN_MAX_AGE: ${DB_CONN_MAX_AGE:-60}
+      REDIS_ENABLED: "true"
+      REDIS_HOST: redis
+      REDIS_PORT: ${REDIS_PORT:-6379}
+      REDIS_DB: ${REDIS_DB:-0}
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+      CELERY_BROKER_URL: ${CELERY_BROKER_URL:-redis://redis:6379/0}
+      CELERY_RESULT_BACKEND: ${CELERY_RESULT_BACKEND:-redis://redis:6379/1}
+      CELERY_TASK_ALWAYS_EAGER: ${CELERY_TASK_ALWAYS_EAGER:-false}
+      CELERY_TASK_EAGER_PROPAGATES: ${CELERY_TASK_EAGER_PROPAGATES:-true}
+      CELERY_TASK_STORE_EAGER_RESULT: ${CELERY_TASK_STORE_EAGER_RESULT:-false}
+      MILVUS_URI: ${MILVUS_URI:-http://milvus:19530}
+      MILVUS_COLLECTION_NAME: ${MILVUS_COLLECTION_NAME:-knowledgebase_document_chunks}
+      KB_CHUNK_SIZE: ${KB_CHUNK_SIZE:-400}
+      KB_CHUNK_OVERLAP: ${KB_CHUNK_OVERLAP:-50}
+      KB_EMBEDDING_DIMENSION: ${KB_EMBEDDING_DIMENSION:-64}
+      MEDIA_ROOT: ${MEDIA_ROOT:-/app/media}
+    volumes:
+      - backend_media:/app/media
+    restart: unless-stopped
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      milvus:
+        condition: service_started
+      ollama:
+        condition: service_started
+
   mysql:
     image: mysql:8.4
     command:

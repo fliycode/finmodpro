@@ -3,10 +3,12 @@ import { computed, onMounted, onUnmounted, ref } from 'vue';
 
 import { kbApi } from '../api/knowledgebase.js';
 import { useFlash } from '../lib/flash.js';
+import { getIngestionAction, isIngestionInFlight } from '../lib/knowledgebase-actions.js';
 
 const items = ref([]);
 const isLoading = ref(false);
 const isUploading = ref(false);
+const isSubmittingTask = ref(false);
 const selectedDocumentId = ref('');
 const selectedDocumentDetail = ref(null);
 const isLoadingDetail = ref(false);
@@ -50,7 +52,7 @@ const selectedDocument = computed(() => {
 });
 
 const activeProcessingCount = computed(() =>
-  items.value.filter((item) => kbApi.isProcessingStatus(item.status)).length,
+  items.value.filter((item) => isIngestionInFlight(item)).length,
 );
 
 const indexedCount = computed(() =>
@@ -60,6 +62,15 @@ const indexedCount = computed(() =>
 const failedCount = computed(() =>
   items.value.filter((item) => item.status === 'failed').length,
 );
+
+const selectedIngestionAction = computed(() => getIngestionAction(selectedDocument.value));
+const taskHintText = computed(() => {
+  if (isIngestionInFlight(selectedDocument.value)) {
+    return '任务已启动，后台正在异步执行解析、切块和向量写入，完成后页面会自动刷新状态。';
+  }
+
+  return `上传只保存原始文件；点击“${selectedIngestionAction.value?.label || '启动入库'}”后，后台才会异步完成解析、切块和写入向量库。`;
+});
 
 const keepSelectionFresh = () => {
   if (!selectedDocumentId.value) {
@@ -119,15 +130,7 @@ const handleFileChange = async (event) => {
       selectedDocumentId.value = uploadResult.document.id;
       selectedDocumentDetail.value = uploadResult.document;
     }
-    flash.success('文件已上传，正在创建入库任务。');
-
-    if (uploadResult.document?.id) {
-      const ingestResult = await kbApi.ingestDocument(uploadResult.document.id);
-      if (ingestResult.document) {
-        selectedDocumentDetail.value = ingestResult.document;
-      }
-      flash.success(ingestResult.message || '入库任务已提交。');
-    }
+    flash.success('文件已上传。请启动入库任务，后台会异步完成解析、切块和向量化。');
 
     await fetchDocuments();
     await refreshSelectedDocument();
@@ -137,6 +140,28 @@ const handleFileChange = async (event) => {
   } finally {
     isUploading.value = false;
     event.target.value = '';
+  }
+};
+
+const startIngestion = async () => {
+  if (!selectedDocument.value?.id || !selectedIngestionAction.value || isSubmittingTask.value) {
+    return;
+  }
+
+  isSubmittingTask.value = true;
+  try {
+    const ingestResult = await kbApi.ingestDocument(selectedDocument.value.id);
+    if (ingestResult.document) {
+      selectedDocumentDetail.value = ingestResult.document;
+    }
+    flash.success(ingestResult.message || '入库任务已提交。');
+    await fetchDocuments();
+    await refreshSelectedDocument();
+  } catch (error) {
+    console.error('启动入库任务失败:', error);
+    flash.error(`启动入库失败：${error.message || '未知错误'}`);
+  } finally {
+    isSubmittingTask.value = false;
   }
 };
 
@@ -278,9 +303,22 @@ onUnmounted(() => {
               <h3>{{ selectedDocument.title }}</h3>
               <p class="kb-detail__summary">{{ selectedDocument.processResult }}</p>
             </div>
-            <span :class="['status-chip', `tone-${statusTone[selectedDocument.processStep.code] || 'neutral'}`]">
-              {{ selectedDocument.processStep.label }}
-            </span>
+            <div class="kb-detail__header-actions">
+              <button
+                v-if="selectedIngestionAction"
+                :class="[
+                  selectedIngestionAction.emphasis === 'primary' ? 'kb-primary-btn' : 'kb-secondary-btn',
+                  'kb-detail__trigger',
+                ]"
+                :disabled="isSubmittingTask"
+                @click="startIngestion"
+              >
+                {{ isSubmittingTask ? '提交中...' : selectedIngestionAction.label }}
+              </button>
+              <span :class="['status-chip', `tone-${statusTone[selectedDocument.processStep.code] || 'neutral'}`]">
+                {{ selectedDocument.processStep.label }}
+              </span>
+            </div>
           </div>
 
           <div class="kb-progress">
@@ -325,6 +363,7 @@ onUnmounted(() => {
               <h4>处理任务</h4>
               <span v-if="selectedDocument.isSearchReady" class="task-ready">可检索</span>
             </div>
+            <p class="kb-task-card__hint">{{ taskHintText }}</p>
             <div class="task-grid">
               <div>
                 <span class="meta-label">任务状态</span>
@@ -397,6 +436,19 @@ onUnmounted(() => {
 .kb-detail h3 {
   margin: 0;
   color: #142033;
+}
+
+.kb-detail__header,
+.kb-detail__header-actions {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.kb-detail__header-actions {
+  align-items: center;
+  justify-content: flex-end;
 }
 
 .kb-overview__text,
@@ -478,6 +530,10 @@ onUnmounted(() => {
   color: #142033;
 }
 
+.kb-detail__trigger {
+  min-width: 118px;
+}
+
 .kb-layout {
   display: grid;
   grid-template-columns: minmax(0, 1.2fr) minmax(360px, 0.95fr);
@@ -542,6 +598,12 @@ onUnmounted(() => {
   color: #5a677d;
 }
 
+.kb-task-card__hint {
+  margin: 12px 0 0;
+  color: #5a677d;
+  line-height: 1.6;
+}
+
 .status-chip {
   display: inline-flex;
   align-items: center;
@@ -580,7 +642,6 @@ onUnmounted(() => {
   padding: 22px;
 }
 
-.kb-detail__header,
 .section-head,
 .kb-progress__meta,
 .kb-actions {

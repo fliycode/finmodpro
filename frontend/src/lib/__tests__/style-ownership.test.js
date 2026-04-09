@@ -5,7 +5,7 @@ import { resolve } from 'node:path';
 
 const styleCss = readFileSync(resolve(process.cwd(), 'src/style.css'), 'utf8');
 const authLayoutVue = readFileSync(resolve(process.cwd(), 'src/layouts/AuthLayout.vue'), 'utf8');
-const authViewVue = readFileSync(resolve(process.cwd(), 'src/views/auth/AuthView.vue'), 'utf8');
+const authLandingVue = readFileSync(resolve(process.cwd(), 'src/components/AuthLanding.vue'), 'utf8');
 
 test('shared stylesheet no longer owns auth-specific selectors', () => {
   assert.doesNotMatch(styleCss, /\.auth-layout(?:__|[\s,{:])/);
@@ -15,17 +15,15 @@ test('shared stylesheet no longer owns auth-specific selectors', () => {
   assert.doesNotMatch(styleCss, /\.ui-card--admin(?:[\s,{:])/);
 });
 
-test('auth layout keeps its styles local', () => {
-  assert.match(authLayoutVue, /<style scoped>/);
-  assert.match(authLayoutVue, /\.auth-layout\b/);
-  assert.match(authLayoutVue, /\.auth-layout__brand\b/);
-  assert.match(authLayoutVue, /\.auth-layout__panel\b/);
+test('auth layout stays a thin router shell', () => {
+  assert.match(authLayoutVue, /<RouterView \/>/);
+  assert.doesNotMatch(authLayoutVue, /<style scoped>/);
 });
 
-test('auth view keeps its card and form styles local', () => {
-  assert.match(authViewVue, /<style scoped>/);
-  assert.match(authViewVue, /\.auth-card\b/);
-  assert.match(authViewVue, /\.auth-card__tab\b/);
-  assert.match(authViewVue, /\.auth-form\b/);
-  assert.match(authViewVue, /\.auth-form__submit\b/);
+test('auth landing keeps auth-specific shell and form styles local', () => {
+  assert.match(authLandingVue, /<style scoped>/);
+  assert.match(authLandingVue, /\.auth-entry\b/);
+  assert.match(authLandingVue, /\.brand-column\b/);
+  assert.match(authLandingVue, /\.form-card\b/);
+  assert.match(authLandingVue, /\.auth-form\b/);
 });

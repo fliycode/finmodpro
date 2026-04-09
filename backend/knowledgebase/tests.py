@@ -1,5 +1,6 @@
 import shutil
 import tempfile
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from django.contrib.auth.models import Group
@@ -474,3 +475,80 @@ class KnowledgebaseDocumentServiceTests(TestCase):
         )
 
         self.assertEqual([chunk["content"] for chunk in chunks], ["abcdefghij", "ij12345678", "7890"])
+
+
+@override_settings(
+    JWT_SECRET_KEY="test-jwt-secret",
+    JWT_ACCESS_TOKEN_LIFETIME_SECONDS=3600,
+    CELERY_TASK_ALWAYS_EAGER=False,
+    CELERY_TASK_EAGER_PROPAGATES=True,
+)
+class KnowledgebaseAsyncQueueTests(TestCase):
+    def setUp(self):
+        self.media_root = tempfile.mkdtemp()
+        self.override = override_settings(MEDIA_ROOT=self.media_root)
+        self.override.enable()
+
+    def tearDown(self):
+        self.override.disable()
+        shutil.rmtree(self.media_root, ignore_errors=True)
+
+    def test_enqueue_document_ingestion_resets_failed_document_to_uploaded_before_requeue(self):
+        document = create_document_from_upload(
+            uploaded_file=SimpleUploadedFile(
+                "retry.txt",
+                b"retry me",
+                content_type="text/plain",
+            ),
+            title="Retry doc",
+            source_date="2025-03-01",
+        )
+        document.status = Document.STATUS_FAILED
+        document.error_message = "上一次解析失败"
+        document.save(update_fields=["status", "error_message", "updated_at"])
+        IngestionTask.objects.create(
+            document=document,
+            status=IngestionTask.STATUS_FAILED,
+            current_step=IngestionTask.STEP_FAILED,
+            error_message="上一次解析失败",
+        )
+
+        with patch(
+            "knowledgebase.tasks.ingest_document_task.delay",
+            return_value=SimpleNamespace(id="celery-task-123"),
+        ) as delay_mock:
+            ingestion_task, created = enqueue_document_ingestion(document)
+
+        self.assertTrue(created)
+        delay_mock.assert_called_once_with(document.id, ingestion_task.id)
+
+        document.refresh_from_db()
+        ingestion_task.refresh_from_db()
+        self.assertEqual(document.status, Document.STATUS_UPLOADED)
+        self.assertEqual(document.error_message, "")
+        self.assertEqual(ingestion_task.status, IngestionTask.STATUS_QUEUED)
+        self.assertEqual(ingestion_task.current_step, IngestionTask.STEP_QUEUED)
+        self.assertEqual(ingestion_task.celery_task_id, "celery-task-123")
+
+    def test_enqueue_document_ingestion_reuses_existing_running_task(self):
+        document = create_document_from_upload(
+            uploaded_file=SimpleUploadedFile(
+                "running.txt",
+                b"still working",
+                content_type="text/plain",
+            ),
+            title="Running doc",
+            source_date="2025-03-01",
+        )
+        running_task = IngestionTask.objects.create(
+            document=document,
+            status=IngestionTask.STATUS_RUNNING,
+            current_step=IngestionTask.STEP_INDEXING,
+        )
+
+        with patch("knowledgebase.tasks.ingest_document_task.delay") as delay_mock:
+            ingestion_task, created = enqueue_document_ingestion(document)
+
+        self.assertFalse(created)
+        self.assertEqual(ingestion_task.id, running_task.id)
+        delay_mock.assert_not_called()
