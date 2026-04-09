@@ -2,6 +2,8 @@ from django.conf import settings
 
 from knowledgebase.models import DocumentChunk
 from knowledgebase.services.embedding_service import build_dense_embedding
+
+
 class VectorService:
     _client = None
 
@@ -20,14 +22,37 @@ class VectorService:
             self.__class__._client = MilvusClient(**self._build_client_kwargs())
         return self.__class__._client
 
-    def ensure_collection(self):
+    def _extract_collection_dimension(self, collection_schema):
+        if not isinstance(collection_schema, dict):
+            return None
+
+        fields = collection_schema.get("fields") or []
+        for field in fields:
+            if not isinstance(field, dict):
+                continue
+            if field.get("name") != "vector":
+                continue
+            params = field.get("params") or {}
+            dimension = field.get("dimension") or params.get("dim") or params.get("dimension")
+            if dimension is None:
+                return None
+            return int(dimension)
+        return None
+
+    def ensure_collection(self, *, dimension=None):
         client = self._get_client()
+
+        target_dimension = int(dimension or settings.KB_EMBEDDING_DIMENSION)
         if client.has_collection(settings.MILVUS_COLLECTION_NAME):
-            return client
+            existing_schema = client.describe_collection(settings.MILVUS_COLLECTION_NAME)
+            existing_dimension = self._extract_collection_dimension(existing_schema)
+            if existing_dimension == target_dimension:
+                return client
+            client.drop_collection(settings.MILVUS_COLLECTION_NAME)
 
         client.create_collection(
             collection_name=settings.MILVUS_COLLECTION_NAME,
-            dimension=settings.KB_EMBEDDING_DIMENSION,
+            dimension=target_dimension,
             primary_field_name="id",
             id_type="int",
             vector_field_name="vector",
@@ -72,10 +97,11 @@ class VectorService:
         queryset = DocumentChunk.objects.filter(document=document).order_by("chunk_index")
         for chunk in queryset:
             vector_id = int(chunk.id)
+            vector = build_dense_embedding(chunk.content)
             rows.append(
                 {
                     "id": vector_id,
-                    "vector": build_dense_embedding(chunk.content),
+                    "vector": vector,
                     "document_id": document.id,
                     "chunk_id": chunk.id,
                     "document_title": document.title,
@@ -90,16 +116,16 @@ class VectorService:
             )
             chunk.vector_id = str(vector_id)
             chunks_to_update.append(chunk)
-        if chunks_to_update:
-            DocumentChunk.objects.bulk_update(chunks_to_update, ["vector_id"])
-        return rows
+        return rows, chunks_to_update
 
     def index(self, document):
-        client = self.ensure_collection()
+        rows, chunks_to_update = self._build_rows(document)
+        dimension = len(rows[0]["vector"]) if rows else settings.KB_EMBEDDING_DIMENSION
+        client = self.ensure_collection(dimension=dimension)
         self._delete_existing_document_vectors(client, document)
-        rows = self._build_rows(document)
         if rows:
             client.insert(settings.MILVUS_COLLECTION_NAME, rows)
+            DocumentChunk.objects.bulk_update(chunks_to_update, ["vector_id"])
         from rag.services.vector_store_service import index_document
 
         index_document(document)
