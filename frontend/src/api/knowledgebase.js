@@ -250,7 +250,7 @@ export const kbApi = {
   },
 
   isProcessingStatus(status) {
-    return ['uploaded', 'queued', 'parsed', 'chunked', 'processing', 'pending', 'indexing'].includes(
+    return ['queued', 'parsing', 'chunking', 'indexing', 'running'].includes(
       String(status || '').toLowerCase(),
     );
   },

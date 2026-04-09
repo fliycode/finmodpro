@@ -393,8 +393,6 @@ def ingest_document(document, ingestion_task=None):
 def enqueue_document_ingestion(document):
     from knowledgebase.tasks import ingest_document_task
 
-    document.error_message = ""
-    document.save(update_fields=["error_message", "updated_at"])
     latest_task = document.ingestion_tasks.order_by("id").last()
     if latest_task and latest_task.status in {
         IngestionTask.STATUS_QUEUED,
@@ -402,6 +400,9 @@ def enqueue_document_ingestion(document):
     }:
         return latest_task, False
 
+    document.status = Document.STATUS_UPLOADED
+    document.error_message = ""
+    document.save(update_fields=["status", "error_message", "updated_at"])
     ingestion_task = IngestionTask.objects.create(
         document=document,
         status=IngestionTask.STATUS_QUEUED,
