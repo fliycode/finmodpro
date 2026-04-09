@@ -9,6 +9,10 @@ export const resolveHomeRoute = (profile) => (
   isAdminProfile(profile) ? '/admin/overview' : '/workspace/qa'
 );
 
+export const resolveEntryRoute = (token, profile) => (
+  token ? resolveHomeRoute(profile) : '/login'
+);
+
 export const canAccessRoute = (route, profile) => {
   if (!route.meta?.requiresAdmin) {
     return true;

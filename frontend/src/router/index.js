@@ -1,7 +1,7 @@
 import { createRouter, createWebHistory } from 'vue-router';
 
 import { authStorage } from '../lib/auth-storage.js';
-import { canAccessRoute, resolveHomeRoute } from '../lib/session-state.js';
+import { canAccessRoute, resolveEntryRoute, resolveHomeRoute } from '../lib/session-state.js';
 import { appRoutes } from './routes.js';
 
 const router = createRouter({
@@ -14,7 +14,7 @@ router.beforeEach((to) => {
   const profile = authStorage.getProfile();
 
   if (to.path === '/') {
-    return resolveHomeRoute(profile);
+    return resolveEntryRoute(token, profile);
   }
 
   if (to.meta?.public && token) {

@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { appRoutes, getDefaultRouteForRole } from '../routes.js';
+import { resolveEntryRoute } from '../../lib/session-state.js';
 
 test('business user lands on workspace qa', () => {
   assert.equal(
@@ -15,6 +16,14 @@ test('admin lands on admin overview', () => {
     getDefaultRouteForRole({ groups: ['admin'], permissions: ['admin'] }),
     '/admin/overview',
   );
+});
+
+test('entry route sends anonymous users to login', () => {
+  assert.equal(resolveEntryRoute(null, { groups: ['admin'], permissions: ['admin'] }), '/login');
+});
+
+test('entry route sends authenticated admins to admin overview', () => {
+  assert.equal(resolveEntryRoute('token', { groups: ['admin'], permissions: ['admin'] }), '/admin/overview');
 });
 
 test('route table exposes login workspace and admin branches', () => {
