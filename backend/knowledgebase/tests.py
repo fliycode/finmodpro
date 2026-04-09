@@ -1,7 +1,7 @@
 import shutil
 import tempfile
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from django.contrib.auth.models import Group
 from django.core.files.uploadedfile import SimpleUploadedFile
@@ -18,6 +18,7 @@ from knowledgebase.services.document_service import (
     ingest_document,
     vectorize_document,
 )
+from knowledgebase.services.vector_service import VectorService
 from rag.services.vector_store_service import index_document
 from knowledgebase.services.parser_service import ParserService
 from knowledgebase.tasks import ingest_document_task
@@ -552,3 +553,63 @@ class KnowledgebaseAsyncQueueTests(TestCase):
         self.assertFalse(created)
         self.assertEqual(ingestion_task.id, running_task.id)
         delay_mock.assert_not_called()
+
+
+class VectorServiceDimensionTests(TestCase):
+    def setUp(self):
+        self.media_root = tempfile.mkdtemp()
+        self.override = override_settings(MEDIA_ROOT=self.media_root)
+        self.override.enable()
+
+    def tearDown(self):
+        self.override.disable()
+        shutil.rmtree(self.media_root, ignore_errors=True)
+
+    def test_index_creates_collection_with_actual_embedding_dimension(self):
+        document = create_document_from_upload(
+            uploaded_file=SimpleUploadedFile(
+                "vector.txt",
+                b"vector dimension sample",
+                content_type="text/plain",
+            ),
+            title="Vector doc",
+            source_date="2025-03-01",
+        )
+        document.parsed_text = "vector dimension sample"
+        document.save(update_fields=["parsed_text", "updated_at"])
+        chunk = document.chunks.create(
+            chunk_index=0,
+            content="vector dimension sample",
+            metadata={"page_label": "chunk-1"},
+        )
+
+        mocked_client = Mock()
+        mocked_client.has_collection.return_value = False
+
+        with patch.object(VectorService, "_get_client", return_value=mocked_client), patch(
+            "knowledgebase.services.vector_service.build_dense_embedding",
+            return_value=[0.1, 0.2, 0.3, 0.4],
+        ), patch("rag.services.vector_store_service.index_document"):
+            VectorService().index(document)
+
+        mocked_client.create_collection.assert_called_once()
+        self.assertEqual(mocked_client.create_collection.call_args.kwargs["dimension"], 4)
+        chunk.refresh_from_db()
+        self.assertEqual(chunk.vector_id, str(chunk.id))
+
+    def test_ensure_collection_recreates_existing_collection_when_dimension_mismatches(self):
+        mocked_client = Mock()
+        mocked_client.has_collection.return_value = True
+        mocked_client.describe_collection.return_value = {
+            "fields": [
+                {"name": "id"},
+                {"name": "vector", "params": {"dim": 64}},
+            ]
+        }
+
+        with patch.object(VectorService, "_get_client", return_value=mocked_client):
+            VectorService().ensure_collection(dimension=1024)
+
+        mocked_client.drop_collection.assert_called_once()
+        mocked_client.create_collection.assert_called_once()
+        self.assertEqual(mocked_client.create_collection.call_args.kwargs["dimension"], 1024)
