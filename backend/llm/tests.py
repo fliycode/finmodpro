@@ -1,4 +1,5 @@
 import json
+import os
 import shutil
 import tempfile
 from decimal import Decimal
@@ -22,7 +23,11 @@ from llm.services.providers.ollama_provider import (
     OllamaEmbeddingProvider,
 )
 from llm.services.providers.deepseek_provider import DeepSeekChatProvider
-from llm.services.runtime_service import get_chat_provider, get_embedding_provider
+from llm.services.runtime_service import (
+    _normalize_ollama_endpoint,
+    get_chat_provider,
+    get_embedding_provider,
+)
 from rbac.services.rbac_service import ROLE_ADMIN, ROLE_MEMBER, ROLE_SUPER_ADMIN, seed_roles_and_permissions
 
 
@@ -231,6 +236,20 @@ class ProviderRuntimeTests(TestCase):
         self.assertIsInstance(provider, DeepSeekChatProvider)
         self.assertEqual(result, "pong")
         mocked_init_chat_model.assert_called_once()
+
+    @patch.dict(os.environ, {"APP_ENV": "production", "OLLAMA_INTERNAL_URL": "http://ollama:11434"})
+    def test_runtime_service_rewrites_localhost_ollama_endpoint_in_production(self):
+        provider = get_embedding_provider()
+
+        self.assertIsInstance(provider, OllamaEmbeddingProvider)
+        self.assertEqual(provider.endpoint, "http://ollama:11434")
+
+    @patch.dict(os.environ, {"APP_ENV": "production"}, clear=False)
+    def test_normalize_ollama_endpoint_keeps_non_local_host(self):
+        self.assertEqual(
+            _normalize_ollama_endpoint("http://10.0.0.8:11434"),
+            "http://10.0.0.8:11434",
+        )
 
     @patch("llm.services.providers.deepseek_provider.init_chat_model")
     def test_deepseek_chat_provider_maps_auth_error(self, mocked_init_chat_model):
