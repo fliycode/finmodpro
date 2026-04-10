@@ -13,6 +13,16 @@ from knowledgebase.services.document_service import (
 from rbac.services.authz_service import permission_required
 
 
+def _build_schema_not_ready_response(exc):
+    return JsonResponse(
+        {
+            "message": "知识库数据表尚未初始化，请先执行后端迁移与 RBAC 初始化。",
+            "detail": str(exc),
+        },
+        status=503,
+    )
+
+
 @csrf_exempt
 @require_http_methods(["GET", "POST"])
 @permission_required("auth.view_document")
@@ -21,13 +31,7 @@ def document_list_create_view(request):
         try:
             return JsonResponse(build_document_list_response(request.user))
         except (OperationalError, ProgrammingError, DatabaseError) as exc:
-            return JsonResponse(
-                {
-                    "message": "知识库数据表尚未初始化，请先执行后端迁移与 RBAC 初始化。",
-                    "detail": str(exc),
-                },
-                status=503,
-            )
+            return _build_schema_not_ready_response(exc)
 
     if not request.user.has_perm("auth.upload_document"):
         return JsonResponse({"message": "无权限。"}, status=403)
@@ -60,7 +64,12 @@ def document_detail_view(request, document_id):
         document = get_document_for_user(request.user, document_id)
     except Document.DoesNotExist:
         return JsonResponse({"message": "文档不存在。"}, status=404)
+    except (OperationalError, ProgrammingError, DatabaseError) as exc:
+        return _build_schema_not_ready_response(exc)
 
-    return JsonResponse(
-        build_document_response(document, include_content_preview=True)
-    )
+    try:
+        return JsonResponse(
+            build_document_response(document, include_content_preview=True)
+        )
+    except (OperationalError, ProgrammingError, DatabaseError) as exc:
+        return _build_schema_not_ready_response(exc)
