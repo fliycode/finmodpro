@@ -1,5 +1,12 @@
 <script setup>
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+
+import {
+  AUTH_BRAND_STATEMENT,
+  buildBrandStatementSegments,
+  getPasswordToggleLabel,
+} from '../lib/auth-landing.js';
+import AppIcon from './ui/AppIcon.vue';
 
 const props = defineProps({
   activeTab: {
@@ -34,15 +41,15 @@ const emit = defineEmits([
   'toggle-password',
 ]);
 
-const brandStatement =
-  '一站式风控平台，连接文档、问答与模型，快速完成从风险识别到报告生成。';
-
 const streamedStatement = ref('');
+const usernameInput = ref(null);
 let typingTimer = null;
 
 const panelTitle = computed(() => (props.activeTab === 'login' ? '欢迎回来' : '创建账号'));
 const panelEyebrow = computed(() => (props.activeTab === 'login' ? 'Welcome back' : 'Create account'));
 const submitLabel = computed(() => (props.activeTab === 'login' ? '登录' : '创建账号'));
+const statementSegments = computed(() => buildBrandStatementSegments(streamedStatement.value));
+const passwordToggleLabel = computed(() => getPasswordToggleLabel(props.showPassword));
 
 const playStatementStream = () => {
   if (typingTimer) {
@@ -54,23 +61,33 @@ const playStatementStream = () => {
   let index = 0;
   typingTimer = setInterval(() => {
     index += 1;
-    streamedStatement.value = brandStatement.slice(0, index);
+    streamedStatement.value = AUTH_BRAND_STATEMENT.slice(0, index);
 
-    if (index >= brandStatement.length) {
+    if (index >= AUTH_BRAND_STATEMENT.length) {
       clearInterval(typingTimer);
       typingTimer = null;
     }
   }, 36);
 };
 
+const focusUsernameInput = async () => {
+  await nextTick();
+  usernameInput.value?.focus();
+};
+
 onMounted(() => {
   playStatementStream();
+  focusUsernameInput();
 });
 
 onBeforeUnmount(() => {
   if (typingTimer) {
     clearInterval(typingTimer);
   }
+});
+
+watch(() => props.activeTab, () => {
+  focusUsernameInput();
 });
 </script>
 
@@ -96,7 +113,12 @@ onBeforeUnmount(() => {
         </div>
 
         <div class="brand-column__statement">
-          <h2>{{ streamedStatement }}<span class="stream-caret" aria-hidden="true"></span></h2>
+          <h2>
+            <template v-for="(segment, index) in statementSegments" :key="`${segment.text}-${index}`">
+              <span :class="{ 'statement-accent': segment.emphasis }">{{ segment.text }}</span>
+            </template>
+            <span class="stream-caret" aria-hidden="true"></span>
+          </h2>
         </div>
       </aside>
 
@@ -139,6 +161,7 @@ onBeforeUnmount(() => {
                   <label for="username">用户名</label>
                   <input
                     id="username"
+                    ref="usernameInput"
                     v-model="formData.username"
                     type="text"
                     :placeholder="activeTab === 'register' ? '例如：finance.ops' : '请输入用户名'"
@@ -178,10 +201,12 @@ onBeforeUnmount(() => {
                     <button
                       type="button"
                       class="toggle-pwd"
+                      :aria-label="passwordToggleLabel"
+                      :title="passwordToggleLabel"
                       :disabled="isLoading"
                       @click="emit('toggle-password')"
                     >
-                      {{ showPassword ? '隐藏' : '显示' }}
+                      <AppIcon :name="showPassword ? 'eye-off' : 'eye'" />
                     </button>
                   </div>
                   <span v-if="errors.password" class="error-msg">{{ errors.password }}</span>
@@ -356,7 +381,7 @@ onBeforeUnmount(() => {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
   align-items: center;
-  gap: 20px;
+  gap: 16px;
 }
 
 .brand-lockup__icon-wrap {
@@ -387,6 +412,12 @@ onBeforeUnmount(() => {
   font-family: 'Iowan Old Style', 'Palatino Linotype', 'Noto Serif SC', serif;
 }
 
+.brand-lockup__copy {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+
 .brand-lockup__copy h1 {
   font-size: clamp(2.8rem, 4vw, 4.4rem);
   line-height: 0.94;
@@ -394,27 +425,25 @@ onBeforeUnmount(() => {
 }
 
 .brand-lockup__copy p {
-  margin: 10px 0 0;
+  margin: 4px 0 0;
   color: var(--entry-muted);
-  line-height: 1.7;
+  line-height: 1.55;
   max-width: 420px;
 }
 
 .brand-column__statement {
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 12px;
   max-width: 620px;
-  min-height: 176px;
-  padding: 26px 30px 30px;
-  border-radius: 24px;
+  min-height: 0;
+  padding: 18px 20px 20px;
+  border-radius: 22px;
   background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.62), rgba(255, 255, 255, 0.3)),
-    linear-gradient(135deg, rgba(255, 255, 255, 0.18), rgba(191, 219, 254, 0.18));
-  border: 1px solid rgba(148, 163, 184, 0.18);
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.7),
-    0 16px 36px rgba(37, 99, 235, 0.08);
+    linear-gradient(180deg, rgba(255, 255, 255, 0.34), rgba(255, 255, 255, 0.16)),
+    linear-gradient(135deg, rgba(255, 255, 255, 0.12), rgba(191, 219, 254, 0.1));
+  border: 1px solid rgba(148, 163, 184, 0.12);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.55);
 }
 
 .brand-column__statement h2 {
@@ -422,6 +451,11 @@ onBeforeUnmount(() => {
   line-height: 1.16;
   letter-spacing: -0.04em;
   max-width: 560px;
+}
+
+.statement-accent {
+  color: var(--entry-accent);
+  font-weight: 700;
 }
 
 .stream-caret {
@@ -473,7 +507,7 @@ onBeforeUnmount(() => {
   border-radius: 999px;
   padding: 10px 18px;
   background: transparent;
-  color: #64748b;
+  color: #475569;
   font-size: 0.94rem;
   font-weight: 600;
   cursor: pointer;
@@ -614,7 +648,7 @@ onBeforeUnmount(() => {
 }
 
 .password-input-wrapper input {
-  padding-right: 76px;
+  padding-right: 56px;
 }
 
 .toggle-pwd {
@@ -624,10 +658,26 @@ onBeforeUnmount(() => {
   transform: translateY(-50%);
   border: 0;
   background: transparent;
-  color: var(--entry-accent);
+  color: #48617e;
   cursor: pointer;
-  font-size: 0.86rem;
-  font-weight: 700;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  transition: background-color 180ms ease, color 180ms ease;
+}
+
+.toggle-pwd:hover:not(:disabled) {
+  background: rgba(29, 78, 216, 0.08);
+  color: var(--entry-accent);
+}
+
+.toggle-pwd :deep(.app-icon) {
+  width: 17px;
+  height: 17px;
 }
 
 .checkbox-group {
