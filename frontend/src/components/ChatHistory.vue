@@ -1,36 +1,34 @@
 <script setup>
-import { onMounted, ref } from 'vue';
+const props = defineProps({
+  items: {
+    type: Array,
+    default: () => [],
+  },
+  isLoading: {
+    type: Boolean,
+    default: false,
+  },
+  activeSessionId: {
+    type: [String, Number],
+    default: null,
+  },
+});
 
-import { chatApi } from '../api/chat.js';
-
-const emit = defineEmits(['open-session']);
-
-const history = ref([]);
-const isLoading = ref(false);
-
-const fetchHistory = async () => {
-  isLoading.value = true;
-  try {
-    history.value = await chatApi.listHistory();
-  } catch (error) {
-    console.error('Failed to fetch history:', error);
-  } finally {
-    isLoading.value = false;
-  }
-};
+const emit = defineEmits(['open-session', 'refresh']);
 
 const handleOpenSession = (id) => {
   emit('open-session', id);
 };
-
-onMounted(fetchHistory);
 </script>
 
 <template>
   <div class="history-shell">
     <div class="history-shell__toolbar">
-      <span class="history-shell__eyebrow">会话记录</span>
-      <button class="refresh-btn" @click="fetchHistory" :disabled="isLoading">刷新</button>
+      <div>
+        <span class="history-shell__eyebrow">历史会话</span>
+        <p class="history-shell__subtitle">按最近使用时间继续之前的问答上下文。</p>
+      </div>
+      <button class="refresh-btn" @click="$emit('refresh')" :disabled="isLoading">刷新</button>
     </div>
 
     <div v-if="isLoading" class="skeleton-list">
@@ -42,56 +40,67 @@ onMounted(fetchHistory);
         <div class="skeleton-meta" />
       </div>
     </div>
-    <div v-else-if="history.length === 0" class="state-msg empty">
+    <div v-else-if="items.length === 0" class="state-msg empty">
       <div class="state-msg__stack">
         <div>暂无历史记录</div>
-        <div class="state-msg__footnote">(后端仍需实现 `GET /api/chat/sessions` 的完整返回)</div>
+        <div class="state-msg__footnote">新对话创建后会自动出现在这里。</div>
       </div>
     </div>
     <div v-else class="history-list">
-      <div v-for="item in history" :key="item.id" class="history-item" @click="handleOpenSession(item.id)">
+      <button
+        v-for="item in items"
+        :key="item.id"
+        type="button"
+        class="history-item"
+        :class="{ 'is-active': String(activeSessionId) === String(item.id) }"
+        @click="handleOpenSession(item.id)"
+      >
         <div class="item-main">
           <div class="item-title">{{ item.title }}</div>
-          <div class="item-preview">{{ item.lastMessage }}</div>
+          <div class="item-preview">{{ item.preview }}</div>
         </div>
         <div class="item-meta">
           <div class="item-time">{{ item.timestamp }}</div>
-          <button class="view-btn">继续对话</button>
+          <span class="view-btn">继续对话</span>
         </div>
-      </div>
+      </button>
     </div>
   </div>
 </template>
 
 <style scoped>
 .history-shell {
-  background: #fff;
-  border-radius: 20px;
-  padding: 24px;
-  box-shadow: var(--shadow-soft);
-  border: 1px solid var(--line-soft);
-  min-height: 500px;
   display: flex;
   flex-direction: column;
+  gap: 16px;
+  min-height: 100%;
 }
 
 .history-shell__toolbar {
   display: flex;
   justify-content: space-between;
-  align-items: center;
-  margin-bottom: 20px;
+  align-items: flex-start;
+  gap: 16px;
 }
 
 .history-shell__eyebrow {
-  font-size: 12px;
+  display: block;
+  font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.12em;
   text-transform: uppercase;
   color: var(--text-muted);
 }
 
+.history-shell__subtitle {
+  margin: 6px 0 0;
+  color: var(--text-secondary);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
 .refresh-btn {
-  padding: 8px 16px;
+  padding: 8px 14px;
   border: 1px solid var(--line-soft);
   border-radius: 10px;
   background: #fff;
@@ -99,12 +108,6 @@ onMounted(fetchHistory);
   font-size: 13px;
   font-weight: 600;
   color: var(--text-secondary);
-  transition: all 0.2s;
-}
-
-.refresh-btn:hover:not(:disabled) {
-  background: var(--surface-3);
-  border-color: var(--line-strong);
 }
 
 .refresh-btn:disabled {
@@ -114,6 +117,7 @@ onMounted(fetchHistory);
 
 .state-msg {
   flex: 1;
+  min-height: 180px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -145,22 +149,24 @@ onMounted(fetchHistory);
 .skeleton-item {
   display: flex;
   justify-content: space-between;
-  padding: 16px;
+  width: 100%;
+  padding: 15px 16px;
   border: 1px solid var(--line-soft);
   border-radius: 16px;
   background: #fff;
 }
 
 .history-item {
-  transition: all 0.2s;
+  text-align: left;
   cursor: pointer;
+  transition: all 0.2s;
 }
 
-.history-item:hover {
+.history-item:hover,
+.history-item.is-active {
   border-color: rgba(36, 87, 197, 0.18);
   background: rgba(255, 255, 255, 0.98);
   box-shadow: 0 12px 24px -20px rgba(36, 87, 197, 0.18);
-  transform: translateY(-1px);
 }
 
 .item-main,
@@ -178,11 +184,11 @@ onMounted(fetchHistory);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  font-size: 15px;
+  font-size: 14px;
 }
 
 .item-preview {
-  font-size: 13px;
+  font-size: 12px;
   color: var(--text-secondary);
   white-space: nowrap;
   overflow: hidden;
@@ -195,38 +201,22 @@ onMounted(fetchHistory);
   flex-direction: column;
   align-items: flex-end;
   justify-content: space-between;
-  margin-left: 16px;
+  margin-left: 14px;
   flex-shrink: 0;
 }
 
 .item-time {
   font-size: 12px;
   color: var(--text-muted);
-  font-weight: 500;
 }
 
 .view-btn {
-  padding: 6px 14px;
+  padding: 6px 12px;
   background: var(--surface-3);
   color: var(--brand);
-  border: none;
-  border-radius: 8px;
+  border-radius: 999px;
   font-size: 12px;
   font-weight: 600;
-  cursor: pointer;
-  transition: all 0.2s;
-  opacity: 0;
-  transform: translateX(10px);
-}
-
-.history-item:hover .view-btn {
-  opacity: 1;
-  transform: translateX(0);
-  background: var(--brand-soft);
-}
-
-.view-btn:hover {
-  background: var(--brand-soft);
 }
 
 .skeleton-title,
@@ -255,16 +245,8 @@ onMounted(fetchHistory);
 }
 
 @keyframes pulse {
-  0% {
-    opacity: 1;
-  }
-
-  50% {
-    opacity: 0.5;
-  }
-
-  100% {
-    opacity: 1;
-  }
+  0% { opacity: 1; }
+  50% { opacity: 0.45; }
+  100% { opacity: 1; }
 }
 </style>

@@ -4,6 +4,8 @@ import { useRouter } from 'vue-router';
 
 import { chatApi } from '../api/chat.js';
 import { qaApi } from '../api/qa.js';
+import { getActiveSessionLabel, normalizeHistoryItems } from '../lib/workspace-qa.js';
+import ChatHistory from './ChatHistory.vue';
 
 const props = defineProps({
   sessionId: {
@@ -23,10 +25,17 @@ const messagesContainer = ref(null);
 const sessionOptions = ref([]);
 const isLoadingSessions = ref(false);
 const isHydratingSession = ref(false);
+const historyDrawerOpen = ref(false);
 
 const hasStreamingAssistant = computed(() =>
   messages.value.some((message) => message.isStreaming),
 );
+
+const activeSessionLabel = computed(() =>
+  getActiveSessionLabel(sessionOptions.value, currentSessionId.value),
+);
+
+const historyItems = computed(() => normalizeHistoryItems(sessionOptions.value));
 
 const getAvatarLabel = (role) => {
   if (role === 'user') return '我';
@@ -60,6 +69,10 @@ const scrollToBottom = async () => {
   }
 };
 
+const resetConversation = () => {
+  messages.value = [{ role: 'system', content: DEFAULT_SYSTEM_MESSAGE, tone: 'info' }];
+};
+
 const refreshSessionOptions = async () => {
   isLoadingSessions.value = true;
   try {
@@ -82,6 +95,12 @@ const syncSessionRoute = async (sessionId) => {
       session: String(sessionId),
     },
   });
+};
+
+const clearSessionRoute = async () => {
+  const nextQuery = { ...router.currentRoute.value.query };
+  delete nextQuery.session;
+  await router.replace({ query: nextQuery });
 };
 
 const loadSession = async (id) => {
@@ -111,6 +130,25 @@ const loadSession = async (id) => {
   await scrollToBottom();
 };
 
+const openSession = async (id) => {
+  if (!id) {
+    return;
+  }
+
+  currentSessionId.value = id;
+  await syncSessionRoute(id);
+  await loadSession(id);
+  historyDrawerOpen.value = false;
+};
+
+const startNewConversation = async () => {
+  currentSessionId.value = null;
+  query.value = '';
+  resetConversation();
+  historyDrawerOpen.value = false;
+  await clearSessionRoute();
+};
+
 watch(() => props.sessionId, async (newId) => {
   currentSessionId.value = newId;
   if (newId && !isHydratingSession.value && !isAsking.value) {
@@ -118,7 +156,7 @@ watch(() => props.sessionId, async (newId) => {
     return;
   }
   if (!newId) {
-    messages.value = [{ role: 'system', content: DEFAULT_SYSTEM_MESSAGE, tone: 'info' }];
+    resetConversation();
   }
 });
 
@@ -128,21 +166,6 @@ onMounted(async () => {
     await loadSession(currentSessionId.value);
   }
 });
-
-const handleSessionChange = async (event) => {
-  const nextId = event.target.value;
-  currentSessionId.value = nextId || null;
-  if (nextId) {
-    await syncSessionRoute(nextId);
-    await loadSession(nextId);
-    return;
-  }
-
-  const nextQuery = { ...router.currentRoute.value.query };
-  delete nextQuery.session;
-  await router.replace({ query: nextQuery });
-  messages.value = [{ role: 'system', content: DEFAULT_SYSTEM_MESSAGE, tone: 'info' }];
-};
 
 const createAssistantPlaceholder = () => ({
   role: 'assistant',
@@ -209,6 +232,7 @@ const handleAsk = async () => {
 
     assistantMessage.isStreaming = false;
     assistantMessage.content = finalState.answer || assistantMessage.content || '未获取到回答，请稍后重试。';
+    await refreshSessionOptions();
   } catch (error) {
     const lastMessage = messages.value[messages.value.length - 1];
     if (lastMessage?.isStreaming) {
@@ -233,129 +257,207 @@ const handleAsk = async () => {
 
 <template>
   <div class="page-stack qa-page">
-    <div class="qa-toolbar ui-card">
-      <label class="qa-toolbar__session-picker">
-        <span>历史会话</span>
-        <select
-          :value="currentSessionId || ''"
-          :disabled="isLoadingSessions || isAsking"
-          @change="handleSessionChange"
-        >
-          <option value="">新对话</option>
-          <option v-for="session in sessionOptions" :key="session.id" :value="session.id">
-            {{ session.title }}
-          </option>
-        </select>
-      </label>
-    </div>
+    <div class="qa-shell ui-card">
+      <div class="qa-shell__toolbar">
+        <div class="qa-shell__heading">
+          <span class="qa-shell__eyebrow">智能问答</span>
+          <div class="qa-shell__title-row">
+            <h1 class="qa-shell__title">{{ activeSessionLabel }}</h1>
+            <span class="qa-shell__session-state">
+              {{ currentSessionId ? '延续会话中' : '新对话' }}
+            </span>
+          </div>
+        </div>
 
-    <div class="chat-window ui-card">
-      <div ref="messagesContainer" class="messages">
-        <div
-          v-for="(msg, index) in messages"
-          :key="index"
-          :class="['message', msg.role, msg.tone ? `tone-${msg.tone}` : '']"
-        >
-          <div :class="getAvatarClass(msg.role)">{{ getAvatarLabel(msg.role) }}</div>
-          <div class="message-content">
-            <div :class="['bubble', { 'bubble-error': msg.isError }]">
-              <div class="bubble-text">{{ msg.content }}</div>
-              <div v-if="msg.isStreaming" class="stream-caret" />
-              <div v-if="msg.duration_ms" class="duration-info">
-                耗时: {{ (msg.duration_ms / 1000).toFixed(2) }}s
-              </div>
-              <div v-if="msg.answer_notice" class="answer-notice">
-                {{ msg.answer_notice }}
-              </div>
-            </div>
+        <div class="qa-shell__actions">
+          <button class="ghost-btn" type="button" @click="historyDrawerOpen = true">
+            历史会话
+          </button>
+          <button class="ghost-btn ghost-btn--primary" type="button" @click="startNewConversation">
+            新对话
+          </button>
+        </div>
+      </div>
 
-            <div v-if="msg.citations && msg.citations.length > 0" class="citations-container">
-              <div class="citations-title">引用依据</div>
-              <div class="citations-list">
-                <div v-for="(cite, i) in msg.citations" :key="i" class="citation-card">
-                  <div class="citation-card__header">
-                    <span class="cite-index">[{{ i + 1 }}]</span>
-                    <span class="cite-title">{{ cite.document_title }}</span>
+      <div class="chat-window">
+        <div ref="messagesContainer" class="messages">
+          <div
+            v-for="(msg, index) in messages"
+            :key="index"
+            :class="['message', msg.role, msg.tone ? `tone-${msg.tone}` : '']"
+          >
+            <div :class="getAvatarClass(msg.role)">{{ getAvatarLabel(msg.role) }}</div>
+            <div class="message-content">
+              <div :class="['bubble', { 'bubble-error': msg.isError }]">
+                <div class="bubble-text">{{ msg.content }}</div>
+                <div v-if="msg.isStreaming" class="stream-caret" />
+                <div v-if="msg.duration_ms" class="duration-info">
+                  耗时: {{ (msg.duration_ms / 1000).toFixed(2) }}s
+                </div>
+                <div v-if="msg.answer_notice" class="answer-notice">
+                  {{ msg.answer_notice }}
+                </div>
+              </div>
+
+              <div v-if="msg.citations && msg.citations.length > 0" class="citations-container">
+                <div class="citations-title">引用依据</div>
+                <div class="citations-list">
+                  <div v-for="(cite, i) in msg.citations" :key="i" class="citation-card">
+                    <div class="citation-card__header">
+                      <span class="cite-index">[{{ i + 1 }}]</span>
+                      <span class="cite-title">{{ cite.document_title }}</span>
+                    </div>
+                    <div class="cite-meta">
+                      <span>{{ cite.doc_type }}</span>
+                      <span v-if="cite.page_label && cite.page_label !== 'N/A'">位置 {{ cite.page_label }}</span>
+                      <span v-if="cite.score > 0">相关度 {{ (cite.score * 100).toFixed(0) }}%</span>
+                    </div>
+                    <div class="cite-snippet">{{ cite.snippet }}</div>
                   </div>
-                  <div class="cite-meta">
-                    <span>{{ cite.doc_type }}</span>
-                    <span v-if="cite.page_label && cite.page_label !== 'N/A'">位置 {{ cite.page_label }}</span>
-                    <span v-if="cite.score > 0">相关度 {{ (cite.score * 100).toFixed(0) }}%</span>
-                  </div>
-                  <div class="cite-snippet">{{ cite.snippet }}</div>
                 </div>
               </div>
             </div>
           </div>
-        </div>
 
-        <div v-if="isAsking && !hasStreamingAssistant" class="message assistant">
-          <div :class="getAvatarClass('assistant')">AI</div>
-          <div class="message-content">
-            <div class="bubble typing">
-              <span class="dot" />
-              <span class="dot" />
-              <span class="dot" />
+          <div v-if="isAsking && !hasStreamingAssistant" class="message assistant">
+            <div :class="getAvatarClass('assistant')">AI</div>
+            <div class="message-content">
+              <div class="bubble typing">
+                <span class="dot" />
+                <span class="dot" />
+                <span class="dot" />
+              </div>
             </div>
           </div>
         </div>
-      </div>
 
-      <div class="input-area">
-        <textarea
-          v-model="query"
-          placeholder="输入您的金融分析问题，按 Enter 发送，Shift + Enter 换行"
-          @keydown.enter.exact.prevent="handleAsk"
-        />
-        <button :disabled="isAsking || !query.trim()" class="send-btn" @click="handleAsk">发送</button>
+        <div class="input-area">
+          <textarea
+            v-model="query"
+            placeholder="输入您的金融分析问题，按 Enter 发送，Shift + Enter 换行"
+            @keydown.enter.exact.prevent="handleAsk"
+          />
+          <button :disabled="isAsking || !query.trim()" class="send-btn" @click="handleAsk">发送</button>
+        </div>
       </div>
     </div>
+
+    <el-drawer
+      v-model="historyDrawerOpen"
+      direction="rtl"
+      size="360px"
+      :with-header="false"
+      class="qa-history-drawer"
+    >
+      <ChatHistory
+        :items="historyItems"
+        :is-loading="isLoadingSessions"
+        :active-session-id="currentSessionId"
+        @refresh="refreshSessionOptions"
+        @open-session="openSession"
+      />
+    </el-drawer>
   </div>
 </template>
 
 <style scoped>
 .qa-page {
-  min-height: calc(100vh - 180px);
+  min-height: calc(100vh - 142px);
 }
 
-.qa-toolbar {
+.qa-shell {
+  min-height: calc(100vh - 170px);
   display: flex;
-  justify-content: flex-end;
-  padding: 18px 22px;
+  flex-direction: column;
+  padding: 0;
+  overflow: hidden;
 }
 
-.qa-toolbar__session-picker {
+.qa-shell__toolbar {
+  display: flex;
+  justify-content: space-between;
+  gap: 18px;
+  align-items: center;
+  padding: 18px 22px 14px;
+  border-bottom: 1px solid rgba(20, 32, 51, 0.08);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(248, 250, 252, 0.94));
+}
+
+.qa-shell__heading {
+  min-width: 0;
   display: flex;
   flex-direction: column;
   gap: 6px;
-  font-size: 13px;
-  color: #5a677d;
+}
+
+.qa-shell__eyebrow {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.qa-shell__title-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.qa-shell__title {
+  margin: 0;
+  font-size: 24px;
+  line-height: 1.1;
+  color: var(--text-primary);
+}
+
+.qa-shell__session-state {
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;
+  padding: 0 10px;
+  border-radius: 999px;
+  background: var(--surface-3);
+  color: var(--text-secondary);
+  font-size: 12px;
   font-weight: 600;
 }
 
-.qa-toolbar__session-picker select {
-  min-width: 240px;
-  height: 42px;
-  border-radius: 12px;
-  border: 1px solid rgba(20, 32, 51, 0.12);
+.qa-shell__actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.ghost-btn {
+  min-height: 38px;
+  padding: 0 14px;
+  border-radius: 999px;
+  border: 1px solid var(--line-strong);
   background: #fff;
-  padding: 0 12px;
-  color: #142033;
+  color: var(--text-primary);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.ghost-btn--primary {
+  background: var(--brand);
+  border-color: var(--brand);
+  color: #fff;
 }
 
 .chat-window {
   flex: 1;
-  min-height: calc(100vh - 360px);
+  min-height: calc(100vh - 260px);
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.98) 0%, rgba(243, 245, 247, 0.95) 100%);
-  border-radius: 24px;
   display: flex;
   flex-direction: column;
-  overflow: hidden;
 }
 
 .messages {
   flex: 1;
-  padding: 28px;
+  padding: 24px 26px 18px;
   overflow-y: auto;
   display: flex;
   flex-direction: column;
@@ -365,7 +467,7 @@ const handleAsk = async () => {
 .message {
   display: flex;
   gap: 14px;
-  max-width: min(88%, 920px);
+  max-width: min(96%, 1120px);
 }
 
 .message.user {
@@ -375,7 +477,7 @@ const handleAsk = async () => {
 
 .message.system {
   align-self: center;
-  max-width: min(100%, 720px);
+  max-width: min(100%, 860px);
 }
 
 .message.system .message-content {
@@ -386,6 +488,7 @@ const handleAsk = async () => {
   display: flex;
   flex-direction: column;
   gap: 12px;
+  min-width: 0;
 }
 
 .avatar {
@@ -419,12 +522,12 @@ const handleAsk = async () => {
 .bubble {
   position: relative;
   border-radius: 18px;
-  padding: 14px 16px;
+  padding: 15px 17px;
   background: #fff;
   color: #142033;
   box-shadow: 0 14px 30px rgba(15, 23, 42, 0.06);
   border: 1px solid rgba(20, 32, 51, 0.08);
-  line-height: 1.7;
+  line-height: 1.72;
   white-space: pre-wrap;
 }
 
@@ -531,15 +634,16 @@ const handleAsk = async () => {
 }
 
 .input-area {
-  padding: 20px 24px 24px;
+  padding: 16px 22px 22px;
   border-top: 1px solid rgba(20, 32, 51, 0.08);
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 104px;
-  gap: 14px;
+  grid-template-columns: minmax(0, 1fr) 92px;
+  gap: 12px;
+  background: rgba(255, 255, 255, 0.92);
 }
 
 .input-area textarea {
-  min-height: 92px;
+  min-height: 108px;
   resize: vertical;
   border-radius: 18px;
   border: 1px solid rgba(20, 32, 51, 0.12);
@@ -551,7 +655,7 @@ const handleAsk = async () => {
 
 .send-btn {
   align-self: end;
-  height: 48px;
+  height: 46px;
   border: none;
   border-radius: 14px;
   background: #2457c5;
@@ -587,6 +691,11 @@ const handleAsk = async () => {
   animation-delay: 0.32s;
 }
 
+:deep(.qa-history-drawer .el-drawer__body) {
+  padding: 18px;
+  background: #f7f9fb;
+}
+
 @keyframes bounce {
   0%, 80%, 100% {
     transform: translateY(0);
@@ -608,6 +717,11 @@ const handleAsk = async () => {
 }
 
 @media (max-width: 900px) {
+  .qa-shell__toolbar {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
   .message {
     max-width: 100%;
   }
