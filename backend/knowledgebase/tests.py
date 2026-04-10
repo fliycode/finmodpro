@@ -727,3 +727,26 @@ class VectorServiceDimensionTests(TestCase):
         mocked_client.drop_collection.assert_called_once()
         mocked_client.create_collection.assert_called_once()
         self.assertEqual(mocked_client.create_collection.call_args.kwargs["dimension"], 1024)
+
+    def test_search_uses_query_embedding_dimension_instead_of_default_setting(self):
+        mocked_client = Mock()
+        mocked_client.has_collection.return_value = True
+        mocked_client.describe_collection.return_value = {
+            "fields": [
+                {"name": "id"},
+                {"name": "vector", "params": {"dim": 4}},
+            ]
+        }
+        mocked_client.search.return_value = [[]]
+
+        with override_settings(KB_EMBEDDING_DIMENSION=64), patch.object(
+            VectorService, "_get_client", return_value=mocked_client
+        ), patch(
+            "knowledgebase.services.vector_service.build_dense_embedding",
+            return_value=[0.1, 0.2, 0.3, 0.4],
+        ):
+            VectorService().search(query="开题报告", top_k=5)
+
+        mocked_client.drop_collection.assert_not_called()
+        mocked_client.create_collection.assert_not_called()
+        mocked_client.search.assert_called_once()

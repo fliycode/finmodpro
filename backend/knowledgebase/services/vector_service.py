@@ -131,10 +131,13 @@ class VectorService:
         index_document(document)
 
     def search(self, *, query, filters=None, top_k=5):
-        client = self.ensure_collection()
+        query_vector = build_dense_embedding(query)
+        client = self.ensure_collection(
+            dimension=len(query_vector) if query_vector else settings.KB_EMBEDDING_DIMENSION
+        )
         search_results = client.search(
             collection_name=settings.MILVUS_COLLECTION_NAME,
-            data=[build_dense_embedding(query)],
+            data=[query_vector],
             limit=int(top_k),
             filter=self._build_filter_expression(filters),
             output_fields=[
