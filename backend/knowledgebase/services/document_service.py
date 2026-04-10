@@ -2,6 +2,7 @@ from datetime import date
 from pathlib import Path
 
 from django.contrib.auth import get_user_model
+from django.conf import settings
 from django.db.models import Q
 from django.utils import timezone
 
@@ -408,7 +409,12 @@ def enqueue_document_ingestion(document):
         status=IngestionTask.STATUS_QUEUED,
         current_step=IngestionTask.STEP_QUEUED,
     )
-    async_result = ingest_document_task.delay(document.id, ingestion_task.id)
+    broker_url = str(getattr(settings, "CELERY_BROKER_URL", "") or "")
+    should_run_inline = settings.CELERY_TASK_ALWAYS_EAGER or broker_url.startswith("memory://")
+    if should_run_inline:
+        async_result = ingest_document_task.apply(args=(document.id, ingestion_task.id))
+    else:
+        async_result = ingest_document_task.delay(document.id, ingestion_task.id)
     ingestion_task.celery_task_id = async_result.id or ""
     ingestion_task.save(update_fields=["celery_task_id", "updated_at"])
     return ingestion_task, True

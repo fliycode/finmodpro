@@ -5,6 +5,7 @@ from unittest.mock import Mock, patch
 
 from django.contrib.auth.models import Group
 from django.core.files.uploadedfile import SimpleUploadedFile
+from django.db import ProgrammingError
 from django.test import Client, TestCase, override_settings
 
 from authentication.models import User
@@ -282,6 +283,65 @@ class KnowledgebaseApiTests(TestCase):
         )
         self.assertEqual(hidden_detail_response.status_code, 404)
 
+    def test_document_detail_returns_503_when_schema_is_outdated(self):
+        document = create_document_from_upload(
+            uploaded_file=SimpleUploadedFile(
+                "schema.txt",
+                b"schema drift content",
+                content_type="text/plain",
+            ),
+            title="Schema doc",
+            source_date="2025-03-01",
+            uploaded_by=self.user,
+        )
+        self.client.raise_request_exception = False
+
+        with patch(
+            "knowledgebase.controllers.document_controller.build_document_response",
+            side_effect=ProgrammingError("no such column: knowledgebase_document.visibility"),
+        ):
+            response = self.client.get(
+                f"/api/knowledgebase/documents/{document.id}",
+                HTTP_AUTHORIZATION=f"Bearer {self.access_token}",
+            )
+
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(
+            response.json()["message"],
+            "知识库数据表尚未初始化，请先执行后端迁移与 RBAC 初始化。",
+        )
+
+    def test_document_ingest_returns_503_when_schema_is_outdated(self):
+        document = create_document_from_upload(
+            uploaded_file=SimpleUploadedFile(
+                "schema-ingest.txt",
+                b"schema drift content",
+                content_type="text/plain",
+            ),
+            title="Schema ingest doc",
+            source_date="2025-03-01",
+            uploaded_by=self.user,
+        )
+        self.client.raise_request_exception = False
+
+        with patch(
+            "knowledgebase.controllers.ingest_controller.enqueue_document_ingestion",
+            return_value=(SimpleNamespace(id="task-1"), True),
+        ), patch(
+            "knowledgebase.controllers.ingest_controller.build_document_response",
+            side_effect=ProgrammingError("no such column: knowledgebase_ingestiontask.current_step"),
+        ):
+            response = self.client.post(
+                f"/api/knowledgebase/documents/{document.id}/ingest",
+                HTTP_AUTHORIZATION=f"Bearer {self.access_token}",
+            )
+
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(
+            response.json()["message"],
+            "知识库数据表尚未初始化，请先执行后端迁移与 RBAC 初始化。",
+        )
+
 
 @override_settings(
     JWT_SECRET_KEY="test-jwt-secret",
@@ -483,6 +543,7 @@ class KnowledgebaseDocumentServiceTests(TestCase):
     JWT_ACCESS_TOKEN_LIFETIME_SECONDS=3600,
     CELERY_TASK_ALWAYS_EAGER=False,
     CELERY_TASK_EAGER_PROPAGATES=True,
+    CELERY_BROKER_URL="redis://127.0.0.1:6379/0",
 )
 class KnowledgebaseAsyncQueueTests(TestCase):
     def setUp(self):
@@ -553,6 +614,59 @@ class KnowledgebaseAsyncQueueTests(TestCase):
         self.assertFalse(created)
         self.assertEqual(ingestion_task.id, running_task.id)
         delay_mock.assert_not_called()
+
+
+@override_settings(
+    JWT_SECRET_KEY="test-jwt-secret",
+    JWT_ACCESS_TOKEN_LIFETIME_SECONDS=3600,
+    CELERY_TASK_ALWAYS_EAGER=False,
+    CELERY_TASK_EAGER_PROPAGATES=True,
+    CELERY_BROKER_URL="memory://",
+)
+class KnowledgebaseLocalMemoryBrokerTests(TestCase):
+    def setUp(self):
+        self.media_root = tempfile.mkdtemp()
+        self.override = override_settings(MEDIA_ROOT=self.media_root)
+        self.override.enable()
+        clear_store()
+
+    def tearDown(self):
+        self.override.disable()
+        shutil.rmtree(self.media_root, ignore_errors=True)
+        clear_store()
+
+    def test_enqueue_document_ingestion_executes_inline_when_memory_broker_is_used(self):
+        document = create_document_from_upload(
+            uploaded_file=SimpleUploadedFile(
+                "inline.txt",
+                b"cash flow stayed resilient",
+                content_type="text/plain",
+            ),
+            title="Inline doc",
+            source_date="2025-03-01",
+        )
+
+        with patch(
+            "knowledgebase.services.embedding_service.get_embedding_provider",
+            return_value=FakeEmbeddingProvider(),
+        ), patch(
+            "knowledgebase.services.document_service.index_document_chunks",
+            side_effect=fake_index_document_chunks,
+        ):
+            ingestion_task, created = enqueue_document_ingestion(document)
+
+        self.assertTrue(created)
+        document.refresh_from_db()
+        ingestion_task.refresh_from_db()
+        self.assertEqual(document.status, Document.STATUS_INDEXED)
+        self.assertEqual(document.error_message, "")
+        self.assertEqual(document.chunks.count(), 1)
+        self.assertTrue(document.chunks.exclude(vector_id="").exists())
+        self.assertEqual(ingestion_task.status, IngestionTask.STATUS_SUCCEEDED)
+        self.assertEqual(ingestion_task.current_step, IngestionTask.STEP_COMPLETED)
+        self.assertIsNotNone(ingestion_task.started_at)
+        self.assertIsNotNone(ingestion_task.finished_at)
+        self.assertTrue(ingestion_task.celery_task_id)
 
 
 class VectorServiceDimensionTests(TestCase):
