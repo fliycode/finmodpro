@@ -21,7 +21,7 @@ const areaMeta = computed(() => {
   if (props.area === 'admin') {
     return {
       label: '管理控制台',
-      sublabel: '机构治理与运行决策',
+      sublabel: '治理与运维总览',
     };
   }
 

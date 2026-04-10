@@ -13,7 +13,7 @@ import FlashStack from '../components/ui/FlashStack.vue';
       <AppTopbar
         eyebrow="管理员端"
         title="管理控制台"
-        subtitle="面向平台治理、风险审查、模型配置与运维判断的统一工作台。"
+        subtitle="平台治理、风险审查与模型运维总览。"
         area="admin"
         switch-target="/workspace/qa"
         switch-label="进入工作区"
