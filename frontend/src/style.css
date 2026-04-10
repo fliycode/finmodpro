@@ -554,6 +554,55 @@ textarea {
   background: var(--brand-soft);
 }
 
+.app-topbar--compact {
+  padding-block: 9px;
+}
+
+.app-topbar--compact .app-topbar__title-group {
+  gap: 10px;
+}
+
+.app-topbar--compact .app-topbar__brand-logo {
+  width: 28px;
+  height: 28px;
+  border-radius: 10px;
+}
+
+.app-topbar--compact h2 {
+  font-size: 18px;
+}
+
+.app-topbar--compact .app-topbar__copy {
+  gap: 0;
+}
+
+.app-topbar--compact .app-topbar__eyebrow {
+  margin-bottom: 1px;
+}
+
+.app-topbar--compact .app-topbar__subtitle {
+  max-width: 420px;
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.app-topbar--compact .app-topbar__identity {
+  gap: 6px;
+}
+
+.app-topbar--compact .app-topbar__role,
+.app-topbar--compact .app-topbar__user {
+  min-height: 28px;
+  font-size: 12px;
+}
+
+.app-topbar--compact a,
+.app-topbar--compact .app-topbar__button {
+  min-height: 32px;
+  padding: 0 11px;
+  font-size: 13px;
+}
+
 .flash-stack {
   display: flex;
   flex-direction: column;

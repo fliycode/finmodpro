@@ -32,6 +32,10 @@ const props = defineProps({
     type: String,
     default: '',
   },
+  compact: {
+    type: Boolean,
+    default: false,
+  },
 });
 
 const router = useRouter();
@@ -66,7 +70,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <header class="app-topbar">
+  <header class="app-topbar" :class="{ 'app-topbar--compact': props.compact }">
     <div class="app-topbar__title-group">
       <img class="app-topbar__brand-logo" :src="finmodproMark" alt="FinModPro" />
       <div class="app-topbar__copy">

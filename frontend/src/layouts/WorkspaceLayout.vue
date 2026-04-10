@@ -13,8 +13,9 @@ import FlashStack from '../components/ui/FlashStack.vue';
       <AppTopbar
         eyebrow="用户端"
         title="业务工作区"
-        subtitle="围绕问答、知识检索、风险摘要与会话连续性的日常工作终端。"
+        subtitle="问答、检索与风险摘要的连续工作区。"
         area="workspace"
+        compact
       />
       <FlashStack />
       <div class="app-shell__content">
