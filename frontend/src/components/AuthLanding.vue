@@ -50,6 +50,7 @@ const panelEyebrow = computed(() => (props.activeTab === 'login' ? 'Welcome back
 const submitLabel = computed(() => (props.activeTab === 'login' ? '登录' : '创建账号'));
 const statementSegments = computed(() => buildBrandStatementSegments(streamedStatement.value));
 const passwordToggleLabel = computed(() => getPasswordToggleLabel(props.showPassword));
+const STATEMENT_STREAM_INTERVAL_MS = 56;
 
 const playStatementStream = () => {
   if (typingTimer) {
@@ -67,7 +68,7 @@ const playStatementStream = () => {
       clearInterval(typingTimer);
       typingTimer = null;
     }
-  }, 36);
+  }, STATEMENT_STREAM_INTERVAL_MS);
 };
 
 const focusUsernameInput = async () => {
