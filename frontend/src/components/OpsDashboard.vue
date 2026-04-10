@@ -1,22 +1,27 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue';
+import { useRouter } from 'vue-router';
 import { ElMessage } from 'element-plus';
 
 import { dashboardApi } from '../api/dashboard.js';
 import {
+  buildOperationalBanner,
   buildDocumentStatusOption,
+  hasOperationalQueueItems,
   buildRiskDistributionOption,
   buildTrendChartOption,
   normalizeDashboardPayload,
-  summarizeOperationalPosture,
 } from '../lib/admin-dashboard.js';
 import AdminChart from './admin/AdminChart.vue';
 import AppSectionCard from './ui/AppSectionCard.vue';
 
+const router = useRouter();
 const dashboardStats = ref(normalizeDashboardPayload({}));
 const isLoading = ref(true);
 const errorMsg = ref('');
 const refreshedAt = ref('');
+const activitySection = ref(null);
+const evidenceSection = ref(null);
 
 const formatTimestamp = (value) => {
   if (!value) {
@@ -78,8 +83,8 @@ const fetchData = async () => {
 };
 
 onMounted(fetchData);
-
-const posture = computed(() => summarizeOperationalPosture(dashboardStats.value));
+const banner = computed(() => buildOperationalBanner(dashboardStats.value));
+const hasQueueItems = computed(() => hasOperationalQueueItems(dashboardStats.value));
 
 const headlineMetrics = computed(() => [
   {
@@ -135,21 +140,21 @@ const focusQueue = computed(() => [
 const operationalSummary = computed(() => [
   {
     id: 'hit-rate',
-    label: '近 7 天命中率',
+    label: '检索命中率',
     value: dashboardStats.value.retrieval_hit_rate_7d,
-    detail: '按问答检索日志的命中结果统计，用于判断知识可用性。',
+    detail: '命中偏低时优先查看评测结果与模型配置。',
   },
   {
     id: 'risk-total',
-    label: '风险事件总量',
+    label: '风险审查规模',
     value: dashboardStats.value.risk_event_count,
-    detail: '包含待审与已审核事件，用于判断审查规模。',
+    detail: '结合待审数量判断是否需要人工加速审核。',
   },
   {
     id: 'knowledgebase-count',
-    label: '知识资产分组',
+    label: '知识资产入口',
     value: dashboardStats.value.knowledgebase_count,
-    detail: '当前平台纳管的知识资产入口数量。',
+    detail: '关注当前纳管范围是否覆盖主要知识来源。',
   },
 ]);
 
@@ -161,18 +166,30 @@ const activityItems = computed(() => dashboardStats.value.recent_activity.slice(
 const evidenceItems = computed(() => dashboardStats.value.recent_activity.slice(0, 10));
 
 const toneClass = (tone) => `is-${tone || 'neutral'}`;
+const sectionRefs = {
+  'activity-section': activitySection,
+  'evidence-section': evidenceSection,
+};
+
+const handleBannerAction = async (action) => {
+  if (action?.to) {
+    await router.push(action.to);
+    return;
+  }
+
+  const targetRef = sectionRefs[action?.target];
+  targetRef?.value?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+};
 </script>
 
 <template>
   <div class="page-stack admin-page">
-    <section class="overview-strip">
-      <div class="overview-strip__main">
-        <p class="overview-strip__eyebrow">管理员总览</p>
-        <div class="overview-strip__headline">
-          <h1 class="overview-strip__title">{{ posture.label }}</h1>
-          <p class="overview-strip__summary">{{ posture.summary }}</p>
-        </div>
-        <div class="overview-strip__meta">
+    <section class="overview-banner" :class="toneClass(banner.tone)">
+      <div class="overview-banner__copy">
+        <p class="overview-banner__eyebrow">{{ banner.eyebrow }}</p>
+        <h1 class="overview-banner__title">{{ banner.title }}</h1>
+        <p class="overview-banner__summary">{{ banner.summary }}</p>
+        <div class="overview-banner__meta">
           <span>最近刷新：{{ refreshedAt }}</span>
           <span>待审风险：{{ dashboardStats.pending_risk_event_count }}</span>
           <span>失败入库：{{ dashboardStats.failed_document_count }}</span>
@@ -180,15 +197,16 @@ const toneClass = (tone) => `is-${tone || 'neutral'}`;
         </div>
       </div>
 
-      <div class="overview-strip__actions">
-        <div class="overview-strip__status" :class="toneClass(posture.tone)">
-          <span class="overview-strip__status-label">当前判断</span>
-          <strong>{{ posture.label }}</strong>
-          <p>{{ posture.summary }}</p>
-        </div>
-        <div class="overview-strip__buttons">
-          <el-button type="primary" @click="fetchData" :loading="isLoading">刷新运行状态</el-button>
-        </div>
+      <div class="overview-banner__actions">
+        <el-button
+          v-for="action in banner.actions"
+          :key="action.id"
+          :type="action.to ? 'primary' : 'default'"
+          @click="handleBannerAction(action)"
+        >
+          {{ action.label }}
+        </el-button>
+        <el-button @click="fetchData" :loading="isLoading">刷新运行状态</el-button>
       </div>
     </section>
 
@@ -202,9 +220,22 @@ const toneClass = (tone) => `is-${tone || 'neutral'}`;
       </article>
     </section>
 
+    <section class="overview-primary-chart">
+      <AppSectionCard title="近 7 天请求与命中趋势" desc="用于判断问答规模和知识召回表现是否同步变化。" admin>
+        <AdminChart :option="trendOption" height="320px" />
+      </AppSectionCard>
+    </section>
+
     <section class="overview-main">
       <AppSectionCard title="待处理事项" desc="优先用于判断今天需要人工跟进的治理动作。" admin>
-        <div class="focus-list">
+        <div v-if="!hasQueueItems" class="focus-empty-state">
+          <div class="focus-empty-state__icon">✓</div>
+          <div class="focus-empty-state__body">
+            <strong>暂无待办事项，系统运行健康。</strong>
+            <p>当前没有需要人工立即处理的审核或入库积压。</p>
+          </div>
+        </div>
+        <div v-else class="focus-list">
           <article v-for="item in focusQueue" :key="item.id" class="focus-item" :class="toneClass(item.tone)">
             <div class="focus-item__head">
               <span class="focus-item__title">{{ item.title }}</span>
@@ -215,7 +246,7 @@ const toneClass = (tone) => `is-${tone || 'neutral'}`;
         </div>
       </AppSectionCard>
 
-      <AppSectionCard title="运行摘要" desc="保留管理员真正需要的核心判断，不再使用占位统计。" admin>
+      <AppSectionCard title="运行摘要" desc="把关键指标转成下一步治理动作，而不是重复结论。" admin>
         <div class="summary-grid">
           <article v-for="item in operationalSummary" :key="item.id" class="summary-panel">
             <span class="summary-panel__label">{{ item.label }}</span>
@@ -227,10 +258,6 @@ const toneClass = (tone) => `is-${tone || 'neutral'}`;
     </section>
 
     <section class="overview-charts">
-      <AppSectionCard title="近 7 天请求与命中趋势" desc="用于判断问答规模和知识召回表现是否同步变化。" admin>
-        <AdminChart :option="trendOption" height="310px" />
-      </AppSectionCard>
-
       <AppSectionCard title="风险等级分布" desc="快速观察当前风险审查压力主要集中在哪个等级。" admin>
         <AdminChart :option="riskOption" height="310px" />
       </AppSectionCard>
@@ -241,39 +268,43 @@ const toneClass = (tone) => `is-${tone || 'neutral'}`;
     </section>
 
     <section class="overview-evidence">
-      <AppSectionCard title="最近活动" desc="面向治理判断的最新动态。" admin>
-        <div v-if="activityItems.length === 0" class="activity-empty">暂无最近活动</div>
-        <div v-else class="activity-list">
-          <article v-for="(item, index) in activityItems" :key="`${item.timestamp}-${index}`" class="activity-item">
-            <span class="activity-item__dot" :class="toneClass(item.tone)" />
-            <div class="activity-item__content">
-              <div class="activity-item__meta">
+      <div ref="activitySection" class="overview-evidence__column">
+        <AppSectionCard title="最近活动" desc="面向治理判断的最新动态。" admin>
+          <div v-if="activityItems.length === 0" class="activity-empty">暂无最近活动</div>
+          <div v-else class="activity-list">
+            <article v-for="(item, index) in activityItems" :key="`${item.timestamp}-${index}`" class="activity-item">
+              <span class="activity-item__dot" :class="toneClass(item.tone)" />
+              <div class="activity-item__content">
+                <div class="activity-item__meta">
+                  <span>{{ formatActivityType(item.type) }}</span>
+                  <span>{{ formatTimestamp(item.timestamp) }}</span>
+                </div>
+                <p>{{ item.message }}</p>
+              </div>
+            </article>
+          </div>
+        </AppSectionCard>
+      </div>
+
+      <div ref="evidenceSection" class="overview-evidence__column">
+        <AppSectionCard title="运行证据" desc="保留最近证据链，方便继续向下追查。" admin>
+          <template #header>
+            <span class="evidence-count">{{ evidenceItems.length }} 条记录</span>
+          </template>
+
+          <div v-if="evidenceItems.length === 0" class="evidence-log-list__empty">暂无运行证据</div>
+          <div v-else class="evidence-log-list">
+            <article v-for="(item, index) in evidenceItems" :key="`${item.timestamp}-${index}`" class="evidence-log">
+              <div class="evidence-log__head">
+                <span class="evidence-log__badge" :class="toneClass(item.tone)">{{ formatStatus(item.status) }}</span>
                 <span>{{ formatActivityType(item.type) }}</span>
                 <span>{{ formatTimestamp(item.timestamp) }}</span>
               </div>
-              <p>{{ item.message }}</p>
-            </div>
-          </article>
-        </div>
-      </AppSectionCard>
-
-      <AppSectionCard title="运行证据" desc="保留最近证据链，方便继续向下追查。" admin>
-        <template #header>
-          <span class="evidence-count">{{ evidenceItems.length }} 条记录</span>
-        </template>
-
-        <div v-if="evidenceItems.length === 0" class="evidence-log-list__empty">暂无运行证据</div>
-        <div v-else class="evidence-log-list">
-          <article v-for="(item, index) in evidenceItems" :key="`${item.timestamp}-${index}`" class="evidence-log">
-            <div class="evidence-log__head">
-              <span class="evidence-log__badge" :class="toneClass(item.tone)">{{ formatStatus(item.status) }}</span>
-              <span>{{ formatActivityType(item.type) }}</span>
-              <span>{{ formatTimestamp(item.timestamp) }}</span>
-            </div>
-            <p class="evidence-log__message">{{ item.message }}</p>
-          </article>
-        </div>
-      </AppSectionCard>
+              <p class="evidence-log__message">{{ item.message }}</p>
+            </article>
+          </div>
+        </AppSectionCard>
+      </div>
     </section>
   </div>
 </template>
@@ -283,33 +314,53 @@ const toneClass = (tone) => `is-${tone || 'neutral'}`;
   gap: 20px;
 }
 
-.overview-strip {
-  display: grid;
-  grid-template-columns: minmax(0, 1.5fr) minmax(260px, 0.7fr);
+.overview-banner {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
   gap: 18px;
-  padding: 22px 24px;
+  padding: 18px 22px;
   border-radius: 24px;
   border: 1px solid var(--line-soft);
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(247, 250, 252, 0.96));
+  background: linear-gradient(180deg, rgba(248, 250, 252, 0.98), rgba(255, 255, 255, 0.96));
   box-shadow: var(--shadow-soft);
 }
 
-.overview-strip__main,
-.overview-strip__actions {
+.overview-banner.is-warning {
+  border-color: rgba(183, 121, 31, 0.2);
+  background: linear-gradient(180deg, rgba(255, 247, 224, 0.98), rgba(255, 251, 240, 0.95));
+}
+
+.overview-banner.is-risk {
+  border-color: rgba(196, 73, 61, 0.18);
+  background: linear-gradient(180deg, rgba(255, 240, 238, 0.98), rgba(255, 247, 245, 0.95));
+}
+
+.overview-banner.is-info,
+.overview-banner.is-neutral {
+  border-color: rgba(36, 87, 197, 0.14);
+  background: linear-gradient(180deg, rgba(240, 246, 255, 0.98), rgba(248, 251, 255, 0.95));
+}
+
+.overview-banner__copy,
+.overview-banner__actions {
   display: flex;
   flex-direction: column;
 }
 
-.overview-strip__main {
-  gap: 12px;
+.overview-banner__copy {
+  gap: 10px;
+  min-width: 0;
 }
 
-.overview-strip__actions {
-  gap: 14px;
-  align-items: stretch;
+.overview-banner__actions {
+  align-items: flex-end;
+  justify-content: flex-start;
+  gap: 10px;
+  flex-shrink: 0;
 }
 
-.overview-strip__eyebrow {
+.overview-banner__eyebrow {
   margin: 0;
   font-size: 11px;
   font-weight: 700;
@@ -318,33 +369,27 @@ const toneClass = (tone) => `is-${tone || 'neutral'}`;
   color: var(--text-muted);
 }
 
-.overview-strip__headline {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.overview-strip__title {
+.overview-banner__title {
   margin: 0;
-  font-size: clamp(28px, 3.3vw, 38px);
-  line-height: 1.06;
+  font-size: clamp(26px, 3vw, 34px);
+  line-height: 1.08;
   color: var(--text-primary);
 }
 
-.overview-strip__summary {
+.overview-banner__summary {
   margin: 0;
   max-width: 720px;
   color: var(--text-secondary);
   line-height: 1.65;
 }
 
-.overview-strip__meta {
+.overview-banner__meta {
   display: flex;
   flex-wrap: wrap;
   gap: 10px;
 }
 
-.overview-strip__meta span {
+.overview-banner__meta span {
   display: inline-flex;
   align-items: center;
   min-height: 32px;
@@ -356,60 +401,18 @@ const toneClass = (tone) => `is-${tone || 'neutral'}`;
   font-weight: 600;
 }
 
-.overview-strip__status {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  padding: 16px 18px;
-  border-radius: 18px;
-  border: 1px solid var(--line-soft);
-  background: var(--surface-2);
-}
-
-.overview-strip__status.is-risk {
-  border-color: rgba(196, 73, 61, 0.18);
-  background: rgba(196, 73, 61, 0.06);
-}
-
-.overview-strip__status.is-warning {
-  border-color: rgba(183, 121, 31, 0.18);
-  background: rgba(183, 121, 31, 0.08);
-}
-
-.overview-strip__status.is-info,
-.overview-strip__status.is-neutral {
-  border-color: rgba(36, 87, 197, 0.12);
-  background: rgba(36, 87, 197, 0.05);
-}
-
-.overview-strip__status-label {
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  color: var(--text-muted);
-}
-
-.overview-strip__status strong {
-  color: var(--text-primary);
-  font-size: 18px;
-}
-
-.overview-strip__status p {
-  margin: 0;
-  color: var(--text-secondary);
-  line-height: 1.6;
-}
-
-.overview-strip__buttons {
-  display: flex;
-  justify-content: flex-end;
+.overview-banner__actions :deep(.el-button + .el-button) {
+  margin-left: 0;
 }
 
 .overview-metrics {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 16px;
+}
+
+.overview-primary-chart {
+  display: block;
 }
 
 .overview-metric {
@@ -452,7 +455,7 @@ const toneClass = (tone) => `is-${tone || 'neutral'}`;
 
 .overview-charts {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 18px;
 }
 
@@ -480,6 +483,46 @@ const toneClass = (tone) => `is-${tone || 'neutral'}`;
 .focus-item.is-warning {
   border-color: rgba(183, 121, 31, 0.18);
   background: rgba(183, 121, 31, 0.07);
+}
+
+.focus-empty-state {
+  display: flex;
+  gap: 14px;
+  align-items: flex-start;
+  padding: 16px;
+  border-radius: 16px;
+  background: rgba(33, 129, 92, 0.08);
+  border: 1px solid rgba(33, 129, 92, 0.16);
+}
+
+.focus-empty-state__icon {
+  width: 28px;
+  height: 28px;
+  border-radius: 999px;
+  background: rgba(33, 129, 92, 0.14);
+  color: var(--success);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 800;
+  flex-shrink: 0;
+}
+
+.focus-empty-state__body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.focus-empty-state__body strong {
+  color: var(--text-primary);
+  font-size: 15px;
+}
+
+.focus-empty-state__body p {
+  margin: 0;
+  color: var(--text-secondary);
+  line-height: 1.6;
 }
 
 .focus-item__head {
@@ -521,6 +564,10 @@ const toneClass = (tone) => `is-${tone || 'neutral'}`;
   padding: 14px 16px;
   border-radius: 16px;
   background: var(--surface-3);
+}
+
+.overview-evidence__column {
+  min-width: 0;
 }
 
 .activity-list,
@@ -618,24 +665,28 @@ const toneClass = (tone) => `is-${tone || 'neutral'}`;
 
 @media (max-width: 1200px) {
   .overview-metrics,
-  .overview-charts,
   .summary-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .overview-banner {
+    flex-direction: column;
+  }
+
+  .overview-banner__actions {
+    align-items: flex-start;
+    flex-direction: row;
+    flex-wrap: wrap;
   }
 }
 
 @media (max-width: 960px) {
-  .overview-strip,
   .overview-main,
   .overview-evidence,
   .overview-metrics,
   .overview-charts,
   .summary-grid {
     grid-template-columns: 1fr;
-  }
-
-  .overview-strip__buttons {
-    justify-content: flex-start;
   }
 }
 </style>
