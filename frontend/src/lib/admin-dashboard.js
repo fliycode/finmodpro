@@ -100,6 +100,62 @@ export function summarizeOperationalPosture(stats) {
   };
 }
 
+export function buildOperationalBanner(stats) {
+  const pendingRisk = toNumber(stats?.pending_risk_event_count);
+  const failedDocuments = toNumber(stats?.failed_document_count);
+  const hitRate = parseFloat(String(stats?.retrieval_hit_rate_7d ?? '0').replace('%', '')) || 0;
+
+  if (pendingRisk > 0 || failedDocuments > 0) {
+    const primaryAction = pendingRisk > 0
+      ? { id: 'risk-review', label: '查看风险与摘要', to: '/workspace/risk' }
+      : { id: 'knowledge-quality', label: '查看知识库质量', to: '/workspace/knowledge' };
+
+    return {
+      tone: 'risk',
+      eyebrow: '需要立即处理',
+      title: pendingRisk > 0 ? '存在待审风险需要人工处理' : '存在失败入库需要优先清理',
+      summary: pendingRisk > 0
+        ? '建议先完成审核，避免积压进入报告流程。'
+        : '建议先修复失败文档，避免继续拉低知识可用性。',
+      actions: [
+        primaryAction,
+        { id: 'evidence', label: '查看运行证据', kind: 'scroll', target: 'evidence-section' },
+      ],
+    };
+  }
+
+  if (hitRate < 70) {
+    return {
+      tone: 'warning',
+      eyebrow: '检索预警',
+      title: '检测到近 7 天检索命中率偏低',
+      summary: '建议检查知识资产、失败入库和召回配置。',
+      actions: [
+        { id: 'knowledge-quality', label: '查看知识库质量', to: '/workspace/knowledge' },
+        { id: 'retrieval-config', label: '优化召回配置', to: '/admin/models' },
+      ],
+    };
+  }
+
+  return {
+    tone: 'info',
+    eyebrow: '运行平稳',
+    title: '平台运行平稳',
+    summary: '当前无明显积压，可继续推进知识治理与模型运维。',
+    actions: [
+      { id: 'evidence', label: '查看运行证据', kind: 'scroll', target: 'evidence-section' },
+    ],
+  };
+}
+
+export function hasOperationalQueueItems(stats) {
+  return [
+    toNumber(stats?.pending_risk_event_count),
+    toNumber(stats?.failed_document_count),
+    toNumber(stats?.processing_document_count),
+  ].some((value) => value > 0);
+}
+
 export function buildTrendChartOption(stats) {
   const requests = Array.isArray(stats?.chat_requests_7d) ? stats.chat_requests_7d : [];
   const hits = Array.isArray(stats?.retrieval_hits_7d) ? stats.retrieval_hits_7d : [];

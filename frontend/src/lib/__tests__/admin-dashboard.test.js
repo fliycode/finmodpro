@@ -2,9 +2,11 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
+  buildOperationalBanner,
   buildDocumentStatusOption,
   buildRiskDistributionOption,
   buildTrendChartOption,
+  hasOperationalQueueItems,
   normalizeDashboardPayload,
   summarizeOperationalPosture,
 } from '../admin-dashboard.js';
@@ -82,4 +84,53 @@ test('summarizeOperationalPosture prioritizes pending risk and failed documents'
 
   assert.equal(summary.tone, 'risk');
   assert.match(summary.label, /优先处理|重点/);
+});
+
+test('buildOperationalBanner returns warning banner with evaluation and model actions', () => {
+  const banner = buildOperationalBanner({
+    pending_risk_event_count: 0,
+    failed_document_count: 0,
+    retrieval_hit_rate_7d: '42.0%',
+  });
+
+  assert.equal(banner.tone, 'warning');
+  assert.match(banner.title, /命中率偏低/);
+  assert.deepEqual(
+    banner.actions.map((item) => item.to),
+    ['/workspace/knowledge', '/admin/models'],
+  );
+});
+
+test('buildOperationalBanner prioritizes pending risk over retrieval warnings', () => {
+  const banner = buildOperationalBanner({
+    pending_risk_event_count: 2,
+    failed_document_count: 0,
+    retrieval_hit_rate_7d: '30.0%',
+  });
+
+  assert.equal(banner.tone, 'risk');
+  assert.deepEqual(
+    banner.actions.map((item) => item.to || item.target),
+    ['/workspace/risk', 'evidence-section'],
+  );
+});
+
+test('hasOperationalQueueItems returns false only when all tracked queue counts are zero', () => {
+  assert.equal(
+    hasOperationalQueueItems({
+      pending_risk_event_count: 0,
+      failed_document_count: 0,
+      processing_document_count: 0,
+    }),
+    false,
+  );
+
+  assert.equal(
+    hasOperationalQueueItems({
+      pending_risk_event_count: 0,
+      failed_document_count: 1,
+      processing_document_count: 0,
+    }),
+    true,
+  );
 });
