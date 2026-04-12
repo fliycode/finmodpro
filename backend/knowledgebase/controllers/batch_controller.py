@@ -24,9 +24,12 @@ def _build_schema_not_ready_response(exc):
 
 def _parse_request_payload(request):
     try:
-        return json.loads(request.body.decode("utf-8") or "{}")
+        payload = json.loads(request.body.decode("utf-8") or "{}")
     except json.JSONDecodeError:
         raise ValueError("请求体必须是合法 JSON。")
+    if not isinstance(payload, dict):
+        raise ValueError("请求体必须是 JSON 对象。")
+    return payload
 
 
 @csrf_exempt
