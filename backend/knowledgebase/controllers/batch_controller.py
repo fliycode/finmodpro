@@ -45,7 +45,7 @@ def document_batch_ingest_view(request):
         return JsonResponse(
             batch_enqueue_document_ingestion(
                 request.user,
-                payload.get("document_ids") or [],
+                payload.get("document_ids", []),
             )
         )
     except ValueError as exc:
@@ -67,7 +67,7 @@ def document_batch_delete_view(request):
         return JsonResponse(
             batch_delete_documents(
                 request.user,
-                payload.get("document_ids") or [],
+                payload.get("document_ids", []),
             )
         )
     except ValueError as exc:
