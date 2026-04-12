@@ -1,6 +1,7 @@
 from django.urls import path
 
 from knowledgebase.controllers import (
+    document_chunks_view,
     document_detail_view,
     document_ingest_view,
     document_list_create_view,
@@ -13,6 +14,11 @@ urlpatterns = [
         "documents/<int:document_id>",
         document_detail_view,
         name="knowledgebase-document-detail",
+    ),
+    path(
+        "documents/<int:document_id>/chunks",
+        document_chunks_view,
+        name="knowledgebase-document-chunks",
     ),
     path(
         "documents/<int:document_id>/ingest",
