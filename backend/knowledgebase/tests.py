@@ -221,6 +221,32 @@ class KnowledgebaseApiTests(TestCase):
         self.assertEqual(item["latest_ingestion_task"]["status"], "succeeded")
         self.assertEqual(item["latest_ingestion_task"]["current_step"], "completed")
 
+    def test_document_list_without_pagination_params_returns_all_visible_documents(self):
+        for index in range(12):
+            create_document_from_upload(
+                uploaded_file=SimpleUploadedFile(
+                    f"doc-{index}.txt",
+                    f"document {index}".encode("utf-8"),
+                    content_type="text/plain",
+                ),
+                title=f"Doc {index}",
+                source_date="2025-04-01",
+                uploaded_by=self.user,
+            )
+
+        response = self.client.get(
+            "/api/knowledgebase/documents",
+            HTTP_AUTHORIZATION=f"Bearer {self.access_token}",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["total"], 12)
+        self.assertEqual(len(payload["documents"]), 12)
+        self.assertNotIn("page", payload)
+        self.assertNotIn("page_size", payload)
+        self.assertNotIn("total_pages", payload)
+
     def test_document_list_filters_and_paginates_results(self):
         now = timezone.now()
 
