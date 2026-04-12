@@ -17,6 +17,7 @@ from authentication.services.jwt_service import generate_access_token
 from knowledgebase.models import Document, IngestionTask
 from knowledgebase.services.chunk_service import build_document_chunks
 from knowledgebase.services.document_service import (
+    batch_delete_documents,
     create_document_from_upload,
     enqueue_document_ingestion,
     get_document_for_user,
@@ -27,7 +28,7 @@ from knowledgebase.services.vector_service import VectorService
 from rag.services.vector_store_service import index_document
 from knowledgebase.services.parser_service import ParserService
 from knowledgebase.tasks import ingest_document_task
-from rag.services.vector_store_service import clear_store
+from rag.services.vector_store_service import _VECTOR_STORE, clear_store
 from rbac.services.rbac_service import ROLE_ADMIN, seed_roles_and_permissions
 
 
@@ -816,6 +817,92 @@ class KnowledgebaseDocumentServiceTests(TestCase):
         )
 
         self.assertEqual([chunk["content"] for chunk in chunks], ["abcdefghij", "ij12345678", "7890"])
+
+
+@override_settings(
+    JWT_SECRET_KEY="test-jwt-secret",
+    JWT_ACCESS_TOKEN_LIFETIME_SECONDS=3600,
+    CELERY_TASK_ALWAYS_EAGER=True,
+    CELERY_TASK_EAGER_PROPAGATES=True,
+)
+class KnowledgebaseVectorCleanupTests(TestCase):
+    def setUp(self):
+        seed_roles_and_permissions()
+        clear_store()
+        self.embedding_provider_patcher = patch(
+            "knowledgebase.services.embedding_service.get_embedding_provider",
+            return_value=FakeEmbeddingProvider(),
+        )
+        self.embedding_provider_patcher.start()
+        self.media_root = tempfile.mkdtemp()
+        self.milvus_uri = f"{self.media_root}/test-milvus.db"
+        self.override = override_settings(
+            MEDIA_ROOT=self.media_root,
+            MILVUS_URI=self.milvus_uri,
+            MILVUS_COLLECTION_NAME="test_document_chunks",
+        )
+        self.override.enable()
+        self.user = User.objects.create_user(
+            username="cleanup-admin",
+            password="secret123",
+            email="cleanup@example.com",
+            is_staff=True,
+        )
+        self.user.groups.add(Group.objects.get(name=ROLE_ADMIN))
+
+    def tearDown(self):
+        self.embedding_provider_patcher.stop()
+        self.override.disable()
+        shutil.rmtree(self.media_root, ignore_errors=True)
+        clear_store()
+
+    def test_batch_delete_documents_removes_document_vectors_from_all_stores(self):
+        document = create_document_from_upload(
+            uploaded_file=SimpleUploadedFile(
+                "cleanup.txt",
+                b"treasury liquidity remained resilient through quarter end",
+                content_type="text/plain",
+            ),
+            title="Cleanup doc",
+            source_date="2026-04-10",
+            uploaded_by=self.user,
+        )
+        ingest_document(document)
+        document.refresh_from_db()
+        original_path = document.file.path
+
+        self.assertIn(document.id, _VECTOR_STORE)
+        self.assertTrue(_VECTOR_STORE[document.id])
+        self.assertTrue(
+            VectorService().search(
+                query="treasury liquidity resilient",
+                filters={"document_id": document.id},
+                top_k=5,
+            )
+        )
+
+        result = batch_delete_documents(self.user, [document.id])
+
+        self.assertEqual(
+            result,
+            {
+                "deleted_count": 1,
+                "failed_count": 0,
+                "results": [{"document_id": document.id, "status": "deleted"}],
+            },
+        )
+        self.assertFalse(Document.objects.filter(id=document.id).exists())
+        self.assertFalse(IngestionTask.objects.filter(document_id=document.id).exists())
+        self.assertFalse(os.path.exists(original_path))
+        self.assertNotIn(document.id, _VECTOR_STORE)
+        self.assertEqual(
+            VectorService().search(
+                query="treasury liquidity resilient",
+                filters={"document_id": document.id},
+                top_k=5,
+            ),
+            [],
+        )
 
 
 @override_settings(
