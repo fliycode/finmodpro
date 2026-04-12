@@ -1,3 +1,4 @@
+import logging
 from datetime import date
 from datetime import timedelta
 from math import ceil
@@ -12,6 +13,8 @@ from knowledgebase.models import Document, DocumentChunk, IngestionTask
 from knowledgebase.services.chunk_service import build_document_chunks
 from knowledgebase.services.parser_service import parse_document_file
 from knowledgebase.services.vector_service import VectorService, index_document_chunks
+
+logger = logging.getLogger(__name__)
 
 
 def _detect_doc_type(filename):
@@ -579,17 +582,22 @@ def batch_enqueue_document_ingestion(user, document_ids):
 def delete_document_with_vectors(document):
     from rag.services.vector_store_service import _VECTOR_STORE
 
-    VectorService().delete_document(document.id)
-    _VECTOR_STORE.pop(document.id, None)
-
     file_field = document.file
     storage = file_field.storage
     file_name = file_field.name
 
+    VectorService().delete_document(document.id)
+    _VECTOR_STORE.pop(document.id, None)
     document.delete()
 
     if file_name and storage.exists(file_name):
-        storage.delete(file_name)
+        try:
+            storage.delete(file_name)
+        except Exception:
+            logger.exception(
+                "Failed to delete knowledgebase file after document cleanup",
+                extra={"document_id": document.id, "file_name": file_name},
+            )
 
 
 def batch_delete_documents(user, document_ids):

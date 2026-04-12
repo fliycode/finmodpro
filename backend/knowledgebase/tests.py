@@ -353,6 +353,28 @@ class KnowledgebaseApiTests(TestCase):
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.json(), {"message": "document_ids 必须是整数数组。"})
 
+    def test_batch_ingest_rejects_non_object_json_body(self):
+        response = self.client.post(
+            "/api/knowledgebase/documents/batch/ingest",
+            data=json.dumps(["not-an-object"]),
+            content_type="application/json",
+            HTTP_AUTHORIZATION=f"Bearer {self.access_token}",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json(), {"message": "请求体必须是 JSON 对象。"})
+
+    def test_batch_delete_rejects_non_object_json_body(self):
+        response = self.client.post(
+            "/api/knowledgebase/documents/batch/delete",
+            data=json.dumps(["not-an-object"]),
+            content_type="application/json",
+            HTTP_AUTHORIZATION=f"Bearer {self.access_token}",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json(), {"message": "请求体必须是 JSON 对象。"})
+
     def test_document_list_filters_and_paginates_results(self):
         now = timezone.now()
 
@@ -925,6 +947,47 @@ class KnowledgebaseVectorCleanupTests(TestCase):
             ),
             [],
         )
+
+    def test_batch_delete_reports_success_when_file_cleanup_fails_after_destructive_steps(self):
+        document = create_document_from_upload(
+            uploaded_file=SimpleUploadedFile(
+                "cleanup-fail.txt",
+                b"cleanup should survive storage failure",
+                content_type="text/plain",
+            ),
+            title="Cleanup file failure doc",
+            source_date="2026-04-10",
+            uploaded_by=self.user,
+        )
+        ingest_document(document)
+        document.refresh_from_db()
+        file_name = document.file.name
+        original_path = document.file.path
+
+        with patch.object(document.file.storage, "delete", side_effect=OSError("disk busy")):
+            result = batch_delete_documents(self.user, [document.id])
+
+        self.assertEqual(
+            result,
+            {
+                "deleted_count": 1,
+                "failed_count": 0,
+                "results": [{"document_id": document.id, "status": "deleted"}],
+            },
+        )
+        self.assertFalse(Document.objects.filter(id=document.id).exists())
+        self.assertFalse(IngestionTask.objects.filter(document_id=document.id).exists())
+        self.assertNotIn(document.id, _VECTOR_STORE)
+        self.assertEqual(
+            VectorService().search(
+                query="cleanup storage failure",
+                filters={"document_id": document.id},
+                top_k=5,
+            ),
+            [],
+        )
+        self.assertTrue(os.path.exists(original_path))
+        self.assertTrue(document.file.storage.exists(file_name))
 
 
 @override_settings(
