@@ -1,8 +1,10 @@
+import json
+import os
 import shutil
 import tempfile
+from datetime import timedelta
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
-from datetime import timedelta
 
 from django.contrib.auth.models import Group
 from django.core.files.uploadedfile import SimpleUploadedFile
@@ -246,6 +248,87 @@ class KnowledgebaseApiTests(TestCase):
         self.assertNotIn("page", payload)
         self.assertNotIn("page_size", payload)
         self.assertNotIn("total_pages", payload)
+
+    def test_batch_ingest_returns_accepted_and_skipped_counts(self):
+        first = create_document_from_upload(
+            uploaded_file=SimpleUploadedFile(
+                "first.txt",
+                b"first document content",
+                content_type="text/plain",
+            ),
+            title="First",
+            source_date="2026-04-10",
+            uploaded_by=self.user,
+        )
+        second = create_document_from_upload(
+            uploaded_file=SimpleUploadedFile(
+                "second.txt",
+                b"second document content",
+                content_type="text/plain",
+            ),
+            title="Second",
+            source_date="2026-04-10",
+            uploaded_by=self.user,
+        )
+        running_task = IngestionTask.objects.create(
+            document=second,
+            status=IngestionTask.STATUS_RUNNING,
+            current_step=IngestionTask.STEP_INDEXING,
+        )
+
+        response = self.client.post(
+            "/api/knowledgebase/documents/batch/ingest",
+            data=json.dumps({"document_ids": [first.id, second.id]}),
+            content_type="application/json",
+            HTTP_AUTHORIZATION=f"Bearer {self.access_token}",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["accepted_count"], 1)
+        self.assertEqual(payload["skipped_count"], 1)
+        self.assertEqual(len(payload["results"]), 2)
+        self.assertEqual(payload["results"][0]["document_id"], first.id)
+        self.assertEqual(payload["results"][0]["status"], "accepted")
+        self.assertEqual(payload["results"][1]["document_id"], second.id)
+        self.assertEqual(payload["results"][1]["status"], "skipped")
+        self.assertEqual(payload["results"][1]["reason"], "已有进行中的摄取任务。")
+        self.assertEqual(payload["results"][1]["task_id"], running_task.id)
+
+    def test_batch_delete_removes_file_chunks_and_vectors(self):
+        document = create_document_from_upload(
+            uploaded_file=SimpleUploadedFile(
+                "delete.txt",
+                b"delete me",
+                content_type="text/plain",
+            ),
+            title="Delete me",
+            source_date="2026-04-10",
+            uploaded_by=self.user,
+        )
+        enqueue_document_ingestion(document)
+        document.refresh_from_db()
+        original_path = document.file.path
+        chunk_ids = list(document.chunks.values_list("id", flat=True))
+
+        with patch.object(VectorService, "delete_document", return_value=None) as delete_vector_mock:
+            response = self.client.post(
+                "/api/knowledgebase/documents/batch/delete",
+                data=json.dumps({"document_ids": [document.id]}),
+                content_type="application/json",
+                HTTP_AUTHORIZATION=f"Bearer {self.access_token}",
+            )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["deleted_count"], 1)
+        self.assertEqual(payload["failed_count"], 0)
+        self.assertEqual(payload["results"], [{"document_id": document.id, "status": "deleted"}])
+        self.assertFalse(Document.objects.filter(id=document.id).exists())
+        self.assertFalse(IngestionTask.objects.filter(document_id=document.id).exists())
+        self.assertFalse(document.chunks.model.objects.filter(id__in=chunk_ids).exists())
+        self.assertFalse(os.path.exists(original_path))
+        delete_vector_mock.assert_called_once_with(document.id)
 
     def test_document_list_filters_and_paginates_results(self):
         now = timezone.now()

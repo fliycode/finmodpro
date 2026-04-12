@@ -11,7 +11,7 @@ from django.utils import timezone
 from knowledgebase.models import Document, DocumentChunk, IngestionTask
 from knowledgebase.services.chunk_service import build_document_chunks
 from knowledgebase.services.parser_service import parse_document_file
-from knowledgebase.services.vector_service import index_document_chunks
+from knowledgebase.services.vector_service import VectorService, index_document_chunks
 
 
 def _detect_doc_type(filename):
@@ -346,6 +346,23 @@ def list_documents(user):
     return [serialize_document(document) for document in get_visible_documents_queryset(user)]
 
 
+def _parse_document_ids(raw_ids):
+    if raw_ids in (None, ""):
+        return []
+    if not isinstance(raw_ids, (list, tuple)):
+        raise ValueError("document_ids 必须是整数数组。")
+
+    document_ids = []
+    for raw_value in raw_ids:
+        if str(raw_value).strip() == "":
+            continue
+        try:
+            document_ids.append(int(raw_value))
+        except (TypeError, ValueError) as exc:
+            raise ValueError("document_ids 必须是整数数组。") from exc
+    return document_ids
+
+
 def _update_document_status(document, *, status, error_message=None):
     document.status = status
     update_fields = ["status", "updated_at"]
@@ -511,6 +528,111 @@ def enqueue_document_ingestion(document):
     ingestion_task.celery_task_id = async_result.id or ""
     ingestion_task.save(update_fields=["celery_task_id", "updated_at"])
     return ingestion_task, True
+
+
+def batch_enqueue_document_ingestion(user, document_ids):
+    parsed_document_ids = _parse_document_ids(document_ids)
+    accepted_count = 0
+    skipped_count = 0
+    results = []
+
+    for document_id in parsed_document_ids:
+        try:
+            document = get_document_for_user(user, document_id)
+        except Document.DoesNotExist:
+            skipped_count += 1
+            results.append(
+                {
+                    "document_id": document_id,
+                    "status": "missing",
+                    "reason": "文档不存在。",
+                }
+            )
+            continue
+
+        ingestion_task, created = enqueue_document_ingestion(document)
+        if created:
+            accepted_count += 1
+            results.append(
+                {
+                    "document_id": document_id,
+                    "status": "accepted",
+                    "task_id": ingestion_task.id,
+                }
+            )
+            continue
+
+        skipped_count += 1
+        results.append(
+            {
+                "document_id": document_id,
+                "status": "skipped",
+                "reason": "已有进行中的摄取任务。",
+                "task_id": ingestion_task.id,
+            }
+        )
+
+    return {
+        "accepted_count": accepted_count,
+        "skipped_count": skipped_count,
+        "results": results,
+    }
+
+
+def delete_document_with_vectors(document):
+    VectorService().delete_document(document.id)
+
+    file_field = document.file
+    storage = file_field.storage
+    file_name = file_field.name
+
+    document.delete()
+
+    if file_name and storage.exists(file_name):
+        storage.delete(file_name)
+
+
+def batch_delete_documents(user, document_ids):
+    parsed_document_ids = _parse_document_ids(document_ids)
+    deleted_count = 0
+    failed_count = 0
+    results = []
+
+    for document_id in parsed_document_ids:
+        try:
+            document = get_document_for_user(user, document_id)
+        except Document.DoesNotExist:
+            failed_count += 1
+            results.append(
+                {
+                    "document_id": document_id,
+                    "status": "missing",
+                    "message": "文档不存在。",
+                }
+            )
+            continue
+
+        try:
+            delete_document_with_vectors(document)
+        except Exception as exc:
+            failed_count += 1
+            results.append(
+                {
+                    "document_id": document_id,
+                    "status": "failed",
+                    "message": str(exc) or "删除失败。",
+                }
+            )
+            continue
+
+        deleted_count += 1
+        results.append({"document_id": document_id, "status": "deleted"})
+
+    return {
+        "deleted_count": deleted_count,
+        "failed_count": failed_count,
+        "results": results,
+    }
 
 
 def start_ingestion_task(ingestion_task):

@@ -192,6 +192,7 @@ class AdminManagementApiTests(TestCase):
                     "add_user",
                     "ask_financial_qa",
                     "change_user",
+                    "delete_document",
                     "manage_model_config",
                     "review_risk_event",
                     "trigger_ingest",
@@ -254,6 +255,7 @@ class AdminManagementApiTests(TestCase):
                     "add_user",
                     "ask_financial_qa",
                     "change_user",
+                    "delete_document",
                     "manage_model_config",
                     "review_risk_event",
                     "trigger_ingest",
@@ -343,3 +345,20 @@ class RbacPermissionSeedTests(TestCase):
             member_permissions.intersection(expected_all),
             {"view_document", "ask_financial_qa"},
         )
+
+    def test_seed_roles_and_permissions_adds_delete_document_permission(self):
+        groups = seed_roles_and_permissions()
+
+        admin_permissions = set(
+            groups[ROLE_ADMIN].permissions.values_list("codename", flat=True)
+        )
+        member_permissions = set(
+            groups[ROLE_MEMBER].permissions.values_list("codename", flat=True)
+        )
+        super_admin_permissions = set(
+            groups[ROLE_SUPER_ADMIN].permissions.values_list("codename", flat=True)
+        )
+
+        self.assertIn("delete_document", admin_permissions)
+        self.assertIn("delete_document", super_admin_permissions)
+        self.assertNotIn("delete_document", member_permissions)
