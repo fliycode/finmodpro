@@ -174,6 +174,15 @@ class VectorService:
             for hit in hits
         ]
 
+    def delete_document(self, document_id):
+        client = self._get_client()
+        if not client.has_collection(settings.MILVUS_COLLECTION_NAME):
+            return
+        client.delete(
+            settings.MILVUS_COLLECTION_NAME,
+            filter=f"document_id == {int(document_id)}",
+        )
+
     def clear(self):
         client = self._get_client()
         if client.has_collection(settings.MILVUS_COLLECTION_NAME):
