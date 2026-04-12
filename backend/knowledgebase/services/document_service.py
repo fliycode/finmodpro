@@ -580,7 +580,10 @@ def batch_enqueue_document_ingestion(user, document_ids):
 
 
 def delete_document_with_vectors(document):
+    from rag.services.vector_store_service import _VECTOR_STORE
+
     VectorService().delete_document(document.id)
+    _VECTOR_STORE.pop(document.id, None)
 
     file_field = document.file
     storage = file_field.storage
