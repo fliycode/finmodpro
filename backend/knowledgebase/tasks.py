@@ -6,10 +6,17 @@ from knowledgebase.services.document_service import ingest_document, start_inges
 
 @shared_task(name="knowledgebase.ingest_document_task")
 def ingest_document_task(document_id, ingestion_task_id=None):
-    document = Document.objects.get(id=document_id)
+    try:
+        document = Document.objects.get(id=document_id)
+    except Document.DoesNotExist:
+        return None
+
     ingestion_task = None
     if ingestion_task_id is not None:
-        ingestion_task = IngestionTask.objects.get(id=ingestion_task_id)
+        try:
+            ingestion_task = IngestionTask.objects.get(id=ingestion_task_id)
+        except IngestionTask.DoesNotExist:
+            return None
         start_ingestion_task(ingestion_task)
 
     ingest_document(document, ingestion_task=ingestion_task)
