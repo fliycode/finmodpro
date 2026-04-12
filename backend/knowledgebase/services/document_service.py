@@ -1,4 +1,6 @@
 from datetime import date
+from datetime import timedelta
+from math import ceil
 from pathlib import Path
 
 from django.contrib.auth import get_user_model
@@ -205,11 +207,96 @@ def build_document_response(document, *, include_content_preview=False, message=
     return payload
 
 
-def build_document_list_response(user):
-    documents = list_documents(user)
+def _normalize_page(value, default=1):
+    try:
+        return max(int(value), 1)
+    except (TypeError, ValueError):
+        return default
+
+
+def _normalize_page_size(value, default=10, max_page_size=50):
+    try:
+        return min(max(int(value), 1), max_page_size)
+    except (TypeError, ValueError):
+        return default
+
+
+def _filter_documents(queryset, *, q="", status="all", time_range="all"):
+    keyword = (q or "").strip()
+    if keyword:
+        queryset = queryset.filter(
+            Q(title__icontains=keyword)
+            | Q(filename__icontains=keyword)
+            | Q(uploaded_by__username__icontains=keyword)
+            | Q(uploaded_by__email__icontains=keyword)
+            | Q(parsed_text__icontains=keyword)
+        )
+
+    normalized_status = str(status or "all").lower()
+    if normalized_status == "indexed":
+        queryset = queryset.filter(status=Document.STATUS_INDEXED)
+    elif normalized_status == "failed":
+        queryset = queryset.filter(status=Document.STATUS_FAILED)
+    elif normalized_status == "processing":
+        queryset = queryset.filter(
+            Q(status__in=[Document.STATUS_PARSED, Document.STATUS_CHUNKED])
+            | Q(
+                ingestion_tasks__status__in=[
+                    IngestionTask.STATUS_QUEUED,
+                    IngestionTask.STATUS_RUNNING,
+                ]
+            )
+        ).distinct()
+
+    normalized_time_range = str(time_range or "all").lower()
+    if normalized_time_range in {"7d", "30d"}:
+        days = 7 if normalized_time_range == "7d" else 30
+        cutoff = timezone.now() - timedelta(days=days)
+        queryset = queryset.filter(created_at__gte=cutoff)
+
+    return queryset
+
+
+def build_document_list_response(user, *, q="", status="all", time_range="all", page=1, page_size=10):
+    queryset = _filter_documents(
+        get_visible_documents_queryset(user),
+        q=q,
+        status=status,
+        time_range=time_range,
+    )
+    total = queryset.count()
+    safe_page_size = _normalize_page_size(page_size)
+    safe_page = _normalize_page(page)
+    total_pages = ceil(total / safe_page_size) if total else 0
+    start = (safe_page - 1) * safe_page_size
+    stop = start + safe_page_size
+    documents = [serialize_document(document) for document in queryset[start:stop]]
     return {
         "documents": documents,
-        "total": len(documents),
+        "total": total,
+        "page": safe_page,
+        "page_size": safe_page_size,
+        "total_pages": total_pages,
+    }
+
+
+def serialize_chunk(chunk):
+    metadata = chunk.metadata or {}
+    return {
+        "id": chunk.id,
+        "chunk_index": chunk.chunk_index,
+        "content": chunk.content,
+        "vector_id": chunk.vector_id or "",
+        "page_label": metadata.get("page_label", f"chunk-{chunk.chunk_index + 1}"),
+        "metadata": metadata,
+        "created_at": chunk.created_at.isoformat(),
+    }
+
+
+def build_document_chunks_response(document):
+    return {
+        "document_id": document.id,
+        "chunks": [serialize_chunk(chunk) for chunk in document.chunks.order_by("chunk_index")],
     }
 
 

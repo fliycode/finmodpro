@@ -29,7 +29,16 @@ def _build_schema_not_ready_response(exc):
 def document_list_create_view(request):
     if request.method == "GET":
         try:
-            return JsonResponse(build_document_list_response(request.user))
+            return JsonResponse(
+                build_document_list_response(
+                    request.user,
+                    q=request.GET.get("q", ""),
+                    status=request.GET.get("status", "all"),
+                    time_range=request.GET.get("time_range", "all"),
+                    page=request.GET.get("page", 1),
+                    page_size=request.GET.get("page_size", 10),
+                )
+            )
         except (OperationalError, ProgrammingError, DatabaseError) as exc:
             return _build_schema_not_ready_response(exc)
 

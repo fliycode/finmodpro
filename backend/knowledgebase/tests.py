@@ -2,11 +2,13 @@ import shutil
 import tempfile
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
+from datetime import timedelta
 
 from django.contrib.auth.models import Group
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.db import ProgrammingError
 from django.test import Client, TestCase, override_settings
+from django.utils import timezone
 
 from authentication.models import User
 from authentication.services.jwt_service import generate_access_token
@@ -218,6 +220,175 @@ class KnowledgebaseApiTests(TestCase):
         self.assertGreaterEqual(item["vector_count"], 1)
         self.assertEqual(item["latest_ingestion_task"]["status"], "succeeded")
         self.assertEqual(item["latest_ingestion_task"]["current_step"], "completed")
+
+    def test_document_list_filters_and_paginates_results(self):
+        now = timezone.now()
+
+        recent_indexed_a = create_document_from_upload(
+            uploaded_file=SimpleUploadedFile(
+                "liquidity-a.txt",
+                b"liquidity remained strong",
+                content_type="text/plain",
+            ),
+            title="Liquidity A",
+            source_date="2025-04-01",
+            uploaded_by=self.user,
+        )
+        recent_indexed_b = create_document_from_upload(
+            uploaded_file=SimpleUploadedFile(
+                "liquidity-b.txt",
+                b"liquidity remained strong with ample buffers",
+                content_type="text/plain",
+            ),
+            title="Liquidity B",
+            source_date="2025-04-01",
+            uploaded_by=self.user,
+        )
+        recent_processing = create_document_from_upload(
+            uploaded_file=SimpleUploadedFile(
+                "processing.txt",
+                b"pipeline still running",
+                content_type="text/plain",
+            ),
+            title="Processing doc",
+            source_date="2025-04-01",
+            uploaded_by=self.user,
+        )
+        old_indexed = create_document_from_upload(
+            uploaded_file=SimpleUploadedFile(
+                "liquidity-old.txt",
+                b"liquidity remained strong in the past",
+                content_type="text/plain",
+            ),
+            title="Liquidity Old",
+            source_date="2025-04-01",
+            uploaded_by=self.user,
+        )
+        failed_match = create_document_from_upload(
+            uploaded_file=SimpleUploadedFile(
+                "liquidity-failed.txt",
+                b"liquidity failed during ingestion",
+                content_type="text/plain",
+            ),
+            title="Liquidity Failed",
+            source_date="2025-04-01",
+            uploaded_by=self.user,
+        )
+
+        Document.objects.filter(id=recent_indexed_a.id).update(
+            status=Document.STATUS_INDEXED,
+            created_at=now - timedelta(days=1),
+            updated_at=now - timedelta(days=1),
+        )
+        Document.objects.filter(id=recent_indexed_b.id).update(
+            status=Document.STATUS_INDEXED,
+            created_at=now - timedelta(days=2),
+            updated_at=now - timedelta(days=2),
+        )
+        Document.objects.filter(id=recent_processing.id).update(
+            status=Document.STATUS_UPLOADED,
+            created_at=now - timedelta(days=1),
+            updated_at=now - timedelta(days=1),
+        )
+        IngestionTask.objects.create(
+            document=recent_processing,
+            status=IngestionTask.STATUS_RUNNING,
+            current_step=IngestionTask.STEP_INDEXING,
+        )
+        Document.objects.filter(id=old_indexed.id).update(
+            status=Document.STATUS_INDEXED,
+            created_at=now - timedelta(days=20),
+            updated_at=now - timedelta(days=20),
+        )
+        Document.objects.filter(id=failed_match.id).update(
+            status=Document.STATUS_FAILED,
+            created_at=now - timedelta(days=1),
+            updated_at=now - timedelta(days=1),
+        )
+
+        response = self.client.get(
+            "/api/knowledgebase/documents?q=liquidity&status=indexed&time_range=7d&page=2&page_size=1",
+            HTTP_AUTHORIZATION=f"Bearer {self.access_token}",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(set(payload.keys()), {"documents", "total", "page", "page_size", "total_pages"})
+        self.assertEqual(payload["total"], 2)
+        self.assertEqual(payload["page"], 2)
+        self.assertEqual(payload["page_size"], 1)
+        self.assertEqual(payload["total_pages"], 2)
+        self.assertEqual(len(payload["documents"]), 1)
+        self.assertEqual(payload["documents"][0]["id"], recent_indexed_b.id)
+        self.assertNotIn("chunks", payload["documents"][0])
+
+        processing_response = self.client.get(
+            "/api/knowledgebase/documents?status=processing",
+            HTTP_AUTHORIZATION=f"Bearer {self.access_token}",
+        )
+
+        self.assertEqual(processing_response.status_code, 200)
+        processing_payload = processing_response.json()
+        self.assertEqual(processing_payload["total"], 1)
+        self.assertEqual(processing_payload["documents"][0]["id"], recent_processing.id)
+
+    def test_document_chunks_endpoint_returns_chunk_rows(self):
+        owner = User.objects.create_user(
+            username="chunk-owner",
+            password="secret123",
+            email="chunk-owner@example.com",
+        )
+        owner.groups.add(Group.objects.get(name="member"))
+        stranger = User.objects.create_user(
+            username="chunk-stranger",
+            password="secret123",
+            email="chunk-stranger@example.com",
+        )
+        stranger.groups.add(Group.objects.get(name="member"))
+        stranger_token = generate_access_token(stranger)
+
+        document = create_document_from_upload(
+            uploaded_file=SimpleUploadedFile(
+                "chunks.txt",
+                b"chunk one chunk two chunk three",
+                content_type="text/plain",
+            ),
+            title="Chunk doc",
+            source_date="2025-04-01",
+            uploaded_by=owner,
+            visibility=Document.VISIBILITY_PRIVATE,
+        )
+        document.chunks.create(
+            chunk_index=0,
+            content="chunk one",
+            metadata={"page_label": "chunk-1"},
+        )
+        document.chunks.create(
+            chunk_index=1,
+            content="chunk two",
+            metadata={"page_label": "chunk-2"},
+        )
+
+        response = self.client.get(
+            f"/api/knowledgebase/documents/{document.id}/chunks",
+            HTTP_AUTHORIZATION=f"Bearer {self.access_token}",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["document_id"], document.id)
+        self.assertEqual(len(payload["chunks"]), 2)
+        self.assertEqual(payload["chunks"][0]["chunk_index"], 0)
+        self.assertEqual(payload["chunks"][0]["content"], "chunk one")
+        self.assertEqual(payload["chunks"][0]["page_label"], "chunk-1")
+        self.assertEqual(payload["chunks"][0]["metadata"], {"page_label": "chunk-1"})
+        self.assertNotIn("document", payload)
+
+        hidden_response = self.client.get(
+            f"/api/knowledgebase/documents/{document.id}/chunks",
+            HTTP_AUTHORIZATION=f"Bearer {stranger_token}",
+        )
+        self.assertEqual(hidden_response.status_code, 404)
 
     def test_list_and_detail_only_return_documents_visible_to_request_user(self):
         owner = User.objects.create_user(
