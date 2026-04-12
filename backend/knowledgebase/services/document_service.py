@@ -590,7 +590,19 @@ def delete_document_with_vectors(document):
     _VECTOR_STORE.pop(document.id, None)
     document.delete()
 
-    if file_name and storage.exists(file_name):
+    if not file_name:
+        return
+
+    try:
+        file_exists = storage.exists(file_name)
+    except Exception:
+        logger.exception(
+            "Failed to inspect knowledgebase file after document cleanup",
+            extra={"document_id": document.id, "file_name": file_name},
+        )
+        return
+
+    if file_exists:
         try:
             storage.delete(file_name)
         except Exception:
