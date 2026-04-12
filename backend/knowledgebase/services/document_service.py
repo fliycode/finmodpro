@@ -257,7 +257,7 @@ def _filter_documents(queryset, *, q="", status="all", time_range="all"):
     return queryset
 
 
-def build_document_list_response(user, *, q="", status="all", time_range="all", page=1, page_size=10):
+def build_document_list_response(user, *, q="", status="all", time_range="all", page=None, page_size=None):
     queryset = _filter_documents(
         get_visible_documents_queryset(user),
         q=q,
@@ -265,6 +265,12 @@ def build_document_list_response(user, *, q="", status="all", time_range="all", 
         time_range=time_range,
     )
     total = queryset.count()
+    if page is None and page_size is None:
+        return {
+            "documents": [serialize_document(document) for document in queryset],
+            "total": total,
+        }
+
     safe_page_size = _normalize_page_size(page_size)
     safe_page = _normalize_page(page)
     total_pages = ceil(total / safe_page_size) if total else 0

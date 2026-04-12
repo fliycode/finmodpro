@@ -28,6 +28,7 @@ def _build_schema_not_ready_response(exc):
 @permission_required("auth.view_document")
 def document_list_create_view(request):
     if request.method == "GET":
+        page_requested = "page" in request.GET or "page_size" in request.GET
         try:
             return JsonResponse(
                 build_document_list_response(
@@ -35,8 +36,8 @@ def document_list_create_view(request):
                     q=request.GET.get("q", ""),
                     status=request.GET.get("status", "all"),
                     time_range=request.GET.get("time_range", "all"),
-                    page=request.GET.get("page", 1),
-                    page_size=request.GET.get("page_size", 10),
+                    page=request.GET.get("page") if page_requested else None,
+                    page_size=request.GET.get("page_size") if page_requested else None,
                 )
             )
         except (OperationalError, ProgrammingError, DatabaseError) as exc:
