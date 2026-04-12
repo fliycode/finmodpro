@@ -331,6 +331,28 @@ class KnowledgebaseApiTests(TestCase):
         self.assertFalse(os.path.exists(original_path))
         delete_vector_mock.assert_called_once_with(document.id)
 
+    def test_batch_ingest_rejects_non_integer_document_ids(self):
+        response = self.client.post(
+            "/api/knowledgebase/documents/batch/ingest",
+            data=json.dumps({"document_ids": [True, 1.5, "2"]}),
+            content_type="application/json",
+            HTTP_AUTHORIZATION=f"Bearer {self.access_token}",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json(), {"message": "document_ids 必须是整数数组。"})
+
+    def test_batch_delete_rejects_non_integer_document_ids(self):
+        response = self.client.post(
+            "/api/knowledgebase/documents/batch/delete",
+            data=json.dumps({"document_ids": [True, 1.5, "2"]}),
+            content_type="application/json",
+            HTTP_AUTHORIZATION=f"Bearer {self.access_token}",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json(), {"message": "document_ids 必须是整数数组。"})
+
     def test_document_list_filters_and_paginates_results(self):
         now = timezone.now()
 
@@ -914,9 +936,16 @@ class KnowledgebaseVectorCleanupTests(TestCase):
 )
 class KnowledgebaseAsyncQueueTests(TestCase):
     def setUp(self):
+        seed_roles_and_permissions()
         self.media_root = tempfile.mkdtemp()
         self.override = override_settings(MEDIA_ROOT=self.media_root)
         self.override.enable()
+        self.user = User.objects.create_user(
+            username="async-admin",
+            password="secret123",
+            email="async@example.com",
+        )
+        self.user.groups.add(Group.objects.get(name=ROLE_ADMIN))
 
     def tearDown(self):
         self.override.disable()
@@ -981,6 +1010,65 @@ class KnowledgebaseAsyncQueueTests(TestCase):
         self.assertFalse(created)
         self.assertEqual(ingestion_task.id, running_task.id)
         delay_mock.assert_not_called()
+
+    def test_batch_delete_skips_document_with_active_ingestion_task(self):
+        document = create_document_from_upload(
+            uploaded_file=SimpleUploadedFile(
+                "queued-delete.txt",
+                b"queued for ingestion",
+                content_type="text/plain",
+            ),
+            title="Queued delete doc",
+            source_date="2025-03-01",
+            uploaded_by=self.user,
+        )
+
+        with patch(
+            "knowledgebase.tasks.ingest_document_task.delay",
+            return_value=SimpleNamespace(id="celery-task-456"),
+        ):
+            ingestion_task, created = enqueue_document_ingestion(document)
+
+        self.assertTrue(created)
+        result = batch_delete_documents(self.user, [document.id])
+
+        self.assertEqual(
+            result,
+            {
+                "deleted_count": 0,
+                "failed_count": 1,
+                "results": [
+                    {
+                        "document_id": document.id,
+                        "status": "busy",
+                        "message": "文档存在进行中的摄取任务，无法删除。",
+                    }
+                ],
+            },
+        )
+        self.assertTrue(Document.objects.filter(id=document.id).exists())
+        ingestion_task.refresh_from_db()
+        self.assertEqual(ingestion_task.status, IngestionTask.STATUS_QUEUED)
+
+    def test_ingest_document_task_returns_without_error_when_rows_were_deleted(self):
+        document = create_document_from_upload(
+            uploaded_file=SimpleUploadedFile(
+                "stale-task.txt",
+                b"stale task payload",
+                content_type="text/plain",
+            ),
+            title="Stale task doc",
+            source_date="2025-03-01",
+            uploaded_by=self.user,
+        )
+        ingestion_task = IngestionTask.objects.create(
+            document=document,
+            status=IngestionTask.STATUS_QUEUED,
+            current_step=IngestionTask.STEP_QUEUED,
+        )
+        document.delete()
+
+        self.assertIsNone(ingest_document_task(document.id, ingestion_task.id))
 
 
 @override_settings(

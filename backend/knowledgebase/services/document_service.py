@@ -354,12 +354,9 @@ def _parse_document_ids(raw_ids):
 
     document_ids = []
     for raw_value in raw_ids:
-        if str(raw_value).strip() == "":
-            continue
-        try:
-            document_ids.append(int(raw_value))
-        except (TypeError, ValueError) as exc:
-            raise ValueError("document_ids 必须是整数数组。") from exc
+        if isinstance(raw_value, bool) or not isinstance(raw_value, int):
+            raise ValueError("document_ids 必须是整数数组。")
+        document_ids.append(raw_value)
     return document_ids
 
 
@@ -611,6 +608,23 @@ def batch_delete_documents(user, document_ids):
                     "document_id": document_id,
                     "status": "missing",
                     "message": "文档不存在。",
+                }
+            )
+            continue
+
+        active_ingestion_task = document.ingestion_tasks.filter(
+            status__in=[
+                IngestionTask.STATUS_QUEUED,
+                IngestionTask.STATUS_RUNNING,
+            ]
+        ).order_by("id").last()
+        if active_ingestion_task is not None:
+            failed_count += 1
+            results.append(
+                {
+                    "document_id": document_id,
+                    "status": "busy",
+                    "message": "文档存在进行中的摄取任务，无法删除。",
                 }
             )
             continue
