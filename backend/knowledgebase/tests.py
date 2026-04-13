@@ -17,6 +17,7 @@ from authentication.services.jwt_service import generate_access_token
 from knowledgebase.models import Document, IngestionTask
 from knowledgebase.services.chunk_service import build_document_chunks
 from knowledgebase.services.document_service import (
+    batch_enqueue_document_ingestion,
     batch_delete_documents,
     create_document_from_upload,
     enqueue_document_ingestion,
@@ -739,6 +740,36 @@ class KnowledgebaseApiTests(TestCase):
             "知识库数据表尚未初始化，请先执行后端迁移与 RBAC 初始化。",
         )
 
+    def test_document_batch_delete_returns_503_when_schema_is_outdated(self):
+        document = create_document_from_upload(
+            uploaded_file=SimpleUploadedFile(
+                "schema-delete.txt",
+                b"schema drift content",
+                content_type="text/plain",
+            ),
+            title="Schema delete doc",
+            source_date="2025-03-01",
+            uploaded_by=self.user,
+        )
+        self.client.raise_request_exception = False
+
+        with patch(
+            "knowledgebase.services.document_service.delete_document_with_vectors",
+            side_effect=ProgrammingError("no such table: knowledgebase_document"),
+        ):
+            response = self.client.post(
+                "/api/knowledgebase/documents/batch/delete",
+                data=json.dumps({"document_ids": [document.id]}),
+                content_type="application/json",
+                HTTP_AUTHORIZATION=f"Bearer {self.access_token}",
+            )
+
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(
+            response.json()["message"],
+            "知识库数据表尚未初始化，请先执行后端迁移与 RBAC 初始化。",
+        )
+
 
 @override_settings(
     JWT_SECRET_KEY="test-jwt-secret",
@@ -933,6 +964,45 @@ class KnowledgebaseDocumentServiceTests(TestCase):
         )
 
         self.assertEqual([chunk["content"] for chunk in chunks], ["abcdefghij", "ij12345678", "7890"])
+
+    def test_batch_enqueue_document_ingestion_treats_disappeared_row_as_missing_result(self):
+        user = User.objects.create_user(
+            username="gone-admin",
+            password="secret123",
+            email="gone@example.com",
+        )
+        user.groups.add(Group.objects.get(name=ROLE_ADMIN))
+        document = create_document_from_upload(
+            uploaded_file=SimpleUploadedFile(
+                "gone.txt",
+                b"gone document",
+                content_type="text/plain",
+            ),
+            title="Gone doc",
+            source_date="2025-03-01",
+            uploaded_by=user,
+        )
+
+        with patch(
+            "knowledgebase.services.document_service.enqueue_document_ingestion",
+            side_effect=Document.DoesNotExist,
+        ):
+            result = batch_enqueue_document_ingestion(user, [document.id])
+
+        self.assertEqual(
+            result,
+            {
+                "accepted_count": 0,
+                "skipped_count": 1,
+                "results": [
+                    {
+                        "document_id": document.id,
+                        "status": "missing",
+                        "reason": "文档不存在。",
+                    }
+                ],
+            },
+        )
 
 
 @override_settings(
