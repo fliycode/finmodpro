@@ -1,14 +1,20 @@
+from django.http import HttpResponse
+from django.shortcuts import get_object_or_404
 from rest_framework.views import APIView
 
 from common.api_response import error_response, success_response
 from rbac.services.authz_service import get_authenticated_user, user_has_permission
-from risk.models import RiskEvent
+from risk.models import RiskEvent, RiskReport
 from risk.serializers import (
     CompanyRiskReportCreateSerializer,
     RiskReportSerializer,
     TimeRangeRiskReportCreateSerializer,
 )
-from risk.services.report_service import generate_company_risk_report, generate_time_range_risk_report
+from risk.services.report_service import (
+    build_risk_report_export,
+    generate_company_risk_report,
+    generate_time_range_risk_report,
+)
 
 
 def _build_validation_error_response(errors):
@@ -76,3 +82,27 @@ class TimeRangeRiskReportCreateView(APIView):
             data={"report": RiskReportSerializer(report).data},
             status_code=201,
         )
+
+
+class RiskReportExportView(APIView):
+    authentication_classes = []
+    permission_classes = []
+
+    def get(self, request, report_id):
+        user = get_authenticated_user(request)
+        if user is None:
+            return error_response(code=401, message="未认证。", status_code=401)
+        if not user_has_permission(user, "auth.view_document"):
+            return error_response(code=403, message="无权限。", status_code=403)
+
+        report = get_object_or_404(RiskReport, id=report_id)
+        export_format = request.query_params.get("format", "markdown")
+
+        try:
+            payload = build_risk_report_export(report=report, export_format=export_format)
+        except ValueError as exc:
+            return error_response(code=400, message=str(exc), status_code=400)
+
+        response = HttpResponse(payload["content"], content_type=f'{payload["content_type"]}; charset=utf-8')
+        response["Content-Disposition"] = f'attachment; filename="{payload["filename"]}"'
+        return response

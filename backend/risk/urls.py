@@ -2,18 +2,22 @@ from django.urls import path
 
 from risk.controllers import (
     CompanyRiskReportCreateView,
+    RiskAnalyticsOverviewView,
     RiskDocumentBatchExtractView,
     RiskDocumentExtractView,
     RiskEventListView,
     RiskEventReviewView,
+    RiskReportExportView,
     TimeRangeRiskReportCreateView,
 )
 
 
 urlpatterns = [
+    path("analytics/overview", RiskAnalyticsOverviewView.as_view(), name="risk-analytics-overview"),
     path("events", RiskEventListView.as_view(), name="risk-event-list"),
     path("events/<int:event_id>/review", RiskEventReviewView.as_view(), name="risk-event-review"),
     path("reports/company", CompanyRiskReportCreateView.as_view(), name="risk-report-company-create"),
+    path("reports/<int:report_id>/export", RiskReportExportView.as_view(), name="risk-report-export"),
     path("reports/time-range", TimeRangeRiskReportCreateView.as_view(), name="risk-report-time-range-create"),
     path(
         "documents/extract-batch",
