@@ -351,8 +351,6 @@ def list_documents(user):
 
 
 def _parse_document_ids(raw_ids):
-    if raw_ids in (None, ""):
-        return []
     if not isinstance(raw_ids, (list, tuple)):
         raise ValueError("document_ids 必须是整数数组。")
 
@@ -626,7 +624,31 @@ def batch_delete_documents(user, document_ids):
 
     for document_id in parsed_document_ids:
         try:
-            document = get_document_for_user(user, document_id)
+            with transaction.atomic():
+                document = (
+                    Document.objects.select_for_update()
+                    .filter(_document_access_q(user))
+                    .get(id=document_id)
+                )
+
+                active_ingestion_task = document.ingestion_tasks.filter(
+                    status__in=[
+                        IngestionTask.STATUS_QUEUED,
+                        IngestionTask.STATUS_RUNNING,
+                    ]
+                ).order_by("id").last()
+                if active_ingestion_task is not None:
+                    failed_count += 1
+                    results.append(
+                        {
+                            "document_id": document_id,
+                            "status": "busy",
+                            "message": "文档存在进行中的摄取任务，无法删除。",
+                        }
+                    )
+                    continue
+
+                delete_document_with_vectors(document)
         except Document.DoesNotExist:
             failed_count += 1
             results.append(
@@ -637,26 +659,6 @@ def batch_delete_documents(user, document_ids):
                 }
             )
             continue
-
-        active_ingestion_task = document.ingestion_tasks.filter(
-            status__in=[
-                IngestionTask.STATUS_QUEUED,
-                IngestionTask.STATUS_RUNNING,
-            ]
-        ).order_by("id").last()
-        if active_ingestion_task is not None:
-            failed_count += 1
-            results.append(
-                {
-                    "document_id": document_id,
-                    "status": "busy",
-                    "message": "文档存在进行中的摄取任务，无法删除。",
-                }
-            )
-            continue
-
-        try:
-            delete_document_with_vectors(document)
         except Exception as exc:
             failed_count += 1
             results.append(

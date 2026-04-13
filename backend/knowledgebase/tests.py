@@ -399,6 +399,30 @@ class KnowledgebaseApiTests(TestCase):
             self.assertEqual(response.status_code, 400)
             self.assertEqual(response.json(), {"message": "document_ids 必须是整数数组。"})
 
+    def test_batch_ingest_rejects_null_and_empty_string_document_ids_payload(self):
+        for invalid_value in (None, ""):
+            response = self.client.post(
+                "/api/knowledgebase/documents/batch/ingest",
+                data=json.dumps({"document_ids": invalid_value}),
+                content_type="application/json",
+                HTTP_AUTHORIZATION=f"Bearer {self.access_token}",
+            )
+
+            self.assertEqual(response.status_code, 400)
+            self.assertEqual(response.json(), {"message": "document_ids 必须是整数数组。"})
+
+    def test_batch_delete_rejects_null_and_empty_string_document_ids_payload(self):
+        for invalid_value in (None, ""):
+            response = self.client.post(
+                "/api/knowledgebase/documents/batch/delete",
+                data=json.dumps({"document_ids": invalid_value}),
+                content_type="application/json",
+                HTTP_AUTHORIZATION=f"Bearer {self.access_token}",
+            )
+
+            self.assertEqual(response.status_code, 400)
+            self.assertEqual(response.json(), {"message": "document_ids 必须是整数数组。"})
+
     def test_batch_ingest_rejects_malformed_utf8_body(self):
         response = self.client.generic(
             "POST",
@@ -1224,6 +1248,39 @@ class KnowledgebaseAsyncQueueTests(TestCase):
         self.assertTrue(Document.objects.filter(id=document.id).exists())
         ingestion_task.refresh_from_db()
         self.assertEqual(ingestion_task.status, IngestionTask.STATUS_QUEUED)
+
+    def test_batch_delete_locks_document_before_busy_check_and_delete(self):
+        document = create_document_from_upload(
+            uploaded_file=SimpleUploadedFile(
+                "delete-lock.txt",
+                b"delete lock me",
+                content_type="text/plain",
+            ),
+            title="Delete lock doc",
+            source_date="2025-03-01",
+            uploaded_by=self.user,
+        )
+
+        with patch.object(
+            Document.objects,
+            "select_for_update",
+            wraps=Document.objects.select_for_update,
+        ) as select_for_update_mock, patch(
+            "knowledgebase.services.document_service.delete_document_with_vectors",
+            return_value=None,
+        ) as delete_document_mock:
+            result = batch_delete_documents(self.user, [document.id])
+
+        self.assertEqual(
+            result,
+            {
+                "deleted_count": 1,
+                "failed_count": 0,
+                "results": [{"document_id": document.id, "status": "deleted"}],
+            },
+        )
+        select_for_update_mock.assert_called_once()
+        delete_document_mock.assert_called_once()
 
     def test_ingest_document_task_returns_without_error_when_rows_were_deleted(self):
         document = create_document_from_upload(
