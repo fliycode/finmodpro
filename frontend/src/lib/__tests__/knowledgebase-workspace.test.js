@@ -17,10 +17,18 @@ test('buildKnowledgebaseQuery removes empty filters and keeps pagination', () =>
       searchKeyword: 'liquidity',
       statusFilter: 'indexed',
       timeRange: '7d',
+      datasetId: 7,
       page: 2,
       pageSize: 10,
     }),
-    { q: 'liquidity', status: 'indexed', time_range: '7d', page: 2, page_size: 10 },
+    {
+      q: 'liquidity',
+      status: 'indexed',
+      time_range: '7d',
+      dataset_id: 7,
+      page: 2,
+      page_size: 10,
+    },
   );
 });
 

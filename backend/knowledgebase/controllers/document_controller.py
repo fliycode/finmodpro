@@ -36,6 +36,7 @@ def document_list_create_view(request):
                     q=request.GET.get("q", ""),
                     status=request.GET.get("status", "all"),
                     time_range=request.GET.get("time_range", "all"),
+                    dataset_id=request.GET.get("dataset_id"),
                     page=request.GET.get("page") if page_requested else None,
                     page_size=request.GET.get("page_size") if page_requested else None,
                 )
@@ -60,6 +61,7 @@ def document_list_create_view(request):
             uploaded_by=request.user,
             owner_id=request.POST.get("owner_id"),
             visibility=request.POST.get("visibility"),
+            dataset_id=request.POST.get("dataset_id"),
         )
     except ValueError as exc:
         return JsonResponse({"message": str(exc)}, status=400)

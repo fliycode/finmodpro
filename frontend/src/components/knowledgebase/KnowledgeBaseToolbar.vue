@@ -12,13 +12,28 @@ defineProps({
     type: String,
     default: 'all',
   },
+  datasets: {
+    type: Array,
+    default: () => [],
+  },
+  selectedDatasetId: {
+    type: [String, Number],
+    default: 'all',
+  },
   isUploading: {
     type: Boolean,
     default: false,
   },
 });
 
-defineEmits(['update:searchKeyword', 'update:statusFilter', 'update:timeRange', 'upload']);
+defineEmits([
+  'update:searchKeyword',
+  'update:statusFilter',
+  'update:timeRange',
+  'update:selectedDatasetId',
+  'upload',
+  'create-dataset',
+]);
 </script>
 
 <template>
@@ -52,6 +67,25 @@ defineEmits(['update:searchKeyword', 'update:statusFilter', 'update:timeRange', 
       <option value="30d">近 30 天</option>
     </select>
 
+    <select
+      class="kb-select"
+      :value="selectedDatasetId"
+      @change="$emit('update:selectedDatasetId', $event.target.value)"
+    >
+      <option value="all">全部数据集</option>
+      <option
+        v-for="dataset in datasets"
+        :key="dataset.id"
+        :value="dataset.id"
+      >
+        {{ dataset.name }}
+      </option>
+    </select>
+
+    <button class="kb-secondary-btn" @click="$emit('create-dataset')">
+      新建数据集
+    </button>
+
     <button class="kb-primary-btn" :disabled="isUploading" @click="$emit('upload')">
       {{ isUploading ? '上传中...' : '上传文档' }}
     </button>
@@ -61,7 +95,7 @@ defineEmits(['update:searchKeyword', 'update:statusFilter', 'update:timeRange', 
 <style scoped>
 .kb-toolbar {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 160px 160px auto;
+  grid-template-columns: minmax(0, 1fr) 160px 160px 180px auto auto;
   gap: 14px;
   padding: 18px 22px;
 }
@@ -76,15 +110,25 @@ defineEmits(['update:searchKeyword', 'update:statusFilter', 'update:timeRange', 
   color: #142033;
 }
 
-.kb-primary-btn {
+.kb-primary-btn,
+.kb-secondary-btn {
   height: 44px;
-  border: none;
   border-radius: 14px;
   padding: 0 18px;
-  background: #2457c5;
-  color: #fff;
   font-weight: 700;
   cursor: pointer;
+}
+
+.kb-primary-btn {
+  border: none;
+  background: #2457c5;
+  color: #fff;
+}
+
+.kb-secondary-btn {
+  border: 1px solid rgba(20, 32, 51, 0.12);
+  background: #fff;
+  color: #142033;
 }
 
 .kb-primary-btn:disabled {

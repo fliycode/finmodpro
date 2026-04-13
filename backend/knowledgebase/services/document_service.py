@@ -10,7 +10,7 @@ from django.db import DatabaseError, OperationalError, ProgrammingError, transac
 from django.db.models import Q
 from django.utils import timezone
 
-from knowledgebase.models import Document, DocumentChunk, IngestionTask
+from knowledgebase.models import Dataset, Document, DocumentChunk, DocumentVersion, IngestionTask
 from knowledgebase.services.chunk_service import build_document_chunks
 from knowledgebase.services.parser_service import parse_document_file
 from knowledgebase.services.vector_service import VectorService, index_document_chunks
@@ -41,6 +41,15 @@ def _parse_owner_id(raw_value):
         raise ValueError("owner_id 必须是整数。") from exc
 
 
+def _parse_dataset_id(raw_value):
+    if raw_value in (None, "", "all"):
+        return None
+    try:
+        return int(raw_value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("dataset_id 必须是整数。") from exc
+
+
 def _parse_visibility(raw_value):
     if not raw_value:
         return Document.VISIBILITY_INTERNAL
@@ -65,6 +74,65 @@ def _serialize_user(user):
     }
 
 
+def _serialize_dataset_summary(dataset):
+    if dataset is None:
+        return None
+    return {
+        "id": dataset.id,
+        "name": dataset.name,
+    }
+
+
+def _get_version_record(document):
+    if document is None:
+        return None
+
+    try:
+        return document.version_record
+    except DocumentVersion.DoesNotExist:
+        return None
+
+
+def _serialize_provenance(version_record):
+    if version_record is None:
+        return {
+            "source_type": "upload",
+            "source_label": "",
+            "source_metadata": {},
+            "processing_notes": "",
+        }
+
+    return {
+        "source_type": version_record.source_type or "upload",
+        "source_label": version_record.source_label or "",
+        "source_metadata": version_record.source_metadata or {},
+        "processing_notes": version_record.processing_notes or "",
+    }
+
+
+def _get_root_document_id(document, version_record):
+    if version_record is None:
+        return document.id
+    return version_record.root_document_id
+
+
+def _get_current_version_number(document, version_record):
+    if version_record is None:
+        return 1
+    return version_record.version_number
+
+
+def _get_version_count(document, version_record):
+    if version_record is None:
+        return 1
+
+    root_document = getattr(version_record, "root_document", None)
+    annotated_count = getattr(root_document, "version_count", None)
+    if annotated_count is not None:
+        return annotated_count
+    return DocumentVersion.objects.filter(root_document_id=version_record.root_document_id).count()
+
+
 def _is_document_admin(user):
     if user is None:
         return False
@@ -87,7 +155,13 @@ def _document_access_q(user):
 
 def get_visible_documents_queryset(user):
     return (
-        Document.objects.select_related("uploaded_by", "owner")
+        Document.objects.select_related(
+            "uploaded_by",
+            "owner",
+            "dataset",
+            "version_record",
+            "version_record__root_document",
+        )
         .prefetch_related("ingestion_tasks")
         .filter(_document_access_q(user))
         .order_by("id")
@@ -154,6 +228,8 @@ def _build_process_result(document, ingestion_task):
 def serialize_document(document, include_content_preview=False, include_content=False):
     ingestion_task = _get_latest_ingestion_task(document)
     original_url = _build_file_url(document)
+    version_record = _get_version_record(document)
+    provenance = _serialize_provenance(version_record)
 
     try:
         chunk_count = document.chunks.count()
@@ -174,10 +250,21 @@ def serialize_document(document, include_content_preview=False, include_content=
         "doc_type": document.doc_type,
         "status": document.status,
         "visibility": document.visibility,
+        "dataset": _serialize_dataset_summary(getattr(document, "dataset", None)),
         "uploader": _serialize_user(getattr(document, "uploaded_by", None)),
         "uploaded_by": _serialize_user(getattr(document, "uploaded_by", None)),
         "owner": _serialize_user(getattr(document, "owner", None)),
         "source_date": document.source_date.isoformat() if document.source_date else None,
+        "root_document_id": _get_root_document_id(document, version_record),
+        "version_number": _get_current_version_number(document, version_record),
+        "current_version": _get_current_version_number(document, version_record),
+        "version_count": _get_version_count(document, version_record),
+        "is_current_version": version_record.is_current if version_record is not None else True,
+        "provenance": provenance,
+        "source_type": provenance["source_type"],
+        "source_label": provenance["source_label"],
+        "source_metadata": provenance["source_metadata"],
+        "processing_notes": provenance["processing_notes"],
         "file_path": getattr(document.file, "name", ""),
         "original_url": original_url,
         "preview_url": original_url,
@@ -225,7 +312,7 @@ def _normalize_page_size(value, default=10, max_page_size=50):
         return default
 
 
-def _filter_documents(queryset, *, q="", status="all", time_range="all"):
+def _filter_documents(queryset, *, q="", status="all", time_range="all", dataset_id=None):
     keyword = (q or "").strip()
     if keyword:
         queryset = queryset.filter(
@@ -258,15 +345,25 @@ def _filter_documents(queryset, *, q="", status="all", time_range="all"):
         cutoff = timezone.now() - timedelta(days=days)
         queryset = queryset.filter(created_at__gte=cutoff)
 
+    parsed_dataset_id = _parse_dataset_id(dataset_id)
+    if parsed_dataset_id is not None:
+        queryset = queryset.filter(dataset_id=parsed_dataset_id)
+
     return queryset
 
 
-def build_document_list_response(user, *, q="", status="all", time_range="all", page=None, page_size=None):
+def build_document_list_response(
+    user, *, q="", status="all", time_range="all", dataset_id=None, page=None, page_size=None
+):
     queryset = _filter_documents(
         get_visible_documents_queryset(user),
         q=q,
         status=status,
         time_range=time_range,
+        dataset_id=dataset_id,
+    )
+    queryset = queryset.filter(
+        Q(version_record__is_current=True) | Q(version_record__isnull=True)
     )
     total = queryset.count()
     if page is None and page_size is None:
@@ -316,22 +413,34 @@ def create_document_from_upload(
     title,
     source_date,
     uploaded_by=None,
+    owner=None,
     owner_id=None,
     visibility=None,
+    dataset=None,
+    dataset_id=None,
+    skip_initial_version=False,
 ):
     filename = uploaded_file.name
     doc_type = _detect_doc_type(filename)
     if doc_type not in {"txt", "pdf", "docx"}:
         raise ValueError("当前仅支持 txt/pdf/docx 文件上传。")
 
-    owner = uploaded_by
+    resolved_owner = owner or uploaded_by
     parsed_owner_id = _parse_owner_id(owner_id)
     if parsed_owner_id is not None:
         User = get_user_model()
         try:
-            owner = User.objects.get(id=parsed_owner_id)
+            resolved_owner = User.objects.get(id=parsed_owner_id)
         except User.DoesNotExist as exc:
             raise ValueError("owner_id 对应用户不存在。") from exc
+
+    resolved_dataset = dataset
+    parsed_dataset_id = _parse_dataset_id(dataset_id)
+    if parsed_dataset_id is not None:
+        try:
+            resolved_dataset = Dataset.objects.get(id=parsed_dataset_id)
+        except Dataset.DoesNotExist as exc:
+            raise ValueError("dataset_id 对应数据集不存在。") from exc
 
     document = Document.objects.create(
         title=title or Path(filename).stem,
@@ -339,15 +448,30 @@ def create_document_from_upload(
         filename=filename,
         doc_type=doc_type,
         uploaded_by=uploaded_by,
-        owner=owner,
+        owner=resolved_owner,
+        dataset=resolved_dataset,
         visibility=_parse_visibility(visibility),
         source_date=_parse_source_date(source_date),
     )
+    if not skip_initial_version:
+        DocumentVersion.objects.create(
+            root_document=document,
+            document=document,
+            version_number=1,
+            is_current=True,
+            source_type="upload",
+            source_label=document.title or document.filename,
+            source_metadata={},
+            processing_notes="",
+        )
     return document
 
 
 def list_documents(user):
-    return [serialize_document(document) for document in get_visible_documents_queryset(user)]
+    queryset = get_visible_documents_queryset(user).filter(
+        Q(version_record__is_current=True) | Q(version_record__isnull=True)
+    )
+    return [serialize_document(document) for document in queryset]
 
 
 def _parse_document_ids(raw_ids):
@@ -377,11 +501,16 @@ def _update_ingestion_task_step(ingestion_task, *, current_step):
 
 
 def _build_chunk_metadata(document, index):
+    version_record = _get_version_record(document)
     return {
         "document_id": document.id,
         "document_title": document.title,
         "doc_type": document.doc_type,
         "source_date": document.source_date.isoformat() if document.source_date else None,
+        "dataset_id": document.dataset_id,
+        "dataset_name": document.dataset.name if getattr(document, "dataset", None) else None,
+        "root_document_id": _get_root_document_id(document, version_record),
+        "version_number": _get_current_version_number(document, version_record),
         "chunk_index": index,
         "page_label": f"chunk-{index + 1}",
     }

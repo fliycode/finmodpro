@@ -174,6 +174,185 @@ class KnowledgebaseApiTests(TestCase):
         self.assertIsNotNone(ingestion_task.finished_at)
         self.assertTrue(ingestion_task.celery_task_id)
 
+    def test_dataset_create_list_detail_and_dataset_scoped_documents(self):
+        create_response = self.client.post(
+            "/api/knowledgebase/datasets",
+            data=json.dumps(
+                {
+                    "name": "2025 年报数据集",
+                    "description": "用于年报问答与风险提取",
+                }
+            ),
+            content_type="application/json",
+            HTTP_AUTHORIZATION=f"Bearer {self.access_token}",
+        )
+
+        self.assertEqual(create_response.status_code, 201)
+        dataset_payload = create_response.json()["dataset"]
+        dataset_id = dataset_payload["id"]
+        self.assertEqual(dataset_payload["name"], "2025 年报数据集")
+        self.assertEqual(dataset_payload["document_count"], 0)
+
+        list_response = self.client.get(
+            "/api/knowledgebase/datasets",
+            HTTP_AUTHORIZATION=f"Bearer {self.access_token}",
+        )
+        self.assertEqual(list_response.status_code, 200)
+        self.assertEqual(list_response.json()["total"], 1)
+        self.assertEqual(list_response.json()["datasets"][0]["id"], dataset_id)
+
+        detail_response = self.client.get(
+            f"/api/knowledgebase/datasets/{dataset_id}",
+            HTTP_AUTHORIZATION=f"Bearer {self.access_token}",
+        )
+        self.assertEqual(detail_response.status_code, 200)
+        self.assertEqual(detail_response.json()["dataset"]["id"], dataset_id)
+        self.assertEqual(detail_response.json()["dataset"]["document_count"], 0)
+
+        dataset_document_response = self.client.post(
+            "/api/knowledgebase/documents",
+            data={
+                "title": "dataset scoped report",
+                "dataset_id": str(dataset_id),
+                "file": SimpleUploadedFile(
+                    "dataset-report.txt",
+                    b"dataset scoped content",
+                    content_type="text/plain",
+                ),
+            },
+            HTTP_AUTHORIZATION=f"Bearer {self.access_token}",
+        )
+        self.assertEqual(dataset_document_response.status_code, 201)
+        self.assertEqual(
+            dataset_document_response.json()["document"]["dataset"],
+            {
+                "id": dataset_id,
+                "name": "2025 年报数据集",
+            },
+        )
+
+        other_document_response = self.client.post(
+            "/api/knowledgebase/documents",
+            data={
+                "title": "ungrouped report",
+                "file": SimpleUploadedFile(
+                    "ungrouped.txt",
+                    b"ungrouped content",
+                    content_type="text/plain",
+                ),
+            },
+            HTTP_AUTHORIZATION=f"Bearer {self.access_token}",
+        )
+        self.assertEqual(other_document_response.status_code, 201)
+        self.assertIsNone(other_document_response.json()["document"]["dataset"])
+
+        filtered_response = self.client.get(
+            f"/api/knowledgebase/documents?dataset_id={dataset_id}",
+            HTTP_AUTHORIZATION=f"Bearer {self.access_token}",
+        )
+        self.assertEqual(filtered_response.status_code, 200)
+        self.assertEqual(filtered_response.json()["total"], 1)
+        self.assertEqual(
+            filtered_response.json()["documents"][0]["title"],
+            "dataset scoped report",
+        )
+
+    def test_document_version_upload_list_and_provenance_fields(self):
+        upload_response = self.client.post(
+            "/api/knowledgebase/documents",
+            data={
+                "title": "Q1 风险纪要",
+                "file": SimpleUploadedFile(
+                    "q1-report.txt",
+                    b"original q1 risk memo",
+                    content_type="text/plain",
+                ),
+            },
+            HTTP_AUTHORIZATION=f"Bearer {self.access_token}",
+        )
+
+        self.assertEqual(upload_response.status_code, 201)
+        initial_document = upload_response.json()["document"]
+        self.assertEqual(initial_document["version_number"], 1)
+        self.assertEqual(initial_document["current_version"], 1)
+        self.assertTrue(initial_document["is_current_version"])
+        self.assertEqual(initial_document["provenance"]["source_type"], "upload")
+
+        version_upload_response = self.client.post(
+            f"/api/knowledgebase/documents/{initial_document['id']}/versions",
+            data={
+                "title": "Q1 风险纪要修订版",
+                "source_type": "upload",
+                "source_label": "Q1 风险纪要修订版",
+                "source_metadata": json.dumps(
+                    {
+                        "channel": "email",
+                        "checksum": "abc123",
+                    }
+                ),
+                "processing_notes": "补充了董事会风险说明。",
+                "file": SimpleUploadedFile(
+                    "q1-report-v2.txt",
+                    b"updated q1 risk memo",
+                    content_type="text/plain",
+                ),
+            },
+            HTTP_AUTHORIZATION=f"Bearer {self.access_token}",
+        )
+
+        self.assertEqual(version_upload_response.status_code, 201)
+        updated_document = version_upload_response.json()["document"]
+        self.assertEqual(updated_document["root_document_id"], initial_document["id"])
+        self.assertEqual(updated_document["version_number"], 2)
+        self.assertEqual(updated_document["current_version"], 2)
+        self.assertTrue(updated_document["is_current_version"])
+        self.assertEqual(
+            updated_document["provenance"]["source_label"],
+            "Q1 风险纪要修订版",
+        )
+        self.assertEqual(
+            updated_document["provenance"]["source_metadata"],
+            {
+                "channel": "email",
+                "checksum": "abc123",
+            },
+        )
+        self.assertEqual(
+            updated_document["provenance"]["processing_notes"],
+            "补充了董事会风险说明。",
+        )
+
+        versions_response = self.client.get(
+            f"/api/knowledgebase/documents/{initial_document['id']}/versions",
+            HTTP_AUTHORIZATION=f"Bearer {self.access_token}",
+        )
+        self.assertEqual(versions_response.status_code, 200)
+        versions_payload = versions_response.json()
+        self.assertEqual(versions_payload["document_id"], initial_document["id"])
+        self.assertEqual(versions_payload["current_version"], 2)
+        self.assertEqual(
+            [item["version_number"] for item in versions_payload["versions"]],
+            [2, 1],
+        )
+        self.assertTrue(versions_payload["versions"][0]["is_current"])
+        self.assertFalse(versions_payload["versions"][1]["is_current"])
+        self.assertEqual(
+            versions_payload["versions"][0]["source_metadata"]["checksum"],
+            "abc123",
+        )
+
+        list_response = self.client.get(
+            "/api/knowledgebase/documents",
+            HTTP_AUTHORIZATION=f"Bearer {self.access_token}",
+        )
+        self.assertEqual(list_response.status_code, 200)
+        self.assertEqual(list_response.json()["total"], 1)
+        self.assertEqual(list_response.json()["documents"][0]["version_number"], 2)
+        self.assertEqual(
+            list_response.json()["documents"][0]["root_document_id"],
+            initial_document["id"],
+        )
+
     def test_upload_requires_upload_permission_even_when_user_can_view_documents(self):
         member_user = User.objects.create_user(
             username="kb-member",

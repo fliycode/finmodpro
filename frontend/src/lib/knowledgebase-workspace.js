@@ -2,6 +2,7 @@ export const buildKnowledgebaseQuery = ({
   searchKeyword = '',
   statusFilter = 'all',
   timeRange = 'all',
+  datasetId = '',
   page = 1,
   pageSize = 10,
 } = {}) => {
@@ -20,6 +21,10 @@ export const buildKnowledgebaseQuery = ({
 
   if (timeRange && timeRange !== 'all') {
     query.time_range = timeRange;
+  }
+
+  if (datasetId && datasetId !== 'all') {
+    query.dataset_id = datasetId;
   }
 
   return query;
