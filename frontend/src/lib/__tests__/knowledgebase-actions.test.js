@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { getIngestionAction } from '../knowledgebase-actions.js';
+import { getDocumentRowActions, getIngestionAction } from '../knowledgebase-actions.js';
 
 test('uploaded document exposes start ingestion action', () => {
   const action = getIngestionAction({
@@ -54,4 +54,19 @@ test('processing document does not expose action', () => {
   });
 
   assert.equal(action, null);
+});
+
+test('failed document exposes retry and error row actions', () => {
+  const actions = getDocumentRowActions({
+    status: 'failed',
+    processStep: { code: 'failed' },
+    latestTask: { status: 'failed' },
+    isSearchReady: false,
+    processError: '解析失败',
+  });
+
+  assert.deepEqual(
+    actions.map((item) => item.id),
+    ['retry', 'view-error'],
+  );
 });

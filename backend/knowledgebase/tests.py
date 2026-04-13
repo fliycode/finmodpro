@@ -290,6 +290,7 @@ class KnowledgebaseApiTests(TestCase):
         payload = response.json()
         self.assertEqual(payload["accepted_count"], 1)
         self.assertEqual(payload["skipped_count"], 1)
+        self.assertEqual(payload["failed_count"], 0)
         self.assertEqual(len(payload["results"]), 2)
         self.assertEqual(payload["results"][0]["document_id"], first.id)
         self.assertEqual(payload["results"][0]["status"], "accepted")
@@ -297,6 +298,61 @@ class KnowledgebaseApiTests(TestCase):
         self.assertEqual(payload["results"][1]["status"], "skipped")
         self.assertEqual(payload["results"][1]["reason"], "已有进行中的摄取任务。")
         self.assertEqual(payload["results"][1]["task_id"], running_task.id)
+
+    def test_batch_ingest_reports_partial_failure_without_aborting_batch(self):
+        first = create_document_from_upload(
+            uploaded_file=SimpleUploadedFile(
+                "first-partial.txt",
+                b"first document content",
+                content_type="text/plain",
+            ),
+            title="First partial",
+            source_date="2026-04-10",
+            uploaded_by=self.user,
+        )
+        second = create_document_from_upload(
+            uploaded_file=SimpleUploadedFile(
+                "second-partial.txt",
+                b"second document content",
+                content_type="text/plain",
+            ),
+            title="Second partial",
+            source_date="2026-04-10",
+            uploaded_by=self.user,
+        )
+
+        accepted_task = SimpleNamespace(id="task-accepted", status=IngestionTask.STATUS_QUEUED)
+        with patch(
+            "knowledgebase.services.document_service.enqueue_document_ingestion",
+            side_effect=[(accepted_task, True), RuntimeError("queue unavailable")],
+        ):
+            response = self.client.post(
+                "/api/knowledgebase/documents/batch/ingest",
+                data=json.dumps({"document_ids": [first.id, second.id]}),
+                content_type="application/json",
+                HTTP_AUTHORIZATION=f"Bearer {self.access_token}",
+            )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["accepted_count"], 1)
+        self.assertEqual(payload["skipped_count"], 0)
+        self.assertEqual(payload["failed_count"], 1)
+        self.assertEqual(
+            payload["results"],
+            [
+                {
+                    "document_id": first.id,
+                    "status": "accepted",
+                    "task_id": accepted_task.id,
+                },
+                {
+                    "document_id": second.id,
+                    "status": "failed",
+                    "reason": "queue unavailable",
+                },
+            ],
+        )
 
     def test_batch_delete_removes_file_chunks_and_vectors(self):
         document = create_document_from_upload(
@@ -1000,6 +1056,7 @@ class KnowledgebaseDocumentServiceTests(TestCase):
             {
                 "accepted_count": 0,
                 "skipped_count": 1,
+                "failed_count": 0,
                 "results": [
                     {
                         "document_id": document.id,
@@ -1097,6 +1154,55 @@ class KnowledgebaseVectorCleanupTests(TestCase):
             [],
         )
 
+    def test_batch_delete_hides_stale_vector_hits_when_vector_cleanup_fails(self):
+        document = create_document_from_upload(
+            uploaded_file=SimpleUploadedFile(
+                "cleanup-stale-vectors.txt",
+                b"stale vectors should not stay searchable",
+                content_type="text/plain",
+            ),
+            title="Cleanup stale vector doc",
+            source_date="2026-04-10",
+            uploaded_by=self.user,
+        )
+        ingest_document(document)
+        document.refresh_from_db()
+
+        self.assertTrue(
+            VectorService().search(
+                query="stale vectors searchable",
+                filters={"document_id": document.id},
+                top_k=5,
+            )
+        )
+
+        with patch.object(
+            VectorService,
+            "delete_document",
+            side_effect=OSError("milvus unavailable"),
+        ):
+            with self.captureOnCommitCallbacks(execute=True):
+                result = batch_delete_documents(self.user, [document.id])
+
+        self.assertEqual(
+            result,
+            {
+                "deleted_count": 1,
+                "failed_count": 0,
+                "results": [{"document_id": document.id, "status": "deleted"}],
+            },
+        )
+        self.assertFalse(Document.objects.filter(id=document.id).exists())
+        self.assertNotIn(document.id, _VECTOR_STORE)
+        self.assertEqual(
+            VectorService().search(
+                query="stale vectors searchable",
+                filters={"document_id": document.id},
+                top_k=5,
+            ),
+            [],
+        )
+
     def test_delete_document_with_vectors_defers_vector_cleanup_until_commit(self):
         document = create_document_from_upload(
             uploaded_file=SimpleUploadedFile(
@@ -1127,12 +1233,13 @@ class KnowledgebaseVectorCleanupTests(TestCase):
 
                 self.assertFalse(Document.objects.filter(id=document.id).exists())
                 self.assertIn(document.id, _VECTOR_STORE)
-                self.assertTrue(
+                self.assertEqual(
                     VectorService().search(
                         query="cleanup waits commit",
                         filters={"document_id": document.id},
                         top_k=5,
-                    )
+                    ),
+                    [],
                 )
 
         self.assertEqual(len(callbacks), 1)

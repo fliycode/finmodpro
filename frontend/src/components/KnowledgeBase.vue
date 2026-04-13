@@ -1,9 +1,21 @@
 <script setup>
-import { computed, onMounted, onUnmounted, ref } from 'vue';
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
 
 import { kbApi } from '../api/knowledgebase.js';
+import KnowledgeBaseDetailPanel from './knowledgebase/KnowledgeBaseDetailPanel.vue';
+import KnowledgeBasePreviewModal from './knowledgebase/KnowledgeBasePreviewModal.vue';
+import KnowledgeBaseTable from './knowledgebase/KnowledgeBaseTable.vue';
+import KnowledgeBaseToolbar from './knowledgebase/KnowledgeBaseToolbar.vue';
 import { useFlash } from '../lib/flash.js';
-import { getIngestionAction, isIngestionInFlight } from '../lib/knowledgebase-actions.js';
+import { getDocumentRowActions, getIngestionAction, isIngestionInFlight } from '../lib/knowledgebase-actions.js';
+import {
+  buildChunkExpansionState,
+  buildEmptyDetailState,
+  buildNextSelection,
+  buildPreviewState,
+  buildSelectionAfterBatchDelete,
+  summarizeBatchResult,
+} from '../lib/knowledgebase-workspace.js';
 
 const items = ref([]);
 const isLoading = ref(false);
@@ -13,8 +25,19 @@ const selectedDocumentId = ref('');
 const selectedDocumentDetail = ref(null);
 const isLoadingDetail = ref(false);
 const searchKeyword = ref('');
+const statusFilter = ref('all');
+const timeRange = ref('all');
+const checkedDocumentIds = ref([]);
 const fileInput = ref(null);
+const currentPage = ref(1);
+const pagination = ref({ total: 0, page: 1, pageSize: 10, totalPages: 0 });
+const isPreviewOpen = ref(false);
+const activeTab = ref('processing');
+const chunks = ref([]);
+const isLoadingChunks = ref(false);
+const expandedChunkIds = ref([]);
 const flash = useFlash();
+const emptyDetailState = buildEmptyDetailState();
 
 let pollInterval = null;
 
@@ -28,28 +51,30 @@ const statusTone = {
   failed: 'danger',
 };
 
-const filteredItems = computed(() => {
-  const keyword = searchKeyword.value.trim().toLowerCase();
-  if (!keyword) {
-    return items.value;
-  }
-  return items.value.filter((item) =>
-    [
-      item.title,
-      item.filename,
-      item.uploaderName,
-      item.processResult,
-      item.processStep?.label,
-    ].some((value) => String(value || '').toLowerCase().includes(keyword)),
-  );
-});
+const decoratedItems = computed(() =>
+  items.value.map((item) => ({
+    ...item,
+    statusTone: statusTone[item.processStep?.code] || 'neutral',
+    rowActions: getDocumentRowActions(item),
+  })),
+);
 
 const selectedDocument = computed(() => {
   if (selectedDocumentDetail.value?.id === selectedDocumentId.value) {
-    return selectedDocumentDetail.value;
+    return {
+      ...selectedDocumentDetail.value,
+      statusTone: statusTone[selectedDocumentDetail.value.processStep?.code] || 'neutral',
+    };
   }
-  return items.value.find((item) => item.id === selectedDocumentId.value) || null;
+
+  const item = items.value.find((entry) => entry.id === selectedDocumentId.value);
+  return item
+    ? { ...item, statusTone: statusTone[item.processStep?.code] || 'neutral' }
+    : null;
 });
+
+const selectedIngestionAction = computed(() => getIngestionAction(selectedDocument.value));
+const previewState = computed(() => buildPreviewState(selectedDocument.value));
 
 const activeProcessingCount = computed(() =>
   items.value.filter((item) => isIngestionInFlight(item)).length,
@@ -63,31 +88,49 @@ const failedCount = computed(() =>
   items.value.filter((item) => item.status === 'failed').length,
 );
 
-const selectedIngestionAction = computed(() => getIngestionAction(selectedDocument.value));
 const taskHintText = computed(() => {
   if (isIngestionInFlight(selectedDocument.value)) {
-    return '任务已启动，后台正在异步执行解析、切块和向量写入，完成后页面会自动刷新状态。';
+    return '任务已启动，后台正在执行解析、切块和向量写入，完成后列表与详情会自动刷新。';
   }
 
   return `上传只保存原始文件；点击“${selectedIngestionAction.value?.label || '启动入库'}”后，后台才会异步完成解析、切块和写入向量库。`;
 });
 
-const keepSelectionFresh = () => {
+const syncSelectionWithPage = () => {
   if (!selectedDocumentId.value) {
-    selectedDocumentId.value = items.value[0]?.id || '';
+    selectedDocumentDetail.value = null;
     return;
   }
+
   if (!items.value.some((item) => item.id === selectedDocumentId.value)) {
-    selectedDocumentId.value = items.value[0]?.id || '';
+    selectedDocumentId.value = '';
     selectedDocumentDetail.value = null;
+    chunks.value = [];
+    expandedChunkIds.value = [];
   }
 };
 
 const fetchDocuments = async () => {
   isLoading.value = true;
   try {
-    items.value = await kbApi.listDocuments();
-    keepSelectionFresh();
+    const result = await kbApi.listDocuments({
+      searchKeyword: searchKeyword.value,
+      statusFilter: statusFilter.value,
+      timeRange: timeRange.value,
+      page: currentPage.value,
+      pageSize: pagination.value.pageSize,
+    });
+
+    items.value = result.documents || [];
+    pagination.value = {
+      total: result.total || 0,
+      page: result.page || currentPage.value,
+      pageSize: result.pageSize || pagination.value.pageSize,
+      totalPages: result.totalPages || 0,
+    };
+    currentPage.value = pagination.value.page;
+    checkedDocumentIds.value = checkedDocumentIds.value.filter((id) => items.value.some((item) => item.id === id));
+    syncSelectionWithPage();
   } catch (error) {
     console.error('加载知识库失败:', error);
     flash.error(`加载知识库失败：${error.message || '未知错误'}`);
@@ -106,10 +149,26 @@ const refreshSelectedDocument = async () => {
     selectedDocumentDetail.value = await kbApi.getDocumentDetail(selectedDocumentId.value);
   } catch (error) {
     console.error('加载文档详情失败:', error);
-    selectedDocumentDetail.value =
-      items.value.find((item) => item.id === selectedDocumentId.value) || null;
+    selectedDocumentDetail.value = items.value.find((item) => item.id === selectedDocumentId.value) || null;
   } finally {
     isLoadingDetail.value = false;
+  }
+};
+
+const refreshSelectedChunks = async () => {
+  if (!selectedDocumentId.value) {
+    chunks.value = [];
+    return;
+  }
+
+  isLoadingChunks.value = true;
+  try {
+    chunks.value = await kbApi.getDocumentChunks(selectedDocumentId.value);
+  } catch (error) {
+    console.error('加载切块详情失败:', error);
+    chunks.value = [];
+  } finally {
+    isLoadingChunks.value = false;
   }
 };
 
@@ -129,11 +188,12 @@ const handleFileChange = async (event) => {
     if (uploadResult.document?.id) {
       selectedDocumentId.value = uploadResult.document.id;
       selectedDocumentDetail.value = uploadResult.document;
+      activeTab.value = 'processing';
     }
     flash.success('文件已上传。请启动入库任务，后台会异步完成解析、切块和向量化。');
-
     await fetchDocuments();
     await refreshSelectedDocument();
+    await refreshSelectedChunks();
   } catch (error) {
     console.error('上传文档失败:', error);
     flash.error(`上传失败：${error.message || '未知错误'}`);
@@ -143,20 +203,23 @@ const handleFileChange = async (event) => {
   }
 };
 
-const startIngestion = async () => {
-  if (!selectedDocument.value?.id || !selectedIngestionAction.value || isSubmittingTask.value) {
+const startIngestionForDocument = async (documentId) => {
+  if (!documentId || isSubmittingTask.value) {
     return;
   }
 
   isSubmittingTask.value = true;
   try {
-    const ingestResult = await kbApi.ingestDocument(selectedDocument.value.id);
-    if (ingestResult.document) {
+    const ingestResult = await kbApi.ingestDocument(documentId);
+    if (documentId === selectedDocumentId.value && ingestResult.document) {
       selectedDocumentDetail.value = ingestResult.document;
     }
     flash.success(ingestResult.message || '入库任务已提交。');
     await fetchDocuments();
-    await refreshSelectedDocument();
+    if (documentId === selectedDocumentId.value) {
+      await refreshSelectedDocument();
+      await refreshSelectedChunks();
+    }
   } catch (error) {
     console.error('启动入库任务失败:', error);
     flash.error(`启动入库失败：${error.message || '未知错误'}`);
@@ -166,12 +229,16 @@ const startIngestion = async () => {
 };
 
 const selectDocument = async (item) => {
-  if (!item?.id || item.id === selectedDocumentId.value) {
+  if (!item?.id) {
     return;
   }
+
   selectedDocumentId.value = item.id;
   selectedDocumentDetail.value = item;
+  activeTab.value = 'processing';
+  expandedChunkIds.value = [];
   await refreshSelectedDocument();
+  await refreshSelectedChunks();
 };
 
 const openLink = (url) => {
@@ -182,22 +249,91 @@ const openLink = (url) => {
   window.open(url, '_blank', 'noopener');
 };
 
+const handleRowAction = async ({ item, action }) => {
+  if (action.id === 'retry') {
+    await startIngestionForDocument(item.id);
+    return;
+  }
+
+  if (action.id === 'view-error') {
+    await selectDocument(item);
+    activeTab.value = 'errors';
+  }
+};
+
+const toggleRow = (documentId) => {
+  checkedDocumentIds.value = buildNextSelection({
+    selectedIds: checkedDocumentIds.value,
+    toggledId: documentId,
+  });
+};
+
+const toggleAll = () => {
+  if (decoratedItems.value.length === 0) {
+    checkedDocumentIds.value = [];
+    return;
+  }
+
+  const allIds = decoratedItems.value.map((item) => item.id);
+  const allChecked = allIds.every((id) => checkedDocumentIds.value.includes(id));
+  checkedDocumentIds.value = allChecked ? [] : allIds;
+};
+
+const changePage = async (page) => {
+  currentPage.value = page;
+  await fetchDocuments();
+};
+
+const handleBatchIngest = async () => {
+  if (checkedDocumentIds.value.length === 0) {
+    return;
+  }
+
+  try {
+    const payload = await kbApi.batchIngestDocuments(checkedDocumentIds.value);
+    flash.success(summarizeBatchResult(payload, '批量重新入库'));
+    await fetchDocuments();
+    await refreshSelectedDocument();
+  } catch (error) {
+    console.error('批量入库失败:', error);
+    flash.error(`批量入库失败：${error.message || '未知错误'}`);
+  }
+};
+
+const handleBatchDelete = async () => {
+  if (checkedDocumentIds.value.length === 0) {
+    return;
+  }
+
+  try {
+    const payload = await kbApi.batchDeleteDocuments(checkedDocumentIds.value);
+    flash.success(summarizeBatchResult(payload, '批量删除'));
+    const deletedIds = (payload.results || [])
+      .filter((item) => item.status === 'deleted')
+      .map((item) => item.document_id);
+    checkedDocumentIds.value = buildSelectionAfterBatchDelete(checkedDocumentIds.value, deletedIds);
+    if (deletedIds.includes(selectedDocumentId.value)) {
+      selectedDocumentId.value = '';
+      selectedDocumentDetail.value = null;
+      chunks.value = [];
+    }
+    await fetchDocuments();
+  } catch (error) {
+    console.error('批量删除失败:', error);
+    flash.error(`批量删除失败：${error.message || '未知错误'}`);
+  }
+};
+
 const startPolling = () => {
   pollInterval = setInterval(async () => {
     if (activeProcessingCount.value === 0) {
       return;
     }
     try {
-      items.value = await kbApi.listDocuments();
-      keepSelectionFresh();
+      await fetchDocuments();
       if (selectedDocumentId.value) {
-        const freshSelected = items.value.find((item) => item.id === selectedDocumentId.value);
-        if (freshSelected) {
-          selectedDocumentDetail.value = {
-            ...(selectedDocumentDetail.value || {}),
-            ...freshSelected,
-          };
-        }
+        await refreshSelectedDocument();
+        await refreshSelectedChunks();
       }
     } catch (error) {
       console.error('轮询知识库失败:', error);
@@ -205,9 +341,13 @@ const startPolling = () => {
   }, 3000);
 };
 
+watch([searchKeyword, statusFilter, timeRange], async () => {
+  currentPage.value = 1;
+  await fetchDocuments();
+});
+
 onMounted(async () => {
   await fetchDocuments();
-  await refreshSelectedDocument();
   startPolling();
 });
 
@@ -223,15 +363,15 @@ onUnmounted(() => {
     <section class="kb-overview ui-card">
       <div class="kb-overview__copy">
         <p class="eyebrow">知识库总览</p>
-        <h2>上传、处理、入库三段状态分离展示</h2>
+        <h2>文档处理状态监控</h2>
         <p class="kb-overview__text">
-          只有文档完成切块并写入 Milvus 后，状态才会变为“已入库”，此时才能参与问答检索。
+          聚焦上传、处理、入库全流程；文档完成切块并写入 Milvus 后，才会进入“已入库”并可参与检索。
         </p>
       </div>
       <div class="kb-overview__stats">
         <div class="stat-card">
           <span class="stat-label">文档总数</span>
-          <strong>{{ items.length }}</strong>
+          <strong>{{ pagination.total }}</strong>
         </div>
         <div class="stat-card">
           <span class="stat-label">处理中</span>
@@ -248,160 +388,65 @@ onUnmounted(() => {
       </div>
     </section>
 
-    <section class="kb-toolbar ui-card">
-      <input
-        v-model="searchKeyword"
-        class="kb-search"
-        type="text"
-        placeholder="搜索文档名、上传者、处理状态"
-      />
-      <input ref="fileInput" type="file" hidden @change="handleFileChange" />
-      <button class="kb-primary-btn" :disabled="isUploading" @click="triggerUpload">
-        {{ isUploading ? '上传中...' : '上传文档' }}
-      </button>
-    </section>
+    <KnowledgeBaseToolbar
+      :search-keyword="searchKeyword"
+      :status-filter="statusFilter"
+      :time-range="timeRange"
+      :is-uploading="isUploading"
+      @update:search-keyword="searchKeyword = $event"
+      @update:status-filter="statusFilter = $event"
+      @update:time-range="timeRange = $event"
+      @upload="triggerUpload"
+    />
+
+    <div v-if="checkedDocumentIds.length > 0" class="kb-batchbar ui-card">
+      <span>已选择 {{ checkedDocumentIds.length }} 个文档</span>
+      <div class="kb-batchbar__actions">
+        <button class="kb-secondary-btn" @click="handleBatchIngest">批量重新入库</button>
+        <button class="kb-danger-btn" @click="handleBatchDelete">批量删除</button>
+      </div>
+    </div>
+
+    <input ref="fileInput" type="file" hidden @change="handleFileChange" />
 
     <section class="kb-layout">
-      <div class="kb-list ui-card">
-        <div class="kb-list__header">
-          <span>文档</span>
-          <span>上传者</span>
-          <span>当前状态</span>
-          <span>上传时间</span>
-        </div>
+      <KnowledgeBaseTable
+        :items="decoratedItems"
+        :checked-ids="checkedDocumentIds"
+        :selected-document-id="selectedDocumentId"
+        :is-loading="isLoading"
+        :page="pagination.page"
+        :total-pages="pagination.totalPages"
+        :total="pagination.total"
+        @select="selectDocument"
+        @toggle-row="toggleRow"
+        @toggle-all="toggleAll"
+        @row-action="handleRowAction"
+        @change-page="changePage"
+      />
 
-        <div v-if="isLoading && items.length === 0" class="kb-empty">正在加载知识库...</div>
-        <div v-else-if="filteredItems.length === 0" class="kb-empty">当前没有符合条件的文档。</div>
-
-        <button
-          v-for="item in filteredItems"
-          :key="item.id"
-          type="button"
-          :class="['kb-row', { active: item.id === selectedDocumentId }]"
-          @click="selectDocument(item)"
-        >
-          <div class="kb-row__title">
-            <strong>{{ item.title }}</strong>
-            <span>{{ item.filename }}</span>
-          </div>
-          <div>{{ item.uploaderName }}</div>
-          <div class="kb-row__status">
-            <span :class="['status-chip', `tone-${statusTone[item.processStep.code] || 'neutral'}`]">
-              {{ item.processStep.label }}
-            </span>
-            <small>{{ item.processResult }}</small>
-          </div>
-          <div>{{ item.uploadTime }}</div>
-        </button>
-      </div>
-
-      <div class="kb-detail ui-card">
-        <template v-if="selectedDocument">
-          <div class="kb-detail__header">
-            <div>
-              <p class="eyebrow">文档详情</p>
-              <h3>{{ selectedDocument.title }}</h3>
-              <p class="kb-detail__summary">{{ selectedDocument.processResult }}</p>
-            </div>
-            <div class="kb-detail__header-actions">
-              <button
-                v-if="selectedIngestionAction"
-                :class="[
-                  selectedIngestionAction.emphasis === 'primary' ? 'kb-primary-btn' : 'kb-secondary-btn',
-                  'kb-detail__trigger',
-                ]"
-                :disabled="isSubmittingTask"
-                @click="startIngestion"
-              >
-                {{ isSubmittingTask ? '提交中...' : selectedIngestionAction.label }}
-              </button>
-              <span :class="['status-chip', `tone-${statusTone[selectedDocument.processStep.code] || 'neutral'}`]">
-                {{ selectedDocument.processStep.label }}
-              </span>
-            </div>
-          </div>
-
-          <div class="kb-progress">
-            <div class="kb-progress__meta">
-              <span>处理进度</span>
-              <span>{{ selectedDocument.processStep.progress }}%</span>
-            </div>
-            <div class="kb-progress__track">
-              <div class="kb-progress__value" :style="{ width: `${selectedDocument.processStep.progress}%` }" />
-            </div>
-          </div>
-
-          <div class="kb-meta-grid">
-            <div class="meta-card">
-              <span>上传者</span>
-              <strong>{{ selectedDocument.uploaderName }}</strong>
-            </div>
-            <div class="meta-card">
-              <span>归属人</span>
-              <strong>{{ selectedDocument.ownerName }}</strong>
-            </div>
-            <div class="meta-card">
-              <span>上传时间</span>
-              <strong>{{ selectedDocument.uploadTime }}</strong>
-            </div>
-            <div class="meta-card">
-              <span>更新时间</span>
-              <strong>{{ selectedDocument.updateTime }}</strong>
-            </div>
-            <div class="meta-card">
-              <span>切块数量</span>
-              <strong>{{ selectedDocument.chunkCount }}</strong>
-            </div>
-            <div class="meta-card">
-              <span>向量数量</span>
-              <strong>{{ selectedDocument.vectorCount }}</strong>
-            </div>
-          </div>
-
-          <div class="kb-task-card">
-            <div class="section-head">
-              <h4>处理任务</h4>
-              <span v-if="selectedDocument.isSearchReady" class="task-ready">可检索</span>
-            </div>
-            <p class="kb-task-card__hint">{{ taskHintText }}</p>
-            <div class="task-grid">
-              <div>
-                <span class="meta-label">任务状态</span>
-                <strong>{{ selectedDocument.latestTask?.status || '未创建' }}</strong>
-              </div>
-              <div>
-                <span class="meta-label">当前步骤</span>
-                <strong>{{ selectedDocument.latestTask?.current_step || '未开始' }}</strong>
-              </div>
-              <div>
-                <span class="meta-label">开始时间</span>
-                <strong>{{ selectedDocument.latestTask?.startedAtText || 'N/A' }}</strong>
-              </div>
-              <div>
-                <span class="meta-label">完成时间</span>
-                <strong>{{ selectedDocument.latestTask?.finishedAtText || 'N/A' }}</strong>
-              </div>
-            </div>
-            <p v-if="selectedDocument.processError" class="task-error">{{ selectedDocument.processError }}</p>
-          </div>
-
-          <div class="kb-actions">
-            <button class="kb-secondary-btn" @click="openLink(selectedDocument.previewUrl)">查看预览</button>
-            <button class="kb-secondary-btn" @click="openLink(selectedDocument.originalUrl)">查看原文</button>
-          </div>
-
-          <div class="kb-preview-card">
-            <div class="section-head">
-              <h4>抽取文本</h4>
-              <span v-if="isLoadingDetail">刷新中...</span>
-            </div>
-            <pre>{{ selectedDocument.extractedText || selectedDocument.parsedTextPreview || '当前暂无抽取文本。' }}</pre>
-          </div>
-        </template>
-
-        <div v-else class="kb-empty">请选择左侧文档查看详情。</div>
-      </div>
+      <KnowledgeBaseDetailPanel
+        :document="selectedDocument"
+        :primary-action="selectedIngestionAction"
+        :active-tab="activeTab"
+        :task-hint-text="taskHintText"
+        :is-submitting-task="isSubmittingTask"
+        :chunks="chunks"
+        :expanded-chunk-ids="expandedChunkIds"
+        :is-loading-chunks="isLoadingChunks"
+        :empty-state="emptyDetailState"
+        @ingest="startIngestionForDocument(selectedDocument?.id)"
+        @preview="isPreviewOpen = true"
+        @open-original="openLink(selectedDocument?.originalUrl)"
+        @change-tab="activeTab = $event"
+        @toggle-chunk="expandedChunkIds = buildChunkExpansionState(expandedChunkIds, $event)"
+      />
     </section>
+
+    <KnowledgeBasePreviewModal
+      v-model="isPreviewOpen"
+      :preview-state="previewState"
+    />
   </div>
 </template>
 
@@ -411,9 +456,7 @@ onUnmounted(() => {
 }
 
 .kb-overview,
-.kb-toolbar,
-.kb-list,
-.kb-detail {
+.kb-batchbar {
   background: #fff;
 }
 
@@ -432,27 +475,12 @@ onUnmounted(() => {
   color: #6b7b93;
 }
 
-.kb-overview h2,
-.kb-detail h3 {
+.kb-overview h2 {
   margin: 0;
   color: #142033;
 }
 
-.kb-detail__header,
-.kb-detail__header-actions {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 12px;
-}
-
-.kb-detail__header-actions {
-  align-items: center;
-  justify-content: flex-end;
-}
-
-.kb-overview__text,
-.kb-detail__summary {
+.kb-overview__text {
   margin: 10px 0 0;
   color: #5a677d;
   line-height: 1.7;
@@ -464,267 +492,76 @@ onUnmounted(() => {
   gap: 14px;
 }
 
-.stat-card,
-.meta-card {
+.stat-card {
   border: 1px solid rgba(20, 32, 51, 0.08);
   border-radius: 18px;
   padding: 16px;
   background: #f7f9fc;
 }
 
-.stat-label,
-.meta-card span,
-.meta-label {
+.stat-label {
   display: block;
   color: #6b7b93;
   font-size: 12px;
   margin-bottom: 6px;
 }
 
-.stat-card strong,
-.meta-card strong,
-.task-grid strong {
+.stat-card strong {
   color: #142033;
   font-size: 20px;
 }
 
-.kb-toolbar {
+.kb-batchbar {
   display: flex;
+  align-items: center;
+  justify-content: space-between;
   gap: 16px;
-  padding: 18px 22px;
+  padding: 14px 18px;
 }
 
-.kb-search {
-  flex: 1;
-  height: 44px;
-  border: 1px solid rgba(20, 32, 51, 0.12);
-  border-radius: 14px;
-  padding: 0 14px;
-  background: #fff;
-  color: #142033;
+.kb-batchbar__actions {
+  display: flex;
+  gap: 10px;
 }
 
-.kb-primary-btn,
-.kb-secondary-btn {
-  height: 44px;
-  border-radius: 14px;
-  padding: 0 18px;
+.kb-secondary-btn,
+.kb-danger-btn {
+  height: 40px;
+  border-radius: 12px;
+  padding: 0 16px;
   font-weight: 700;
   cursor: pointer;
 }
 
-.kb-primary-btn {
-  border: none;
-  background: #2457c5;
-  color: #fff;
-}
-
-.kb-primary-btn:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
-}
-
 .kb-secondary-btn {
   border: 1px solid rgba(20, 32, 51, 0.12);
   background: #fff;
   color: #142033;
 }
 
-.kb-detail__trigger {
-  min-width: 118px;
+.kb-danger-btn {
+  border: 1px solid rgba(181, 58, 58, 0.18);
+  background: rgba(181, 58, 58, 0.08);
+  color: #9b3131;
 }
 
 .kb-layout {
   display: grid;
-  grid-template-columns: minmax(0, 1.2fr) minmax(360px, 0.95fr);
+  grid-template-columns: minmax(0, 1.25fr) minmax(380px, 0.95fr);
   gap: 18px;
+  align-items: start;
 }
 
-.kb-list {
-  overflow: hidden;
-}
-
-.kb-list__header,
-.kb-row {
-  display: grid;
-  grid-template-columns: minmax(0, 1.6fr) 120px minmax(0, 1.2fr) 140px;
-  gap: 12px;
-  align-items: center;
-  padding: 16px 18px;
-}
-
-.kb-list__header {
-  border-bottom: 1px solid rgba(20, 32, 51, 0.08);
-  background: #f7f9fc;
-  color: #6b7b93;
-  font-size: 12px;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-
-.kb-row {
-  width: 100%;
-  border: none;
-  border-bottom: 1px solid rgba(20, 32, 51, 0.06);
-  background: #fff;
-  text-align: left;
-  cursor: pointer;
-}
-
-.kb-row:hover,
-.kb-row.active {
-  background: #f4f7fb;
-}
-
-.kb-row__title,
-.kb-row__status {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  min-width: 0;
-}
-
-.kb-row__title strong,
-.kb-row__status small,
-.kb-task-card h4 {
-  color: #142033;
-}
-
-.kb-row__title span,
-.kb-row__status small,
-.kb-empty,
-.task-error,
-.kb-preview-card pre {
-  color: #5a677d;
-}
-
-.kb-task-card__hint {
-  margin: 12px 0 0;
-  color: #5a677d;
-  line-height: 1.6;
-}
-
-.status-chip {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 72px;
-  padding: 6px 10px;
-  border-radius: 999px;
-  font-size: 12px;
-  font-weight: 700;
-}
-
-.tone-neutral {
-  background: #eef2f7;
-  color: #516176;
-}
-
-.tone-accent {
-  background: #e6eefb;
-  color: #2457c5;
-}
-
-.tone-success {
-  background: #e8f7ef;
-  color: #0e7a43;
-}
-
-.tone-danger {
-  background: #fdecec;
-  color: #b42318;
-}
-
-.kb-detail {
-  display: flex;
-  flex-direction: column;
-  gap: 18px;
-  padding: 22px;
-}
-
-.section-head,
-.kb-progress__meta,
-.kb-actions {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-}
-
-.kb-progress__track {
-  margin-top: 10px;
-  height: 10px;
-  border-radius: 999px;
-  background: #edf2f8;
-  overflow: hidden;
-}
-
-.kb-progress__value {
-  height: 100%;
-  border-radius: inherit;
-  background: linear-gradient(90deg, #2457c5, #4a79d8);
-}
-
-.kb-meta-grid,
-.task-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
-}
-
-.kb-task-card,
-.kb-preview-card {
-  border: 1px solid rgba(20, 32, 51, 0.08);
-  border-radius: 18px;
-  padding: 16px;
-  background: #f7f9fc;
-}
-
-.task-ready {
-  color: #0e7a43;
-  font-size: 12px;
-  font-weight: 700;
-}
-
-.task-error {
-  margin: 12px 0 0;
-  color: #b42318;
-}
-
-.kb-preview-card pre {
-  margin: 12px 0 0;
-  white-space: pre-wrap;
-  word-break: break-word;
-  font-family: inherit;
-  line-height: 1.7;
-}
-
-.kb-empty {
-  padding: 48px 20px;
-  text-align: center;
-}
-
-@media (max-width: 1100px) {
+@media (max-width: 1080px) {
   .kb-overview,
-  .kb-layout {
+  .kb-layout,
+  .kb-batchbar {
     grid-template-columns: 1fr;
   }
-}
 
-@media (max-width: 760px) {
-  .kb-toolbar {
+  .kb-batchbar {
     flex-direction: column;
-  }
-
-  .kb-list__header,
-  .kb-row {
-    grid-template-columns: 1fr;
-  }
-
-  .kb-meta-grid,
-  .task-grid,
-  .kb-overview__stats {
-    grid-template-columns: 1fr;
+    align-items: flex-start;
   }
 }
 </style>

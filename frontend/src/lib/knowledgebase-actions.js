@@ -33,3 +33,26 @@ export const getIngestionAction = (document) => {
     emphasis: 'primary',
   };
 };
+
+export const getDocumentRowActions = (document) => {
+  const actions = [];
+  const ingestAction = getIngestionAction(document);
+
+  if (ingestAction) {
+    actions.push({
+      id: 'retry',
+      label: ingestAction.label,
+      emphasis: ingestAction.emphasis,
+    });
+  }
+
+  if (String(document?.processStep?.code || '').toLowerCase() === 'failed' && document?.processError) {
+    actions.push({
+      id: 'view-error',
+      label: '查看错误',
+      emphasis: 'secondary',
+    });
+  }
+
+  return actions;
+};

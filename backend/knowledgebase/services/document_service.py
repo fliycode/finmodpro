@@ -579,6 +579,7 @@ def batch_enqueue_document_ingestion(user, document_ids):
     parsed_document_ids = _parse_document_ids(document_ids)
     accepted_count = 0
     skipped_count = 0
+    failed_count = 0
     results = []
 
     for document_id in parsed_document_ids:
@@ -607,6 +608,18 @@ def batch_enqueue_document_ingestion(user, document_ids):
                 }
             )
             continue
+        except (OperationalError, ProgrammingError, DatabaseError):
+            raise
+        except Exception as exc:
+            failed_count += 1
+            results.append(
+                {
+                    "document_id": document_id,
+                    "status": "failed",
+                    "reason": str(exc) or "入库任务提交失败。",
+                }
+            )
+            continue
 
         if created:
             accepted_count += 1
@@ -632,6 +645,7 @@ def batch_enqueue_document_ingestion(user, document_ids):
     return {
         "accepted_count": accepted_count,
         "skipped_count": skipped_count,
+        "failed_count": failed_count,
         "results": results,
     }
 
