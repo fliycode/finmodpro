@@ -1,5 +1,6 @@
 import { createApiConfig, joinUrl } from './config.js';
 import { authStorage } from '../lib/auth-storage.js';
+import { buildKnowledgebaseQuery } from '../lib/knowledgebase-workspace.js';
 
 const apiConfig = createApiConfig();
 
@@ -188,15 +189,29 @@ const normalizeDocument = (doc, fallback = {}) => {
 };
 
 export const kbApi = {
-  async listDocuments() {
-    const response = await apiConfig.fetchImpl(joinUrl(apiConfig.baseURL, '/api/knowledgebase/documents'), {
+  async listDocuments(params = {}) {
+    const query = new URLSearchParams(buildKnowledgebaseQuery(params));
+    const path = query.toString()
+      ? `/api/knowledgebase/documents?${query.toString()}`
+      : '/api/knowledgebase/documents';
+    const response = await apiConfig.fetchImpl(joinUrl(apiConfig.baseURL, path), {
       method: 'GET',
       headers: getHeaders(),
       auth: true,
     });
     const data = await parseResponse(response);
-    const docs = Array.isArray(data) ? data : (data.documents || data.data || []);
-    return docs.map((doc) => normalizeDocument(doc));
+    const docs = Array.isArray(data.documents)
+      ? data.documents
+      : Array.isArray(data)
+        ? data
+        : (data.data || []);
+    return {
+      documents: docs.map((doc) => normalizeDocument(doc)),
+      total: Number(data.total ?? docs.length ?? 0),
+      page: Number(data.page || 1),
+      pageSize: Number(data.page_size || 10),
+      totalPages: Number(data.total_pages || 0),
+    };
   },
 
   async uploadDocument(file) {
@@ -247,6 +262,43 @@ export const kbApi = {
     const data = await parseResponse(response);
     const doc = data.document || data.data || data;
     return normalizeDocument(doc);
+  },
+
+  async getDocumentChunks(documentId) {
+    const response = await apiConfig.fetchImpl(joinUrl(apiConfig.baseURL, `/api/knowledgebase/documents/${documentId}/chunks`), {
+      method: 'GET',
+      headers: getHeaders(),
+      auth: true,
+    });
+    const data = await parseResponse(response);
+    return (data.chunks || []).map((chunk) => ({
+      id: chunk.id,
+      chunkIndex: Number(chunk.chunk_index || 0),
+      pageLabel: chunk.page_label || `chunk-${Number(chunk.chunk_index || 0) + 1}`,
+      content: chunk.content || '',
+      vectorId: chunk.vector_id || '',
+      metadata: chunk.metadata || {},
+    }));
+  },
+
+  async batchIngestDocuments(documentIds) {
+    const response = await apiConfig.fetchImpl(joinUrl(apiConfig.baseURL, '/api/knowledgebase/documents/batch/ingest'), {
+      method: 'POST',
+      headers: getHeaders(),
+      body: JSON.stringify({ document_ids: documentIds }),
+      auth: true,
+    });
+    return parseResponse(response);
+  },
+
+  async batchDeleteDocuments(documentIds) {
+    const response = await apiConfig.fetchImpl(joinUrl(apiConfig.baseURL, '/api/knowledgebase/documents/batch/delete'), {
+      method: 'POST',
+      headers: getHeaders(),
+      body: JSON.stringify({ document_ids: documentIds }),
+      auth: true,
+    });
+    return parseResponse(response);
   },
 
   isProcessingStatus(status) {

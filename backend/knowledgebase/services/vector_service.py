@@ -151,28 +151,41 @@ class VectorService:
             ],
         )
         hits = search_results[0] if search_results else []
-        return [
-            {
-                "document_id": hit.get("entity", {}).get("document_id"),
-                "chunk_id": hit.get("entity", {}).get("chunk_id"),
-                "document_title": hit.get("entity", {}).get("document_title"),
-                "doc_type": hit.get("entity", {}).get("doc_type"),
-                "source_date": hit.get("entity", {}).get("source_date"),
-                "page_label": hit.get("entity", {}).get("page_label"),
-                "snippet": hit.get("entity", {}).get("content", ""),
-                "metadata": {
-                    "document_id": hit.get("entity", {}).get("document_id"),
-                    "document_title": hit.get("entity", {}).get("document_title"),
-                    "doc_type": hit.get("entity", {}).get("doc_type"),
-                    "source_date": hit.get("entity", {}).get("source_date"),
-                    "page_label": hit.get("entity", {}).get("page_label"),
-                },
-                "score": hit.get("distance", 0.0),
-                "vector_score": hit.get("distance", 0.0),
-                "keyword_score": 0.0,
-            }
+        chunk_ids = [
+            hit.get("entity", {}).get("chunk_id")
             for hit in hits
+            if hit.get("entity", {}).get("chunk_id") is not None
         ]
+        chunks_by_id = {
+            chunk.id: chunk
+            for chunk in DocumentChunk.objects.select_related("document").filter(id__in=chunk_ids)
+        }
+        results = []
+        for hit in hits:
+            entity = hit.get("entity", {})
+            chunk_id = entity.get("chunk_id")
+            chunk = chunks_by_id.get(chunk_id)
+            if chunk is None:
+                continue
+
+            metadata = chunk.metadata or {}
+            results.append(
+                {
+                    "document_id": chunk.document_id,
+                    "chunk_id": chunk.id,
+                    "document_title": metadata.get("document_title") or chunk.document.title,
+                    "doc_type": metadata.get("doc_type") or chunk.document.doc_type,
+                    "source_date": metadata.get("source_date")
+                    or (chunk.document.source_date.isoformat() if chunk.document.source_date else None),
+                    "page_label": metadata.get("page_label", f"chunk-{chunk.chunk_index + 1}"),
+                    "snippet": chunk.content,
+                    "metadata": metadata,
+                    "score": hit.get("distance", 0.0),
+                    "vector_score": hit.get("distance", 0.0),
+                    "keyword_score": 0.0,
+                }
+            )
+        return results
 
     def delete_document(self, document_id):
         client = self._get_client()

@@ -37,3 +37,4 @@ pnpm-debug.log*
 
 # Local worktrees
 .worktrees/
+.omx/
