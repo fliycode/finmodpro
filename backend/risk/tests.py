@@ -1003,3 +1003,183 @@ class TimeRangeRiskReportApiTests(TestCase):
             report_payload["source_metadata"]["risk_type_counts"],
             {"credit": 1, "liquidity": 1},
         )
+
+
+@override_settings(
+    JWT_SECRET_KEY="test-jwt-secret",
+    JWT_ACCESS_TOKEN_LIFETIME_SECONDS=3600,
+)
+class RiskAnalyticsOverviewApiTests(TestCase):
+    def setUp(self):
+        self.client = Client()
+        seed_roles_and_permissions()
+        self.authorized_user = User.objects.create_user(
+            username="risk-analytics-admin",
+            password="secret123",
+            email="risk-analytics-admin@example.com",
+        )
+        self.authorized_user.groups.add(Group.objects.get(name=ROLE_ADMIN))
+        self.authorized_token = generate_access_token(self.authorized_user)
+
+        self.first_document = Document.objects.create(
+            title="风险分析文档 A",
+            file=SimpleUploadedFile("analytics-a.pdf", b"risk-content", content_type="application/pdf"),
+            filename="analytics-a.pdf",
+            doc_type="pdf",
+        )
+        self.second_document = Document.objects.create(
+            title="风险分析文档 B",
+            file=SimpleUploadedFile("analytics-b.pdf", b"risk-content", content_type="application/pdf"),
+            filename="analytics-b.pdf",
+            doc_type="pdf",
+        )
+
+    def test_get_overview_requires_authentication(self):
+        response = self.client.get("/api/risk/analytics/overview")
+
+        self.assertEqual(response.status_code, 401)
+        self.assertEqual(
+            response.json(),
+            {"code": 401, "message": "未认证。", "data": {}},
+        )
+
+    def test_get_overview_returns_chart_ready_distributions_and_trend(self):
+        RiskEvent.objects.create(
+            company_name="FinModPro Holdings",
+            risk_type="liquidity",
+            risk_level=RiskEvent.LEVEL_HIGH,
+            event_time="2025-02-10T09:00:00+08:00",
+            summary="流动性风险上升",
+            evidence_text="短债覆盖倍数下降。",
+            confidence_score=Decimal("0.910"),
+            review_status=RiskEvent.STATUS_APPROVED,
+            document=self.first_document,
+        )
+        RiskEvent.objects.create(
+            company_name="Another Corp",
+            risk_type="credit",
+            risk_level=RiskEvent.LEVEL_MEDIUM,
+            event_time="2025-02-18T09:00:00+08:00",
+            summary="信用风险增加",
+            evidence_text="客户回款周期拉长。",
+            confidence_score=Decimal("0.760"),
+            review_status=RiskEvent.STATUS_APPROVED,
+            document=self.second_document,
+        )
+        RiskEvent.objects.create(
+            company_name="FinModPro Holdings",
+            risk_type="market",
+            risk_level=RiskEvent.LEVEL_CRITICAL,
+            event_time="2025-03-05T09:00:00+08:00",
+            summary="区间外事件",
+            evidence_text="不应被纳入。",
+            confidence_score=Decimal("0.820"),
+            review_status=RiskEvent.STATUS_APPROVED,
+            document=self.first_document,
+        )
+        RiskEvent.objects.create(
+            company_name="FinModPro Holdings",
+            risk_type="operation",
+            risk_level=RiskEvent.LEVEL_LOW,
+            event_time="2025-02-15T09:00:00+08:00",
+            summary="待审核事件",
+            evidence_text="不应被纳入已确认统计。",
+            confidence_score=Decimal("0.620"),
+            review_status=RiskEvent.STATUS_PENDING,
+            document=self.first_document,
+        )
+
+        response = self.client.get(
+            "/api/risk/analytics/overview?review_status=approved&period_start=2025-02-01&period_end=2025-02-28",
+            HTTP_AUTHORIZATION=f"Bearer {self.authorized_token}",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["code"], 0)
+        analytics = payload["data"]
+        self.assertEqual(
+            analytics["summary"],
+            {
+                "total_events": 2,
+                "high_risk_events": 1,
+                "pending_reviews": 0,
+                "unique_companies": 2,
+                "document_count": 2,
+            },
+        )
+        self.assertEqual(
+            analytics["risk_level_distribution"],
+            [
+                {"key": "high", "value": 1},
+                {"key": "medium", "value": 1},
+            ],
+        )
+        self.assertEqual(
+            analytics["risk_type_distribution"],
+            [
+                {"key": "credit", "value": 1},
+                {"key": "liquidity", "value": 1},
+            ],
+        )
+        self.assertEqual(
+            analytics["trend"],
+            [
+                {"date": "2025-02-10", "value": 1},
+                {"date": "2025-02-18", "value": 1},
+            ],
+        )
+        self.assertEqual(
+            analytics["top_companies"],
+            [
+                {"key": "Another Corp", "value": 1},
+                {"key": "FinModPro Holdings", "value": 1},
+            ],
+        )
+
+
+@override_settings(
+    JWT_SECRET_KEY="test-jwt-secret",
+    JWT_ACCESS_TOKEN_LIFETIME_SECONDS=3600,
+)
+class RiskReportExportApiTests(TestCase):
+    def setUp(self):
+        self.client = Client()
+        seed_roles_and_permissions()
+        self.authorized_user = User.objects.create_user(
+            username="risk-export-admin",
+            password="secret123",
+            email="risk-export-admin@example.com",
+        )
+        self.authorized_user.groups.add(Group.objects.get(name=ROLE_ADMIN))
+        self.authorized_token = generate_access_token(self.authorized_user)
+
+        self.report = RiskReport.objects.create(
+            scope_type=RiskReport.SCOPE_COMPANY,
+            title="FinModPro Holdings 风险报告",
+            company_name="FinModPro Holdings",
+            summary="共汇总 2 条已审核通过风险事件。",
+            content="报告详情\n- 流动性风险上升",
+            source_metadata={
+                "event_ids": [1, 2],
+                "document_ids": [11, 12],
+                "risk_type_counts": {"liquidity": 1, "credit": 1},
+            },
+        )
+
+    def test_export_report_returns_markdown_attachment(self):
+        response = self.client.get(
+            f"/api/risk/reports/{self.report.id}/export",
+            HTTP_AUTHORIZATION=f"Bearer {self.authorized_token}",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["Content-Type"], "text/markdown; charset=utf-8")
+        self.assertIn(
+            f'attachment; filename="risk-report-{self.report.id}.md"',
+            response["Content-Disposition"],
+        )
+        body = response.content.decode("utf-8")
+        self.assertIn("# FinModPro Holdings 风险报告", body)
+        self.assertIn("共汇总 2 条已审核通过风险事件。", body)
+        self.assertIn("报告详情", body)

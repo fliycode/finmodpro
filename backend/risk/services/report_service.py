@@ -1,3 +1,5 @@
+import json
+
 from django.db.models import Count
 
 from risk.models import RiskEvent, RiskReport
@@ -185,3 +187,58 @@ def generate_time_range_risk_report(*, period_start, period_end):
         source_metadata=source_metadata,
     )
     return report
+
+
+def build_risk_report_export(*, report, export_format="markdown"):
+    if export_format == "markdown":
+        lines = [
+            f"# {report.title}",
+            "",
+            f"- 报告范围: {report.scope_type}",
+            f"- 生成时间: {report.created_at.isoformat()}",
+        ]
+        if report.company_name:
+            lines.append(f"- 公司: {report.company_name}")
+        if report.period_start or report.period_end:
+            lines.append(f"- 时间区间: {report.period_start or '-'} 至 {report.period_end or '-'}")
+        lines.extend(
+            [
+                "",
+                "## 摘要",
+                report.summary or "暂无摘要",
+                "",
+                "## 报告内容",
+                report.content,
+                "",
+                "## 源数据",
+                json.dumps(report.source_metadata or {}, ensure_ascii=False, indent=2),
+                "",
+            ]
+        )
+        return {
+            "filename": f"risk-report-{report.id}.md",
+            "content_type": "text/markdown",
+            "content": "\n".join(lines),
+        }
+
+    if export_format == "json":
+        payload = {
+            "id": report.id,
+            "scope_type": report.scope_type,
+            "title": report.title,
+            "company_name": report.company_name,
+            "period_start": report.period_start.isoformat() if report.period_start else None,
+            "period_end": report.period_end.isoformat() if report.period_end else None,
+            "summary": report.summary,
+            "content": report.content,
+            "source_metadata": report.source_metadata,
+            "created_at": report.created_at.isoformat(),
+            "updated_at": report.updated_at.isoformat(),
+        }
+        return {
+            "filename": f"risk-report-{report.id}.json",
+            "content_type": "application/json",
+            "content": json.dumps(payload, ensure_ascii=False, indent=2),
+        }
+
+    raise ValueError("仅支持 markdown 或 json 导出格式。")

@@ -1,31 +1,58 @@
 <script setup>
-import { ref, onMounted } from "vue";
+import { computed, onMounted, ref } from "vue";
 import { riskApi } from "../api/risk.js";
 import { useFlash } from "../lib/flash.js";
+import {
+  buildRiskLevelChartOption,
+  buildRiskTrendChartOption,
+  buildRiskTypeChartOption,
+  normalizeRiskAnalytics,
+} from "../lib/risk-workspace.js";
 import AppSectionCard from "./ui/AppSectionCard.vue";
 import AppToolbar from "./ui/AppToolbar.vue";
 import MetaChips from "./ui/MetaChips.vue";
+import AdminChart from "./admin/AdminChart.vue";
 
 const activeTab = ref("events");
 const flash = useFlash();
+
+const buildDefaultFilters = () => ({
+  company_name: "",
+  risk_type: "",
+  risk_level: "",
+  review_status: "",
+  period_start: "",
+  period_end: "",
+});
+
+const filters = ref(buildDefaultFilters());
 
 const events = ref([]);
 const isEventsLoading = ref(false);
 const eventsErrorMsg = ref("");
 
-const filters = ref({
-  company_name: "",
-  risk_type: "",
-  risk_level: "",
-  review_status: ""
-});
+const analyticsPayload = ref(null);
+const isAnalyticsLoading = ref(false);
+const analyticsErrorMsg = ref("");
+
+const analytics = computed(() => normalizeRiskAnalytics(analyticsPayload.value));
+const analyticsHighlights = computed(() => ([
+  { key: "total", label: "事件总量", value: analytics.value.summary.total_events, tone: "brand" },
+  { key: "high", label: "高风险/严重", value: analytics.value.summary.high_risk_events, tone: "risk" },
+  { key: "pending", label: "待审核", value: analytics.value.summary.pending_reviews, tone: "warning" },
+  { key: "company", label: "涉及公司", value: analytics.value.summary.unique_companies, tone: "neutral" },
+  { key: "document", label: "来源文档", value: analytics.value.summary.document_count, tone: "neutral" },
+]));
+const riskLevelOption = computed(() => buildRiskLevelChartOption(analytics.value));
+const riskTypeOption = computed(() => buildRiskTypeChartOption(analytics.value));
+const riskTrendOption = computed(() => buildRiskTrendChartOption(analytics.value));
 
 const fetchEvents = async () => {
   isEventsLoading.value = true;
   eventsErrorMsg.value = "";
   try {
     const data = await riskApi.getEvents(filters.value);
-    events.value = data.events || data.data || data || [];
+    events.value = data.data?.risk_events || data.risk_events || [];
   } catch (error) {
     console.error("Failed to fetch risk events:", error);
     eventsErrorMsg.value = error.message || "加载风险事件失败";
@@ -34,15 +61,32 @@ const fetchEvents = async () => {
   }
 };
 
+const fetchAnalytics = async () => {
+  isAnalyticsLoading.value = true;
+  analyticsErrorMsg.value = "";
+  try {
+    analyticsPayload.value = await riskApi.getAnalytics(filters.value);
+  } catch (error) {
+    console.error("Failed to fetch analytics:", error);
+    analyticsErrorMsg.value = error.message || "加载风险分析失败";
+  } finally {
+    isAnalyticsLoading.value = false;
+  }
+};
+
+const refreshWorkspace = async () => {
+  await Promise.all([fetchEvents(), fetchAnalytics()]);
+};
+
 onMounted(() => {
-  fetchEvents();
+  refreshWorkspace();
 });
 
 const handleReview = async (event, status) => {
   try {
     await riskApi.reviewEvent(event.id || event.event_id, status);
-    event.review_status = status;
-    flash.success(`风险事件已${status === 'approved' ? '确认' : '忽略'}`);
+    flash.success(`风险事件已${status === "approved" ? "确认" : "忽略"}`);
+    await refreshWorkspace();
   } catch (error) {
     console.error("Failed to review event:", error);
     flash.error(error.message || "审核失败");
@@ -50,50 +94,45 @@ const handleReview = async (event, status) => {
 };
 
 const applyFilters = () => {
-  fetchEvents();
+  refreshWorkspace();
 };
 
 const resetFilters = () => {
-  filters.value = {
-    company_name: "",
-    risk_type: "",
-    risk_level: "",
-    review_status: ""
-  };
-  fetchEvents();
+  filters.value = buildDefaultFilters();
+  refreshWorkspace();
 };
 
 const getReviewStatusText = (status) => {
   const texts = {
     pending: "待审核",
     approved: "已确认",
-    rejected: "已忽略"
+    rejected: "已忽略",
   };
   return texts[status?.toLowerCase()] || status || "待审核";
 };
 
 const getRiskTagType = (level) => {
-  if (level === 'high') return 'danger';
-  if (level === 'medium') return 'warning';
-  if (level === 'low') return 'success';
-  return 'info';
+  if (level === "high" || level === "critical") return "danger";
+  if (level === "medium") return "warning";
+  if (level === "low") return "success";
+  return "info";
 };
 
 const getReviewTagType = (status) => {
-  if (status === 'approved') return 'success';
-  if (status === 'rejected') return 'danger';
-  if (status === 'pending') return 'warning';
-  return 'info';
+  if (status === "approved") return "success";
+  if (status === "rejected") return "danger";
+  if (status === "pending") return "warning";
+  return "info";
 };
 
 const getEventMetaChips = (item) => {
   const chips = [];
   if (item.confidence_score !== undefined || item.confidence !== undefined) {
     const value = item.confidence_score !== undefined ? item.confidence_score : item.confidence;
-    chips.push({ key: 'confidence', label: `置信度: ${Math.round(value * 100)}%` });
+    chips.push({ key: "confidence", label: `置信度: ${Math.round(Number(value) * 100)}%` });
   }
   if (item.document_id) {
-    chips.push({ key: 'document', label: `文档: ${item.document_id.substring(0, 8)}...`, title: item.document_id });
+    chips.push({ key: "document", label: `文档: ${String(item.document_id)}`, title: String(item.document_id) });
   }
   return chips;
 };
@@ -102,20 +141,21 @@ const formatDate = (dateStr) => {
   if (!dateStr) return "N/A";
   try {
     return new Date(dateStr).toLocaleString();
-  } catch (e) {
+  } catch {
     return dateStr;
   }
 };
 
 const reportType = ref("company");
 const isReportLoading = ref(false);
+const isReportExporting = ref(false);
 const reportErrorMsg = ref("");
 const generatedReport = ref(null);
 
 const reportForm = ref({
   company_name: "",
   period_start: "",
-  period_end: ""
+  period_end: "",
 });
 
 const generateReport = async () => {
@@ -130,7 +170,7 @@ const generateReport = async () => {
       data = await riskApi.generateCompanyReport({
         company_name: reportForm.value.company_name,
         period_start: reportForm.value.period_start || undefined,
-        period_end: reportForm.value.period_end || undefined
+        period_end: reportForm.value.period_end || undefined,
       });
     } else {
       if (!reportForm.value.period_start || !reportForm.value.period_end) {
@@ -138,16 +178,42 @@ const generateReport = async () => {
       }
       data = await riskApi.generateTimeRangeReport({
         period_start: reportForm.value.period_start,
-        period_end: reportForm.value.period_end
+        period_end: reportForm.value.period_end,
       });
     }
-    generatedReport.value = data.report || data.data?.report || data;
-    flash.success('风险报告生成成功');
+    generatedReport.value = data.data?.report || data.report || data;
+    flash.success("风险报告生成成功");
+    await fetchAnalytics();
   } catch (error) {
     console.error("Failed to generate report:", error);
     reportErrorMsg.value = error.message || "生成报告失败";
   } finally {
     isReportLoading.value = false;
+  }
+};
+
+const downloadGeneratedReport = async (format = "markdown") => {
+  if (!generatedReport.value?.id) {
+    flash.error("请先生成报告后再导出");
+    return;
+  }
+
+  isReportExporting.value = true;
+  try {
+    const exportPayload = await riskApi.exportReport(generatedReport.value.id, { format });
+    const blob = new Blob([exportPayload.content], { type: exportPayload.contentType });
+    const url = window.URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = exportPayload.filename;
+    link.click();
+    window.URL.revokeObjectURL(url);
+    flash.success(`风险报告已导出为 ${format === "json" ? "JSON" : "Markdown"}`);
+  } catch (error) {
+    console.error("Failed to export report:", error);
+    flash.error(error.message || "导出失败");
+  } finally {
+    isReportExporting.value = false;
   }
 };
 </script>
@@ -158,7 +224,71 @@ const generateReport = async () => {
       <el-tabs v-model="activeTab" class="risk-tabs">
         <el-tab-pane label="风险事件审核" name="events">
           <div class="tab-content risk-events-content">
-            <AppSectionCard title="待处理风险事件" desc="按公司、类型、等级和审核状态快速缩小范围，减少表格视觉噪音。" shadow="never">
+            <AppSectionCard
+              title="风险分析概览"
+              desc="直接复用后端聚合结果，快速判断当前风险积压、类型分布和时间趋势。"
+              shadow="never"
+            >
+              <el-alert v-if="analyticsErrorMsg" :title="analyticsErrorMsg" type="error" show-icon :closable="false" />
+
+              <div v-else class="analytics-shell" v-loading="isAnalyticsLoading">
+                <div class="analytics-highlight-grid">
+                  <article
+                    v-for="item in analyticsHighlights"
+                    :key="item.key"
+                    class="analytics-highlight"
+                    :class="`analytics-highlight--${item.tone}`"
+                  >
+                    <span class="analytics-highlight__label">{{ item.label }}</span>
+                    <strong class="analytics-highlight__value">{{ item.value }}</strong>
+                  </article>
+                </div>
+
+                <div class="analytics-chart-grid">
+                  <div class="analytics-chart-card">
+                    <div class="analytics-chart-card__head">
+                      <h4>风险等级分布</h4>
+                      <span>按筛选结果统计</span>
+                    </div>
+                    <AdminChart :option="riskLevelOption" height="280px" />
+                  </div>
+                  <div class="analytics-chart-card">
+                    <div class="analytics-chart-card__head">
+                      <h4>风险类型分布</h4>
+                      <span>按风险类型观察聚焦点</span>
+                    </div>
+                    <AdminChart :option="riskTypeOption" height="280px" />
+                  </div>
+                </div>
+
+                <div class="analytics-chart-grid analytics-chart-grid--bottom">
+                  <div class="analytics-chart-card analytics-chart-card--wide">
+                    <div class="analytics-chart-card__head">
+                      <h4>事件时间趋势</h4>
+                      <span>用于观察近期风险集中出现的日期段</span>
+                    </div>
+                    <AdminChart :option="riskTrendOption" height="300px" />
+                  </div>
+                  <div class="analytics-chart-card">
+                    <div class="analytics-chart-card__head">
+                      <h4>重点公司</h4>
+                      <span>按事件数量排序的前 5 家公司</span>
+                    </div>
+                    <ul class="analytics-company-list">
+                      <li v-for="item in analytics.top_companies" :key="item.key">
+                        <span>{{ item.key }}</span>
+                        <strong>{{ item.value }}</strong>
+                      </li>
+                      <li v-if="analytics.top_companies.length === 0" class="analytics-company-list__empty">
+                        当前筛选条件下暂无公司分布数据。
+                      </li>
+                    </ul>
+                  </div>
+                </div>
+              </div>
+            </AppSectionCard>
+
+            <AppSectionCard title="待处理风险事件" desc="按公司、类型、等级、时间和审核状态快速缩小范围。" shadow="never">
               <AppToolbar>
                 <el-form :inline="true" class="admin-form-row">
                   <el-form-item>
@@ -172,6 +302,7 @@ const generateReport = async () => {
                       <el-option label="高风险" value="high" />
                       <el-option label="中风险" value="medium" />
                       <el-option label="低风险" value="low" />
+                      <el-option label="严重" value="critical" />
                     </el-select>
                   </el-form-item>
                   <el-form-item>
@@ -182,8 +313,14 @@ const generateReport = async () => {
                     </el-select>
                   </el-form-item>
                   <el-form-item>
-                    <el-button type="primary" @click="applyFilters" :loading="isEventsLoading">查询</el-button>
-                    <el-button @click="resetFilters" :disabled="isEventsLoading">重置</el-button>
+                    <el-date-picker v-model="filters.period_start" type="date" value-format="YYYY-MM-DD" placeholder="开始日期" />
+                  </el-form-item>
+                  <el-form-item>
+                    <el-date-picker v-model="filters.period_end" type="date" value-format="YYYY-MM-DD" placeholder="结束日期" />
+                  </el-form-item>
+                  <el-form-item>
+                    <el-button type="primary" @click="applyFilters" :loading="isEventsLoading || isAnalyticsLoading">查询</el-button>
+                    <el-button @click="resetFilters" :disabled="isEventsLoading || isAnalyticsLoading">重置</el-button>
                   </el-form-item>
                 </el-form>
               </AppToolbar>
@@ -193,7 +330,7 @@ const generateReport = async () => {
               <el-table v-else :data="events" stripe style="width: 100%" v-loading="isEventsLoading">
                 <el-table-column prop="company_name" label="公司名" min-width="160">
                   <template #default="scope">
-                    <span class="company-name">{{ scope.row.company_name || '未知公司' }}</span>
+                    <span class="company-name">{{ scope.row.company_name || "未知公司" }}</span>
                   </template>
                 </el-table-column>
                 <el-table-column prop="risk_type" label="风险类型" width="140">
@@ -204,13 +341,13 @@ const generateReport = async () => {
                 <el-table-column label="风险等级" width="120">
                   <template #default="scope">
                     <el-tag :type="getRiskTagType(scope.row.risk_level)">
-                      {{ (scope.row.risk_level || 'unknown').toUpperCase() }}
+                      {{ (scope.row.risk_level || "unknown").toUpperCase() }}
                     </el-tag>
                   </template>
                 </el-table-column>
                 <el-table-column label="事件时间" min-width="180">
                   <template #default="scope">
-                    <span class="muted-text">{{ formatDate(scope.row.event_date || scope.row.created_at) }}</span>
+                    <span class="muted-text">{{ formatDate(scope.row.event_time || scope.row.created_at) }}</span>
                   </template>
                 </el-table-column>
                 <el-table-column label="摘要 / 证据" min-width="320">
@@ -231,7 +368,7 @@ const generateReport = async () => {
                 </el-table-column>
                 <el-table-column label="操作" width="160" fixed="right">
                   <template #default="scope">
-                    <div v-if="((scope.row.review_status || 'pending').toLowerCase() === 'pending')" class="inline-actions">
+                    <div v-if="(scope.row.review_status || 'pending').toLowerCase() === 'pending'" class="inline-actions">
                       <el-button type="success" plain size="small" @click="handleReview(scope.row, 'approved')">确认</el-button>
                       <el-button type="danger" plain size="small" @click="handleReview(scope.row, 'rejected')">忽略</el-button>
                     </div>
@@ -279,11 +416,19 @@ const generateReport = async () => {
 
             <el-card v-if="generatedReport" class="report-result ui-card" shadow="never">
               <div class="report-header">
-                <h2>{{ generatedReport.title }}</h2>
-                <div class="report-meta">
-                  <span class="meta-item">生成时间: {{ formatDate(generatedReport.created_at || generatedReport.generated_at) }}</span>
-                  <span class="meta-item">包含事件数: {{ generatedReport.source_metadata?.event_count || 0 }}</span>
-                  <span v-if="generatedReport.source_metadata?.document_ids" class="meta-item">涉及文档数: {{ generatedReport.source_metadata.document_ids.length }}</span>
+                <div>
+                  <h2>{{ generatedReport.title }}</h2>
+                  <div class="report-meta">
+                    <span class="meta-item">生成时间: {{ formatDate(generatedReport.created_at || generatedReport.generated_at) }}</span>
+                    <span class="meta-item">包含事件数: {{ generatedReport.source_metadata?.event_count || 0 }}</span>
+                    <span v-if="generatedReport.source_metadata?.document_ids" class="meta-item">
+                      涉及文档数: {{ generatedReport.source_metadata.document_ids.length }}
+                    </span>
+                  </div>
+                </div>
+                <div class="report-actions">
+                  <el-button plain :loading="isReportExporting" @click="downloadGeneratedReport('markdown')">导出 Markdown</el-button>
+                  <el-button plain :loading="isReportExporting" @click="downloadGeneratedReport('json')">导出 JSON</el-button>
                 </div>
               </div>
 
@@ -329,21 +474,56 @@ const generateReport = async () => {
 </template>
 
 <style scoped>
-.risk-summary-shell { min-height: 760px; }
+.risk-summary-shell { min-height: 900px; }
 .tab-content { display: flex; flex-direction: column; gap: 22px; }
+.risk-events-content, .risk-reports-content { gap: 22px; }
 .company-name { font-weight: 700; white-space: nowrap; color: #1e293b; }
 .summary-text { font-weight: 600; color: #334155; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
-.risk-reports-content { gap: 22px; }
+.summary-block { display: flex; flex-direction: column; gap: 10px; }
+.summary-block__quote { color: #64748b; font-size: 13px; line-height: 1.7; }
+.analytics-shell { display: flex; flex-direction: column; gap: 18px; }
+.analytics-highlight-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 14px; }
+.analytics-highlight {
+  border-radius: 18px;
+  padding: 18px;
+  border: 1px solid #e2e8f0;
+  background: linear-gradient(180deg, rgba(255,255,255,0.98), rgba(248,250,252,0.94));
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.analytics-highlight--brand { border-color: rgba(36, 87, 197, 0.18); }
+.analytics-highlight--risk { border-color: rgba(196, 73, 61, 0.22); }
+.analytics-highlight--warning { border-color: rgba(183, 121, 31, 0.22); }
+.analytics-highlight__label { color: #64748b; font-size: 12px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; }
+.analytics-highlight__value { color: #0f172a; font-size: 28px; line-height: 1; }
+.analytics-chart-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; }
+.analytics-chart-grid--bottom { align-items: stretch; }
+.analytics-chart-card {
+  border: 1px solid #e2e8f0;
+  border-radius: 18px;
+  padding: 18px;
+  background: #fff;
+}
+.analytics-chart-card--wide { min-width: 0; }
+.analytics-chart-card__head { display: flex; justify-content: space-between; gap: 12px; align-items: baseline; margin-bottom: 8px; }
+.analytics-chart-card__head h4 { margin: 0; color: #1e293b; font-size: 15px; }
+.analytics-chart-card__head span { color: #64748b; font-size: 12px; }
+.analytics-company-list { list-style: none; padding: 0; margin: 8px 0 0; display: flex; flex-direction: column; gap: 10px; }
+.analytics-company-list li { display: flex; justify-content: space-between; gap: 12px; color: #334155; padding-bottom: 10px; border-bottom: 1px dashed #e2e8f0; }
+.analytics-company-list li:last-child { border-bottom: none; padding-bottom: 0; }
+.analytics-company-list__empty { color: #64748b; }
 .risk-report-form :deep(.el-date-editor),
 .risk-report-form :deep(.el-input) { width: 100%; max-width: 360px; }
 .report-result { padding: 30px; }
-.report-header { margin-bottom: 28px; border-bottom: 1px solid #f1f5f9; padding-bottom: 22px; }
+.report-header { margin-bottom: 28px; border-bottom: 1px solid #f1f5f9; padding-bottom: 22px; display: flex; justify-content: space-between; gap: 18px; align-items: flex-start; }
 .report-header h2 { margin: 0 0 16px 0; color: #0f172a; font-size: 24px; line-height: 1.3; }
 .report-meta { display: flex; gap: 12px; flex-wrap: wrap; }
+.report-actions { display: flex; gap: 10px; flex-wrap: wrap; }
 .meta-item { background: #f8fafc; color: #64748b; padding: 6px 12px; border-radius: 999px; font-size: 12px; font-weight: 600; border: 1px solid #e2e8f0; }
 .report-section { margin-bottom: 28px; }
 .report-section h3 { margin: 0 0 16px 0; color: #1e293b; font-size: 18px; display: flex; align-items: center; gap: 8px; }
-.report-section h3::before { content: ''; display: block; width: 4px; height: 16px; background: #6366f1; border-radius: 2px; }
+.report-section h3::before { content: ""; display: block; width: 4px; height: 16px; background: #6366f1; border-radius: 2px; }
 .summary-content { font-size: 14px; line-height: 1.75; color: #334155; background: #f8fafc; padding: 20px; border-radius: 12px; border-left: 4px solid #818cf8; }
 .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 16px; }
 .stat-card { background: white; border: 1px solid #e2e8f0; border-radius: 14px; padding: 16px; }
@@ -354,7 +534,13 @@ const generateReport = async () => {
 .stat-label { color: #64748b; }
 .stat-value { font-weight: 700; color: #1e293b; background: #f1f5f9; padding: 2px 8px; border-radius: 999px; font-size: 12px; }
 .markdown-content { font-size: 14px; line-height: 1.78; color: #334155; white-space: pre-wrap; font-family: inherit; background: white; padding: 24px; border: 1px solid #e2e8f0; border-radius: 14px; }
+
+@media (max-width: 1100px) {
+  .analytics-chart-grid { grid-template-columns: 1fr; }
+}
+
 @media (max-width: 900px) {
   .report-result { padding: 20px; }
+  .report-header { flex-direction: column; }
 }
 </style>

@@ -33,6 +33,15 @@ class RiskEventListQuerySerializer(serializers.Serializer):
     review_status = serializers.ChoiceField(required=False, choices=RiskEvent.STATUS_CHOICES)
     risk_level = serializers.ChoiceField(required=False, choices=RiskEvent.LEVEL_CHOICES)
     document_id = serializers.IntegerField(required=False, min_value=1)
+    period_start = serializers.DateField(required=False)
+    period_end = serializers.DateField(required=False)
+
+    def validate(self, attrs):
+        period_start = attrs.get("period_start")
+        period_end = attrs.get("period_end")
+        if period_start and period_end and period_start > period_end:
+            raise serializers.ValidationError({"message": "period_start 不能晚于 period_end。"})
+        return attrs
 
 
 class RiskEventReviewSerializer(serializers.Serializer):

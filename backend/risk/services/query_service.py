@@ -1,7 +1,7 @@
 from risk.models import RiskEvent
 
 
-def list_risk_events(*, filters):
+def build_risk_event_queryset(*, filters):
     queryset = RiskEvent.objects.select_related("document", "chunk").all()
 
     company_name = filters.get("company_name")
@@ -24,4 +24,16 @@ def list_risk_events(*, filters):
     if document_id:
         queryset = queryset.filter(document_id=document_id)
 
-    return queryset.order_by("-created_at", "-id")
+    period_start = filters.get("period_start")
+    if period_start:
+        queryset = queryset.filter(event_time__date__gte=period_start)
+
+    period_end = filters.get("period_end")
+    if period_end:
+        queryset = queryset.filter(event_time__date__lte=period_end)
+
+    return queryset
+
+
+def list_risk_events(*, filters):
+    return build_risk_event_queryset(filters=filters).order_by("-created_at", "-id")
