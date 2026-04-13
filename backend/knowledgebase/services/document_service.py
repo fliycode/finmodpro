@@ -515,6 +515,8 @@ def enqueue_document_ingestion(document):
         }:
             return latest_task, False
 
+        previous_status = locked_document.status
+        previous_error_message = locked_document.error_message
         locked_document.status = Document.STATUS_UPLOADED
         locked_document.error_message = ""
         locked_document.save(update_fields=["status", "error_message", "updated_at"])
@@ -524,14 +526,53 @@ def enqueue_document_ingestion(document):
             current_step=IngestionTask.STEP_QUEUED,
         )
 
-    if should_run_inline:
-        async_result = ingest_document_task.apply(args=(locked_document.id, ingestion_task.id))
-    else:
-        async_result = ingest_document_task.delay(locked_document.id, ingestion_task.id)
+    try:
+        if should_run_inline:
+            async_result = ingest_document_task.apply(args=(locked_document.id, ingestion_task.id))
+        else:
+            async_result = ingest_document_task.delay(locked_document.id, ingestion_task.id)
+    except Exception:
+        _cleanup_failed_ingestion_dispatch(
+            document_id=locked_document.id,
+            ingestion_task_id=ingestion_task.id,
+            previous_status=previous_status,
+            previous_error_message=previous_error_message,
+        )
+        raise
 
     ingestion_task.celery_task_id = async_result.id or ""
     ingestion_task.save(update_fields=["celery_task_id", "updated_at"])
     return ingestion_task, True
+
+
+def _cleanup_failed_ingestion_dispatch(
+    *,
+    document_id,
+    ingestion_task_id,
+    previous_status,
+    previous_error_message,
+):
+    with transaction.atomic():
+        task = (
+            IngestionTask.objects.select_for_update()
+            .filter(id=ingestion_task_id)
+            .select_related("document")
+            .first()
+        )
+        if task is None:
+            return
+        if task.status != IngestionTask.STATUS_QUEUED:
+            return
+
+        document = Document.objects.select_for_update().filter(id=document_id).first()
+        task.delete()
+
+        if document is None:
+            return
+
+        document.status = previous_status
+        document.error_message = previous_error_message
+        document.save(update_fields=["status", "error_message", "updated_at"])
 
 
 def batch_enqueue_document_ingestion(user, document_ids):
@@ -596,15 +637,32 @@ def batch_enqueue_document_ingestion(user, document_ids):
 
 
 def delete_document_with_vectors(document):
-    from rag.services.vector_store_service import _VECTOR_STORE
-
     file_field = document.file
     storage = file_field.storage
     file_name = file_field.name
-
-    VectorService().delete_document(document.id)
-    _VECTOR_STORE.pop(document.id, None)
+    document_id = document.id
     document.delete()
+    transaction.on_commit(
+        lambda: _cleanup_deleted_document_artifacts(
+            document_id=document_id,
+            storage=storage,
+            file_name=file_name,
+        )
+    )
+
+
+def _cleanup_deleted_document_artifacts(*, document_id, storage, file_name):
+    from rag.services.vector_store_service import _VECTOR_STORE
+
+    try:
+        VectorService().delete_document(document_id)
+    except Exception:
+        logger.exception(
+            "Failed to delete knowledgebase vectors after document cleanup",
+            extra={"document_id": document_id},
+        )
+
+    _VECTOR_STORE.pop(document_id, None)
 
     if not file_name:
         return
@@ -614,7 +672,7 @@ def delete_document_with_vectors(document):
     except Exception:
         logger.exception(
             "Failed to inspect knowledgebase file after document cleanup",
-            extra={"document_id": document.id, "file_name": file_name},
+            extra={"document_id": document_id, "file_name": file_name},
         )
         return
 
@@ -624,7 +682,7 @@ def delete_document_with_vectors(document):
         except Exception:
             logger.exception(
                 "Failed to delete knowledgebase file after document cleanup",
-                extra={"document_id": document.id, "file_name": file_name},
+                extra={"document_id": document_id, "file_name": file_name},
             )
 
 
