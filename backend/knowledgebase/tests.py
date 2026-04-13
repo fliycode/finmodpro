@@ -399,6 +399,30 @@ class KnowledgebaseApiTests(TestCase):
             self.assertEqual(response.status_code, 400)
             self.assertEqual(response.json(), {"message": "document_ids 必须是整数数组。"})
 
+    def test_batch_ingest_rejects_malformed_utf8_body(self):
+        response = self.client.generic(
+            "POST",
+            "/api/knowledgebase/documents/batch/ingest",
+            b"\xff",
+            content_type="application/json",
+            HTTP_AUTHORIZATION=f"Bearer {self.access_token}",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json(), {"message": "请求体必须是合法 JSON。"})
+
+    def test_batch_delete_rejects_malformed_utf8_body(self):
+        response = self.client.generic(
+            "POST",
+            "/api/knowledgebase/documents/batch/delete",
+            b"\xff",
+            content_type="application/json",
+            HTTP_AUTHORIZATION=f"Bearer {self.access_token}",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json(), {"message": "请求体必须是合法 JSON。"})
+
     def test_document_list_filters_and_paginates_results(self):
         now = timezone.now()
 
@@ -1136,6 +1160,31 @@ class KnowledgebaseAsyncQueueTests(TestCase):
         self.assertFalse(created)
         self.assertEqual(ingestion_task.id, running_task.id)
         delay_mock.assert_not_called()
+
+    def test_enqueue_document_ingestion_locks_document_before_creating_task(self):
+        document = create_document_from_upload(
+            uploaded_file=SimpleUploadedFile(
+                "lock.txt",
+                b"lock me",
+                content_type="text/plain",
+            ),
+            title="Lock doc",
+            source_date="2025-03-01",
+        )
+
+        with patch.object(
+            Document.objects,
+            "select_for_update",
+            wraps=Document.objects.select_for_update,
+        ) as select_for_update_mock, patch(
+            "knowledgebase.tasks.ingest_document_task.delay",
+            return_value=SimpleNamespace(id="celery-task-lock"),
+        ):
+            ingestion_task, created = enqueue_document_ingestion(document)
+
+        self.assertTrue(created)
+        self.assertEqual(ingestion_task.status, IngestionTask.STATUS_QUEUED)
+        select_for_update_mock.assert_called_once()
 
     def test_batch_delete_skips_document_with_active_ingestion_task(self):
         document = create_document_from_upload(

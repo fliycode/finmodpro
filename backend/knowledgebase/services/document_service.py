@@ -6,6 +6,7 @@ from pathlib import Path
 
 from django.contrib.auth import get_user_model
 from django.conf import settings
+from django.db import transaction
 from django.db.models import Q
 from django.utils import timezone
 
@@ -504,27 +505,32 @@ def ingest_document(document, ingestion_task=None):
 def enqueue_document_ingestion(document):
     from knowledgebase.tasks import ingest_document_task
 
-    latest_task = document.ingestion_tasks.order_by("id").last()
-    if latest_task and latest_task.status in {
-        IngestionTask.STATUS_QUEUED,
-        IngestionTask.STATUS_RUNNING,
-    }:
-        return latest_task, False
-
-    document.status = Document.STATUS_UPLOADED
-    document.error_message = ""
-    document.save(update_fields=["status", "error_message", "updated_at"])
-    ingestion_task = IngestionTask.objects.create(
-        document=document,
-        status=IngestionTask.STATUS_QUEUED,
-        current_step=IngestionTask.STEP_QUEUED,
-    )
     broker_url = str(getattr(settings, "CELERY_BROKER_URL", "") or "")
     should_run_inline = settings.CELERY_TASK_ALWAYS_EAGER or broker_url.startswith("memory://")
+
+    with transaction.atomic():
+        locked_document = Document.objects.select_for_update().get(id=document.id)
+        latest_task = locked_document.ingestion_tasks.order_by("id").last()
+        if latest_task and latest_task.status in {
+            IngestionTask.STATUS_QUEUED,
+            IngestionTask.STATUS_RUNNING,
+        }:
+            return latest_task, False
+
+        locked_document.status = Document.STATUS_UPLOADED
+        locked_document.error_message = ""
+        locked_document.save(update_fields=["status", "error_message", "updated_at"])
+        ingestion_task = IngestionTask.objects.create(
+            document=locked_document,
+            status=IngestionTask.STATUS_QUEUED,
+            current_step=IngestionTask.STEP_QUEUED,
+        )
+
     if should_run_inline:
-        async_result = ingest_document_task.apply(args=(document.id, ingestion_task.id))
+        async_result = ingest_document_task.apply(args=(locked_document.id, ingestion_task.id))
     else:
-        async_result = ingest_document_task.delay(document.id, ingestion_task.id)
+        async_result = ingest_document_task.delay(locked_document.id, ingestion_task.id)
+
     ingestion_task.celery_task_id = async_result.id or ""
     ingestion_task.save(update_fields=["celery_task_id", "updated_at"])
     return ingestion_task, True
