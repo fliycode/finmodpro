@@ -6,7 +6,7 @@ from pathlib import Path
 
 from django.contrib.auth import get_user_model
 from django.conf import settings
-from django.db import transaction
+from django.db import DatabaseError, OperationalError, ProgrammingError, transaction
 from django.db.models import Q
 from django.utils import timezone
 
@@ -554,7 +554,19 @@ def batch_enqueue_document_ingestion(user, document_ids):
             )
             continue
 
-        ingestion_task, created = enqueue_document_ingestion(document)
+        try:
+            ingestion_task, created = enqueue_document_ingestion(document)
+        except Document.DoesNotExist:
+            skipped_count += 1
+            results.append(
+                {
+                    "document_id": document_id,
+                    "status": "missing",
+                    "reason": "文档不存在。",
+                }
+            )
+            continue
+
         if created:
             accepted_count += 1
             results.append(
@@ -659,6 +671,8 @@ def batch_delete_documents(user, document_ids):
                 }
             )
             continue
+        except (OperationalError, ProgrammingError, DatabaseError):
+            raise
         except Exception as exc:
             failed_count += 1
             results.append(
