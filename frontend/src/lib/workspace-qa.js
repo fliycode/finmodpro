@@ -35,9 +35,33 @@ export function normalizeHistoryItems(items) {
 
   return items.map((item) => ({
     id: item.id,
-    title: item.title || '未命名会话',
-    preview: item.lastMessagePreview || item.lastMessage || '暂无会话内容',
-    timestamp: formatHistoryTimestamp(item.updatedAt || item.timestamp || item.updated_at),
-    rawTimestamp: item.updatedAt || item.timestamp || item.updated_at || '',
-  }));
+      title: item.title || '未命名会话',
+      preview: item.lastMessagePreview || item.lastMessage || '暂无会话内容',
+      timestamp: formatHistoryTimestamp(item.updatedAt || item.timestamp || item.updated_at),
+      rawTimestamp: item.updatedAt || item.timestamp || item.updated_at || '',
+      contextFilters: item.contextFilters || item.context_filters || {},
+    }));
+}
+
+export function buildHistoryQuery({ datasetId = null, keyword = '' } = {}) {
+  const params = new URLSearchParams();
+
+  if (datasetId !== null && datasetId !== undefined && String(datasetId).trim() !== '') {
+    params.set('dataset_id', String(datasetId).trim());
+  }
+
+  const normalizedKeyword = String(keyword || '').trim();
+  if (normalizedKeyword) {
+    params.set('keyword', normalizedKeyword);
+  }
+
+  return params.toString();
+}
+
+export function buildSessionExportDownload(payload = {}) {
+  const sessionId = payload?.session?.id ?? 'session';
+  return {
+    filename: `chat-session-${sessionId}.json`,
+    content: JSON.stringify(payload, null, 2),
+  };
 }

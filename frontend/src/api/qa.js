@@ -72,9 +72,41 @@ const parseSse = (buffer, onEvent) => {
   return remaining;
 };
 
+const normalizeAskOptions = (filtersOrOptions = {}, topKOverride) => {
+  if (
+    filtersOrOptions
+    && !Array.isArray(filtersOrOptions)
+    && typeof filtersOrOptions === 'object'
+    && (
+      Object.prototype.hasOwnProperty.call(filtersOrOptions, 'filters')
+      || Object.prototype.hasOwnProperty.call(filtersOrOptions, 'top_k')
+      || Object.prototype.hasOwnProperty.call(filtersOrOptions, 'sessionId')
+      || Object.prototype.hasOwnProperty.call(filtersOrOptions, 'session_id')
+    )
+  ) {
+    return {
+      filters: filtersOrOptions.filters ?? {},
+      top_k: filtersOrOptions.top_k ?? topKOverride ?? 5,
+      sessionId: filtersOrOptions.sessionId ?? filtersOrOptions.session_id ?? null,
+    };
+  }
+
+  return {
+    filters: filtersOrOptions ?? {},
+    top_k: topKOverride ?? 5,
+    sessionId: null,
+  };
+};
+
 export const qaApi = {
-  async askQuestion(query, filters = {}, top_k = 5) {
-    const payload = { question: query, filters, top_k };
+  async askQuestion(query, filtersOrOptions = {}, top_k = 5) {
+    const options = normalizeAskOptions(filtersOrOptions, top_k);
+    const payload = {
+      question: query,
+      filters: options.filters,
+      top_k: options.top_k,
+      ...(options.sessionId ? { session_id: options.sessionId } : {}),
+    };
 
     try {
       const data = await apiConfig.fetchJson('/api/chat/ask', {
@@ -88,8 +120,16 @@ export const qaApi = {
     }
   },
 
-  async streamQuestion(query, { filters = {}, top_k = 5, onMeta, onChunk, onDone } = {}) {
-    const payload = { question: query, filters, top_k };
+  async streamQuestion(
+    query,
+    { filters = {}, top_k = 5, sessionId = null, onMeta, onChunk, onDone } = {},
+  ) {
+    const payload = {
+      question: query,
+      filters,
+      top_k,
+      ...(sessionId ? { session_id: sessionId } : {}),
+    };
     const response = await apiConfig.fetchImpl(joinUrl(apiConfig.baseURL, '/api/chat/ask/stream'), {
       method: 'POST',
       headers: apiConfig.getAuthHeaders(),

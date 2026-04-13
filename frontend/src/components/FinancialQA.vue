@@ -1,6 +1,6 @@
 <script setup>
 import { computed, nextTick, onMounted, ref, watch } from 'vue';
-import { useRouter } from 'vue-router';
+import { useRoute, useRouter } from 'vue-router';
 
 import { chatApi } from '../api/chat.js';
 import { qaApi } from '../api/qa.js';
@@ -16,6 +16,7 @@ const props = defineProps({
 
 const DEFAULT_SYSTEM_MESSAGE = '您好，我是您的金融助手。请输入您的金融问题。';
 
+const route = useRoute();
 const router = useRouter();
 const currentSessionId = ref(props.sessionId);
 const query = ref('');
@@ -26,6 +27,21 @@ const sessionOptions = ref([]);
 const isLoadingSessions = ref(false);
 const isHydratingSession = ref(false);
 const historyDrawerOpen = ref(false);
+const activeSessionFilters = ref({});
+
+const normalizeDatasetId = (value) => {
+  if (value === null || value === undefined || String(value).trim() === '') {
+    return null;
+  }
+
+  const numericValue = Number(value);
+  return Number.isNaN(numericValue) ? String(value).trim() : numericValue;
+};
+
+const getDefaultSessionFilters = () => {
+  const datasetId = normalizeDatasetId(route.query.dataset);
+  return datasetId === null ? {} : { dataset_id: datasetId };
+};
 
 const hasStreamingAssistant = computed(() =>
   messages.value.some((message) => message.isStreaming),
@@ -36,6 +52,9 @@ const activeSessionLabel = computed(() =>
 );
 
 const historyItems = computed(() => normalizeHistoryItems(sessionOptions.value));
+const activeDatasetId = computed(() =>
+  activeSessionFilters.value?.dataset_id ?? normalizeDatasetId(route.query.dataset),
+);
 
 const getAvatarLabel = (role) => {
   if (role === 'user') return '我';
@@ -76,7 +95,9 @@ const resetConversation = () => {
 const refreshSessionOptions = async () => {
   isLoadingSessions.value = true;
   try {
-    sessionOptions.value = await chatApi.listHistory();
+    sessionOptions.value = await chatApi.listHistory({
+      datasetId: activeDatasetId.value,
+    });
   } catch (error) {
     console.error('加载会话列表失败:', error);
   } finally {
@@ -108,6 +129,7 @@ const loadSession = async (id) => {
   isHydratingSession.value = true;
   try {
     const session = await chatApi.getSession(id);
+    activeSessionFilters.value = session.contextFilters || {};
     if (Array.isArray(session.messages) && session.messages.length > 0) {
       messages.value = session.messages;
     } else {
@@ -127,6 +149,7 @@ const loadSession = async (id) => {
   } finally {
     isHydratingSession.value = false;
   }
+  await refreshSessionOptions();
   await scrollToBottom();
 };
 
@@ -144,9 +167,11 @@ const openSession = async (id) => {
 const startNewConversation = async () => {
   currentSessionId.value = null;
   query.value = '';
+  activeSessionFilters.value = getDefaultSessionFilters();
   resetConversation();
   historyDrawerOpen.value = false;
   await clearSessionRoute();
+  await refreshSessionOptions();
 };
 
 watch(() => props.sessionId, async (newId) => {
@@ -156,11 +181,23 @@ watch(() => props.sessionId, async (newId) => {
     return;
   }
   if (!newId) {
+    activeSessionFilters.value = getDefaultSessionFilters();
     resetConversation();
   }
 });
 
+watch(
+  () => route.query.dataset,
+  async () => {
+    if (!currentSessionId.value) {
+      activeSessionFilters.value = getDefaultSessionFilters();
+    }
+    await refreshSessionOptions();
+  },
+);
+
 onMounted(async () => {
+  activeSessionFilters.value = getDefaultSessionFilters();
   await refreshSessionOptions();
   if (currentSessionId.value) {
     await loadSession(currentSessionId.value);
@@ -191,9 +228,13 @@ const handleAsk = async () => {
   try {
     if (!currentSessionId.value) {
       try {
-        const session = await chatApi.createSession(currentQuery.slice(0, 50));
+        const session = await chatApi.createSession({
+          title: currentQuery.slice(0, 50),
+          contextFilters: activeSessionFilters.value,
+        });
         if (session?.id) {
           currentSessionId.value = session.id;
+          activeSessionFilters.value = session.contextFilters || activeSessionFilters.value;
           await refreshSessionOptions();
           await syncSessionRoute(session.id);
         }
@@ -212,6 +253,8 @@ const handleAsk = async () => {
     await scrollToBottom();
 
     const finalState = await qaApi.streamQuestion(currentQuery, {
+      sessionId: currentSessionId.value,
+      filters: activeSessionFilters.value,
       onMeta(meta) {
         assistantMessage.citations = meta.citations;
         assistantMessage.answer_mode = meta.answer_mode;

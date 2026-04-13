@@ -1,3 +1,4 @@
+from django.http import JsonResponse
 from rest_framework.views import APIView
 
 from chat.models import ChatSession
@@ -8,6 +9,7 @@ from chat.serializers import (
     CreateChatSessionSerializer,
 )
 from chat.services.session_service import (
+    build_chat_session_export,
     create_chat_session,
     get_chat_session_for_user,
     list_chat_sessions_for_user,
@@ -27,7 +29,11 @@ class ChatSessionCreateView(APIView):
         if not user_has_permission(user, "auth.ask_financial_qa"):
             return error_response(code=403, message="无权限。", status_code=403)
 
-        sessions = list_chat_sessions_for_user(user=user)
+        sessions = list_chat_sessions_for_user(
+            user=user,
+            dataset_id=request.query_params.get("dataset_id"),
+            keyword=request.query_params.get("keyword", ""),
+        )
         return success_response(data={"sessions": ChatSessionListSerializer(sessions, many=True).data})
 
     def post(self, request):
@@ -74,3 +80,24 @@ class ChatSessionDetailView(APIView):
             return error_response(code=404, message="会话不存在。", status_code=404)
 
         return success_response(data={"session": ChatSessionDetailSerializer(session).data})
+
+
+class ChatSessionExportView(APIView):
+    authentication_classes = []
+    permission_classes = []
+
+    def get(self, request, session_id):
+        user = get_authenticated_user(request)
+        if user is None:
+            return error_response(code=401, message="未认证。", status_code=401)
+        if not user_has_permission(user, "auth.ask_financial_qa"):
+            return error_response(code=403, message="无权限。", status_code=403)
+
+        try:
+            session = get_chat_session_for_user(user=user, session_id=session_id)
+        except PermissionError as exc:
+            return error_response(code=403, message=str(exc), status_code=403)
+        except ChatSession.DoesNotExist:
+            return error_response(code=404, message="会话不存在。", status_code=404)
+
+        return JsonResponse(build_chat_session_export(session=session))

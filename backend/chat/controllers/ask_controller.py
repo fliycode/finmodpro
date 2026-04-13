@@ -4,7 +4,9 @@ from django.http import JsonResponse, StreamingHttpResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
 
+from chat.models import ChatSession
 from chat.services.ask_service import ask_question, stream_question
+from chat.services.session_service import get_chat_session_for_user
 from common.exceptions import (
     ModelNotConfiguredError,
     ProviderConfigurationError,
@@ -131,6 +133,7 @@ def _parse_request_payload(request):
     question = ((payload.get("question") or payload.get("query") or "")).strip()
     filters = payload.get("filters") or {}
     top_k = payload.get("top_k", 5)
+    session_id = payload.get("session_id")
 
     if not question:
         return None, JsonResponse(
@@ -142,7 +145,23 @@ def _parse_request_payload(request):
             {"message": "filters 必须是对象。"},
             status=400,
         )
-    return {"question": question, "filters": filters, "top_k": top_k}, None
+    if session_id in ("", None):
+        normalized_session_id = None
+    else:
+        try:
+            normalized_session_id = int(session_id)
+        except (TypeError, ValueError):
+            return None, JsonResponse(
+                {"message": "session_id 必须是整数。"},
+                status=400,
+            )
+
+    return {
+        "question": question,
+        "filters": filters,
+        "top_k": top_k,
+        "session_id": normalized_session_id,
+    }, None
 
 
 @csrf_exempt
@@ -153,11 +172,21 @@ def chat_ask_view(request):
     if error_response is not None:
         return error_response
 
+    session = None
+    if parsed_request["session_id"] is not None:
+        try:
+            session = get_chat_session_for_user(user=request.user, session_id=parsed_request["session_id"])
+        except PermissionError as exc:
+            return JsonResponse({"message": str(exc)}, status=403)
+        except ChatSession.DoesNotExist:
+            return JsonResponse({"message": "会话不存在。"}, status=404)
+
     try:
         response_payload = ask_question(
             question=parsed_request["question"],
             filters=parsed_request["filters"],
             top_k=parsed_request["top_k"],
+            session=session,
         )
     except ServiceConfigurationError as exc:
         return _build_configuration_error_response(exc)
@@ -177,11 +206,21 @@ def chat_ask_stream_view(request):
     if error_response is not None:
         return error_response
 
+    session = None
+    if parsed_request["session_id"] is not None:
+        try:
+            session = get_chat_session_for_user(user=request.user, session_id=parsed_request["session_id"])
+        except PermissionError as exc:
+            return JsonResponse({"message": str(exc)}, status=403)
+        except ChatSession.DoesNotExist:
+            return JsonResponse({"message": "会话不存在。"}, status=404)
+
     try:
         event_iterator = stream_question(
             question=parsed_request["question"],
             filters=parsed_request["filters"],
             top_k=parsed_request["top_k"],
+            session=session,
         )
     except ServiceConfigurationError as exc:
         return _build_configuration_error_response(exc)
