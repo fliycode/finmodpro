@@ -12,12 +12,20 @@ const props = defineProps({
     type: [String, Number],
     default: null,
   },
+  enableExport: {
+    type: Boolean,
+    default: false,
+  },
 });
 
-const emit = defineEmits(['open-session', 'refresh']);
+const emit = defineEmits(['open-session', 'refresh', 'export-session']);
 
 const handleOpenSession = (id) => {
   emit('open-session', id);
+};
+
+const handleExportSession = (id) => {
+  emit('export-session', id);
 };
 </script>
 
@@ -47,13 +55,11 @@ const handleOpenSession = (id) => {
       </div>
     </div>
     <div v-else class="history-list">
-      <button
+      <article
         v-for="item in items"
         :key="item.id"
-        type="button"
         class="history-item"
         :class="{ 'is-active': String(activeSessionId) === String(item.id) }"
-        @click="handleOpenSession(item.id)"
       >
         <div class="item-main">
           <div class="item-title">{{ item.title }}</div>
@@ -61,9 +67,19 @@ const handleOpenSession = (id) => {
         </div>
         <div class="item-meta">
           <div class="item-time">{{ item.timestamp }}</div>
-          <span class="view-btn">继续对话</span>
+          <div class="item-actions">
+            <button type="button" class="view-btn" @click="handleOpenSession(item.id)">继续对话</button>
+            <button
+              v-if="enableExport"
+              type="button"
+              class="export-btn"
+              @click="handleExportSession(item.id)"
+            >
+              导出
+            </button>
+          </div>
         </div>
-      </button>
+      </article>
     </div>
   </div>
 </template>
@@ -158,7 +174,6 @@ const handleOpenSession = (id) => {
 
 .history-item {
   text-align: left;
-  cursor: pointer;
   transition: all 0.2s;
 }
 
@@ -210,13 +225,29 @@ const handleOpenSession = (id) => {
   color: var(--text-muted);
 }
 
-.view-btn {
+.item-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.view-btn,
+.export-btn {
+  border: none;
   padding: 6px 12px;
-  background: var(--surface-3);
-  color: var(--brand);
+  cursor: pointer;
   border-radius: 999px;
   font-size: 12px;
   font-weight: 600;
+}
+
+.view-btn {
+  background: var(--surface-3);
+  color: var(--brand);
+}
+
+.export-btn {
+  background: rgba(16, 35, 61, 0.08);
+  color: var(--text-secondary);
 }
 
 .skeleton-title,

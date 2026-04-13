@@ -317,6 +317,67 @@ class ChatAskApiTests(TestCase):
         self.assertIn('"answer_mode": "fallback"', body)
         self.assertIn("answer_notice", body)
 
+    @patch("chat.services.ask_service.retrieve", return_value=[])
+    def test_chat_ask_persists_session_messages_and_uses_session_filters(self, mocked_retrieve):
+        session = ChatSession.objects.create(
+            user=self.user,
+            title="数据集问答",
+            context_filters={"dataset_id": 7, "doc_type": "txt"},
+        )
+
+        response = self.client.post(
+            "/api/chat/ask",
+            data=json.dumps({"question": "revenue outlook", "session_id": session.id}),
+            content_type="application/json",
+            HTTP_AUTHORIZATION=f"Bearer {self.access_token}",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        mocked_retrieve.assert_called_once_with(
+            query="revenue outlook",
+            filters={"dataset_id": 7, "doc_type": "txt"},
+            top_k=5,
+        )
+        session.refresh_from_db()
+        self.assertEqual(
+            list(session.messages.values_list("role", "content")),
+            [
+                (ChatMessage.ROLE_USER, "revenue outlook"),
+                (ChatMessage.ROLE_ASSISTANT, "revenue outlook"),
+            ],
+        )
+
+    @patch("chat.services.ask_service.retrieve", return_value=[])
+    def test_chat_stream_persists_session_messages_and_uses_session_filters(self, mocked_retrieve):
+        session = ChatSession.objects.create(
+            user=self.user,
+            title="流式数据集问答",
+            context_filters={"dataset_id": 11},
+        )
+
+        response = self.client.post(
+            "/api/chat/ask/stream",
+            data=json.dumps({"question": "cash flow outlook", "session_id": session.id}),
+            content_type="application/json",
+            HTTP_AUTHORIZATION=f"Bearer {self.access_token}",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        body = b"".join(response.streaming_content).decode("utf-8")
+        self.assertIn("cash flow outlook", body)
+        mocked_retrieve.assert_called_once_with(
+            query="cash flow outlook",
+            filters={"dataset_id": 11},
+            top_k=5,
+        )
+        self.assertEqual(
+            list(session.messages.values_list("role", "content")),
+            [
+                (ChatMessage.ROLE_USER, "cash flow outlook"),
+                (ChatMessage.ROLE_ASSISTANT, "cash flow outlook"),
+            ],
+        )
+
     def test_chat_ask_requires_question_or_query(self):
         response = self.client.post(
             "/api/chat/ask",
@@ -778,6 +839,48 @@ class ChatSessionListApiTests(TestCase):
         self.assertIn("created_at", session_payload)
         self.assertIn("updated_at", session_payload)
 
+    def test_list_sessions_filters_by_dataset_and_keyword(self):
+        first_session = ChatSession.objects.create(
+            user=self.user,
+            title="流动性风险讨论",
+            context_filters={"dataset_id": 7},
+        )
+        ChatMessage.objects.create(
+            session=first_session,
+            role=ChatMessage.ROLE_USER,
+            content="现金流承压",
+        )
+        second_session = ChatSession.objects.create(
+            user=self.user,
+            title="信用风险回顾",
+            context_filters={"dataset_id": 7},
+        )
+        ChatMessage.objects.create(
+            session=second_session,
+            role=ChatMessage.ROLE_ASSISTANT,
+            content="资本充足率下降",
+        )
+        third_session = ChatSession.objects.create(
+            user=self.user,
+            title="汇率敞口分析",
+            context_filters={"dataset_id": 8},
+        )
+        ChatMessage.objects.create(
+            session=third_session,
+            role=ChatMessage.ROLE_USER,
+            content="美元波动扩大",
+        )
+
+        response = self.client.get(
+            "/api/chat/sessions?dataset_id=7&keyword=资本",
+            HTTP_AUTHORIZATION=f"Bearer {self.access_token}",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        sessions = response.json()["data"]["sessions"]
+        self.assertEqual([session["id"] for session in sessions], [second_session.id])
+        self.assertEqual(sessions[0]["title"], "信用风险回顾")
+
 
 @override_settings(
     JWT_SECRET_KEY="test-jwt-secret",
@@ -875,6 +978,23 @@ class ChatSessionDetailApiTests(TestCase):
             response.json(),
             {"code": 404, "message": "会话不存在。", "data": {}},
         )
+
+    def test_session_export_returns_transcript_payload(self):
+        response = self.client.get(
+            f"/api/chat/sessions/{self.session.id}/export",
+            HTTP_AUTHORIZATION=f"Bearer {self.access_token}",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["session"]["id"], self.session.id)
+        self.assertEqual(payload["session"]["title"], "压力测试会话")
+        self.assertEqual(payload["session"]["context_filters"], {"doc_type": "pdf"})
+        self.assertEqual(
+            [message["content"] for message in payload["session"]["messages"]],
+            ["第一条问题", "第二条回答"],
+        )
+        self.assertIn("exported_at", payload)
 
 
 @override_settings(

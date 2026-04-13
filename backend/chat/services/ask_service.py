@@ -1,5 +1,6 @@
 import time
 
+from chat.services.session_service import normalize_context_filters, persist_session_turn
 from llm.services.prompt_service import render_prompt
 from llm.services.runtime_service import get_chat_provider
 from rag.models import RetrievalLog
@@ -37,9 +38,18 @@ def _build_messages(question, citations):
     return [{"role": "user", "content": prompt}]
 
 
-def _prepare_answer(question, filters=None, top_k=5):
+def _resolve_filters(filters=None, session=None):
+    resolved_filters = {}
+    if session is not None:
+        resolved_filters.update(normalize_context_filters(session.context_filters))
+    resolved_filters.update(normalize_context_filters(filters))
+    return resolved_filters
+
+
+def _prepare_answer(question, filters=None, top_k=5, session=None):
     started_at = time.monotonic()
-    retrieval_results = retrieve(query=question, filters=filters, top_k=top_k)
+    resolved_filters = _resolve_filters(filters, session=session)
+    retrieval_results = retrieve(query=question, filters=resolved_filters, top_k=top_k)
     retrieval_payload = build_retrieval_response(query=question, results=retrieval_results)
     citations = retrieval_payload["citations"]
     duration_ms = int((time.monotonic() - started_at) * 1000)
@@ -52,7 +62,7 @@ def _prepare_answer(question, filters=None, top_k=5):
         "answer_notice": _build_answer_notice(citations),
         "duration_ms": duration_ms,
         "retrieval_results": retrieval_results,
-        "filters": filters or {},
+        "filters": resolved_filters,
         "top_k": top_k,
     }
 
@@ -68,9 +78,11 @@ def _record_retrieval_log(payload):
     )
 
 
-def ask_question(*, question, filters=None, top_k=5):
-    payload = _prepare_answer(question, filters=filters, top_k=top_k)
+def ask_question(*, question, filters=None, top_k=5, session=None):
+    payload = _prepare_answer(question, filters=filters, top_k=top_k, session=session)
     answer = get_chat_provider().chat(messages=payload["messages"])
+    if session is not None:
+        persist_session_turn(session=session, question=payload["question"], answer=answer)
     _record_retrieval_log(payload)
     return {
         "question": payload["question"],
@@ -83,8 +95,8 @@ def ask_question(*, question, filters=None, top_k=5):
     }
 
 
-def stream_question(*, question, filters=None, top_k=5):
-    payload = _prepare_answer(question, filters=filters, top_k=top_k)
+def stream_question(*, question, filters=None, top_k=5, session=None):
+    payload = _prepare_answer(question, filters=filters, top_k=top_k, session=session)
     provider = get_chat_provider()
 
     def event_stream():
@@ -115,6 +127,8 @@ def stream_question(*, question, filters=None, top_k=5):
             yield {"event": "chunk", "data": {"content": answer}}
 
         answer = "".join(chunks)
+        if session is not None:
+            persist_session_turn(session=session, question=payload["question"], answer=answer)
         _record_retrieval_log(payload)
         yield {
             "event": "done",
