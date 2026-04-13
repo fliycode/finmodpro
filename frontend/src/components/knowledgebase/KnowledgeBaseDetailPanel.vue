@@ -22,6 +22,18 @@ defineProps({
     type: Boolean,
     default: false,
   },
+  versions: {
+    type: Array,
+    default: () => [],
+  },
+  isLoadingVersions: {
+    type: Boolean,
+    default: false,
+  },
+  isUploadingVersion: {
+    type: Boolean,
+    default: false,
+  },
   chunks: {
     type: Array,
     default: () => [],
@@ -42,6 +54,7 @@ defineProps({
 
 defineEmits([
   'ingest',
+  'upload-version',
   'preview',
   'open-original',
   'change-tab',
@@ -50,6 +63,7 @@ defineEmits([
 
 const tabs = [
   { id: 'processing', label: '处理详情' },
+  { id: 'versions', label: '版本记录' },
   { id: 'chunks', label: 'Chunks' },
   { id: 'errors', label: '错误日志' },
 ];
@@ -65,6 +79,14 @@ const tabs = [
           <p class="kb-detail__summary">{{ document.processResult }}</p>
         </div>
         <div class="kb-detail__header-actions">
+          <button
+            v-if="document"
+            class="kb-secondary-btn"
+            :disabled="isUploadingVersion"
+            @click="$emit('upload-version')"
+          >
+            {{ isUploadingVersion ? '上传中...' : '上传新版本' }}
+          </button>
           <button
             v-if="primaryAction"
             :class="primaryAction.emphasis === 'primary' ? 'kb-primary-btn' : 'kb-secondary-btn'"
@@ -100,6 +122,22 @@ const tabs = [
         <div class="meta-item">
           <span>更新时间</span>
           <strong>{{ document.updateTime }}</strong>
+        </div>
+        <div class="meta-item">
+          <span>数据集</span>
+          <strong>{{ document.datasetName }}</strong>
+        </div>
+        <div class="meta-item">
+          <span>当前版本</span>
+          <strong>v{{ document.currentVersion }}</strong>
+        </div>
+        <div class="meta-item">
+          <span>来源类型</span>
+          <strong>{{ document.sourceType || '未标记' }}</strong>
+        </div>
+        <div class="meta-item">
+          <span>来源标签</span>
+          <strong>{{ document.sourceLabel || '未标记' }}</strong>
         </div>
         <div class="meta-item">
           <span>切块数量</span>
@@ -154,6 +192,72 @@ const tabs = [
               <strong>{{ document.latestTask?.finishedAtText || 'N/A' }}</strong>
             </div>
           </div>
+        </div>
+      </div>
+
+      <div v-else-if="activeTab === 'versions'" class="kb-detail__section">
+        <div class="kb-version-summary">
+          <div>
+            <span class="meta-label">根文档 ID</span>
+            <strong>{{ document.rootDocumentId }}</strong>
+          </div>
+          <div>
+            <span class="meta-label">版本总数</span>
+            <strong>{{ document.versionCount }}</strong>
+          </div>
+        </div>
+
+        <div v-if="document.processingNotes" class="kb-provenance-card">
+          <span class="meta-label">处理备注</span>
+          <p>{{ document.processingNotes }}</p>
+        </div>
+
+        <div v-if="document.sourceMetadata && Object.keys(document.sourceMetadata).length" class="kb-provenance-card">
+          <span class="meta-label">来源元数据</span>
+          <pre>{{ JSON.stringify(document.sourceMetadata, null, 2) }}</pre>
+        </div>
+
+        <div v-if="isLoadingVersions" class="kb-empty-state">
+          正在加载版本记录...
+        </div>
+        <div v-else-if="versions.length === 0" class="kb-empty-state">
+          当前文档还没有版本记录。
+        </div>
+        <div v-else class="kb-version-list">
+          <article
+            v-for="version in versions"
+            :key="`${version.documentId}-${version.versionNumber}`"
+            class="kb-version-card"
+          >
+            <div class="kb-version-card__header">
+              <strong>v{{ version.versionNumber }}</strong>
+              <span
+                v-if="version.isCurrent"
+                class="status-chip tone-success"
+              >
+                当前版本
+              </span>
+            </div>
+            <p>{{ version.sourceLabel || '未标记来源' }}</p>
+            <div class="task-grid">
+              <div>
+                <span class="meta-label">来源类型</span>
+                <strong>{{ version.sourceType || '未标记' }}</strong>
+              </div>
+              <div>
+                <span class="meta-label">上传时间</span>
+                <strong>{{ version.createdAtText }}</strong>
+              </div>
+            </div>
+            <div v-if="Object.keys(version.sourceMetadata || {}).length" class="kb-version-card__metadata">
+              <span class="meta-label">来源元数据</span>
+              <pre>{{ JSON.stringify(version.sourceMetadata, null, 2) }}</pre>
+            </div>
+            <div v-if="version.processingNotes" class="kb-version-card__metadata">
+              <span class="meta-label">处理备注</span>
+              <p>{{ version.processingNotes }}</p>
+            </div>
+          </article>
         </div>
       </div>
 
@@ -257,6 +361,40 @@ const tabs = [
   border-radius: 16px;
   padding: 14px;
   background: #f7f9fc;
+}
+
+.kb-version-summary,
+.kb-version-list {
+  display: grid;
+  gap: 12px;
+}
+
+.kb-version-summary {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.kb-provenance-card,
+.kb-version-card {
+  border: 1px solid rgba(20, 32, 51, 0.08);
+  border-radius: 16px;
+  padding: 16px;
+  background: #f7f9fc;
+}
+
+.kb-version-card__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.kb-version-card__metadata pre,
+.kb-provenance-card pre {
+  overflow-x: auto;
+  white-space: pre-wrap;
+  margin: 8px 0 0;
+  font-size: 12px;
+  line-height: 1.6;
 }
 
 .meta-item span,

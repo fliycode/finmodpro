@@ -80,6 +80,9 @@ const isAllChecked = () => {
       <div class="kb-table__title">
         <strong>{{ item.title }}</strong>
         <span :title="item.filename">{{ item.filename }}</span>
+        <span class="kb-table__meta">
+          {{ item.datasetName }} · v{{ item.currentVersion }}
+        </span>
       </div>
 
       <div class="kb-table__cell">{{ item.uploaderName }}</div>
@@ -179,6 +182,10 @@ const isAllChecked = () => {
   color: #5a677d;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.kb-table__meta {
+  font-size: 12px;
 }
 
 .kb-table__actions {

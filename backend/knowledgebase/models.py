@@ -2,6 +2,23 @@ from django.conf import settings
 from django.db import models
 
 
+class Dataset(models.Model):
+    name = models.CharField(max_length=255, unique=True)
+    description = models.TextField(blank=True)
+    owner = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        related_name="owned_datasets",
+        on_delete=models.SET_NULL,
+        blank=True,
+        null=True,
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["id"]
+
+
 class Document(models.Model):
     VISIBILITY_PRIVATE = "private"
     VISIBILITY_INTERNAL = "internal"
@@ -43,6 +60,13 @@ class Document(models.Model):
         blank=True,
         null=True,
     )
+    dataset = models.ForeignKey(
+        Dataset,
+        related_name="documents",
+        on_delete=models.SET_NULL,
+        blank=True,
+        null=True,
+    )
     visibility = models.CharField(
         max_length=32,
         choices=VISIBILITY_CHOICES,
@@ -61,6 +85,32 @@ class Document(models.Model):
 
     class Meta:
         ordering = ["id"]
+
+
+class DocumentVersion(models.Model):
+    root_document = models.ForeignKey(
+        Document,
+        related_name="versions",
+        on_delete=models.CASCADE,
+    )
+    document = models.OneToOneField(
+        Document,
+        related_name="version_record",
+        on_delete=models.CASCADE,
+    )
+    version_number = models.PositiveIntegerField()
+    is_current = models.BooleanField(default=True)
+    source_type = models.CharField(max_length=64, blank=True, default="")
+    source_label = models.CharField(max_length=255, blank=True, default="")
+    source_metadata = models.JSONField(default=dict, blank=True)
+    processing_notes = models.TextField(blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-version_number", "-id"]
+        unique_together = (
+            ("root_document", "version_number"),
+        )
 
 
 class IngestionTask(models.Model):

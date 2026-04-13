@@ -67,6 +67,31 @@ const normalizePerson = (person) => {
   };
 };
 
+const normalizeDataset = (dataset) => {
+  if (!dataset || typeof dataset !== 'object') {
+    return null;
+  }
+
+  return {
+    id: dataset.id ?? null,
+    name: dataset.name || '',
+    description: dataset.description || '',
+    owner: normalizePerson(dataset.owner),
+    documentCount: Number(dataset.document_count ?? 0),
+    createdAt: dataset.created_at || null,
+    updatedAt: dataset.updated_at || null,
+    createdAtText: formatDateTime(dataset.created_at),
+    updatedAtText: formatDateTime(dataset.updated_at),
+  };
+};
+
+const normalizeProvenance = (provenance = {}) => ({
+  sourceType: provenance.source_type || '',
+  sourceLabel: provenance.source_label || '',
+  sourceMetadata: provenance.source_metadata || {},
+  processingNotes: provenance.processing_notes || '',
+});
+
 const buildProcessStep = (document, task) => {
   const status = String(document.status || '').toLowerCase();
   const step = String(task?.current_step || '').toLowerCase();
@@ -148,11 +173,25 @@ const buildProcessStep = (document, task) => {
   };
 };
 
-const normalizeDocument = (doc, fallback = {}) => {
+export const normalizeDocumentVersion = (version) => ({
+  documentId: version.document_id ?? null,
+  versionNumber: Number(version.version_number || 0),
+  isCurrent: Boolean(version.is_current),
+  sourceType: version.source_type || '',
+  sourceLabel: version.source_label || '',
+  sourceMetadata: version.source_metadata || {},
+  processingNotes: version.processing_notes || '',
+  createdAt: version.created_at || null,
+  createdAtText: formatDateTime(version.created_at),
+});
+
+export const normalizeDocument = (doc, fallback = {}) => {
   const uploader = normalizePerson(doc.uploader || doc.uploaded_by);
   const owner = normalizePerson(doc.owner);
   const latestTask = doc.latest_ingestion_task || null;
   const processStep = buildProcessStep(doc, latestTask);
+  const dataset = normalizeDataset(doc.dataset);
+  const provenance = normalizeProvenance(doc.provenance || doc);
 
   return {
     id: doc.id || fallback.id || '',
@@ -160,10 +199,22 @@ const normalizeDocument = (doc, fallback = {}) => {
     filename: doc.filename || doc.title || fallback.filename || '未命名文档',
     status: String(doc.status || fallback.status || 'uploaded').toLowerCase(),
     visibility: doc.visibility || 'internal',
+    dataset,
+    datasetName: dataset?.name || '未分组',
     uploader,
     owner,
     uploaderName: uploader?.displayName || '未设置',
     ownerName: owner?.displayName || '未设置',
+    rootDocumentId: Number(doc.root_document_id || doc.id || fallback.id || 0),
+    versionNumber: Number(doc.version_number || 1),
+    currentVersion: Number(doc.current_version || doc.version_number || 1),
+    versionCount: Number(doc.version_count || 1),
+    isCurrentVersion: doc.is_current_version !== false,
+    provenance,
+    sourceType: provenance.sourceType,
+    sourceLabel: provenance.sourceLabel,
+    sourceMetadata: provenance.sourceMetadata,
+    processingNotes: provenance.processingNotes,
     uploadTime: formatDateTime(doc.created_at || fallback.created_at),
     updateTime: formatDateTime(doc.updated_at || fallback.updated_at),
     sourceDate: doc.source_date || 'N/A',
@@ -189,6 +240,31 @@ const normalizeDocument = (doc, fallback = {}) => {
 };
 
 export const kbApi = {
+  async listDatasets() {
+    const response = await apiConfig.fetchImpl(joinUrl(apiConfig.baseURL, '/api/knowledgebase/datasets'), {
+      method: 'GET',
+      headers: getHeaders(),
+      auth: true,
+    });
+    const data = await parseResponse(response);
+    const datasets = Array.isArray(data.datasets) ? data.datasets : [];
+    return {
+      datasets: datasets.map((dataset) => normalizeDataset(dataset)),
+      total: Number(data.total ?? datasets.length ?? 0),
+    };
+  },
+
+  async createDataset(payload = {}) {
+    const response = await apiConfig.fetchImpl(joinUrl(apiConfig.baseURL, '/api/knowledgebase/datasets'), {
+      method: 'POST',
+      headers: getHeaders(),
+      body: JSON.stringify(payload),
+      auth: true,
+    });
+    const data = await parseResponse(response);
+    return normalizeDataset(data.dataset || data);
+  },
+
   async listDocuments(params = {}) {
     const query = new URLSearchParams(buildKnowledgebaseQuery(params));
     const path = query.toString()
@@ -214,11 +290,14 @@ export const kbApi = {
     };
   },
 
-  async uploadDocument(file) {
+  async uploadDocument(file, options = {}) {
     const formData = new FormData();
     formData.append('file', file);
     formData.append('title', file.name);
     formData.append('source_date', new Date().toISOString().split('T')[0]);
+    if (options.datasetId && options.datasetId !== 'all') {
+      formData.append('dataset_id', options.datasetId);
+    }
 
     const headers = getHeaders();
     delete headers['Content-Type'];
@@ -237,6 +316,54 @@ export const kbApi = {
         title: file.name,
         fileSize: file.size,
       }),
+    };
+  },
+
+  async listDocumentVersions(documentId) {
+    const response = await apiConfig.fetchImpl(joinUrl(apiConfig.baseURL, `/api/knowledgebase/documents/${documentId}/versions`), {
+      method: 'GET',
+      headers: getHeaders(),
+      auth: true,
+    });
+    const data = await parseResponse(response);
+    return {
+      documentId: Number(data.document_id || documentId),
+      currentVersion: Number(data.current_version || 1),
+      versions: Array.isArray(data.versions)
+        ? data.versions.map((version) => normalizeDocumentVersion(version))
+        : [],
+    };
+  },
+
+  async uploadNewVersion(documentId, file, metadata = {}) {
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('title', metadata.title || file.name);
+    formData.append('source_date', metadata.sourceDate || new Date().toISOString().split('T')[0]);
+    formData.append('source_type', metadata.sourceType || 'upload');
+    formData.append('source_label', metadata.sourceLabel || file.name);
+    formData.append(
+      'source_metadata',
+      JSON.stringify(metadata.sourceMetadata || {}),
+    );
+    formData.append('processing_notes', metadata.processingNotes || '');
+
+    const headers = getHeaders();
+    delete headers['Content-Type'];
+
+    const response = await apiConfig.fetchImpl(
+      joinUrl(apiConfig.baseURL, `/api/knowledgebase/documents/${documentId}/versions`),
+      {
+        method: 'POST',
+        headers,
+        body: formData,
+        auth: true,
+      },
+    );
+    const data = await parseResponse(response);
+    return {
+      ...data,
+      document: data.document ? normalizeDocument(data.document) : null,
     };
   },
 

@@ -20,22 +20,35 @@ import {
 const items = ref([]);
 const isLoading = ref(false);
 const isUploading = ref(false);
+const isUploadingVersion = ref(false);
 const isSubmittingTask = ref(false);
+const isLoadingDatasets = ref(false);
+const isCreatingDataset = ref(false);
+const isDatasetComposerOpen = ref(false);
 const selectedDocumentId = ref('');
 const selectedDocumentDetail = ref(null);
 const isLoadingDetail = ref(false);
+const selectedDatasetId = ref('all');
 const searchKeyword = ref('');
 const statusFilter = ref('all');
 const timeRange = ref('all');
 const checkedDocumentIds = ref([]);
 const fileInput = ref(null);
+const versionFileInput = ref(null);
 const currentPage = ref(1);
 const pagination = ref({ total: 0, page: 1, pageSize: 10, totalPages: 0 });
 const isPreviewOpen = ref(false);
 const activeTab = ref('processing');
+const datasets = ref([]);
+const versionHistory = ref([]);
+const isLoadingVersions = ref(false);
 const chunks = ref([]);
 const isLoadingChunks = ref(false);
 const expandedChunkIds = ref([]);
+const datasetForm = ref({
+  name: '',
+  description: '',
+});
 const flash = useFlash();
 const emptyDetailState = buildEmptyDetailState();
 
@@ -88,6 +101,10 @@ const failedCount = computed(() =>
   items.value.filter((item) => item.status === 'failed').length,
 );
 
+const activeDataset = computed(() =>
+  datasets.value.find((dataset) => String(dataset.id) === String(selectedDatasetId.value)) || null,
+);
+
 const taskHintText = computed(() => {
   if (isIngestionInFlight(selectedDocument.value)) {
     return '任务已启动，后台正在执行解析、切块和向量写入，完成后列表与详情会自动刷新。';
@@ -99,14 +116,35 @@ const taskHintText = computed(() => {
 const syncSelectionWithPage = () => {
   if (!selectedDocumentId.value) {
     selectedDocumentDetail.value = null;
+    versionHistory.value = [];
     return;
   }
 
   if (!items.value.some((item) => item.id === selectedDocumentId.value)) {
     selectedDocumentId.value = '';
     selectedDocumentDetail.value = null;
+    versionHistory.value = [];
     chunks.value = [];
     expandedChunkIds.value = [];
+  }
+};
+
+const fetchDatasets = async () => {
+  isLoadingDatasets.value = true;
+  try {
+    const result = await kbApi.listDatasets();
+    datasets.value = result.datasets || [];
+    if (
+      selectedDatasetId.value !== 'all'
+      && !datasets.value.some((dataset) => String(dataset.id) === String(selectedDatasetId.value))
+    ) {
+      selectedDatasetId.value = 'all';
+    }
+  } catch (error) {
+    console.error('加载数据集失败:', error);
+    flash.error(`加载数据集失败：${error.message || '未知错误'}`);
+  } finally {
+    isLoadingDatasets.value = false;
   }
 };
 
@@ -117,6 +155,7 @@ const fetchDocuments = async () => {
       searchKeyword: searchKeyword.value,
       statusFilter: statusFilter.value,
       timeRange: timeRange.value,
+      datasetId: selectedDatasetId.value,
       page: currentPage.value,
       pageSize: pagination.value.pageSize,
     });
@@ -172,8 +211,34 @@ const refreshSelectedChunks = async () => {
   }
 };
 
+const refreshSelectedVersions = async () => {
+  if (!selectedDocument.value?.rootDocumentId) {
+    versionHistory.value = [];
+    return;
+  }
+
+  isLoadingVersions.value = true;
+  try {
+    const payload = await kbApi.listDocumentVersions(selectedDocument.value.rootDocumentId);
+    versionHistory.value = payload.versions || [];
+  } catch (error) {
+    console.error('加载版本记录失败:', error);
+    versionHistory.value = [];
+  } finally {
+    isLoadingVersions.value = false;
+  }
+};
+
 const triggerUpload = () => {
   fileInput.value?.click();
+};
+
+const triggerVersionUpload = () => {
+  if (!selectedDocument.value) {
+    flash.error('请先选择一个文档后再上传新版本。');
+    return;
+  }
+  versionFileInput.value?.click();
 };
 
 const handleFileChange = async (event) => {
@@ -184,21 +249,69 @@ const handleFileChange = async (event) => {
 
   isUploading.value = true;
   try {
-    const uploadResult = await kbApi.uploadDocument(file);
+    const uploadResult = await kbApi.uploadDocument(file, {
+      datasetId: selectedDatasetId.value,
+    });
     if (uploadResult.document?.id) {
       selectedDocumentId.value = uploadResult.document.id;
       selectedDocumentDetail.value = uploadResult.document;
       activeTab.value = 'processing';
     }
-    flash.success('文件已上传。请启动入库任务，后台会异步完成解析、切块和向量化。');
+    flash.success(
+      selectedDatasetId.value !== 'all'
+        ? `文件已上传到“${activeDataset.value?.name || '当前数据集'}”。请启动入库任务。`
+        : '文件已上传。请启动入库任务，后台会异步完成解析、切块和向量化。',
+    );
+    await fetchDatasets();
     await fetchDocuments();
     await refreshSelectedDocument();
+    await refreshSelectedVersions();
     await refreshSelectedChunks();
   } catch (error) {
     console.error('上传文档失败:', error);
     flash.error(`上传失败：${error.message || '未知错误'}`);
   } finally {
     isUploading.value = false;
+    event.target.value = '';
+  }
+};
+
+const handleVersionFileChange = async (event) => {
+  const file = event.target.files?.[0];
+  if (!file || !selectedDocument.value) {
+    return;
+  }
+
+  isUploadingVersion.value = true;
+  try {
+    const result = await kbApi.uploadNewVersion(
+      selectedDocument.value.rootDocumentId,
+      file,
+      {
+        title: file.name,
+        sourceLabel: file.name,
+        sourceMetadata: {
+          replaced_document_id: selectedDocument.value.id,
+          dataset_id: selectedDocument.value.dataset?.id || null,
+        },
+      },
+    );
+    if (result.document?.id) {
+      selectedDocumentId.value = result.document.id;
+      selectedDocumentDetail.value = result.document;
+      activeTab.value = 'versions';
+    }
+    flash.success(result.message || '新版本已上传。');
+    await fetchDatasets();
+    await fetchDocuments();
+    await refreshSelectedDocument();
+    await refreshSelectedVersions();
+    await refreshSelectedChunks();
+  } catch (error) {
+    console.error('上传新版本失败:', error);
+    flash.error(`上传新版本失败：${error.message || '未知错误'}`);
+  } finally {
+    isUploadingVersion.value = false;
     event.target.value = '';
   }
 };
@@ -238,7 +351,32 @@ const selectDocument = async (item) => {
   activeTab.value = 'processing';
   expandedChunkIds.value = [];
   await refreshSelectedDocument();
+  await refreshSelectedVersions();
   await refreshSelectedChunks();
+};
+
+const createDataset = async () => {
+  if (!datasetForm.value.name.trim()) {
+    flash.error('请输入数据集名称。');
+    return;
+  }
+
+  isCreatingDataset.value = true;
+  try {
+    const dataset = await kbApi.createDataset(datasetForm.value);
+    flash.success(`数据集“${dataset.name}”已创建。`);
+    datasetForm.value = { name: '', description: '' };
+    isDatasetComposerOpen.value = false;
+    await fetchDatasets();
+    selectedDatasetId.value = String(dataset.id);
+    currentPage.value = 1;
+    await fetchDocuments();
+  } catch (error) {
+    console.error('创建数据集失败:', error);
+    flash.error(`创建数据集失败：${error.message || '未知错误'}`);
+  } finally {
+    isCreatingDataset.value = false;
+  }
 };
 
 const openLink = (url) => {
@@ -341,12 +479,13 @@ const startPolling = () => {
   }, 3000);
 };
 
-watch([searchKeyword, statusFilter, timeRange], async () => {
+watch([searchKeyword, statusFilter, timeRange, selectedDatasetId], async () => {
   currentPage.value = 1;
   await fetchDocuments();
 });
 
 onMounted(async () => {
+  await fetchDatasets();
   await fetchDocuments();
   startPolling();
 });
@@ -385,6 +524,10 @@ onUnmounted(() => {
           <span class="stat-label">失败</span>
           <strong>{{ failedCount }}</strong>
         </div>
+        <div class="stat-card">
+          <span class="stat-label">数据集</span>
+          <strong>{{ datasets.length }}</strong>
+        </div>
       </div>
     </section>
 
@@ -392,12 +535,56 @@ onUnmounted(() => {
       :search-keyword="searchKeyword"
       :status-filter="statusFilter"
       :time-range="timeRange"
+      :datasets="datasets"
+      :selected-dataset-id="selectedDatasetId"
       :is-uploading="isUploading"
       @update:search-keyword="searchKeyword = $event"
       @update:status-filter="statusFilter = $event"
       @update:time-range="timeRange = $event"
+      @update:selected-dataset-id="selectedDatasetId = $event"
+      @create-dataset="isDatasetComposerOpen = !isDatasetComposerOpen"
       @upload="triggerUpload"
     />
+
+    <section v-if="isDatasetComposerOpen" class="kb-dataset-composer ui-card">
+      <div class="kb-dataset-composer__copy">
+        <p class="eyebrow">数据集管理</p>
+        <h3>创建一个新的知识数据集</h3>
+        <p>
+          用于组织上传文档、限定检索范围，并为后续问答与风险抽取提供稳定的数据边界。
+        </p>
+      </div>
+      <div class="kb-dataset-composer__form">
+        <input
+          v-model="datasetForm.name"
+          class="kb-search"
+          type="text"
+          placeholder="例如：2025 年报数据集"
+        />
+        <textarea
+          v-model="datasetForm.description"
+          class="kb-textarea"
+          rows="3"
+          placeholder="补充该数据集的用途、来源或适用场景"
+        />
+        <div class="kb-dataset-composer__actions">
+          <button
+            class="kb-secondary-btn"
+            :disabled="isCreatingDataset"
+            @click="isDatasetComposerOpen = false"
+          >
+            取消
+          </button>
+          <button
+            class="kb-primary-btn"
+            :disabled="isCreatingDataset"
+            @click="createDataset"
+          >
+            {{ isCreatingDataset ? '创建中...' : '创建数据集' }}
+          </button>
+        </div>
+      </div>
+    </section>
 
     <div v-if="checkedDocumentIds.length > 0" class="kb-batchbar ui-card">
       <span>已选择 {{ checkedDocumentIds.length }} 个文档</span>
@@ -408,6 +595,7 @@ onUnmounted(() => {
     </div>
 
     <input ref="fileInput" type="file" hidden @change="handleFileChange" />
+    <input ref="versionFileInput" type="file" hidden @change="handleVersionFileChange" />
 
     <section class="kb-layout">
       <KnowledgeBaseTable
@@ -431,11 +619,15 @@ onUnmounted(() => {
         :active-tab="activeTab"
         :task-hint-text="taskHintText"
         :is-submitting-task="isSubmittingTask"
+        :versions="versionHistory"
+        :is-loading-versions="isLoadingVersions"
+        :is-uploading-version="isUploadingVersion"
         :chunks="chunks"
         :expanded-chunk-ids="expandedChunkIds"
         :is-loading-chunks="isLoadingChunks"
         :empty-state="emptyDetailState"
         @ingest="startIngestionForDocument(selectedDocument?.id)"
+        @upload-version="triggerVersionUpload"
         @preview="isPreviewOpen = true"
         @open-original="openLink(selectedDocument?.originalUrl)"
         @change-tab="activeTab = $event"
@@ -488,7 +680,7 @@ onUnmounted(() => {
 
 .kb-overview__stats {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 14px;
 }
 
@@ -524,6 +716,45 @@ onUnmounted(() => {
   gap: 10px;
 }
 
+.kb-dataset-composer {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(320px, 0.9fr);
+  gap: 20px;
+  padding: 22px;
+  background: #fff;
+}
+
+.kb-dataset-composer h3 {
+  margin: 0 0 8px;
+  color: #142033;
+}
+
+.kb-dataset-composer p {
+  margin: 0;
+  color: #5a677d;
+  line-height: 1.7;
+}
+
+.kb-dataset-composer__form {
+  display: grid;
+  gap: 12px;
+}
+
+.kb-textarea {
+  border: 1px solid rgba(20, 32, 51, 0.12);
+  border-radius: 14px;
+  padding: 12px 14px;
+  font: inherit;
+  color: #142033;
+  resize: vertical;
+}
+
+.kb-dataset-composer__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
 .kb-secondary-btn,
 .kb-danger-btn {
   height: 40px;
@@ -555,7 +786,8 @@ onUnmounted(() => {
 @media (max-width: 1080px) {
   .kb-overview,
   .kb-layout,
-  .kb-batchbar {
+  .kb-batchbar,
+  .kb-dataset-composer {
     grid-template-columns: 1fr;
   }
 
