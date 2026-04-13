@@ -8,7 +8,7 @@ from unittest.mock import Mock, patch
 
 from django.contrib.auth.models import Group
 from django.core.files.uploadedfile import SimpleUploadedFile
-from django.db import ProgrammingError
+from django.db import ProgrammingError, transaction
 from django.test import Client, TestCase, override_settings
 from django.utils import timezone
 
@@ -20,6 +20,7 @@ from knowledgebase.services.document_service import (
     batch_enqueue_document_ingestion,
     batch_delete_documents,
     create_document_from_upload,
+    delete_document_with_vectors,
     enqueue_document_ingestion,
     get_document_for_user,
     ingest_document,
@@ -313,13 +314,18 @@ class KnowledgebaseApiTests(TestCase):
         original_path = document.file.path
         chunk_ids = list(document.chunks.values_list("id", flat=True))
 
-        with patch.object(VectorService, "delete_document", return_value=None) as delete_vector_mock:
-            response = self.client.post(
-                "/api/knowledgebase/documents/batch/delete",
-                data=json.dumps({"document_ids": [document.id]}),
-                content_type="application/json",
-                HTTP_AUTHORIZATION=f"Bearer {self.access_token}",
-            )
+        with patch.object(
+            VectorService,
+            "delete_document",
+            return_value=None,
+        ) as delete_vector_mock:
+            with self.captureOnCommitCallbacks(execute=True):
+                response = self.client.post(
+                    "/api/knowledgebase/documents/batch/delete",
+                    data=json.dumps({"document_ids": [document.id]}),
+                    content_type="application/json",
+                    HTTP_AUTHORIZATION=f"Bearer {self.access_token}",
+                )
 
         self.assertEqual(response.status_code, 200)
         payload = response.json()
@@ -1067,7 +1073,8 @@ class KnowledgebaseVectorCleanupTests(TestCase):
             )
         )
 
-        result = batch_delete_documents(self.user, [document.id])
+        with self.captureOnCommitCallbacks(execute=True):
+            result = batch_delete_documents(self.user, [document.id])
 
         self.assertEqual(
             result,
@@ -1090,6 +1097,56 @@ class KnowledgebaseVectorCleanupTests(TestCase):
             [],
         )
 
+    def test_delete_document_with_vectors_defers_vector_cleanup_until_commit(self):
+        document = create_document_from_upload(
+            uploaded_file=SimpleUploadedFile(
+                "cleanup-deferred.txt",
+                b"cleanup waits for commit",
+                content_type="text/plain",
+            ),
+            title="Cleanup deferred doc",
+            source_date="2026-04-10",
+            uploaded_by=self.user,
+        )
+        ingest_document(document)
+        document.refresh_from_db()
+
+        self.assertIn(document.id, _VECTOR_STORE)
+        self.assertTrue(
+            VectorService().search(
+                query="cleanup waits commit",
+                filters={"document_id": document.id},
+                top_k=5,
+            )
+        )
+
+        with self.captureOnCommitCallbacks(execute=False) as callbacks:
+            with transaction.atomic():
+                locked_document = Document.objects.select_for_update().get(id=document.id)
+                delete_document_with_vectors(locked_document)
+
+                self.assertFalse(Document.objects.filter(id=document.id).exists())
+                self.assertIn(document.id, _VECTOR_STORE)
+                self.assertTrue(
+                    VectorService().search(
+                        query="cleanup waits commit",
+                        filters={"document_id": document.id},
+                        top_k=5,
+                    )
+                )
+
+        self.assertEqual(len(callbacks), 1)
+        self.assertIn(document.id, _VECTOR_STORE)
+        callbacks[0]()
+        self.assertEqual(
+            VectorService().search(
+                query="cleanup waits commit",
+                filters={"document_id": document.id},
+                top_k=5,
+            ),
+            [],
+        )
+
     def test_batch_delete_reports_success_when_file_cleanup_fails_after_destructive_steps(self):
         document = create_document_from_upload(
             uploaded_file=SimpleUploadedFile(
@@ -1106,8 +1163,13 @@ class KnowledgebaseVectorCleanupTests(TestCase):
         file_name = document.file.name
         original_path = document.file.path
 
-        with patch.object(document.file.storage, "delete", side_effect=OSError("disk busy")):
-            result = batch_delete_documents(self.user, [document.id])
+        with patch.object(
+            document.file.storage,
+            "delete",
+            side_effect=OSError("disk busy"),
+        ):
+            with self.captureOnCommitCallbacks(execute=True):
+                result = batch_delete_documents(self.user, [document.id])
 
         self.assertEqual(
             result,
@@ -1146,8 +1208,13 @@ class KnowledgebaseVectorCleanupTests(TestCase):
         document.refresh_from_db()
         original_path = document.file.path
 
-        with patch.object(document.file.storage, "exists", side_effect=OSError("stat failed")):
-            result = batch_delete_documents(self.user, [document.id])
+        with patch.object(
+            document.file.storage,
+            "exists",
+            side_effect=OSError("stat failed"),
+        ):
+            with self.captureOnCommitCallbacks(execute=True):
+                result = batch_delete_documents(self.user, [document.id])
 
         self.assertEqual(
             result,
@@ -1279,6 +1346,41 @@ class KnowledgebaseAsyncQueueTests(TestCase):
         self.assertTrue(created)
         self.assertEqual(ingestion_task.status, IngestionTask.STATUS_QUEUED)
         select_for_update_mock.assert_called_once()
+
+    def test_enqueue_document_ingestion_cleans_up_queued_task_when_dispatch_fails(self):
+        document = create_document_from_upload(
+            uploaded_file=SimpleUploadedFile(
+                "dispatch-fail.txt",
+                b"dispatch failure",
+                content_type="text/plain",
+            ),
+            title="Dispatch fail doc",
+            source_date="2025-03-01",
+        )
+        document.status = Document.STATUS_FAILED
+        document.error_message = "上一次解析失败"
+        document.save(update_fields=["status", "error_message", "updated_at"])
+
+        with patch(
+            "knowledgebase.tasks.ingest_document_task.delay",
+            side_effect=RuntimeError("queue unavailable"),
+        ):
+            with self.assertRaisesMessage(RuntimeError, "queue unavailable"):
+                enqueue_document_ingestion(document)
+
+        document.refresh_from_db()
+        self.assertEqual(document.status, Document.STATUS_FAILED)
+        self.assertEqual(document.error_message, "上一次解析失败")
+        self.assertFalse(document.ingestion_tasks.filter(status=IngestionTask.STATUS_QUEUED).exists())
+
+        with patch(
+            "knowledgebase.tasks.ingest_document_task.delay",
+            return_value=SimpleNamespace(id="celery-task-after-failure"),
+        ) as delay_mock:
+            ingestion_task, created = enqueue_document_ingestion(document)
+
+        self.assertTrue(created)
+        delay_mock.assert_called_once_with(document.id, ingestion_task.id)
 
     def test_batch_delete_skips_document_with_active_ingestion_task(self):
         document = create_document_from_upload(
