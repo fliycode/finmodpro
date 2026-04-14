@@ -1,6 +1,6 @@
 <script setup>
 import { computed, onMounted, reactive, ref, watch } from "vue";
-import { llmApi } from "../api/llm.js";
+import { llmApi, normalizeModelConfigPayload } from "../api/llm.js";
 import { useFlash } from "../lib/flash.js";
 import AppSectionCard from "./ui/AppSectionCard.vue";
 
@@ -23,9 +23,9 @@ const fineTuneFilterModelId = ref("");
 const defaultFormState = () => ({
   name: "",
   capability: "chat",
-  provider: "deepseek",
-  model_name: "deepseek-chat",
-  endpoint: "https://api.deepseek.com",
+  provider: "litellm",
+  model_name: "chat-default",
+  endpoint: "http://localhost:4000",
   api_key: "",
   temperature: 0.2,
   max_tokens: 1024,
@@ -48,39 +48,6 @@ const defaultFineTuneFormState = () => ({
 const form = reactive(defaultFormState());
 const fineTuneForm = reactive(defaultFineTuneFormState());
 
-const normalizeConfigs = (payload) => {
-  const list = Array.isArray(payload)
-    ? payload
-    : Array.isArray(payload?.results)
-      ? payload.results
-      : Array.isArray(payload?.items)
-        ? payload.items
-        : Array.isArray(payload?.model_configs)
-          ? payload.model_configs
-          : Array.isArray(payload?.data)
-            ? payload.data
-            : [];
-
-  return list.map((item, index) => ({
-    id: item.id ?? item.config_id ?? index,
-    name: item.name ?? item.config_name ?? item.model_name ?? `config-${index}`,
-    provider: item.provider ?? item.vendor ?? "--",
-    model_name: item.model_name ?? item.model ?? item.name ?? "--",
-    endpoint: item.endpoint ?? item.api_base ?? item.base_url ?? "",
-    capability: item.capability ?? item.model_type ?? item.type ?? "chat",
-    is_active: item.is_active ?? item.active ?? item.enabled ?? false,
-    updated_at: item.updated_at ?? item.updatedAt ?? item.modified_at ?? item.created_at ?? "",
-    options: item.options ?? {},
-    has_api_key: item.has_api_key ?? false,
-    api_key_masked: item.api_key_masked ?? "",
-    fine_tune_run_count: Number(item.fine_tune_run_count ?? 0),
-    latest_fine_tune_dataset: item.latest_fine_tune_dataset ?? "",
-    latest_fine_tune_status: item.latest_fine_tune_status ?? "",
-    latest_fine_tune_artifact_path: item.latest_fine_tune_artifact_path ?? "",
-    raw: item,
-  }));
-};
-
 const chatConfigs = computed(() =>
   configs.value.filter((c) => ["chat", "llm", "generation"].includes(String(c.capability).toLowerCase())),
 );
@@ -91,7 +58,7 @@ const fineTuneModelOptions = computed(() => configs.value.map((config) => ({
   value: config.id,
   label: `${config.name} · ${config.model_name}`,
 })));
-const isDeepSeek = computed(() => form.provider === "deepseek");
+const supportsTokenOptions = computed(() => ["deepseek", "litellm"].includes(form.provider));
 const drawerTitle = computed(() => (editingId.value ? "编辑模型配置" : "新增模型配置"));
 const fineTuneDrawerTitle = computed(() => (editingFineTuneId.value ? "编辑微调登记" : "新增微调登记"));
 
@@ -103,9 +70,9 @@ const resetForm = () => {
 const openCreate = (capability = "chat") => {
   resetForm();
   form.capability = capability;
-  form.provider = capability === "embedding" ? "ollama" : "deepseek";
-  form.model_name = capability === "embedding" ? "bge-m3" : "deepseek-chat";
-  form.endpoint = capability === "embedding" ? "http://localhost:11434" : "https://api.deepseek.com";
+  form.provider = "litellm";
+  form.model_name = capability === "embedding" ? "embed-default" : "chat-default";
+  form.endpoint = "http://localhost:4000";
   drawerVisible.value = true;
 };
 
@@ -127,7 +94,7 @@ const openEdit = (config) => {
 
 const buildPayload = () => {
   const options = {};
-  if (form.provider === "deepseek") {
+  if (supportsTokenOptions.value) {
     if (form.api_key.trim()) {
       options.api_key = form.api_key.trim();
     }
@@ -201,7 +168,7 @@ const fetchConfigs = async () => {
   errorMsg.value = "";
   try {
     const data = await llmApi.getModelConfigs();
-    configs.value = normalizeConfigs(data);
+    configs.value = normalizeModelConfigPayload(data);
     if (!fineTuneFilterModelId.value && chatConfigs.value[0]?.id) {
       fineTuneFilterModelId.value = chatConfigs.value[0].id;
     }
@@ -355,7 +322,7 @@ watch(fineTuneFilterModelId, () => {
         <div class="page-hero__eyebrow">Admin / Models</div>
         <h1 class="page-hero__title">模型配置管理</h1>
         <p class="page-hero__subtitle">
-          管理平台级对话和向量模型。智能问答会自动读取当前启用的 chat 模型，不需要前端额外切换。
+          管理平台级对话和向量模型。第一阶段支持 LiteLLM、Ollama 与 DeepSeek，智能问答会自动读取当前启用的 chat 模型。
         </p>
       </div>
       <div class="model-page__actions">
@@ -366,7 +333,7 @@ watch(fineTuneFilterModelId, () => {
 
     <el-alert v-if="errorMsg" :title="errorMsg" type="error" show-icon :closable="false" />
 
-    <AppSectionCard title="对话模型" desc="支持 Ollama 与 DeepSeek。启用新模型后，智能问答和其它 chat 能力会自动切换。" admin>
+    <AppSectionCard title="对话模型" desc="支持 LiteLLM、Ollama 与 DeepSeek。启用新模型后，智能问答和其它 chat 能力会自动切换。" admin>
       <div v-if="isLoading && chatConfigs.length === 0" class="admin-empty-state">加载中...</div>
       <div v-else-if="chatConfigs.length === 0" class="admin-empty-state">暂无对话模型配置</div>
       <el-table v-else :data="chatConfigs" stripe style="width: 100%">
@@ -413,7 +380,10 @@ watch(fineTuneFilterModelId, () => {
       </el-table>
     </AppSectionCard>
 
-    <AppSectionCard title="向量模型" desc="当前继续沿用现有 embedding 配置体系。" admin>
+    <AppSectionCard title="向量模型" desc="支持 LiteLLM 与 Ollama embedding 配置。" admin>
+      <template #header>
+        <el-button type="primary" @click="openCreate('embedding')">新增向量模型</el-button>
+      </template>
       <div v-if="isLoading && embeddingConfigs.length === 0" class="admin-empty-state">加载中...</div>
       <div v-else-if="embeddingConfigs.length === 0" class="admin-empty-state">暂无向量模型配置</div>
       <el-table v-else :data="embeddingConfigs" stripe style="width: 100%">
@@ -440,6 +410,16 @@ watch(fineTuneFilterModelId, () => {
         <el-table-column label="更新时间" min-width="180">
           <template #default="{ row }">
             <span class="muted-text">{{ formatDate(row.updated_at) }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="操作" width="210" fixed="right">
+          <template #default="{ row }">
+            <div class="table-actions">
+              <el-button size="small" plain @click="openEdit(row)">编辑</el-button>
+              <el-button size="small" :type="row.is_active ? 'danger' : 'primary'" plain @click="toggleActivation(row)">
+                {{ row.is_active ? "停用" : "启用" }}
+              </el-button>
+            </div>
           </template>
         </el-table-column>
       </el-table>
@@ -530,18 +510,19 @@ watch(fineTuneFilterModelId, () => {
           </el-form-item>
           <el-form-item label="Provider">
             <el-select v-model="form.provider" style="width: 100%">
+              <el-option label="LiteLLM" value="litellm" />
               <el-option label="DeepSeek" value="deepseek" />
               <el-option label="Ollama" value="ollama" />
             </el-select>
           </el-form-item>
           <el-form-item label="模型名称">
-            <el-input v-model="form.model_name" placeholder="例如：deepseek-chat" />
+            <el-input v-model="form.model_name" placeholder="例如：chat-default / embed-default / deepseek-chat" />
           </el-form-item>
           <el-form-item label="接口地址">
-            <el-input v-model="form.endpoint" placeholder="例如：https://api.deepseek.com" />
+            <el-input v-model="form.endpoint" placeholder="例如：http://localhost:4000 或 https://api.deepseek.com" />
           </el-form-item>
 
-          <template v-if="isDeepSeek">
+          <template v-if="supportsTokenOptions">
             <el-form-item label="API Key">
               <el-input v-model="form.api_key" type="password" show-password placeholder="新建时必填，编辑时留空表示保留原 key" />
               <div v-if="form.has_api_key" class="form-footnote">已保存密钥：{{ form.api_key_masked || "已配置" }}</div>

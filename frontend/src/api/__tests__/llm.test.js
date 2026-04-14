@@ -6,6 +6,7 @@ import {
   normalizeFineTunePayload,
   normalizeEvaluationRecord,
   normalizeFineTuneRun,
+  normalizeModelConfigPayload,
 } from '../llm.js';
 
 test('normalizeEvaluationPayload preserves comparison groups and new metrics', () => {
@@ -82,4 +83,22 @@ test('normalizeFineTunePayload preserves lineage metadata', () => {
 test('normalizeEvaluationRecord and normalizeFineTuneRun provide stable defaults', () => {
   assert.equal(normalizeEvaluationRecord(null).evaluation_mode, 'baseline');
   assert.equal(normalizeFineTuneRun(null).status, 'pending');
+});
+
+test('normalizeModelConfigPayload keeps litellm provider values', () => {
+  const payload = normalizeModelConfigPayload({
+    model_configs: [
+      {
+        id: 1,
+        provider: 'litellm',
+        capability: 'chat',
+        model_name: 'chat-default',
+        endpoint: 'http://localhost:4000',
+      },
+    ],
+  });
+
+  assert.equal(payload[0].provider, 'litellm');
+  assert.equal(payload[0].model_name, 'chat-default');
+  assert.equal(payload[0].endpoint, 'http://localhost:4000');
 });
