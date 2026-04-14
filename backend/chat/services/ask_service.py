@@ -1,6 +1,7 @@
 import time
 
 from chat.services.session_service import normalize_context_filters, persist_session_turn
+from common.observability import trace_span
 from llm.services.prompt_service import render_prompt
 from llm.services.runtime_service import get_chat_provider
 from rag.models import RetrievalLog
@@ -79,20 +80,32 @@ def _record_retrieval_log(payload):
 
 
 def ask_question(*, question, filters=None, top_k=5, session=None):
-    payload = _prepare_answer(question, filters=filters, top_k=top_k, session=session)
-    answer = get_chat_provider().chat(messages=payload["messages"])
-    if session is not None:
-        persist_session_turn(session=session, question=payload["question"], answer=answer)
-    _record_retrieval_log(payload)
-    return {
-        "question": payload["question"],
-        "query": payload["query"],
-        "answer": answer,
-        "citations": payload["citations"],
-        "answer_mode": payload["answer_mode"],
-        "answer_notice": payload["answer_notice"],
-        "duration_ms": payload["duration_ms"],
-    }
+    with trace_span(
+        "chat.ask",
+        metadata={"top_k": top_k, "session_id": getattr(session, "id", None)},
+        input_data={"question": question},
+    ) as observation:
+        payload = _prepare_answer(question, filters=filters, top_k=top_k, session=session)
+        answer = get_chat_provider().chat(messages=payload["messages"])
+        if session is not None:
+            persist_session_turn(session=session, question=payload["question"], answer=answer)
+        _record_retrieval_log(payload)
+        observation.update(
+            output={
+                "answer_mode": payload["answer_mode"],
+                "citation_count": len(payload["citations"]),
+                "duration_ms": payload["duration_ms"],
+            }
+        )
+        return {
+            "question": payload["question"],
+            "query": payload["query"],
+            "answer": answer,
+            "citations": payload["citations"],
+            "answer_mode": payload["answer_mode"],
+            "answer_notice": payload["answer_notice"],
+            "duration_ms": payload["duration_ms"],
+        }
 
 
 def stream_question(*, question, filters=None, top_k=5, session=None):
@@ -100,45 +113,58 @@ def stream_question(*, question, filters=None, top_k=5, session=None):
     provider = get_chat_provider()
 
     def event_stream():
-        yield {
-            "event": "meta",
-            "data": {
-                "question": payload["question"],
-                "query": payload["query"],
-                "citations": payload["citations"],
-                "answer_mode": payload["answer_mode"],
-                "answer_notice": payload["answer_notice"],
-                "duration_ms": payload["duration_ms"],
-            },
-        }
+        with trace_span(
+            "chat.ask.stream",
+            metadata={"top_k": top_k, "session_id": getattr(session, "id", None)},
+            input_data={"question": question},
+        ) as observation:
+            yield {
+                "event": "meta",
+                "data": {
+                    "question": payload["question"],
+                    "query": payload["query"],
+                    "citations": payload["citations"],
+                    "answer_mode": payload["answer_mode"],
+                    "answer_notice": payload["answer_notice"],
+                    "duration_ms": payload["duration_ms"],
+                },
+            }
 
-        chunks = []
-        stream_method = getattr(provider, "stream", None)
-        if callable(stream_method):
-            for chunk in stream_method(messages=payload["messages"]):
-                text = str(chunk or "")
-                if not text:
-                    continue
-                chunks.append(text)
-                yield {"event": "chunk", "data": {"content": text}}
-        else:
-            answer = provider.chat(messages=payload["messages"])
-            chunks.append(answer)
-            yield {"event": "chunk", "data": {"content": answer}}
+            chunks = []
+            stream_method = getattr(provider, "stream", None)
+            if callable(stream_method):
+                for chunk in stream_method(messages=payload["messages"]):
+                    text = str(chunk or "")
+                    if not text:
+                        continue
+                    chunks.append(text)
+                    yield {"event": "chunk", "data": {"content": text}}
+            else:
+                answer = provider.chat(messages=payload["messages"])
+                chunks.append(answer)
+                yield {"event": "chunk", "data": {"content": answer}}
 
-        answer = "".join(chunks)
-        if session is not None:
-            persist_session_turn(session=session, question=payload["question"], answer=answer)
-        _record_retrieval_log(payload)
-        yield {
-            "event": "done",
-            "data": {
-                "answer": answer,
-                "citations": payload["citations"],
-                "answer_mode": payload["answer_mode"],
-                "answer_notice": payload["answer_notice"],
-                "duration_ms": payload["duration_ms"],
-            },
-        }
+            answer = "".join(chunks)
+            if session is not None:
+                persist_session_turn(session=session, question=payload["question"], answer=answer)
+            _record_retrieval_log(payload)
+            observation.update(
+                output={
+                    "answer_mode": payload["answer_mode"],
+                    "citation_count": len(payload["citations"]),
+                    "duration_ms": payload["duration_ms"],
+                    "stream_chunk_count": len(chunks),
+                }
+            )
+            yield {
+                "event": "done",
+                "data": {
+                    "answer": answer,
+                    "citations": payload["citations"],
+                    "answer_mode": payload["answer_mode"],
+                    "answer_notice": payload["answer_notice"],
+                    "duration_ms": payload["duration_ms"],
+                },
+            }
 
     return event_stream()

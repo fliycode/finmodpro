@@ -2,6 +2,7 @@ import json
 import re
 from collections import Counter
 
+from common.observability import trace_span
 from knowledgebase.models import Document, DocumentChunk
 from knowledgebase.services.document_service import get_visible_documents_queryset
 from llm.services.runtime_service import get_chat_provider
@@ -178,30 +179,45 @@ def _analyze_document(document):
         }
 
     prompt = _build_prompt(document, text_excerpt)
-    try:
-        raw_content = get_chat_provider().chat(
-            messages=[
-                {
-                    "role": "system",
-                    "content": "你是金融舆情分析助手。严格输出 JSON，不要输出 markdown 或额外说明。",
-                },
-                {
-                    "role": "user",
-                    "content": prompt,
-                },
-            ],
-            options={"temperature": 0},
+    heuristic_fallback = False
+    with trace_span(
+        "risk.sentiment",
+        metadata={"document_id": document.id, "dataset_id": document.dataset_id},
+        input_data={"document_title": document.title},
+    ) as observation:
+        try:
+            raw_content = get_chat_provider().chat(
+                messages=[
+                    {
+                        "role": "system",
+                        "content": "你是金融舆情分析助手。严格输出 JSON，不要输出 markdown 或额外说明。",
+                    },
+                    {
+                        "role": "user",
+                        "content": prompt,
+                    },
+                ],
+                options={"temperature": 0},
+            )
+            payload = _parse_provider_payload(raw_content)
+            normalized = {
+                "sentiment": _normalize_sentiment(payload.get("sentiment")),
+                "risk_tendency": _normalize_risk_tendency(payload.get("risk_tendency")),
+                "summary": str(payload.get("summary") or text_excerpt[:120]).strip(),
+                "confidence_score": round(float(payload.get("confidence_score", 0.0)), 3),
+                "evidence": _normalize_evidence(payload.get("evidence")),
+            }
+        except Exception:
+            heuristic_fallback = True
+            normalized = _heuristic_sentiment(text_excerpt)
+
+        observation.update(
+            output={
+                "sentiment": normalized["sentiment"],
+                "risk_tendency": normalized["risk_tendency"],
+                "heuristic_fallback": heuristic_fallback,
+            }
         )
-        payload = _parse_provider_payload(raw_content)
-        normalized = {
-            "sentiment": _normalize_sentiment(payload.get("sentiment")),
-            "risk_tendency": _normalize_risk_tendency(payload.get("risk_tendency")),
-            "summary": str(payload.get("summary") or text_excerpt[:120]).strip(),
-            "confidence_score": round(float(payload.get("confidence_score", 0.0)), 3),
-            "evidence": _normalize_evidence(payload.get("evidence")),
-        }
-    except Exception:
-        normalized = _heuristic_sentiment(text_excerpt)
 
     return {
         "document_id": document.id,

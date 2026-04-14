@@ -158,6 +158,28 @@ class EvalRecordModelTests(TestCase):
         )
 
 
+class ObservabilityTests(TestCase):
+    @patch.dict(
+        os.environ,
+        {
+            "LANGFUSE_HOST": "https://cloud.langfuse.example",
+            "LANGFUSE_PUBLIC_KEY": "pk-lf",
+            "LANGFUSE_SECRET_KEY": "sk-lf",
+        },
+        clear=False,
+    )
+    @patch("common.observability._build_langfuse_client")
+    def test_trace_span_does_not_raise_when_langfuse_client_fails(self, mocked_build_client):
+        from common.observability import trace_span
+
+        mocked_build_client.side_effect = RuntimeError("langfuse unavailable")
+
+        with trace_span("chat.ask", metadata={"question": "Q1"}) as observation:
+            observation.update(output={"status": "ok"})
+
+        mocked_build_client.assert_called_once()
+
+
 class ProviderRuntimeTests(TestCase):
     @patch("urllib.request.urlopen")
     def test_ollama_chat_provider_returns_message_content(self, mocked_urlopen):
