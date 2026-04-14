@@ -42,13 +42,8 @@ class RbacApiTests(TestCase):
         self.access_token = generate_access_token(self.user)
 
     def test_get_me_returns_rbac_profile_for_authenticated_user(self):
-        member_group = Group.objects.create(name="member")
-        dashboard_permission = Permission.objects.create(
-            codename="view_dashboard",
-            name="Can view dashboard",
-            content_type=ContentType.objects.get_for_model(User),
-        )
-        member_group.permissions.add(dashboard_permission)
+        seed_roles_and_permissions()
+        member_group = Group.objects.get(name=ROLE_MEMBER)
         self.user.groups.add(member_group)
 
         response = self.client.get(

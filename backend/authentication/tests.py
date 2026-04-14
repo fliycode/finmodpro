@@ -2,9 +2,11 @@ import json
 
 from django.contrib.auth.models import Group
 from django.test import Client, TestCase, override_settings
+from unittest.mock import patch
 
 from authentication.models import User
 from authentication.services.jwt_service import decode_access_token
+from rbac.services.rbac_service import seed_roles_and_permissions
 
 
 @override_settings(
@@ -113,6 +115,7 @@ class AuthenticationApiTests(TestCase):
         self.assertEqual(response.json()["message"], "用户名或密码错误。")
 
     def test_login_bootstraps_staff_user_rbac_for_permission_gated_modules(self):
+        seed_roles_and_permissions()
         staff_user = User.objects.create_user(
             username="ops-admin",
             password="secret123",
@@ -169,3 +172,41 @@ class AuthenticationApiTests(TestCase):
                     HTTP_AUTHORIZATION=f"Bearer {access_token}",
                 )
                 self.assertNotIn(response.status_code, {401, 403})
+
+    def test_login_binds_existing_role_group_without_reseeding_rbac_permissions(self):
+        Group.objects.bulk_create(
+            [
+                Group(name="member"),
+                Group(name="admin"),
+                Group(name="super_admin"),
+            ],
+            ignore_conflicts=True,
+        )
+        staff_user = User.objects.create_user(
+            username="ops-admin-lite",
+            password="secret123",
+            email="ops-admin-lite@example.com",
+            is_staff=True,
+        )
+
+        with patch(
+            "rbac.services.rbac_service.seed_roles_and_permissions",
+            side_effect=AssertionError("login should not reseed RBAC permissions"),
+        ):
+            login_response = self.client.post(
+                "/api/auth/login",
+                data=json.dumps(
+                    {
+                        "username": "ops-admin-lite",
+                        "password": "secret123",
+                    }
+                ),
+                content_type="application/json",
+            )
+
+        self.assertEqual(login_response.status_code, 200)
+        staff_user.refresh_from_db()
+        self.assertEqual(
+            sorted(staff_user.groups.values_list("name", flat=True)),
+            ["admin"],
+        )
