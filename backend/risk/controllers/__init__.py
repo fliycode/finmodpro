@@ -8,6 +8,7 @@ from risk.controllers.report_controller import (
     TimeRangeRiskReportCreateView,
 )
 from risk.controllers.review_controller import RiskEventReviewView
+from risk.controllers.sentiment_controller import SentimentAnalyzeView
 
 __all__ = [
     "CompanyRiskReportCreateView",
@@ -17,5 +18,6 @@ __all__ = [
     "RiskEventListView",
     "RiskEventReviewView",
     "RiskReportExportView",
+    "SentimentAnalyzeView",
     "TimeRangeRiskReportCreateView",
 ]

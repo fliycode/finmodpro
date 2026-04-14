@@ -4,6 +4,7 @@ from common.api_response import error_response, success_response
 from common.exceptions import UpstreamServiceError
 from knowledgebase.models import Document
 from rbac.services.authz_service import get_authenticated_user, user_has_permission
+from systemcheck.services.audit_service import record_audit_event
 from risk.serializers import RiskEventSummarySerializer
 from risk.services import extract_risk_events_for_document, list_document_chunks
 
@@ -37,6 +38,17 @@ class RiskDocumentExtractView(APIView):
             data = {"error_code": exc.code}
             if exc.provider:
                 data["provider"] = exc.provider
+            record_audit_event(
+                actor=user,
+                action="risk.extract",
+                target_type="document",
+                target_id=document.id,
+                status="failed",
+                detail_payload={
+                    "error_code": exc.code,
+                    "message": exc.message,
+                },
+            )
             return error_response(
                 code=exc.status_code,
                 message=exc.message,
@@ -44,6 +56,16 @@ class RiskDocumentExtractView(APIView):
                 status_code=exc.status_code,
             )
 
+        record_audit_event(
+            actor=user,
+            action="risk.extract",
+            target_type="document",
+            target_id=document.id,
+            status="succeeded",
+            detail_payload={
+                "created_count": len(created_events),
+            },
+        )
         return success_response(
             message="风险抽取完成。",
             data={
