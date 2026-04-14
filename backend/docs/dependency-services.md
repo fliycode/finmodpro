@@ -209,7 +209,49 @@ ollama list
   - 通过 `/api/ops/model-configs`
   - 或直接调整数据库里的 `ModelConfig` 记录
 
-## 五、推荐组合
+## 五、LiteLLM
+
+### 当前作用
+
+- 第一阶段作为统一 LLM gateway
+- Django 通过 `provider=litellm` 配置访问 LiteLLM，再由 LiteLLM 转发到 DeepSeek / Ollama / 未来外部模型
+
+### 推荐默认值
+
+- 本地最小启动：LiteLLM 可选
+- 需要演示统一模型入口、为后续 Langfuse 接入做准备时开启
+
+### 关键变量
+
+- `LITELLM_INTERNAL_URL`
+- `LITELLM_MASTER_KEY`
+- `DEEPSEEK_API_KEY`
+
+### 说明
+
+- 管理台里保存的 LiteLLM endpoint 推荐使用 `http://localhost:4000`
+- 生产环境运行时会由后端自动重写到容器内地址 `http://litellm:4000`
+
+## 六、Langfuse
+
+### 当前作用
+
+- 第一阶段作为 Langfuse Cloud 观测后端
+- LiteLLM 提供 LLM 调用级日志
+- Django 补业务级 trace/span
+
+### 关键变量
+
+- `LANGFUSE_HOST`
+- `LANGFUSE_PUBLIC_KEY`
+- `LANGFUSE_SECRET_KEY`
+
+### 推荐默认值
+
+- 本地开发默认可留空
+- 接入 Cloud 后再填
+
+## 七、推荐组合
 
 ### 最小本地启动
 
@@ -230,7 +272,7 @@ ollama list
 - Milvus Lite（当前仓库默认推荐）或你自己的远程 Milvus URI
 - Ollama 本机启动
 
-## 六、常用联调命令
+## 八、常用联调命令
 
 ```bash
 cd /root/finmodpro/backend
