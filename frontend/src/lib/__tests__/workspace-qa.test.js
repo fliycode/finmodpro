@@ -2,10 +2,12 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
+  getDefaultSessionFilters,
   buildHistoryQuery,
   buildSessionExportDownload,
   formatHistoryTimestamp,
   getActiveSessionLabel,
+  normalizeDatasetId,
   normalizeHistoryItems,
 } from '../workspace-qa.js';
 
@@ -20,6 +22,14 @@ test('getActiveSessionLabel returns matched session title', () => {
   );
 
   assert.equal(label, '流动性风险讨论');
+});
+
+test('normalizeDatasetId and getDefaultSessionFilters normalize route-friendly dataset values', () => {
+  assert.equal(normalizeDatasetId('7'), 7);
+  assert.equal(normalizeDatasetId('dataset-alpha'), 'dataset-alpha');
+  assert.equal(normalizeDatasetId(''), null);
+  assert.deepEqual(getDefaultSessionFilters('8'), { dataset_id: 8 });
+  assert.deepEqual(getDefaultSessionFilters(''), {});
 });
 
 test('normalizeHistoryItems keeps preview and timestamp fields display-safe', () => {

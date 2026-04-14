@@ -3,8 +3,14 @@ import { computed, nextTick, onMounted, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 
 import { chatApi } from '../api/chat.js';
+import { kbApi } from '../api/knowledgebase.js';
 import { qaApi } from '../api/qa.js';
-import { getActiveSessionLabel, normalizeHistoryItems } from '../lib/workspace-qa.js';
+import {
+  getActiveSessionLabel,
+  getDefaultSessionFilters,
+  normalizeDatasetId,
+  normalizeHistoryItems,
+} from '../lib/workspace-qa.js';
 import ChatHistory from './ChatHistory.vue';
 
 const props = defineProps({
@@ -24,24 +30,12 @@ const messages = ref([{ role: 'system', content: DEFAULT_SYSTEM_MESSAGE, tone: '
 const isAsking = ref(false);
 const messagesContainer = ref(null);
 const sessionOptions = ref([]);
+const datasets = ref([]);
 const isLoadingSessions = ref(false);
+const isLoadingDatasets = ref(false);
 const isHydratingSession = ref(false);
 const historyDrawerOpen = ref(false);
 const activeSessionFilters = ref({});
-
-const normalizeDatasetId = (value) => {
-  if (value === null || value === undefined || String(value).trim() === '') {
-    return null;
-  }
-
-  const numericValue = Number(value);
-  return Number.isNaN(numericValue) ? String(value).trim() : numericValue;
-};
-
-const getDefaultSessionFilters = () => {
-  const datasetId = normalizeDatasetId(route.query.dataset);
-  return datasetId === null ? {} : { dataset_id: datasetId };
-};
 
 const hasStreamingAssistant = computed(() =>
   messages.value.some((message) => message.isStreaming),
@@ -55,6 +49,25 @@ const historyItems = computed(() => normalizeHistoryItems(sessionOptions.value))
 const activeDatasetId = computed(() =>
   activeSessionFilters.value?.dataset_id ?? normalizeDatasetId(route.query.dataset),
 );
+
+const selectedDatasetId = computed({
+  get() {
+    return activeDatasetId.value === null || activeDatasetId.value === undefined
+      ? ''
+      : String(activeDatasetId.value);
+  },
+  async set(value) {
+    const normalized = normalizeDatasetId(value);
+    activeSessionFilters.value = normalized === null ? {} : { dataset_id: normalized };
+    const nextQuery = { ...router.currentRoute.value.query };
+    if (normalized === null) {
+      delete nextQuery.dataset;
+    } else {
+      nextQuery.dataset = String(normalized);
+    }
+    await router.replace({ query: nextQuery });
+  },
+});
 
 const getAvatarLabel = (role) => {
   if (role === 'user') return '我';
@@ -90,6 +103,18 @@ const scrollToBottom = async () => {
 
 const resetConversation = () => {
   messages.value = [{ role: 'system', content: DEFAULT_SYSTEM_MESSAGE, tone: 'info' }];
+};
+
+const refreshDatasets = async () => {
+  isLoadingDatasets.value = true;
+  try {
+    const result = await kbApi.listDatasets();
+    datasets.value = Array.isArray(result?.datasets) ? result.datasets : [];
+  } catch (error) {
+    console.error('加载数据集列表失败:', error);
+  } finally {
+    isLoadingDatasets.value = false;
+  }
 };
 
 const refreshSessionOptions = async () => {
@@ -167,7 +192,7 @@ const openSession = async (id) => {
 const startNewConversation = async () => {
   currentSessionId.value = null;
   query.value = '';
-  activeSessionFilters.value = getDefaultSessionFilters();
+  activeSessionFilters.value = getDefaultSessionFilters(route.query.dataset);
   resetConversation();
   historyDrawerOpen.value = false;
   await clearSessionRoute();
@@ -181,7 +206,7 @@ watch(() => props.sessionId, async (newId) => {
     return;
   }
   if (!newId) {
-    activeSessionFilters.value = getDefaultSessionFilters();
+    activeSessionFilters.value = getDefaultSessionFilters(route.query.dataset);
     resetConversation();
   }
 });
@@ -190,15 +215,15 @@ watch(
   () => route.query.dataset,
   async () => {
     if (!currentSessionId.value) {
-      activeSessionFilters.value = getDefaultSessionFilters();
+      activeSessionFilters.value = getDefaultSessionFilters(route.query.dataset);
     }
     await refreshSessionOptions();
   },
 );
 
 onMounted(async () => {
-  activeSessionFilters.value = getDefaultSessionFilters();
-  await refreshSessionOptions();
+  activeSessionFilters.value = getDefaultSessionFilters(route.query.dataset);
+  await Promise.all([refreshSessionOptions(), refreshDatasets()]);
   if (currentSessionId.value) {
     await loadSession(currentSessionId.value);
   }
@@ -309,6 +334,21 @@ const handleAsk = async () => {
             <span class="qa-shell__session-state">
               {{ currentSessionId ? '延续会话中' : '新对话' }}
             </span>
+          </div>
+          <div class="qa-shell__filters">
+            <label class="qa-shell__dataset-picker">
+              <span>数据集范围</span>
+              <select v-model="selectedDatasetId" :disabled="isLoadingDatasets">
+                <option value="">全部数据集</option>
+                <option
+                  v-for="dataset in datasets"
+                  :key="dataset.id"
+                  :value="String(dataset.id)"
+                >
+                  {{ dataset.name }}
+                </option>
+              </select>
+            </label>
           </div>
         </div>
 
@@ -431,6 +471,31 @@ const handleAsk = async () => {
   display: flex;
   flex-direction: column;
   gap: 6px;
+}
+
+.qa-shell__filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.qa-shell__dataset-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.qa-shell__dataset-picker select {
+  min-height: 36px;
+  min-width: 220px;
+  padding: 0 12px;
+  border-radius: 12px;
+  border: 1px solid var(--line-strong);
+  background: #fff;
+  color: var(--text-primary);
 }
 
 .qa-shell__eyebrow {

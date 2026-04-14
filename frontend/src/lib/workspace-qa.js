@@ -1,3 +1,17 @@
+export function normalizeDatasetId(value) {
+  if (value === null || value === undefined || String(value).trim() === '') {
+    return null;
+  }
+
+  const numericValue = Number(value);
+  return Number.isNaN(numericValue) ? String(value).trim() : numericValue;
+}
+
+export function getDefaultSessionFilters(datasetQueryValue) {
+  const datasetId = normalizeDatasetId(datasetQueryValue);
+  return datasetId === null ? {} : { dataset_id: datasetId };
+}
+
 export function formatHistoryTimestamp(value) {
   if (!value) {
     return '最近无更新';
