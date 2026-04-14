@@ -41,6 +41,10 @@ services:
       CELERY_TASK_ALWAYS_EAGER: ${CELERY_TASK_ALWAYS_EAGER:-false}
       CELERY_TASK_EAGER_PROPAGATES: ${CELERY_TASK_EAGER_PROPAGATES:-true}
       CELERY_TASK_STORE_EAGER_RESULT: ${CELERY_TASK_STORE_EAGER_RESULT:-false}
+      LITELLM_INTERNAL_URL: ${LITELLM_INTERNAL_URL:-http://litellm:4000}
+      LANGFUSE_HOST: ${LANGFUSE_HOST:-}
+      LANGFUSE_PUBLIC_KEY: ${LANGFUSE_PUBLIC_KEY:-}
+      LANGFUSE_SECRET_KEY: ${LANGFUSE_SECRET_KEY:-}
       MILVUS_URI: ${MILVUS_URI:-http://milvus:19530}
       MILVUS_COLLECTION_NAME: ${MILVUS_COLLECTION_NAME:-knowledgebase_document_chunks}
       KB_CHUNK_SIZE: ${KB_CHUNK_SIZE:-400}
@@ -56,6 +60,8 @@ services:
       mysql:
         condition: service_healthy
       redis:
+        condition: service_started
+      litellm:
         condition: service_started
       milvus:
         condition: service_started
@@ -98,6 +104,10 @@ services:
       CELERY_TASK_ALWAYS_EAGER: ${CELERY_TASK_ALWAYS_EAGER:-false}
       CELERY_TASK_EAGER_PROPAGATES: ${CELERY_TASK_EAGER_PROPAGATES:-true}
       CELERY_TASK_STORE_EAGER_RESULT: ${CELERY_TASK_STORE_EAGER_RESULT:-false}
+      LITELLM_INTERNAL_URL: ${LITELLM_INTERNAL_URL:-http://litellm:4000}
+      LANGFUSE_HOST: ${LANGFUSE_HOST:-}
+      LANGFUSE_PUBLIC_KEY: ${LANGFUSE_PUBLIC_KEY:-}
+      LANGFUSE_SECRET_KEY: ${LANGFUSE_SECRET_KEY:-}
       MILVUS_URI: ${MILVUS_URI:-http://milvus:19530}
       MILVUS_COLLECTION_NAME: ${MILVUS_COLLECTION_NAME:-knowledgebase_document_chunks}
       KB_CHUNK_SIZE: ${KB_CHUNK_SIZE:-400}
@@ -111,6 +121,8 @@ services:
       mysql:
         condition: service_healthy
       redis:
+        condition: service_started
+      litellm:
         condition: service_started
       milvus:
         condition: service_started
@@ -146,6 +158,24 @@ services:
       - "6379:6379"
     volumes:
       - redis_data:/data
+    restart: unless-stopped
+
+  litellm:
+    image: docker.litellm.ai/berriai/litellm:main-latest
+    command: ["--config", "/app/config.yaml", "--port", "4000"]
+    environment:
+      LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:-change-me-litellm}
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      LANGFUSE_HOST: ${LANGFUSE_HOST:-}
+      LANGFUSE_PUBLIC_KEY: ${LANGFUSE_PUBLIC_KEY:-}
+      LANGFUSE_SECRET_KEY: ${LANGFUSE_SECRET_KEY:-}
+    volumes:
+      - ./deploy/litellm/config.yaml:/app/config.yaml:ro
+    ports:
+      - "4000:4000"
+    depends_on:
+      ollama:
+        condition: service_started
     restart: unless-stopped
 
   etcd:
