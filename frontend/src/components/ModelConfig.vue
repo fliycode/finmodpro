@@ -145,18 +145,89 @@ const buildPayload = () => {
   };
 };
 
+const resetFineTuneForm = () => {
+  Object.assign(fineTuneForm, defaultFineTuneFormState());
+  editingFineTuneId.value = null;
+};
+
+const openCreateFineTune = (baseModelId = "") => {
+  resetFineTuneForm();
+  fineTuneForm.base_model_id = baseModelId || fineTuneFilterModelId.value || chatConfigs.value[0]?.id || configs.value[0]?.id || "";
+  fineTuneDrawerVisible.value = true;
+};
+
+const openEditFineTune = (run) => {
+  resetFineTuneForm();
+  editingFineTuneId.value = run.id;
+  fineTuneForm.base_model_id = run.base_model_id;
+  fineTuneForm.dataset_name = run.dataset_name;
+  fineTuneForm.dataset_version = run.dataset_version;
+  fineTuneForm.strategy = run.strategy;
+  fineTuneForm.status = run.status;
+  fineTuneForm.artifact_path = run.artifact_path;
+  fineTuneForm.metrics_json = JSON.stringify(run.metrics || {}, null, 2);
+  fineTuneForm.notes = run.notes || "";
+  fineTuneDrawerVisible.value = true;
+};
+
+const buildFineTunePayload = () => {
+  if (!fineTuneForm.base_model_id) {
+    throw new Error("请选择基础模型");
+  }
+
+  let metrics = {};
+  if (fineTuneForm.metrics_json.trim()) {
+    try {
+      metrics = JSON.parse(fineTuneForm.metrics_json);
+    } catch (error) {
+      throw new Error("微调指标 JSON 格式不正确");
+    }
+  }
+
+  return {
+    base_model_id: Number(fineTuneForm.base_model_id),
+    dataset_name: fineTuneForm.dataset_name.trim(),
+    dataset_version: fineTuneForm.dataset_version.trim(),
+    strategy: fineTuneForm.strategy.trim() || "lora",
+    status: fineTuneForm.status,
+    artifact_path: fineTuneForm.artifact_path.trim(),
+    metrics,
+    notes: fineTuneForm.notes.trim(),
+  };
+};
+
 const fetchConfigs = async () => {
   isLoading.value = true;
   errorMsg.value = "";
   try {
     const data = await llmApi.getModelConfigs();
     configs.value = normalizeConfigs(data);
+    if (!fineTuneFilterModelId.value && chatConfigs.value[0]?.id) {
+      fineTuneFilterModelId.value = chatConfigs.value[0].id;
+    }
   } catch (error) {
     console.error("Failed to fetch model configs:", error);
     errorMsg.value = error.message || "加载模型配置失败";
     configs.value = [];
   } finally {
     isLoading.value = false;
+  }
+};
+
+const fetchFineTunes = async () => {
+  fineTuneLoading.value = true;
+  fineTuneError.value = "";
+  try {
+    const data = await llmApi.getFineTuneRuns({
+      base_model_id: fineTuneFilterModelId.value || undefined,
+    });
+    fineTuneRuns.value = Array.isArray(data?.fine_tune_runs) ? data.fine_tune_runs : [];
+  } catch (error) {
+    console.error("Failed to fetch fine-tune runs:", error);
+    fineTuneError.value = error.message || "加载微调记录失败";
+    fineTuneRuns.value = [];
+  } finally {
+    fineTuneLoading.value = false;
   }
 };
 
@@ -219,6 +290,47 @@ const runConnectionTest = async () => {
   }
 };
 
+const submitFineTune = async () => {
+  fineTuneSaving.value = true;
+  try {
+    const payload = buildFineTunePayload();
+    if (editingFineTuneId.value) {
+      await llmApi.updateFineTuneRun(editingFineTuneId.value, payload);
+      flash.success("微调登记已更新");
+    } else {
+      await llmApi.createFineTuneRun(payload);
+      flash.success("微调登记已创建");
+    }
+    fineTuneDrawerVisible.value = false;
+    resetFineTuneForm();
+    await fetchFineTunes();
+    await fetchConfigs();
+  } catch (error) {
+    flash.error(error.message || "保存微调登记失败");
+  } finally {
+    fineTuneSaving.value = false;
+  }
+};
+
+const formatFineTuneMetrics = (metrics) => {
+  if (!metrics || Object.keys(metrics).length === 0) {
+    return "暂无指标";
+  }
+  return Object.entries(metrics)
+    .map(([key, value]) => `${key}: ${value}`)
+    .join(" / ");
+};
+
+const formatFineTuneLineage = (config) => {
+  const count = Number(config.fine_tune_run_count || 0);
+  if (!count) {
+    return "暂无登记";
+  }
+  const dataset = config.latest_fine_tune_dataset || "未命名数据集";
+  const status = config.latest_fine_tune_status || "unknown";
+  return `${count} 次 / ${dataset} / ${status}`;
+};
+
 const formatDate = (dateStr) => {
   if (!dateStr) return "N/A";
   try {
@@ -229,6 +341,11 @@ const formatDate = (dateStr) => {
 };
 
 onMounted(fetchConfigs);
+onMounted(fetchFineTunes);
+
+watch(fineTuneFilterModelId, () => {
+  fetchFineTunes();
+});
 </script>
 
 <template>
@@ -271,6 +388,13 @@ onMounted(fetchConfigs);
             <el-tag :type="row.is_active ? 'success' : 'info'">{{ row.is_active ? "已启用" : "未启用" }}</el-tag>
           </template>
         </el-table-column>
+        <el-table-column label="微调线索" min-width="220">
+          <template #default="{ row }">
+            <div class="muted-text lineage-text">
+              {{ formatFineTuneLineage(row) }}
+            </div>
+          </template>
+        </el-table-column>
         <el-table-column label="更新时间" min-width="180">
           <template #default="{ row }">
             <span class="muted-text">{{ formatDate(row.updated_at) }}</span>
@@ -306,9 +430,87 @@ onMounted(fetchConfigs);
             <el-tag :type="row.is_active ? 'success' : 'info'">{{ row.is_active ? "已启用" : "未启用" }}</el-tag>
           </template>
         </el-table-column>
+        <el-table-column label="微调线索" min-width="220">
+          <template #default="{ row }">
+            <div class="muted-text lineage-text">
+              {{ formatFineTuneLineage(row) }}
+            </div>
+          </template>
+        </el-table-column>
         <el-table-column label="更新时间" min-width="180">
           <template #default="{ row }">
             <span class="muted-text">{{ formatDate(row.updated_at) }}</span>
+          </template>
+        </el-table-column>
+      </el-table>
+    </AppSectionCard>
+
+    <AppSectionCard title="微调登记" desc="训练与产物仍保持外部执行，这里只登记 base model、数据集、指标和候选状态。" admin>
+      <div class="registry-toolbar">
+        <el-select
+          v-model="fineTuneFilterModelId"
+          filterable
+          clearable
+          placeholder="按基础模型筛选"
+          style="min-width: 280px"
+        >
+          <el-option
+            v-for="option in fineTuneModelOptions"
+            :key="option.value"
+            :label="option.label"
+            :value="option.value"
+          />
+        </el-select>
+        <div class="registry-toolbar__actions">
+          <el-button @click="fetchFineTunes" :loading="fineTuneLoading">刷新微调记录</el-button>
+          <el-button type="primary" @click="openCreateFineTune()">登记微调</el-button>
+        </div>
+      </div>
+      <el-alert
+        v-if="fineTuneError"
+        :title="fineTuneError"
+        type="error"
+        show-icon
+        :closable="false"
+        class="registry-alert"
+      />
+      <div v-if="fineTuneLoading && fineTuneRuns.length === 0" class="admin-empty-state">加载中...</div>
+      <div v-else-if="fineTuneRuns.length === 0" class="admin-empty-state">暂无微调登记</div>
+      <el-table v-else :data="fineTuneRuns" stripe style="width: 100%">
+        <el-table-column label="基础模型" min-width="180">
+          <template #default="{ row }">
+            <div>{{ row.base_model_name }}</div>
+            <div class="muted-text">{{ row.base_model_provider }} / {{ row.base_model_capability }}</div>
+          </template>
+        </el-table-column>
+        <el-table-column prop="dataset_name" label="数据集" min-width="160" />
+        <el-table-column prop="dataset_version" label="版本" width="120" />
+        <el-table-column prop="strategy" label="策略" width="100" />
+        <el-table-column label="状态" width="120">
+          <template #default="{ row }">
+            <el-tag :type="row.status === 'succeeded' ? 'success' : row.status === 'running' ? 'warning' : row.status === 'failed' ? 'danger' : 'info'">
+              {{ row.status }}
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="产物路径" min-width="220">
+          <template #default="{ row }">
+            <span class="mono-text">{{ row.artifact_path || '外部训练回写后登记' }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="指标" min-width="220">
+          <template #default="{ row }">
+            <span class="muted-text">{{ formatFineTuneMetrics(row.metrics) }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="更新时间" min-width="180">
+          <template #default="{ row }">
+            <span class="muted-text">{{ formatDate(row.updated_at) }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="操作" width="120" fixed="right">
+          <template #default="{ row }">
+            <el-button size="small" plain @click="openEditFineTune(row)">编辑</el-button>
           </template>
         </el-table-column>
       </el-table>
@@ -366,6 +568,63 @@ onMounted(fetchConfigs);
         </div>
       </div>
     </el-drawer>
+
+    <el-drawer v-model="fineTuneDrawerVisible" :title="fineTuneDrawerTitle" size="560px" destroy-on-close>
+      <div class="model-form">
+        <el-form label-position="top">
+          <el-form-item label="基础模型">
+            <el-select v-model="fineTuneForm.base_model_id" filterable style="width: 100%" placeholder="选择基础模型">
+              <el-option
+                v-for="option in fineTuneModelOptions"
+                :key="option.value"
+                :label="option.label"
+                :value="option.value"
+              />
+            </el-select>
+          </el-form-item>
+          <div class="form-grid">
+            <el-form-item label="数据集名称">
+              <el-input v-model="fineTuneForm.dataset_name" placeholder="例如：财报基准集" />
+            </el-form-item>
+            <el-form-item label="数据集版本">
+              <el-input v-model="fineTuneForm.dataset_version" placeholder="例如：2026Q1" />
+            </el-form-item>
+          </div>
+          <div class="form-grid">
+            <el-form-item label="策略">
+              <el-input v-model="fineTuneForm.strategy" placeholder="例如：lora" />
+            </el-form-item>
+            <el-form-item label="状态">
+              <el-select v-model="fineTuneForm.status" style="width: 100%">
+                <el-option label="待处理" value="pending" />
+                <el-option label="执行中" value="running" />
+                <el-option label="已完成" value="succeeded" />
+                <el-option label="失败" value="failed" />
+              </el-select>
+            </el-form-item>
+          </div>
+          <el-form-item label="产物路径">
+            <el-input v-model="fineTuneForm.artifact_path" placeholder="例如：/artifacts/runs/ft-20260413" />
+          </el-form-item>
+          <el-form-item label="指标 JSON">
+            <el-input
+              v-model="fineTuneForm.metrics_json"
+              type="textarea"
+              :rows="6"
+              placeholder='{"loss": 0.12, "f1_score": 0.92}'
+            />
+          </el-form-item>
+          <el-form-item label="备注">
+            <el-input v-model="fineTuneForm.notes" type="textarea" :rows="4" placeholder="记录训练来源、回写状态或人工说明。" />
+          </el-form-item>
+        </el-form>
+
+        <div class="drawer-actions">
+          <el-button @click="fineTuneDrawerVisible = false">取消</el-button>
+          <el-button type="primary" @click="submitFineTune" :loading="fineTuneSaving">保存登记</el-button>
+        </div>
+      </div>
+    </el-drawer>
   </div>
 </template>
 
@@ -411,10 +670,33 @@ onMounted(fetchConfigs);
   color: var(--app-text-muted);
 }
 
+.lineage-text {
+  line-height: 1.4;
+}
+
+.registry-toolbar {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: center;
+  margin-bottom: 16px;
+}
+
+.registry-toolbar__actions {
+  display: flex;
+  gap: 12px;
+}
+
+.registry-alert {
+  margin-bottom: 16px;
+}
+
 @media (max-width: 768px) {
   .model-page__actions,
   .form-grid,
   .drawer-actions,
+  .registry-toolbar,
+  .registry-toolbar__actions,
   .table-actions {
     grid-template-columns: 1fr;
     flex-direction: column;

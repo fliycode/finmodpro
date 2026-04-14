@@ -6,6 +6,7 @@ export const navigationMap = {
     { id: 'knowledge', label: '知识库管理', to: '/workspace/knowledge', icon: 'database' },
     { id: 'history', label: '历史会话', to: '/workspace/history', icon: 'history' },
     { id: 'risk', label: '风险与摘要', to: '/workspace/risk', icon: 'shield' },
+    { id: 'sentiment', label: '舆情分析', to: '/workspace/sentiment', icon: 'spark' },
   ],
   admin: [
     { id: 'admin-overview', label: '仪表盘', to: '/admin/overview', icon: 'dashboard' },
