@@ -27,6 +27,20 @@ test('normalizeDashboardPayload preserves real zero values', () => {
   assert.deepEqual(payload.recent_activity, []);
 });
 
+test('normalizeDashboardPayload preserves operational visibility arrays', () => {
+  const payload = normalizeDashboardPayload({
+    data: {
+      recent_failures: [{ id: 1 }],
+      retryable_ingestion_count: 3,
+      audit_snippets: [{ id: 9 }],
+    },
+  });
+
+  assert.deepEqual(payload.recent_failures, [{ id: 1 }]);
+  assert.equal(payload.retryable_ingestion_count, 3);
+  assert.deepEqual(payload.audit_snippets, [{ id: 9 }]);
+});
+
 test('buildTrendChartOption uses backend dates and values', () => {
   const option = buildTrendChartOption({
     chat_requests_7d: [

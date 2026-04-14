@@ -8,6 +8,7 @@ from risk.controllers import (
     RiskEventListView,
     RiskEventReviewView,
     RiskReportExportView,
+    SentimentAnalyzeView,
     TimeRangeRiskReportCreateView,
 )
 
@@ -19,6 +20,7 @@ urlpatterns = [
     path("reports/company", CompanyRiskReportCreateView.as_view(), name="risk-report-company-create"),
     path("reports/<int:report_id>/export", RiskReportExportView.as_view(), name="risk-report-export"),
     path("reports/time-range", TimeRangeRiskReportCreateView.as_view(), name="risk-report-time-range-create"),
+    path("sentiment/analyze", SentimentAnalyzeView.as_view(), name="risk-sentiment-analyze"),
     path(
         "documents/extract-batch",
         RiskDocumentBatchExtractView.as_view(),

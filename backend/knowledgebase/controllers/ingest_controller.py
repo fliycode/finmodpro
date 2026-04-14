@@ -10,6 +10,7 @@ from knowledgebase.services.document_service import (
     get_document_for_user,
 )
 from rbac.services.authz_service import permission_required
+from systemcheck.services.audit_service import record_audit_event
 
 
 def _build_schema_not_ready_response(exc):
@@ -34,8 +35,22 @@ def document_ingest_view(request, document_id):
         return _build_schema_not_ready_response(exc)
 
     try:
+        previous_status = document.status
         ingestion_task, created = enqueue_document_ingestion(document)
         document.refresh_from_db()
+        audit_status = "retried" if previous_status == Document.STATUS_FAILED and created else ("succeeded" if created else "skipped")
+        record_audit_event(
+            actor=request.user,
+            action="knowledgebase.ingest",
+            target_type="document",
+            target_id=document.id,
+            status=audit_status,
+            detail_payload={
+                "task_id": ingestion_task.id,
+                "retry_count": ingestion_task.retry_count,
+                "document_status": document.status,
+            },
+        )
 
         return JsonResponse(
             build_document_response(
@@ -45,4 +60,12 @@ def document_ingest_view(request, document_id):
             )
         )
     except (OperationalError, ProgrammingError, DatabaseError) as exc:
+        record_audit_event(
+            actor=getattr(request, "user", None),
+            action="knowledgebase.ingest",
+            target_type="document",
+            target_id=document_id,
+            status="failed",
+            detail_payload={"error": str(exc)},
+        )
         return _build_schema_not_ready_response(exc)
