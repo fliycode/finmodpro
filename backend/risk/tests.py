@@ -11,7 +11,7 @@ from django.utils import timezone
 
 from authentication.models import User
 from authentication.services.jwt_service import generate_access_token
-from knowledgebase.models import Document, DocumentChunk
+from knowledgebase.models import Dataset, Document, DocumentChunk
 from rbac.services.rbac_service import ROLE_ADMIN, seed_roles_and_permissions
 from risk.models import RiskEvent, RiskReport
 
@@ -1183,3 +1183,128 @@ class RiskReportExportApiTests(TestCase):
         self.assertIn("# FinModPro Holdings 风险报告", body)
         self.assertIn("共汇总 2 条已审核通过风险事件。", body)
         self.assertIn("报告详情", body)
+
+
+@override_settings(
+    JWT_SECRET_KEY="test-jwt-secret",
+    JWT_ACCESS_TOKEN_LIFETIME_SECONDS=3600,
+)
+class RiskSentimentApiTests(TestCase):
+    def setUp(self):
+        self.client = Client()
+        seed_roles_and_permissions()
+        self.media_root = tempfile.mkdtemp()
+        self.override = override_settings(MEDIA_ROOT=self.media_root)
+        self.override.enable()
+
+        self.user = User.objects.create_user(
+            username="risk-sentiment-admin",
+            password="secret123",
+            email="risk-sentiment-admin@example.com",
+        )
+        self.user.groups.add(Group.objects.get(name=ROLE_ADMIN))
+        self.access_token = generate_access_token(self.user)
+
+    def tearDown(self):
+        self.override.disable()
+        shutil.rmtree(self.media_root, ignore_errors=True)
+
+    def create_document(self, *, title, filename, parsed_text, dataset=None):
+        return Document.objects.create(
+            title=title,
+            file=SimpleUploadedFile(filename, b"sentiment-content", content_type="application/pdf"),
+            filename=filename,
+            doc_type="pdf",
+            dataset=dataset,
+            uploaded_by=self.user,
+            owner=self.user,
+            visibility=Document.VISIBILITY_INTERNAL,
+            status=Document.STATUS_INDEXED,
+            parsed_text=parsed_text,
+        )
+
+    @patch("risk.services.sentiment_service.get_chat_provider")
+    def test_sentiment_analyze_supports_dataset_scope_and_source_groups(self, mocked_get_chat_provider):
+        dataset = Dataset.objects.create(name="舆情数据集", description="dataset scope", owner=self.user)
+        self.create_document(
+            title="公告一",
+            filename="doc-1.txt",
+            parsed_text="公司现金流改善，利润增长明显。",
+            dataset=dataset,
+        )
+        self.create_document(
+            title="公告二",
+            filename="doc-2.txt",
+            parsed_text="客户投诉增加，交付延迟，盈利承压。",
+            dataset=dataset,
+        )
+        mocked_get_chat_provider.return_value.chat.side_effect = [
+            json.dumps(
+                {
+                    "sentiment": "positive",
+                    "risk_tendency": "low",
+                    "summary": "公司现金流改善，利润增长明显。",
+                    "confidence_score": 0.94,
+                    "evidence": ["现金流改善", "利润增长"],
+                }
+            ),
+            json.dumps(
+                {
+                    "sentiment": "negative",
+                    "risk_tendency": "elevated",
+                    "summary": "客户投诉增加，交付延迟，盈利承压。",
+                    "confidence_score": 0.97,
+                    "evidence": ["客户投诉增加", "交付延迟"],
+                }
+            ),
+        ]
+
+        response = self.client.post(
+            "/api/risk/sentiment/analyze",
+            data=json.dumps({"dataset_id": dataset.id}),
+            content_type="application/json",
+            HTTP_AUTHORIZATION=f"Bearer {self.access_token}",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["code"], 0)
+        self.assertEqual(payload["data"]["summary"]["overall_sentiment"], "negative")
+        self.assertEqual(payload["data"]["summary"]["risk_tendency"], "elevated")
+        self.assertEqual(len(payload["data"]["distribution"]), 3)
+        self.assertEqual(len(payload["data"]["source_groups"]), 2)
+        self.assertEqual(
+            [item["document_title"] for item in payload["data"]["items"]],
+            ["公告一", "公告二"],
+        )
+        mocked_get_chat_provider.return_value.chat.assert_called()
+
+    @patch("risk.services.sentiment_service.get_chat_provider")
+    def test_sentiment_analyze_supports_document_scope(self, mocked_get_chat_provider):
+        document = self.create_document(
+            title="精选文档",
+            filename="doc-3.txt",
+            parsed_text="市场反馈中性，整体预期保持稳定。",
+        )
+        mocked_get_chat_provider.return_value.chat.return_value = json.dumps(
+            {
+                "sentiment": "neutral",
+                "risk_tendency": "moderate",
+                "summary": "市场反馈中性，整体预期保持稳定。",
+                "confidence_score": 0.82,
+                "evidence": ["中性", "稳定"],
+            }
+        )
+
+        response = self.client.post(
+            "/api/risk/sentiment/analyze",
+            data=json.dumps({"document_ids": [document.id]}),
+            content_type="application/json",
+            HTTP_AUTHORIZATION=f"Bearer {self.access_token}",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["data"]["summary"]["overall_sentiment"], "neutral")
+        self.assertEqual(payload["data"]["items"][0]["document_id"], document.id)
+        self.assertEqual(payload["data"]["distribution"][1]["key"], "neutral")

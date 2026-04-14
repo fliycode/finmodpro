@@ -14,6 +14,7 @@ from knowledgebase.models import Document, IngestionTask
 from llm.models import EvalRecord, ModelConfig
 from rag.models import RetrievalLog
 from rbac.services.rbac_service import ROLE_ADMIN, seed_roles_and_permissions
+from systemcheck.services.audit_service import record_audit_event
 from risk.models import RiskEvent
 
 
@@ -172,6 +173,14 @@ class DashboardStatsApiTests(TestCase):
             finished_at=now,
         )
         IngestionTask.objects.filter(id=task.id).update(created_at=now - timedelta(minutes=10))
+        record_audit_event(
+            actor=self.admin_user,
+            action="knowledgebase.ingest",
+            target_type="document",
+            target_id=failed_document.id,
+            status="failed",
+            detail_payload={"error": "vector insert failed"},
+        )
 
         eval_record = EvalRecord.objects.create(
             task_type=EvalRecord.TASK_QA,
@@ -203,6 +212,11 @@ class DashboardStatsApiTests(TestCase):
         self.assertEqual(data["active_model_count"], 2)
         self.assertEqual(data["chat_request_count_24h"], 1)
         self.assertEqual(data["retrieval_hit_rate_7d"], "60.0%")
+        self.assertEqual(data["retryable_ingestion_count"], 1)
+        self.assertEqual(len(data["recent_failures"]), 1)
+        self.assertEqual(data["recent_failures"][0]["document_id"], failed_document.id)
+        self.assertEqual(len(data["audit_snippets"]), 1)
+        self.assertEqual(data["audit_snippets"][0]["action"], "knowledgebase.ingest")
         self.assertEqual(len(data["chat_requests_7d"]), 7)
         self.assertEqual(len(data["retrieval_hits_7d"]), 7)
         self.assertEqual(
@@ -265,3 +279,66 @@ class DashboardStatsApiTests(TestCase):
         self.assertEqual(data["document_count"], 2)
         self.assertEqual(data["risk_event_count"], 2)
         self.assertEqual(data["pending_risk_event_count"], 1)
+
+
+class AuditLogsApiTests(TestCase):
+    def setUp(self):
+        self.client = Client()
+        seed_roles_and_permissions()
+
+        self.user = User.objects.create_user(
+            username="audit-admin",
+            password="secret123",
+            email="audit-admin@example.com",
+        )
+        self.user.groups.add(Group.objects.get(name=ROLE_ADMIN))
+        self.access_token = generate_access_token(self.user)
+
+    def test_audit_logs_list_recent_entries(self):
+        record_audit_event(
+            actor=self.user,
+            action="knowledgebase.ingest",
+            target_type="document",
+            target_id="12",
+            status="succeeded",
+            detail_payload={"task_id": 33, "retry_count": 1},
+        )
+        record_audit_event(
+            actor=self.user,
+            action="risk.sentiment",
+            target_type="dataset",
+            target_id="8",
+            status="failed",
+            detail_payload={"error": "provider unavailable"},
+        )
+
+        response = self.client.get(
+            "/api/systemcheck/audits?limit=2",
+            HTTP_AUTHORIZATION=f"Bearer {self.access_token}",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["code"], 0)
+        self.assertEqual(payload["message"], "ok")
+        self.assertEqual(payload["data"]["total"], 2)
+        self.assertEqual(len(payload["data"]["audits"]), 2)
+        self.assertEqual(payload["data"]["audits"][0]["action"], "risk.sentiment")
+        self.assertEqual(payload["data"]["audits"][0]["status"], "failed")
+        self.assertEqual(payload["data"]["audits"][1]["action"], "knowledgebase.ingest")
+
+    def test_audit_logs_require_permission(self):
+        stranger = User.objects.create_user(
+            username="audit-viewer",
+            password="secret123",
+            email="audit-viewer@example.com",
+        )
+        stranger_token = generate_access_token(stranger)
+
+        response = self.client.get(
+            "/api/systemcheck/audits",
+            HTTP_AUTHORIZATION=f"Bearer {stranger_token}",
+        )
+
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.json(), {"code": 403, "message": "无权限。", "data": {}})

@@ -8,6 +8,7 @@ test('workspace nav hides admin entries for analyst', () => {
 
   assert.equal(items.some((item) => item.id === 'admin-overview'), false);
   assert.equal(items.some((item) => item.id === 'qa'), true);
+  assert.equal(items.some((item) => item.id === 'sentiment'), true);
 });
 
 test('admin nav is available to admin profile', () => {
