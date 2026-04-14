@@ -35,7 +35,7 @@ test('workspace branch exposes qa knowledge history and risk', () => {
   const workspace = appRoutes.find((route) => route.path === '/workspace');
   const childPaths = workspace.children.map((child) => child.path);
 
-  assert.deepEqual(childPaths, ['qa', 'knowledge', 'history', 'risk']);
+  assert.deepEqual(childPaths, ['qa', 'knowledge', 'history', 'risk', 'sentiment']);
 });
 
 test('admin branch exposes overview users models evaluation', () => {

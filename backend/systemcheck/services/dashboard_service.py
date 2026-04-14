@@ -6,6 +6,7 @@ from django.utils import timezone
 from knowledgebase.models import Document, IngestionTask
 from llm.models import EvalRecord, ModelConfig
 from rag.models import RetrievalLog
+from systemcheck.services.audit_service import list_audit_records
 from risk.models import RiskEvent
 
 
@@ -89,6 +90,24 @@ def _get_recent_activity(limit=8):
     return items[:limit]
 
 
+def _get_recent_failures(limit=4):
+    failures = []
+    for task in IngestionTask.objects.select_related("document").filter(status=IngestionTask.STATUS_FAILED).order_by("-updated_at", "-id")[:limit]:
+        failures.append(
+            {
+                "id": task.id,
+                "document_id": task.document_id,
+                "document_title": task.document.title,
+                "status": task.status,
+                "current_step": task.current_step,
+                "retry_count": task.retry_count,
+                "error_message": task.error_message or task.document.error_message or "",
+                "updated_at": task.updated_at.isoformat(),
+            }
+        )
+    return failures
+
+
 def get_dashboard_stats():
     today = timezone.localdate()
     start_of_today = timezone.now() - timedelta(hours=24)
@@ -158,6 +177,8 @@ def get_dashboard_stats():
         "indexed_document_count": document_counts["indexed_document_count"],
         "processing_document_count": document_counts["processing_document_count"],
         "failed_document_count": document_counts["failed_document_count"],
+        "retryable_ingestion_count": IngestionTask.objects.filter(status=IngestionTask.STATUS_FAILED).count(),
+        "recent_failures": _get_recent_failures(),
         "risk_event_count": risk_counts["risk_event_count"],
         "pending_risk_event_count": risk_counts["pending_risk_event_count"],
         "high_risk_event_count": risk_counts["high_risk_event_count"],
@@ -169,4 +190,5 @@ def get_dashboard_stats():
         "risk_level_distribution": risk_level_distribution,
         "document_status_distribution": document_status_distribution,
         "recent_activity": _get_recent_activity(),
+        "audit_snippets": list_audit_records(limit=4),
     }

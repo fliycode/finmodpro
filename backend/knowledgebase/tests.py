@@ -174,6 +174,38 @@ class KnowledgebaseApiTests(TestCase):
         self.assertIsNotNone(ingestion_task.finished_at)
         self.assertTrue(ingestion_task.celery_task_id)
 
+    def test_document_ingest_retries_failed_document_and_increments_retry_count(self):
+        document = create_document_from_upload(
+            uploaded_file=SimpleUploadedFile(
+                "retry.txt",
+                b"requeue me after failure",
+                content_type="text/plain",
+            ),
+            title="Retry doc",
+            source_date="2025-03-01",
+            uploaded_by=self.user,
+        )
+        document.status = Document.STATUS_FAILED
+        document.error_message = "上一次解析失败"
+        document.save(update_fields=["status", "error_message", "updated_at"])
+
+        response = self.client.post(
+            f"/api/knowledgebase/documents/{document.id}/ingest",
+            HTTP_AUTHORIZATION=f"Bearer {self.access_token}",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["message"], "摄取任务已提交。")
+        self.assertEqual(payload["document"]["status"], "indexed")
+
+        document.refresh_from_db()
+        ingestion_task = IngestionTask.objects.filter(document=document).latest("id")
+        self.assertEqual(ingestion_task.status, IngestionTask.STATUS_SUCCEEDED)
+        self.assertEqual(ingestion_task.retry_count, 1)
+        self.assertEqual(document.status, Document.STATUS_INDEXED)
+        self.assertEqual(document.error_message, "")
+
     def test_dataset_create_list_detail_and_dataset_scoped_documents(self):
         create_response = self.client.post(
             "/api/knowledgebase/datasets",
