@@ -65,6 +65,20 @@ export const createRiskApi = (overrides = {}) => {
       });
     },
 
+    retryExtractDocument(documentId) {
+      return requestJson(`/api/risk/documents/${documentId}/extract/retry`, {
+        method: 'POST',
+        body: {},
+      });
+    },
+
+    retryBatchExtract(documentIds = []) {
+      return requestJson('/api/risk/documents/extract-batch/retry', {
+        method: 'POST',
+        body: { document_ids: documentIds },
+      });
+    },
+
     generateCompanyReport(data) {
       return requestJson('/api/risk/reports/company', {
         method: 'POST',

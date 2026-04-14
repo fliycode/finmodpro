@@ -14,6 +14,7 @@ from authentication.services.jwt_service import generate_access_token
 from knowledgebase.models import Dataset, Document, DocumentChunk
 from rbac.services.rbac_service import ROLE_ADMIN, seed_roles_and_permissions
 from risk.models import RiskEvent, RiskReport
+from systemcheck.models import AuditRecord
 
 
 @override_settings(
@@ -130,6 +131,54 @@ class RiskExtractionApiTests(TestCase):
         self.assertEqual(RiskEvent.objects.count(), 0)
         mocked_get_chat_provider.assert_not_called()
 
+    @patch("risk.services.extraction_service.get_chat_provider")
+    def test_retry_extract_document_records_retry_audit_and_creates_events(self, mocked_get_chat_provider):
+        document = self.create_document(title="重试文档", filename="retry-risk.pdf")
+        chunk = DocumentChunk.objects.create(
+            document=document,
+            chunk_index=0,
+            content="FinModPro Holdings 流动性承压，需要重新触发提取。",
+            metadata={"page": 1},
+        )
+        mocked_get_chat_provider.return_value.chat.return_value = json.dumps(
+            {
+                "events": [
+                    {
+                        "company_name": "FinModPro Holdings",
+                        "risk_type": "liquidity",
+                        "risk_level": "high",
+                        "event_time": "2025-03-02T00:00:00+08:00",
+                        "summary": "重试后提取到流动性风险。",
+                        "evidence_text": "FinModPro Holdings 流动性承压，需要重新触发提取。",
+                        "confidence_score": "0.910",
+                        "chunk_id": chunk.id,
+                    }
+                ]
+            }
+        )
+
+        response = self.client.post(
+            f"/api/risk/documents/{document.id}/extract/retry",
+            data=json.dumps({}),
+            content_type="application/json",
+            HTTP_AUTHORIZATION=f"Bearer {self.access_token}",
+        )
+
+        self.assertEqual(response.status_code, 201)
+        payload = response.json()
+        self.assertEqual(payload["code"], 0)
+        self.assertEqual(payload["data"]["document_id"], document.id)
+        self.assertEqual(payload["data"]["created_count"], 1)
+        self.assertEqual(RiskEvent.objects.count(), 1)
+        self.assertTrue(
+            AuditRecord.objects.filter(
+                action="risk.extract.retry",
+                target_type="document",
+                target_id=str(document.id),
+                status=AuditRecord.STATUS_RETRIED,
+            ).exists()
+        )
+
 
 @override_settings(
     JWT_SECRET_KEY="test-jwt-secret",
@@ -227,6 +276,54 @@ class RiskBatchExtractionApiTests(TestCase):
         self.assertEqual(payload["data"]["results"][2]["document_id"], 999999)
         self.assertEqual(RiskEvent.objects.count(), 1)
         mocked_get_chat_provider.return_value.chat.assert_called_once()
+
+    @patch("risk.services.extraction_service.get_chat_provider")
+    def test_retry_batch_extract_records_retry_audit_and_processes_documents(self, mocked_get_chat_provider):
+        extractable_document = self.create_document(title="批量重试文档", filename="retry-batch.pdf")
+        chunk = DocumentChunk.objects.create(
+            document=extractable_document,
+            chunk_index=0,
+            content="批量重试后抽取信用风险。",
+            metadata={"page": 3},
+        )
+        mocked_get_chat_provider.return_value.chat.return_value = json.dumps(
+            {
+                "events": [
+                    {
+                        "company_name": "FinModPro Holdings",
+                        "risk_type": "credit",
+                        "risk_level": "medium",
+                        "event_time": None,
+                        "summary": "批量重试成功。",
+                        "evidence_text": "批量重试后抽取信用风险。",
+                        "confidence_score": "0.780",
+                        "chunk_id": chunk.id,
+                    }
+                ]
+            }
+        )
+
+        response = self.client.post(
+            "/api/risk/documents/extract-batch/retry",
+            data=json.dumps({"document_ids": [extractable_document.id]}),
+            content_type="application/json",
+            HTTP_AUTHORIZATION=f"Bearer {self.access_token}",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["code"], 0)
+        self.assertEqual(payload["data"]["total_documents"], 1)
+        self.assertEqual(payload["data"]["total_created_count"], 1)
+        self.assertEqual(RiskEvent.objects.count(), 1)
+        self.assertTrue(
+            AuditRecord.objects.filter(
+                action="risk.batch_extract.retry",
+                target_type="documents",
+                target_id=str(extractable_document.id),
+                status=AuditRecord.STATUS_RETRIED,
+            ).exists()
+        )
 
 
 @override_settings(

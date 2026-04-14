@@ -4,6 +4,7 @@ import { useRouter } from 'vue-router';
 import { ElMessage } from 'element-plus';
 
 import { dashboardApi } from '../api/dashboard.js';
+import { riskApi } from '../api/risk.js';
 import {
   buildOperationalBanner,
   buildDocumentStatusOption,
@@ -196,6 +197,36 @@ const formatAuditAction = (action) => {
   return labels[action] || action || '审计事件';
 };
 
+const isRetryableAudit = (item) => (
+  item?.status === 'failed'
+  && ['risk.extract', 'risk.batch_extract'].includes(item?.action)
+  && String(item?.target_id || '').trim() !== ''
+);
+
+const retryAuditAction = async (item) => {
+  if (!isRetryableAudit(item)) {
+    return;
+  }
+
+  try {
+    if (item.action === 'risk.extract') {
+      await riskApi.retryExtractDocument(item.target_id);
+    } else {
+      const documentIds = String(item.target_id)
+        .split(',')
+        .map((value) => Number.parseInt(value.trim(), 10))
+        .filter((value) => Number.isInteger(value) && value > 0);
+      await riskApi.retryBatchExtract(documentIds);
+    }
+
+    ElMessage.success('已重新触发风险提取任务。');
+    await fetchData();
+  } catch (error) {
+    console.error('Failed to retry risk audit action:', error);
+    ElMessage.error(error?.message || '重新触发失败，请稍后重试。');
+  }
+};
+
 const toneClass = (tone) => `is-${tone || 'neutral'}`;
 const sectionRefs = {
   'activity-section': activitySection,
@@ -310,10 +341,21 @@ const handleBannerAction = async (action) => {
         <div v-else class="audit-list">
           <article v-for="item in auditItems" :key="item.id" class="audit-item">
             <div class="audit-item__head">
-              <span class="evidence-log__badge" :class="toneClass(item.status === 'failed' ? 'risk' : 'info')">
-                {{ formatStatus(item.status) }}
-              </span>
-              <strong>{{ formatAuditAction(item.action) }}</strong>
+              <div class="audit-item__title">
+                <span class="evidence-log__badge" :class="toneClass(item.status === 'failed' ? 'risk' : 'info')">
+                  {{ formatStatus(item.status) }}
+                </span>
+                <strong>{{ formatAuditAction(item.action) }}</strong>
+              </div>
+              <el-button
+                v-if="isRetryableAudit(item)"
+                size="small"
+                text
+                type="primary"
+                @click="retryAuditAction(item)"
+              >
+                重试
+              </el-button>
             </div>
             <p class="audit-item__meta">
               {{ item.actor_name || '系统' }} · {{ item.target_type }} / {{ item.target_id || '--' }}
@@ -552,6 +594,13 @@ const handleBannerAction = async (action) => {
   justify-content: space-between;
   gap: 12px;
   align-items: center;
+}
+
+.audit-item__title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
 }
 
 .failure-item__head span,

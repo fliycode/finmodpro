@@ -51,7 +51,7 @@ const navGroups = computed(() => {
     {
       id: 'workspace-core',
       label: '核心工作',
-      items: items.value.filter((item) => ['qa', 'knowledge', 'risk'].includes(item.id)),
+      items: items.value.filter((item) => ['qa', 'knowledge', 'risk', 'sentiment'].includes(item.id)),
     },
     {
       id: 'workspace-context',

@@ -84,3 +84,53 @@ test('exportReport returns filename content type and text body from attachment r
     content: '# 风险报告',
   });
 });
+
+test('retryExtractDocument posts to retry endpoint with auth header', async () => {
+  globalThis.localStorage = createStorage();
+  globalThis.localStorage.setItem('finmodpro_token', 'retry-token');
+
+  let request;
+  const api = createRiskApi({
+    baseURL: 'http://localhost:8000',
+    fetchImpl: async (url, options) => {
+      request = { url, options };
+      return {
+        ok: true,
+        async json() {
+          return { data: { created_count: 1 } };
+        },
+      };
+    },
+  });
+
+  await api.retryExtractDocument(14);
+
+  assert.equal(request.url, 'http://localhost:8000/api/risk/documents/14/extract/retry');
+  assert.equal(request.options.method, 'POST');
+  assert.equal(request.options.headers.Authorization, 'Bearer retry-token');
+  assert.equal(request.options.body, JSON.stringify({}));
+});
+
+test('retryBatchExtract posts document ids to batch retry endpoint', async () => {
+  globalThis.localStorage = createStorage();
+
+  let request;
+  const api = createRiskApi({
+    baseURL: 'http://localhost:8000',
+    fetchImpl: async (url, options) => {
+      request = { url, options };
+      return {
+        ok: true,
+        async json() {
+          return { data: { total_documents: 2 } };
+        },
+      };
+    },
+  });
+
+  await api.retryBatchExtract([3, 5]);
+
+  assert.equal(request.url, 'http://localhost:8000/api/risk/documents/extract-batch/retry');
+  assert.equal(request.options.method, 'POST');
+  assert.equal(request.options.body, JSON.stringify({ document_ids: [3, 5] }));
+});
