@@ -1,5 +1,6 @@
 from django.urls import path
 
+from llm.controllers.fine_tune_controller import FineTuneRunDetailView, FineTuneRunListCreateView
 from llm.controllers.evaluation_controller import EvalRecordListCreateView
 from llm.controllers.model_config_controller import (
     ModelConfigActivationView,
@@ -13,6 +14,18 @@ from llm.controllers.prompt_config_controller import PromptConfigListView, Promp
 urlpatterns = [
     path("evaluations", EvalRecordListCreateView.as_view(), name="evaluation-list-create-legacy"),
     path("evaluations/", EvalRecordListCreateView.as_view(), name="evaluation-list-create"),
+    path("fine-tunes", FineTuneRunListCreateView.as_view(), name="fine-tune-list-create-legacy"),
+    path("fine-tunes/", FineTuneRunListCreateView.as_view(), name="fine-tune-list-create"),
+    path(
+        "fine-tunes/<int:fine_tune_run_id>",
+        FineTuneRunDetailView.as_view(),
+        name="fine-tune-detail-legacy",
+    ),
+    path(
+        "fine-tunes/<int:fine_tune_run_id>/",
+        FineTuneRunDetailView.as_view(),
+        name="fine-tune-detail",
+    ),
     path(
         "model-configs/test-connection",
         ModelConfigConnectionTestView.as_view(),

@@ -12,6 +12,112 @@ const unwrap = (data) => {
   return data;
 };
 
+const toNumber = (value, fallback = 0) => {
+  const numeric = Number(value ?? fallback);
+  return Number.isFinite(numeric) ? numeric : fallback;
+};
+
+const getArray = (payload, keys) => {
+  for (const key of keys) {
+    if (Array.isArray(payload?.[key])) {
+      return payload[key];
+    }
+  }
+  return [];
+};
+
+const buildQueryPath = (path, params = {}) => {
+  const query = new URLSearchParams();
+  Object.entries(params).forEach(([key, value]) => {
+    if (value === undefined || value === null || value === '') {
+      return;
+    }
+    query.set(key, String(value));
+  });
+  const queryString = query.toString();
+  return queryString ? `${path}?${queryString}` : path;
+};
+
+export const normalizeEvaluationRecord = (item, index = 0) => ({
+  id: item?.id ?? item?.evaluation_id ?? index,
+  model_config_id: item?.model_config_id ?? null,
+  evaluation_mode: item?.evaluation_mode ?? 'baseline',
+  target_name: item?.target_name ?? item?.targetName ?? item?.name ?? `evaluation-${index}`,
+  task_type: item?.task_type ?? item?.taskType ?? item?.type ?? '--',
+  status: item?.status ?? item?.state ?? 'pending',
+  qa_accuracy: item?.qa_accuracy ?? item?.qaAccuracy ?? null,
+  extraction_accuracy: item?.extraction_accuracy ?? item?.extractionAccuracy ?? null,
+  precision: item?.precision ?? null,
+  recall: item?.recall ?? null,
+  f1_score: item?.f1_score ?? null,
+  average_latency_ms: item?.average_latency_ms ?? item?.avg_latency_ms ?? null,
+  version: item?.version ?? item?.eval_version ?? item?.tag ?? '--',
+  dataset_name: item?.dataset_name ?? '',
+  dataset_version: item?.dataset_version ?? '',
+  run_notes: item?.run_notes ?? '',
+  metadata: item?.metadata ?? {},
+  created_at: item?.created_at ?? item?.createdAt ?? item?.started_at ?? item?.updated_at ?? '',
+  raw: item ?? {},
+});
+
+export const normalizeEvaluationGroup = (group, index = 0) => {
+  const records = getArray(group, ['records', 'eval_records']).map((item, recordIndex) => normalizeEvaluationRecord(item, recordIndex));
+  const summary = group?.summary || {};
+  return {
+    evaluation_mode: group?.evaluation_mode ?? 'baseline',
+    label: group?.label ?? `分组 ${index + 1}`,
+    total: toNumber(group?.total, records.length),
+    summary: {
+      qa_accuracy: summary.qa_accuracy ?? null,
+      extraction_accuracy: summary.extraction_accuracy ?? null,
+      precision: summary.precision ?? null,
+      recall: summary.recall ?? null,
+      f1_score: summary.f1_score ?? null,
+      average_latency_ms: summary.average_latency_ms ?? null,
+    },
+    records,
+    raw: group ?? {},
+  };
+};
+
+export const normalizeEvaluationPayload = (payload = {}) => {
+  const evalRecords = getArray(payload, ['eval_records', 'evaluations']).map((item, index) => normalizeEvaluationRecord(item, index));
+  const comparisonGroups = getArray(payload, ['comparison_groups']).map((group, index) => normalizeEvaluationGroup(group, index));
+
+  return {
+    total: toNumber(payload.total, evalRecords.length),
+    eval_records: evalRecords,
+    comparison_groups: comparisonGroups,
+  };
+};
+
+export const normalizeFineTuneRun = (item, index = 0) => ({
+  id: item?.id ?? item?.fine_tune_run_id ?? index,
+  base_model_id: item?.base_model_id ?? null,
+  base_model_name: item?.base_model_name ?? item?.baseModelName ?? '',
+  base_model_capability: item?.base_model_capability ?? '',
+  base_model_provider: item?.base_model_provider ?? '',
+  dataset_name: item?.dataset_name ?? '',
+  dataset_version: item?.dataset_version ?? '',
+  strategy: item?.strategy ?? 'lora',
+  status: item?.status ?? 'pending',
+  artifact_path: item?.artifact_path ?? '',
+  metrics: item?.metrics ?? {},
+  notes: item?.notes ?? '',
+  created_at: item?.created_at ?? '',
+  updated_at: item?.updated_at ?? '',
+  raw: item ?? {},
+});
+
+export const normalizeFineTunePayload = (payload = {}) => {
+  const fineTuneRuns = getArray(payload, ['fine_tune_runs']).map((item, index) => normalizeFineTuneRun(item, index));
+
+  return {
+    total: toNumber(payload.total, fineTuneRuns.length),
+    fine_tune_runs: fineTuneRuns,
+  };
+};
+
 export const llmApi = {
   async getModelConfigs() {
     return unwrap(await apiConfig.fetchJson('/api/ops/model-configs/', {
@@ -53,17 +159,49 @@ export const llmApi = {
   },
 
   async getEvaluations() {
-    return unwrap(await apiConfig.fetchJson('/api/ops/evaluations', {
+    return normalizeEvaluationPayload(unwrap(await apiConfig.fetchJson('/api/ops/evaluations', {
       method: 'GET',
       auth: true,
-    }));
+    })));
   },
 
   async triggerEvaluation(data) {
-    return unwrap(await apiConfig.fetchJson('/api/ops/evaluations', {
+    const payload = unwrap(await apiConfig.fetchJson('/api/ops/evaluations', {
       method: 'POST',
       auth: true,
       body: JSON.stringify(data),
     }));
+    return {
+      eval_record: normalizeEvaluationRecord(payload.eval_record || payload),
+    };
+  },
+
+  async getFineTuneRuns(params = {}) {
+    return normalizeFineTunePayload(unwrap(await apiConfig.fetchJson(buildQueryPath('/api/ops/fine-tunes/', params), {
+      method: 'GET',
+      auth: true,
+    })));
+  },
+
+  async createFineTuneRun(payload) {
+    const data = unwrap(await apiConfig.fetchJson('/api/ops/fine-tunes/', {
+      method: 'POST',
+      auth: true,
+      body: JSON.stringify(payload),
+    }));
+    return {
+      fine_tune_run: normalizeFineTuneRun(data.fine_tune_run || data),
+    };
+  },
+
+  async updateFineTuneRun(id, payload) {
+    const data = unwrap(await apiConfig.fetchJson(`/api/ops/fine-tunes/${id}/`, {
+      method: 'PATCH',
+      auth: true,
+      body: JSON.stringify(payload),
+    }));
+    return {
+      fine_tune_run: normalizeFineTuneRun(data.fine_tune_run || data),
+    };
   },
 };

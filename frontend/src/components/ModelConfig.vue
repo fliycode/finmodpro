@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onMounted, reactive, ref } from "vue";
+import { computed, onMounted, reactive, ref, watch } from "vue";
 import { llmApi } from "../api/llm.js";
 import { useFlash } from "../lib/flash.js";
 import AppSectionCard from "./ui/AppSectionCard.vue";
@@ -12,6 +12,13 @@ const isTesting = ref(false);
 const errorMsg = ref("");
 const drawerVisible = ref(false);
 const editingId = ref(null);
+const fineTuneRuns = ref([]);
+const fineTuneLoading = ref(false);
+const fineTuneSaving = ref(false);
+const fineTuneError = ref("");
+const fineTuneDrawerVisible = ref(false);
+const editingFineTuneId = ref(null);
+const fineTuneFilterModelId = ref("");
 
 const defaultFormState = () => ({
   name: "",
@@ -27,7 +34,19 @@ const defaultFormState = () => ({
   api_key_masked: "",
 });
 
+const defaultFineTuneFormState = () => ({
+  base_model_id: "",
+  dataset_name: "",
+  dataset_version: "",
+  strategy: "lora",
+  status: "pending",
+  artifact_path: "",
+  metrics_json: "{\n  \"f1_score\": 0.9\n}",
+  notes: "",
+});
+
 const form = reactive(defaultFormState());
+const fineTuneForm = reactive(defaultFineTuneFormState());
 
 const normalizeConfigs = (payload) => {
   const list = Array.isArray(payload)
@@ -54,6 +73,10 @@ const normalizeConfigs = (payload) => {
     options: item.options ?? {},
     has_api_key: item.has_api_key ?? false,
     api_key_masked: item.api_key_masked ?? "",
+    fine_tune_run_count: Number(item.fine_tune_run_count ?? 0),
+    latest_fine_tune_dataset: item.latest_fine_tune_dataset ?? "",
+    latest_fine_tune_status: item.latest_fine_tune_status ?? "",
+    latest_fine_tune_artifact_path: item.latest_fine_tune_artifact_path ?? "",
     raw: item,
   }));
 };
@@ -64,8 +87,13 @@ const chatConfigs = computed(() =>
 const embeddingConfigs = computed(() =>
   configs.value.filter((c) => ["embedding", "embed", "vector"].includes(String(c.capability).toLowerCase())),
 );
+const fineTuneModelOptions = computed(() => configs.value.map((config) => ({
+  value: config.id,
+  label: `${config.name} · ${config.model_name}`,
+})));
 const isDeepSeek = computed(() => form.provider === "deepseek");
 const drawerTitle = computed(() => (editingId.value ? "编辑模型配置" : "新增模型配置"));
+const fineTuneDrawerTitle = computed(() => (editingFineTuneId.value ? "编辑微调登记" : "新增微调登记"));
 
 const resetForm = () => {
   Object.assign(form, defaultFormState());
