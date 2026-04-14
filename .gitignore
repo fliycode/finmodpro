@@ -40,3 +40,7 @@ pnpm-debug.log*
 .omx/
 
 .codex
+
+backend/milvus.db
+
+backend/milvus.db
