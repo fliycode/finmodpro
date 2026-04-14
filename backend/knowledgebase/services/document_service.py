@@ -10,6 +10,7 @@ from django.db import DatabaseError, OperationalError, ProgrammingError, transac
 from django.db.models import Q
 from django.utils import timezone
 
+from common.observability import trace_span
 from knowledgebase.models import Dataset, Document, DocumentChunk, DocumentVersion, IngestionTask
 from knowledgebase.services.chunk_service import build_document_chunks
 from knowledgebase.services.parser_service import parse_document_file
@@ -592,41 +593,50 @@ def _mark_ingestion_task_finished(ingestion_task, *, status, error_message=""):
 
 
 def ingest_document(document, ingestion_task=None):
-    try:
-        parsed_text = parse_document(document)
-        if ingestion_task is not None:
-            _update_ingestion_task_step(
-                ingestion_task,
-                current_step=IngestionTask.STEP_CHUNKING,
+    with trace_span(
+        "knowledgebase.ingest",
+        metadata={"document_id": document.id, "doc_type": document.doc_type},
+        input_data={"document_title": document.title},
+    ) as observation:
+        try:
+            parsed_text = parse_document(document)
+            if ingestion_task is not None:
+                _update_ingestion_task_step(
+                    ingestion_task,
+                    current_step=IngestionTask.STEP_CHUNKING,
+                )
+            chunks = chunk_document(document, parsed_text)
+            if ingestion_task is not None:
+                _update_ingestion_task_step(
+                    ingestion_task,
+                    current_step=IngestionTask.STEP_INDEXING,
+                )
+            vectorize_document(document)
+            if ingestion_task is not None:
+                _mark_ingestion_task_finished(
+                    ingestion_task,
+                    status=IngestionTask.STATUS_SUCCEEDED,
+                )
+            observation.update(
+                output={"status": "succeeded", "chunk_count": len(chunks)}
             )
-        chunk_document(document, parsed_text)
-        if ingestion_task is not None:
-            _update_ingestion_task_step(
-                ingestion_task,
-                current_step=IngestionTask.STEP_INDEXING,
-            )
-        vectorize_document(document)
-        if ingestion_task is not None:
-            _mark_ingestion_task_finished(
-                ingestion_task,
-                status=IngestionTask.STATUS_SUCCEEDED,
-            )
-        return document
-    except Exception as exc:
-        DocumentChunk.objects.filter(document=document).delete()
-        error_message = str(exc) or "文档摄取失败。"
-        _update_document_status(
-            document,
-            status=Document.STATUS_FAILED,
-            error_message=error_message,
-        )
-        if ingestion_task is not None:
-            _mark_ingestion_task_finished(
-                ingestion_task,
-                status=IngestionTask.STATUS_FAILED,
+            return document
+        except Exception as exc:
+            DocumentChunk.objects.filter(document=document).delete()
+            error_message = str(exc) or "文档摄取失败。"
+            _update_document_status(
+                document,
+                status=Document.STATUS_FAILED,
                 error_message=error_message,
             )
-        raise
+            if ingestion_task is not None:
+                _mark_ingestion_task_finished(
+                    ingestion_task,
+                    status=IngestionTask.STATUS_FAILED,
+                    error_message=error_message,
+                )
+            observation.update(output={"status": "failed", "error_message": error_message})
+            raise
 
 
 def enqueue_document_ingestion(document):

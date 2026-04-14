@@ -1,3 +1,4 @@
+from common.observability import trace_span
 from rag.services.rerank_service import rerank_results
 from rag.services.vector_store_service import query_store
 
@@ -39,12 +40,19 @@ def build_retrieval_response(*, query, results):
 
 
 def retrieve(*, query, filters=None, top_k=5):
-    results = query_store(
-        query=query,
-        filters=filters,
-        top_k=_normalize_top_k(top_k),
-    )
-    reranked = rerank_results(results)
-    for item in reranked:
-        item["rerank_score"] = item["score"]
-    return reranked
+    normalized_top_k = _normalize_top_k(top_k)
+    with trace_span(
+        "rag.retrieve",
+        metadata={"top_k": normalized_top_k, "has_filters": bool(filters)},
+        input_data={"query": query},
+    ) as observation:
+        results = query_store(
+            query=query,
+            filters=filters,
+            top_k=normalized_top_k,
+        )
+        reranked = rerank_results(results)
+        for item in reranked:
+            item["rerank_score"] = item["score"]
+        observation.update(output={"result_count": len(reranked)})
+        return reranked
