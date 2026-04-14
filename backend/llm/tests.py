@@ -87,6 +87,19 @@ class ModelConfigServiceTests(TestCase):
         self.assertEqual(config.provider, ModelConfig.PROVIDER_DEEPSEEK)
         self.assertEqual(config.options["api_key"], "sk-test-123456")
 
+    def test_model_config_supports_litellm_provider(self):
+        config = ModelConfig.objects.create(
+            name="litellm-chat",
+            capability=ModelConfig.CAPABILITY_CHAT,
+            provider="litellm",
+            model_name="chat-default",
+            endpoint="http://localhost:4000",
+            options={"api_key": "sk-litellm", "temperature": 0.2},
+            is_active=False,
+        )
+
+        self.assertEqual(config.provider, "litellm")
+
 
 class EvalRecordModelTests(TestCase):
     def test_eval_record_can_be_created_with_metrics_and_version(self):
@@ -245,6 +258,42 @@ class ProviderRuntimeTests(TestCase):
         self.assertEqual(result, "pong")
         mocked_urlopen.assert_called_once()
 
+    @patch("urllib.request.urlopen")
+    def test_runtime_service_builds_litellm_chat_provider(self, mocked_urlopen):
+        mocked_urlopen.return_value = _FakeHttpResponse(
+            {"choices": [{"message": {"content": "pong"}}]}
+        )
+        ModelConfig.objects.filter(capability=ModelConfig.CAPABILITY_CHAT).update(is_active=False)
+        ModelConfig.objects.create(
+            name="litellm-active",
+            capability=ModelConfig.CAPABILITY_CHAT,
+            provider="litellm",
+            model_name="chat-default",
+            endpoint="http://localhost:4000",
+            options={"api_key": "sk-litellm", "temperature": 0.3, "max_tokens": 512},
+            is_active=True,
+        )
+
+        provider = get_chat_provider()
+        result = provider.chat(messages=[{"role": "user", "content": "hello"}])
+
+        self.assertEqual(result, "pong")
+
+    @patch("urllib.request.urlopen")
+    def test_litellm_embedding_provider_returns_vectors(self, mocked_urlopen):
+        from llm.services.providers.litellm_provider import LiteLLMEmbeddingProvider
+
+        mocked_urlopen.return_value = _FakeHttpResponse({"data": [{"embedding": [0.1, 0.2, 0.3]}]})
+        provider = LiteLLMEmbeddingProvider(
+            endpoint="http://localhost:4000",
+            model_name="embed-default",
+            options={"api_key": "sk-litellm"},
+        )
+
+        vectors = provider.embed(texts=["cash flow"])
+
+        self.assertEqual(vectors, [[0.1, 0.2, 0.3]])
+
     @patch.dict(os.environ, {"APP_ENV": "production", "OLLAMA_INTERNAL_URL": "http://ollama:11434"})
     def test_runtime_service_rewrites_localhost_ollama_endpoint_in_production(self):
         provider = get_embedding_provider()
@@ -258,6 +307,23 @@ class ProviderRuntimeTests(TestCase):
             _normalize_ollama_endpoint("http://10.0.0.8:11434"),
             "http://10.0.0.8:11434",
         )
+
+    @patch.dict(os.environ, {"APP_ENV": "production", "LITELLM_INTERNAL_URL": "http://litellm:4000"})
+    def test_runtime_service_rewrites_localhost_litellm_endpoint_in_production(self):
+        ModelConfig.objects.filter(capability=ModelConfig.CAPABILITY_CHAT).update(is_active=False)
+        ModelConfig.objects.create(
+            name="litellm-prod",
+            capability=ModelConfig.CAPABILITY_CHAT,
+            provider="litellm",
+            model_name="chat-default",
+            endpoint="http://localhost:4000",
+            options={"api_key": "sk-litellm"},
+            is_active=True,
+        )
+
+        provider = get_chat_provider()
+
+        self.assertEqual(provider.endpoint, "http://litellm:4000")
 
     @patch("urllib.request.urlopen")
     def test_deepseek_chat_provider_maps_auth_error(self, mocked_urlopen):
@@ -637,6 +703,28 @@ class ModelConfigActivationApiTests(TestCase):
                     "model_name": "deepseek-chat",
                     "endpoint": "https://api.deepseek.com",
                     "options": {"api_key": "sk-test"},
+                }
+            ),
+            content_type="application/json",
+            HTTP_AUTHORIZATION=f"Bearer {self.admin_access_token}",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["data"]["ok"], True)
+
+    @patch("urllib.request.urlopen")
+    def test_admin_can_test_litellm_embedding_connection(self, mocked_urlopen):
+        mocked_urlopen.return_value = _FakeHttpResponse({"data": [{"embedding": [0.1, 0.2, 0.3]}]})
+
+        response = self.client.post(
+            "/api/ops/model-configs/test-connection/",
+            data=json.dumps(
+                {
+                    "capability": "embedding",
+                    "provider": "litellm",
+                    "model_name": "embed-default",
+                    "endpoint": "http://localhost:4000",
+                    "options": {"api_key": "sk-litellm"},
                 }
             ),
             content_type="application/json",

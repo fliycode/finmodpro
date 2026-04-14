@@ -43,4 +43,6 @@ def test_model_config_connection(*, payload):
     provider = _build_provider(ModelConfig(**payload))
     if payload["capability"] == ModelConfig.CAPABILITY_CHAT:
         provider.chat(messages=[{"role": "user", "content": "ping"}])
+    elif payload["capability"] == ModelConfig.CAPABILITY_EMBEDDING:
+        provider.embed(texts=["ping"])
     return {"ok": True}
