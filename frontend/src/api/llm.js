@@ -38,6 +38,39 @@ const buildQueryPath = (path, params = {}) => {
   return queryString ? `${path}?${queryString}` : path;
 };
 
+export const normalizeModelConfigPayload = (payload = {}) => {
+  const list = Array.isArray(payload)
+    ? payload
+    : Array.isArray(payload?.results)
+      ? payload.results
+      : Array.isArray(payload?.items)
+        ? payload.items
+        : Array.isArray(payload?.model_configs)
+          ? payload.model_configs
+          : Array.isArray(payload?.data)
+            ? payload.data
+            : [];
+
+  return list.map((item, index) => ({
+    id: item.id ?? item.config_id ?? index,
+    name: item.name ?? item.config_name ?? item.model_name ?? `config-${index}`,
+    provider: item.provider ?? item.vendor ?? "--",
+    model_name: item.model_name ?? item.model ?? item.name ?? "--",
+    endpoint: item.endpoint ?? item.api_base ?? item.base_url ?? "",
+    capability: item.capability ?? item.model_type ?? item.type ?? "chat",
+    is_active: item.is_active ?? item.active ?? item.enabled ?? false,
+    updated_at: item.updated_at ?? item.updatedAt ?? item.modified_at ?? item.created_at ?? "",
+    options: item.options ?? {},
+    has_api_key: item.has_api_key ?? false,
+    api_key_masked: item.api_key_masked ?? "",
+    fine_tune_run_count: Number(item.fine_tune_run_count ?? 0),
+    latest_fine_tune_dataset: item.latest_fine_tune_dataset ?? "",
+    latest_fine_tune_status: item.latest_fine_tune_status ?? "",
+    latest_fine_tune_artifact_path: item.latest_fine_tune_artifact_path ?? "",
+    raw: item,
+  }));
+};
+
 export const normalizeEvaluationRecord = (item, index = 0) => ({
   id: item?.id ?? item?.evaluation_id ?? index,
   model_config_id: item?.model_config_id ?? null,
