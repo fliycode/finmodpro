@@ -23,6 +23,13 @@ def _build_schema_not_ready_response(exc):
     )
 
 
+def _safe_record_audit_event(**kwargs):
+    try:
+        record_audit_event(**kwargs)
+    except (OperationalError, ProgrammingError, DatabaseError):
+        return
+
+
 @csrf_exempt
 @require_POST
 @permission_required("auth.trigger_ingest")
@@ -39,7 +46,7 @@ def document_ingest_view(request, document_id):
         ingestion_task, created = enqueue_document_ingestion(document)
         document.refresh_from_db()
         audit_status = "retried" if previous_status == Document.STATUS_FAILED and created else ("succeeded" if created else "skipped")
-        record_audit_event(
+        _safe_record_audit_event(
             actor=request.user,
             action="knowledgebase.ingest",
             target_type="document",
@@ -47,7 +54,7 @@ def document_ingest_view(request, document_id):
             status=audit_status,
             detail_payload={
                 "task_id": ingestion_task.id,
-                "retry_count": ingestion_task.retry_count,
+                "retry_count": getattr(ingestion_task, "retry_count", 0),
                 "document_status": document.status,
             },
         )
@@ -60,7 +67,7 @@ def document_ingest_view(request, document_id):
             )
         )
     except (OperationalError, ProgrammingError, DatabaseError) as exc:
-        record_audit_event(
+        _safe_record_audit_event(
             actor=getattr(request, "user", None),
             action="knowledgebase.ingest",
             target_type="document",
