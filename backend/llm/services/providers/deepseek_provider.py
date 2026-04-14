@@ -1,10 +1,13 @@
+import json
+import logging
+import time
+from urllib import error, request
+
 from common.exceptions import UpstreamRateLimitError, UpstreamServiceError
 from llm.services.providers.base import BaseChatProvider
 
-try:
-    from langchain.chat_models import init_chat_model
-except ImportError:  # pragma: no cover - exercised in runtime env
-    init_chat_model = None
+
+logger = logging.getLogger(__name__)
 
 
 class DeepSeekChatProvider(BaseChatProvider):
@@ -15,18 +18,10 @@ class DeepSeekChatProvider(BaseChatProvider):
         self.model_name = model_name
         self.options = options or {}
 
-    def _ensure_dependency(self):
-        if init_chat_model is None:
-            raise UpstreamServiceError(
-                "DeepSeek provider 依赖未安装。",
-                status_code=503,
-                code="llm_provider_dependency_missing",
-                provider=self.provider_name,
-            )
-
     def _resolve_options(self, options=None):
         merged_options = {**self.options, **(options or {})}
-        if not merged_options.get("api_key"):
+        api_key = merged_options.get("api_key")
+        if not api_key:
             raise UpstreamServiceError(
                 "DeepSeek API Key 未配置。",
                 status_code=502,
@@ -35,51 +30,132 @@ class DeepSeekChatProvider(BaseChatProvider):
             )
         return merged_options
 
-    def _build_client(self, options=None):
-        self._ensure_dependency()
-        resolved_options = self._resolve_options(options)
-        return init_chat_model(
-            model=self.model_name,
-            model_provider="openai",
-            api_key=resolved_options.get("api_key"),
-            base_url=f"{self.endpoint}/v1",
-            temperature=resolved_options.get("temperature"),
-            max_tokens=resolved_options.get("max_tokens"),
-        )
+    def _build_url(self):
+        return f"{self.endpoint}/v1/chat/completions"
 
-    def _map_upstream_error(self, exc):
-        message = str(exc).lower()
-        if "429" in message or "rate limit" in message or "too many requests" in message:
-            raise UpstreamRateLimitError(provider=self.provider_name) from exc
-        if "401" in message or "api key" in message or "authentication" in message:
+    def _build_headers(self, api_key):
+        return {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        }
+
+    def _build_payload(self, messages, options=None, *, stream=False):
+        merged_options = self._resolve_options(options)
+        payload = {
+            "model": self.model_name,
+            "messages": messages,
+            "stream": stream,
+        }
+        if merged_options.get("temperature") is not None:
+            payload["temperature"] = merged_options.get("temperature")
+        if merged_options.get("max_tokens") is not None:
+            payload["max_tokens"] = merged_options.get("max_tokens")
+        return payload, merged_options
+
+    def _request_json(self, *, payload, api_key):
+        body = json.dumps(payload).encode("utf-8")
+        started_at = time.monotonic()
+        url = self._build_url()
+        logger.info(
+            "Calling %s provider",
+            self.provider_name,
+            extra={
+                "provider": self.provider_name,
+                "model_name": self.model_name,
+                "url": url,
+            },
+        )
+        try:
+            response = request.urlopen(
+                request.Request(url, data=body, headers=self._build_headers(api_key), method="POST"),
+                timeout=30,
+            )
+            response_payload = json.loads(response.read().decode("utf-8"))
+            logger.info(
+                "Completed %s provider call",
+                self.provider_name,
+                extra={
+                    "provider": self.provider_name,
+                    "model_name": self.model_name,
+                    "duration_ms": int((time.monotonic() - started_at) * 1000),
+                },
+            )
+            return response_payload
+        except error.HTTPError as exc:
+            response_body = exc.read().decode("utf-8", errors="ignore")
+            logger.exception(
+                "HTTP error from %s provider",
+                self.provider_name,
+                extra={
+                    "provider": self.provider_name,
+                    "model_name": self.model_name,
+                    "status_code": exc.code,
+                    "response_body": response_body[:500],
+                },
+            )
+            if exc.code == 429:
+                raise UpstreamRateLimitError(
+                    provider=self.provider_name,
+                    retry_after=exc.headers.get("Retry-After"),
+                ) from exc
+            if exc.code in {401, 403} or "api key" in response_body.lower():
+                raise UpstreamServiceError(
+                    "DeepSeek 认证失败。",
+                    status_code=502,
+                    code="llm_provider_auth_failed",
+                    provider=self.provider_name,
+                ) from exc
+            if exc.code == 404 or "model" in response_body.lower() and "not" in response_body.lower():
+                raise UpstreamServiceError(
+                    "DeepSeek 模型名称无效。",
+                    status_code=502,
+                    code="llm_provider_invalid_model",
+                    provider=self.provider_name,
+                ) from exc
             raise UpstreamServiceError(
-                "DeepSeek 认证失败。",
+                "模型服务调用失败。",
                 status_code=502,
-                code="llm_provider_auth_failed",
+                code="llm_provider_error",
                 provider=self.provider_name,
             ) from exc
-        if "model" in message and "not" in message and "found" in message:
+        except (error.URLError, TimeoutError, json.JSONDecodeError) as exc:
+            logger.exception(
+                "Transport error from %s provider",
+                self.provider_name,
+                extra={
+                    "provider": self.provider_name,
+                    "model_name": self.model_name,
+                },
+            )
             raise UpstreamServiceError(
-                "DeepSeek 模型名称无效。",
-                status_code=502,
-                code="llm_provider_invalid_model",
+                "DeepSeek 服务暂不可用。",
+                status_code=503,
+                code="llm_provider_unavailable",
                 provider=self.provider_name,
             ) from exc
-        raise UpstreamServiceError(
-            "DeepSeek 服务暂不可用。",
-            status_code=503,
-            code="llm_provider_unavailable",
-            provider=self.provider_name,
-        ) from exc
+
+    def _extract_content(self, response_payload):
+        choices = response_payload.get("choices") if isinstance(response_payload, dict) else None
+        if not isinstance(choices, list) or not choices:
+            return None
+
+        first_choice = choices[0] or {}
+        message = first_choice.get("message") or {}
+        content = message.get("content")
+        if content:
+            return content
+
+        delta = first_choice.get("delta") or {}
+        content = delta.get("content")
+        if content:
+            return content
+
+        return None
 
     def chat(self, *, messages, options=None):
-        client = self._build_client(options)
-        try:
-            response = client.invoke(messages)
-        except Exception as exc:  # noqa: BLE001
-            self._map_upstream_error(exc)
-
-        content = getattr(response, "content", None)
+        payload, resolved_options = self._build_payload(messages, options, stream=False)
+        response_payload = self._request_json(payload=payload, api_key=resolved_options["api_key"])
+        content = self._extract_content(response_payload)
         if isinstance(content, list):
             content = "".join(str(item) for item in content)
         if not content:
@@ -92,13 +168,59 @@ class DeepSeekChatProvider(BaseChatProvider):
         return content
 
     def stream(self, *, messages, options=None):
-        client = self._build_client(options)
+        payload, resolved_options = self._build_payload(messages, options, stream=True)
+        body = json.dumps(payload).encode("utf-8")
+        url = self._build_url()
         try:
-            for chunk in client.stream(messages):
-                content = getattr(chunk, "content", None)
+            response = request.urlopen(
+                request.Request(
+                    url,
+                    data=body,
+                    headers=self._build_headers(resolved_options["api_key"]),
+                    method="POST",
+                ),
+                timeout=30,
+            )
+            for raw_line in response:
+                line = raw_line.decode("utf-8", errors="ignore").strip()
+                if not line or not line.startswith("data:"):
+                    continue
+                data = line.removeprefix("data:").strip()
+                if data == "[DONE]":
+                    break
+                try:
+                    chunk_payload = json.loads(data)
+                except json.JSONDecodeError:
+                    continue
+                content = self._extract_content(chunk_payload)
                 if isinstance(content, list):
                     content = "".join(str(item) for item in content)
                 if content:
                     yield content
-        except Exception as exc:  # noqa: BLE001
-            self._map_upstream_error(exc)
+        except error.HTTPError as exc:
+            response_body = exc.read().decode("utf-8", errors="ignore")
+            if exc.code == 429:
+                raise UpstreamRateLimitError(
+                    provider=self.provider_name,
+                    retry_after=exc.headers.get("Retry-After"),
+                ) from exc
+            if exc.code in {401, 403} or "api key" in response_body.lower():
+                raise UpstreamServiceError(
+                    "DeepSeek 认证失败。",
+                    status_code=502,
+                    code="llm_provider_auth_failed",
+                    provider=self.provider_name,
+                ) from exc
+            raise UpstreamServiceError(
+                "DeepSeek 服务暂不可用。",
+                status_code=503,
+                code="llm_provider_unavailable",
+                provider=self.provider_name,
+            ) from exc
+        except (error.URLError, TimeoutError) as exc:
+            raise UpstreamServiceError(
+                "DeepSeek 服务暂不可用。",
+                status_code=503,
+                code="llm_provider_unavailable",
+                provider=self.provider_name,
+            ) from exc

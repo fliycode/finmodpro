@@ -10,6 +10,3 @@ pymilvus==2.6.11
 pypdf==6.9.2
 milvus-lite==2.5.1
 setuptools>=75
-langchain
-langchain-openai
-langchain-milvus

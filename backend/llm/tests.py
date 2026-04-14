@@ -5,7 +5,7 @@ import tempfile
 from decimal import Decimal
 from io import BytesIO
 from pathlib import Path
-from unittest.mock import Mock, patch
+from unittest.mock import patch
 from urllib.error import HTTPError, URLError
 
 from django.contrib.auth.models import Group
@@ -37,6 +37,14 @@ class _FakeHttpResponse:
 
     def read(self):
         return json.dumps(self.payload).encode("utf-8")
+
+
+class _FakeStreamingHttpResponse:
+    def __init__(self, lines):
+        self._lines = [line.encode("utf-8") for line in lines]
+
+    def __iter__(self):
+        return iter(self._lines)
 
 
 class ModelConfigServiceTests(TestCase):
@@ -214,11 +222,11 @@ class ProviderRuntimeTests(TestCase):
         self.assertIsInstance(chat_provider, OllamaChatProvider)
         self.assertIsInstance(embedding_provider, OllamaEmbeddingProvider)
 
-    @patch("llm.services.providers.deepseek_provider.init_chat_model")
-    def test_runtime_service_builds_deepseek_chat_provider(self, mocked_init_chat_model):
-        mocked_client = Mock()
-        mocked_client.invoke.return_value = type("Response", (), {"content": "pong"})()
-        mocked_init_chat_model.return_value = mocked_client
+    @patch("urllib.request.urlopen")
+    def test_runtime_service_builds_deepseek_chat_provider(self, mocked_urlopen):
+        mocked_urlopen.return_value = _FakeHttpResponse(
+            {"choices": [{"message": {"content": "pong"}}]}
+        )
         ModelConfig.objects.filter(capability=ModelConfig.CAPABILITY_CHAT).update(is_active=False)
         ModelConfig.objects.create(
             name="deepseek-active",
@@ -235,7 +243,7 @@ class ProviderRuntimeTests(TestCase):
 
         self.assertIsInstance(provider, DeepSeekChatProvider)
         self.assertEqual(result, "pong")
-        mocked_init_chat_model.assert_called_once()
+        mocked_urlopen.assert_called_once()
 
     @patch.dict(os.environ, {"APP_ENV": "production", "OLLAMA_INTERNAL_URL": "http://ollama:11434"})
     def test_runtime_service_rewrites_localhost_ollama_endpoint_in_production(self):
@@ -251,11 +259,15 @@ class ProviderRuntimeTests(TestCase):
             "http://10.0.0.8:11434",
         )
 
-    @patch("llm.services.providers.deepseek_provider.init_chat_model")
-    def test_deepseek_chat_provider_maps_auth_error(self, mocked_init_chat_model):
-        mocked_client = Mock()
-        mocked_client.invoke.side_effect = Exception("401 invalid api key")
-        mocked_init_chat_model.return_value = mocked_client
+    @patch("urllib.request.urlopen")
+    def test_deepseek_chat_provider_maps_auth_error(self, mocked_urlopen):
+        mocked_urlopen.side_effect = HTTPError(
+            url="https://api.deepseek.com/v1/chat/completions",
+            code=401,
+            msg="Unauthorized",
+            hdrs={},
+            fp=BytesIO(b'{"error":"invalid api key"}'),
+        )
         provider = DeepSeekChatProvider(
             endpoint="https://api.deepseek.com",
             model_name="deepseek-chat",
@@ -266,6 +278,25 @@ class ProviderRuntimeTests(TestCase):
             provider.chat(messages=[{"role": "user", "content": "hello"}])
 
         self.assertEqual(context.exception.code, "llm_provider_auth_failed")
+
+    @patch("urllib.request.urlopen")
+    def test_deepseek_chat_provider_streams_chunks(self, mocked_urlopen):
+        mocked_urlopen.return_value = _FakeStreamingHttpResponse(
+            [
+                'data: {"choices":[{"delta":{"content":"hello"}}]}',
+                'data: {"choices":[{"delta":{"content":" world"}}]}',
+                "data: [DONE]",
+            ]
+        )
+        provider = DeepSeekChatProvider(
+            endpoint="https://api.deepseek.com",
+            model_name="deepseek-chat",
+            options={"api_key": "sk-test"},
+        )
+
+        chunks = list(provider.stream(messages=[{"role": "user", "content": "hello"}]))
+
+        self.assertEqual(chunks, ["hello", " world"])
 
     def test_prompt_template_is_rendered_from_prompts_directory(self):
         prompt = render_prompt(
@@ -591,11 +622,11 @@ class ModelConfigActivationApiTests(TestCase):
         self.assertEqual(payload["data"]["model_config"]["provider"], "deepseek")
         self.assertTrue(payload["data"]["model_config"]["has_api_key"])
 
-    @patch("llm.services.providers.deepseek_provider.init_chat_model")
-    def test_admin_can_test_deepseek_connection(self, mocked_init_chat_model):
-        mocked_client = Mock()
-        mocked_client.invoke.return_value = type("Response", (), {"content": "pong"})()
-        mocked_init_chat_model.return_value = mocked_client
+    @patch("urllib.request.urlopen")
+    def test_admin_can_test_deepseek_connection(self, mocked_urlopen):
+        mocked_urlopen.return_value = _FakeHttpResponse(
+            {"choices": [{"message": {"content": "pong"}}]}
+        )
 
         response = self.client.post(
             "/api/ops/model-configs/test-connection/",
