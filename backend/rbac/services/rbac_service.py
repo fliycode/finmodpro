@@ -124,7 +124,7 @@ def ensure_rbac_bootstrapped():
 
 
 def ensure_user_role_bindings(user):
-    groups = ensure_rbac_bootstrapped()
+    groups = ensure_role_groups()
 
     expected_role = ROLE_MEMBER
     should_bind_expected_role = not user.groups.exists()
