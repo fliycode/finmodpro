@@ -50,6 +50,10 @@ export const appRoutes = [
         path: 'risk',
         component: () => import('../views/workspace/WorkspaceRiskView.vue'),
       },
+      {
+        path: 'sentiment',
+        component: () => import('../views/workspace/WorkspaceSentimentView.vue'),
+      },
     ],
   },
   {

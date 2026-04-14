@@ -52,6 +52,7 @@ export function normalizeDashboardPayload(payload) {
     high_risk_event_count: toNumber(data.high_risk_event_count),
     active_model_count: toNumber(data.active_model_count),
     chat_request_count_24h: toNumber(data.chat_request_count_24h),
+    retryable_ingestion_count: toNumber(data.retryable_ingestion_count),
     retrieval_hit_rate_7d: String(data.retrieval_hit_rate_7d ?? '0.0%'),
     chat_requests_7d: Array.isArray(data.chat_requests_7d) ? data.chat_requests_7d : [],
     retrieval_hits_7d: Array.isArray(data.retrieval_hits_7d) ? data.retrieval_hits_7d : [],
@@ -69,6 +70,8 @@ export function normalizeDashboardPayload(payload) {
       failed: toNumber(data?.document_status_distribution?.failed),
     },
     recent_activity: Array.isArray(data.recent_activity) ? data.recent_activity : [],
+    recent_failures: Array.isArray(data.recent_failures) ? data.recent_failures : [],
+    audit_snippets: Array.isArray(data.audit_snippets) ? data.audit_snippets : [],
   };
 }
 

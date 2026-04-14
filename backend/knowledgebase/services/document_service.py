@@ -646,6 +646,11 @@ def enqueue_document_ingestion(document):
 
         previous_status = locked_document.status
         previous_error_message = locked_document.error_message
+        next_retry_count = 0
+        if latest_task and latest_task.status == IngestionTask.STATUS_FAILED:
+            next_retry_count = latest_task.retry_count + 1
+        elif previous_status == Document.STATUS_FAILED:
+            next_retry_count = 1
         locked_document.status = Document.STATUS_UPLOADED
         locked_document.error_message = ""
         locked_document.save(update_fields=["status", "error_message", "updated_at"])
@@ -653,6 +658,7 @@ def enqueue_document_ingestion(document):
             document=locked_document,
             status=IngestionTask.STATUS_QUEUED,
             current_step=IngestionTask.STEP_QUEUED,
+            retry_count=next_retry_count,
         )
 
     try:

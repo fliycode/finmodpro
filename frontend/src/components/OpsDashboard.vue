@@ -17,6 +17,7 @@ import AppSectionCard from './ui/AppSectionCard.vue';
 
 const router = useRouter();
 const dashboardStats = ref(normalizeDashboardPayload({}));
+const audits = ref([]);
 const isLoading = ref(true);
 const errorMsg = ref('');
 const refreshedAt = ref('');
@@ -70,8 +71,14 @@ const fetchData = async () => {
   errorMsg.value = '';
 
   try {
-    const statsRes = await dashboardApi.getStats();
+    const [statsRes, auditRes] = await Promise.all([
+      dashboardApi.getStats(),
+      dashboardApi.getAudits({ limit: 6 }).catch(() => null),
+    ]);
     dashboardStats.value = normalizeDashboardPayload(statsRes);
+    audits.value = Array.isArray(auditRes?.audits)
+      ? auditRes.audits
+      : dashboardStats.value.audit_snippets;
     refreshedAt.value = formatTimestamp(Date.now());
   } catch (error) {
     console.error('Dashboard data fetch failed:', error);
@@ -110,6 +117,12 @@ const headlineMetrics = computed(() => [
     label: '近 24h 问答',
     value: dashboardStats.value.chat_request_count_24h,
     note: `命中率 ${dashboardStats.value.retrieval_hit_rate_7d}`,
+  },
+  {
+    key: 'retryable-ingestion',
+    label: '可重试入库',
+    value: dashboardStats.value.retryable_ingestion_count,
+    note: '失败任务可重新进入入库流程',
   },
 ]);
 
@@ -156,6 +169,12 @@ const operationalSummary = computed(() => [
     value: dashboardStats.value.knowledgebase_count,
     detail: '关注当前纳管范围是否覆盖主要知识来源。',
   },
+  {
+    id: 'audit-events',
+    label: '审计摘要',
+    value: audits.value.length,
+    detail: '关键操作已写入轻量审计记录，便于回溯。 ',
+  },
 ]);
 
 const trendOption = computed(() => buildTrendChartOption(dashboardStats.value));
@@ -164,6 +183,18 @@ const documentOption = computed(() => buildDocumentStatusOption(dashboardStats.v
 
 const activityItems = computed(() => dashboardStats.value.recent_activity.slice(0, 6));
 const evidenceItems = computed(() => dashboardStats.value.recent_activity.slice(0, 10));
+const failureItems = computed(() => dashboardStats.value.recent_failures.slice(0, 6));
+const auditItems = computed(() => audits.value.slice(0, 6));
+
+const formatAuditAction = (action) => {
+  const labels = {
+    'knowledgebase.ingest': '知识入库',
+    'risk.extract': '风险提取',
+    'risk.batch_extract': '批量提取',
+    'risk.sentiment': '舆情分析',
+  };
+  return labels[action] || action || '审计事件';
+};
 
 const toneClass = (tone) => `is-${tone || 'neutral'}`;
 const sectionRefs = {
@@ -252,6 +283,42 @@ const handleBannerAction = async (action) => {
             <span class="summary-panel__label">{{ item.label }}</span>
             <strong class="summary-panel__value">{{ item.value }}</strong>
             <p class="summary-panel__detail">{{ item.detail }}</p>
+          </article>
+        </div>
+      </AppSectionCard>
+    </section>
+
+    <section class="overview-secondary">
+      <AppSectionCard title="最近失败任务" desc="优先查看可重试的失败入库与处理异常。" admin>
+        <div v-if="failureItems.length === 0" class="failure-empty-state">暂无失败任务</div>
+        <div v-else class="failure-list">
+          <article v-for="item in failureItems" :key="item.id" class="failure-item">
+            <div class="failure-item__head">
+              <strong>{{ item.document_title }}</strong>
+              <span>{{ formatTimestamp(item.updated_at) }}</span>
+            </div>
+            <p class="failure-item__meta">
+              步骤：{{ formatStatus(item.current_step) }} · 重试次数：{{ item.retry_count ?? 0 }}
+            </p>
+            <p class="failure-item__message">{{ item.error_message || '失败详情未提供。' }}</p>
+          </article>
+        </div>
+      </AppSectionCard>
+
+      <AppSectionCard title="审计摘要" desc="展示最近平台关键动作与执行结果。" admin>
+        <div v-if="auditItems.length === 0" class="failure-empty-state">暂无审计记录</div>
+        <div v-else class="audit-list">
+          <article v-for="item in auditItems" :key="item.id" class="audit-item">
+            <div class="audit-item__head">
+              <span class="evidence-log__badge" :class="toneClass(item.status === 'failed' ? 'risk' : 'info')">
+                {{ formatStatus(item.status) }}
+              </span>
+              <strong>{{ formatAuditAction(item.action) }}</strong>
+            </div>
+            <p class="audit-item__meta">
+              {{ item.actor_name || '系统' }} · {{ item.target_type }} / {{ item.target_id || '--' }}
+            </p>
+            <p class="audit-item__message">{{ item.summary }}</p>
           </article>
         </div>
       </AppSectionCard>
@@ -447,6 +514,7 @@ const handleBannerAction = async (action) => {
 }
 
 .overview-main,
+.overview-secondary,
 .overview-evidence {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -460,9 +528,46 @@ const handleBannerAction = async (action) => {
 }
 
 .focus-list,
-.summary-grid {
+.summary-grid,
+.failure-list,
+.audit-list {
   display: grid;
   gap: 12px;
+}
+
+.failure-item,
+.audit-item {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 15px 16px;
+  border-radius: 16px;
+  border: 1px solid var(--line-soft);
+  background: var(--surface-2);
+}
+
+.failure-item__head,
+.audit-item__head {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+}
+
+.failure-item__head span,
+.failure-item__meta,
+.audit-item__meta,
+.audit-item__message {
+  color: var(--text-secondary);
+}
+
+.failure-item__message {
+  margin: 0;
+  color: var(--text-primary);
+}
+
+.failure-empty-state {
+  color: var(--text-secondary);
 }
 
 .focus-item {
