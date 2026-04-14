@@ -15,7 +15,7 @@ from django.test import Client, override_settings
 from common.exceptions import UpstreamRateLimitError, UpstreamServiceError
 from authentication.models import User
 from authentication.services.jwt_service import generate_access_token
-from llm.models import EvalRecord, ModelConfig
+from llm.models import EvalRecord, FineTuneRun, ModelConfig
 from llm.services.model_config_service import get_active_model_config
 from llm.services.prompt_service import load_prompt_template, render_prompt
 from llm.services.providers.ollama_provider import (
@@ -395,6 +395,32 @@ class ModelConfigListApiTests(TestCase):
         self.assertTrue(deepseek_row["has_api_key"])
         self.assertEqual(deepseek_row["api_key_masked"], "sk-tes******3456")
         self.assertNotIn("sk-test-123456", json.dumps(deepseek_row))
+
+    def test_list_model_configs_exposes_fine_tune_lineage_summary(self):
+        base_model = get_active_model_config(ModelConfig.CAPABILITY_CHAT)
+        FineTuneRun.objects.create(
+            base_model=base_model,
+            dataset_name="财报基准集",
+            dataset_version="2026Q1",
+            strategy="lora",
+            status=FineTuneRun.STATUS_SUCCEEDED,
+            artifact_path="/artifacts/finmodpro-chat-lora-v1",
+            metrics={"f1_score": 0.92},
+            notes="外部训练完成后登记。",
+        )
+
+        response = self.client.get(
+            "/api/ops/model-configs",
+            HTTP_AUTHORIZATION=f"Bearer {self.admin_access_token}",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        chat_row = next(
+            item for item in response.json()["data"]["model_configs"] if item["id"] == base_model.id
+        )
+        self.assertEqual(chat_row["fine_tune_run_count"], 1)
+        self.assertEqual(chat_row["latest_fine_tune_dataset"], "财报基准集")
+        self.assertEqual(chat_row["latest_fine_tune_status"], "succeeded")
 
 
 @override_settings(
@@ -859,7 +885,16 @@ class EvalRecordApiTests(TestCase):
     def test_create_evaluation_runs_smoke_suite_and_persists_record(self):
         response = self.client.post(
             "/api/ops/evaluations",
-            data=json.dumps({"task_type": "qa", "version": "baseline-v1"}),
+            data=json.dumps(
+                {
+                    "task_type": "qa",
+                    "version": "baseline-v1",
+                    "evaluation_mode": "baseline",
+                    "dataset_name": "qa-smoke",
+                    "dataset_version": "2026Q1",
+                    "run_notes": "baseline smoke",
+                }
+            ),
             content_type="application/json",
             HTTP_AUTHORIZATION=f"Bearer {self.super_admin_access_token}",
         )
@@ -870,8 +905,15 @@ class EvalRecordApiTests(TestCase):
         self.assertEqual(payload["data"]["eval_record"]["task_type"], "qa")
         self.assertEqual(payload["data"]["eval_record"]["target_name"], "default-chat")
         self.assertEqual(payload["data"]["eval_record"]["status"], "succeeded")
+        self.assertEqual(payload["data"]["eval_record"]["evaluation_mode"], "baseline")
         self.assertEqual(payload["data"]["eval_record"]["qa_accuracy"], "1.0000")
         self.assertEqual(payload["data"]["eval_record"]["extraction_accuracy"], "1.0000")
+        self.assertEqual(payload["data"]["eval_record"]["precision"], "1.0000")
+        self.assertEqual(payload["data"]["eval_record"]["recall"], "1.0000")
+        self.assertEqual(payload["data"]["eval_record"]["f1_score"], "1.0000")
+        self.assertEqual(payload["data"]["eval_record"]["dataset_name"], "qa-smoke")
+        self.assertEqual(payload["data"]["eval_record"]["dataset_version"], "2026Q1")
+        self.assertEqual(payload["data"]["eval_record"]["run_notes"], "baseline smoke")
         self.assertEqual(payload["data"]["eval_record"]["version"], "baseline-v1")
         self.assertEqual(payload["data"]["eval_record"]["metadata"]["evaluator_type"], "smoke")
         self.assertEqual(payload["data"]["eval_record"]["metadata"]["qa_dataset_size"], 2)
@@ -898,22 +940,36 @@ class EvalRecordApiTests(TestCase):
             model_config=get_active_model_config(ModelConfig.CAPABILITY_CHAT),
             target_name="default-chat",
             task_type=EvalRecord.TASK_QA,
+            evaluation_mode=EvalRecord.EVALUATION_MODE_BASELINE,
             qa_accuracy=Decimal("0.9000"),
             extraction_accuracy=Decimal("0.8000"),
+            precision=Decimal("0.9000"),
+            recall=Decimal("0.9000"),
+            f1_score=Decimal("0.9000"),
             average_latency_ms=Decimal("12.50"),
             version="v1",
             status=EvalRecord.STATUS_SUCCEEDED,
+            dataset_name="qa-smoke",
+            dataset_version="2026Q1",
+            run_notes="baseline",
             metadata={"evaluator_type": "smoke"},
         )
         second_record = EvalRecord.objects.create(
             model_config=get_active_model_config(ModelConfig.CAPABILITY_CHAT),
             target_name="default-chat",
             task_type=EvalRecord.TASK_RISK_EXTRACTION,
+            evaluation_mode=EvalRecord.EVALUATION_MODE_FINE_TUNED,
             qa_accuracy=Decimal("0.7000"),
             extraction_accuracy=Decimal("0.9500"),
+            precision=Decimal("0.9500"),
+            recall=Decimal("0.9500"),
+            f1_score=Decimal("0.9500"),
             average_latency_ms=Decimal("10.00"),
             version="v2",
             status=EvalRecord.STATUS_SUCCEEDED,
+            dataset_name="risk-smoke",
+            dataset_version="2026Q1",
+            run_notes="fine tuned",
             metadata={"evaluator_type": "smoke"},
         )
 
@@ -937,12 +993,179 @@ class EvalRecordApiTests(TestCase):
                 "model_config_id",
                 "target_name",
                 "task_type",
+                "evaluation_mode",
                 "status",
                 "qa_accuracy",
                 "extraction_accuracy",
+                "precision",
+                "recall",
+                "f1_score",
                 "average_latency_ms",
                 "version",
+                "dataset_name",
+                "dataset_version",
+                "run_notes",
                 "metadata",
                 "created_at",
             },
         )
+        self.assertEqual(
+            [group["evaluation_mode"] for group in payload["data"]["comparison_groups"]],
+            [EvalRecord.EVALUATION_MODE_BASELINE, EvalRecord.EVALUATION_MODE_FINE_TUNED],
+        )
+        self.assertEqual(payload["data"]["comparison_groups"][0]["records"][0]["id"], first_record.id)
+        self.assertEqual(payload["data"]["comparison_groups"][1]["records"][0]["id"], second_record.id)
+
+
+@override_settings(
+    JWT_SECRET_KEY="test-jwt-secret",
+    JWT_ACCESS_TOKEN_LIFETIME_SECONDS=3600,
+)
+class FineTuneRunApiTests(TestCase):
+    def setUp(self):
+        self.client = Client()
+        seed_roles_and_permissions()
+
+        self.admin_user = User.objects.create_user(
+            username="ops-finetune-admin",
+            password="secret123",
+            email="ops-finetune-admin@example.com",
+        )
+        self.admin_user.groups.add(Group.objects.get(name=ROLE_ADMIN))
+        self.admin_access_token = generate_access_token(self.admin_user)
+
+        self.member_user = User.objects.create_user(
+            username="ops-finetune-member",
+            password="secret123",
+            email="ops-finetune-member@example.com",
+        )
+        self.member_user.groups.add(Group.objects.get(name=ROLE_MEMBER))
+        self.member_access_token = generate_access_token(self.member_user)
+
+    def test_list_fine_tunes_requires_manage_permission(self):
+        response = self.client.get(
+            "/api/ops/fine-tunes",
+            HTTP_AUTHORIZATION=f"Bearer {self.member_access_token}",
+        )
+
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.json(), {"code": 403, "message": "无权限。", "data": {}})
+
+    def test_create_fine_tune_run_registers_lineage(self):
+        base_model = get_active_model_config(ModelConfig.CAPABILITY_CHAT)
+
+        response = self.client.post(
+            "/api/ops/fine-tunes",
+            data=json.dumps(
+                {
+                    "base_model_id": base_model.id,
+                    "dataset_name": "财报基准集",
+                    "dataset_version": "2026Q1",
+                    "strategy": "lora",
+                    "status": "running",
+                    "artifact_path": "/artifacts/runs/ft-20260413",
+                    "metrics": {"loss": 0.12, "f1_score": 0.91},
+                    "notes": "外部训练任务登记中。",
+                }
+            ),
+            content_type="application/json",
+            HTTP_AUTHORIZATION=f"Bearer {self.admin_access_token}",
+        )
+
+        self.assertEqual(response.status_code, 201)
+        payload = response.json()
+        self.assertEqual(payload["code"], 0)
+        self.assertEqual(payload["data"]["fine_tune_run"]["base_model_id"], base_model.id)
+        self.assertEqual(payload["data"]["fine_tune_run"]["dataset_name"], "财报基准集")
+        self.assertEqual(payload["data"]["fine_tune_run"]["status"], "running")
+        self.assertEqual(payload["data"]["fine_tune_run"]["metrics"]["f1_score"], 0.91)
+        self.assertEqual(FineTuneRun.objects.count(), 1)
+
+    def test_list_fine_tunes_returns_model_lineage(self):
+        base_model = get_active_model_config(ModelConfig.CAPABILITY_CHAT)
+        first_run = FineTuneRun.objects.create(
+            base_model=base_model,
+            dataset_name="财报基准集",
+            dataset_version="2026Q1",
+            strategy="lora",
+            status=FineTuneRun.STATUS_SUCCEEDED,
+            artifact_path="/artifacts/runs/ft-20260413",
+            metrics={"precision": 0.94, "recall": 0.92, "f1_score": 0.93},
+            notes="已完成登记。",
+        )
+        second_run = FineTuneRun.objects.create(
+            base_model=base_model,
+            dataset_name="舆情语料集",
+            dataset_version="2026Q2",
+            strategy="lora",
+            status=FineTuneRun.STATUS_PENDING,
+            artifact_path="",
+            metrics={},
+            notes="等待外部训练结果回写。",
+        )
+
+        response = self.client.get(
+            "/api/ops/fine-tunes",
+            HTTP_AUTHORIZATION=f"Bearer {self.admin_access_token}",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["data"]["total"], 2)
+        self.assertEqual(
+            [item["id"] for item in payload["data"]["fine_tune_runs"]],
+            [second_run.id, first_run.id],
+        )
+        self.assertEqual(
+            set(payload["data"]["fine_tune_runs"][0].keys()),
+            {
+                "id",
+                "base_model_id",
+                "base_model_name",
+                "base_model_capability",
+                "base_model_provider",
+                "dataset_name",
+                "dataset_version",
+                "strategy",
+                "status",
+                "artifact_path",
+                "metrics",
+                "notes",
+                "created_at",
+                "updated_at",
+            },
+        )
+
+    def test_update_fine_tune_run_updates_status_and_notes(self):
+        base_model = get_active_model_config(ModelConfig.CAPABILITY_CHAT)
+        run = FineTuneRun.objects.create(
+            base_model=base_model,
+            dataset_name="财报基准集",
+            dataset_version="2026Q1",
+            strategy="lora",
+            status=FineTuneRun.STATUS_PENDING,
+            artifact_path="",
+            metrics={},
+            notes="等待登记。",
+        )
+
+        response = self.client.patch(
+            f"/api/ops/fine-tunes/{run.id}",
+            data=json.dumps(
+                {
+                    "status": "succeeded",
+                    "artifact_path": "/artifacts/runs/ft-20260413",
+                    "metrics": {"loss": 0.1, "f1_score": 0.95},
+                    "notes": "训练结果已回写平台。",
+                }
+            ),
+            content_type="application/json",
+            HTTP_AUTHORIZATION=f"Bearer {self.admin_access_token}",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["data"]["fine_tune_run"]["status"], "succeeded")
+        self.assertEqual(payload["data"]["fine_tune_run"]["artifact_path"], "/artifacts/runs/ft-20260413")
+        self.assertEqual(payload["data"]["fine_tune_run"]["metrics"]["f1_score"], 0.95)
+        self.assertEqual(payload["data"]["fine_tune_run"]["notes"], "训练结果已回写平台。")

@@ -40,6 +40,15 @@ class ModelConfig(models.Model):
 
 
 class EvalRecord(models.Model):
+    EVALUATION_MODE_BASELINE = "baseline"
+    EVALUATION_MODE_RAG = "rag"
+    EVALUATION_MODE_FINE_TUNED = "fine_tuned"
+    EVALUATION_MODE_CHOICES = (
+        (EVALUATION_MODE_BASELINE, "Baseline"),
+        (EVALUATION_MODE_RAG, "RAG"),
+        (EVALUATION_MODE_FINE_TUNED, "Fine-tuned"),
+    )
+
     TASK_QA = "qa"
     TASK_RISK_EXTRACTION = "risk_extraction"
     TASK_REPORT = "report"
@@ -67,6 +76,12 @@ class EvalRecord(models.Model):
         blank=True,
         null=True,
     )
+    evaluation_mode = models.CharField(
+        max_length=32,
+        choices=EVALUATION_MODE_CHOICES,
+        default=EVALUATION_MODE_BASELINE,
+        db_index=True,
+    )
     target_name = models.CharField(max_length=255, db_index=True)
     task_type = models.CharField(max_length=64, choices=TASK_CHOICES, db_index=True)
     qa_accuracy = models.DecimalField(
@@ -81,8 +96,14 @@ class EvalRecord(models.Model):
         blank=True,
         null=True,
     )
+    precision = models.DecimalField(max_digits=5, decimal_places=4, blank=True, null=True)
+    recall = models.DecimalField(max_digits=5, decimal_places=4, blank=True, null=True)
+    f1_score = models.DecimalField(max_digits=5, decimal_places=4, blank=True, null=True)
     average_latency_ms = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     version = models.CharField(max_length=128, blank=True, default="")
+    dataset_name = models.CharField(max_length=255, blank=True, default="", db_index=True)
+    dataset_version = models.CharField(max_length=128, blank=True, default="")
+    run_notes = models.TextField(blank=True, default="")
     status = models.CharField(
         max_length=32,
         choices=STATUS_CHOICES,
@@ -91,6 +112,42 @@ class EvalRecord(models.Model):
     )
     metadata = models.JSONField(default=dict, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at", "-id"]
+
+
+class FineTuneRun(models.Model):
+    STATUS_PENDING = "pending"
+    STATUS_RUNNING = "running"
+    STATUS_SUCCEEDED = "succeeded"
+    STATUS_FAILED = "failed"
+    STATUS_CHOICES = (
+        (STATUS_PENDING, "Pending"),
+        (STATUS_RUNNING, "Running"),
+        (STATUS_SUCCEEDED, "Succeeded"),
+        (STATUS_FAILED, "Failed"),
+    )
+
+    base_model = models.ForeignKey(
+        ModelConfig,
+        related_name="fine_tune_runs",
+        on_delete=models.CASCADE,
+    )
+    dataset_name = models.CharField(max_length=255)
+    dataset_version = models.CharField(max_length=128, blank=True, default="")
+    strategy = models.CharField(max_length=64, default="lora")
+    status = models.CharField(
+        max_length=32,
+        choices=STATUS_CHOICES,
+        default=STATUS_PENDING,
+        db_index=True,
+    )
+    artifact_path = models.CharField(max_length=500, blank=True, default="")
+    metrics = models.JSONField(default=dict, blank=True)
+    notes = models.TextField(blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
         ordering = ["-created_at", "-id"]
