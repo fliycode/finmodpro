@@ -1,3 +1,5 @@
+import os
+
 from django.conf import settings
 
 from knowledgebase.models import DocumentChunk
@@ -6,6 +8,22 @@ from knowledgebase.services.embedding_service import build_dense_embedding
 
 class VectorService:
     _client = None
+
+    def _load_milvus_client_class(self):
+        milvus_uri = str(settings.MILVUS_URI or "")
+        if not milvus_uri.endswith(".db"):
+            from pymilvus import MilvusClient
+
+            return MilvusClient
+
+        original_env_uri = os.environ.pop("MILVUS_URI", None)
+        try:
+            from pymilvus import MilvusClient
+        finally:
+            if original_env_uri is not None:
+                os.environ["MILVUS_URI"] = original_env_uri
+
+        return MilvusClient
 
     def _build_client_kwargs(self):
         kwargs = {"uri": settings.MILVUS_URI}
@@ -17,9 +35,8 @@ class VectorService:
 
     def _get_client(self):
         if self.__class__._client is None:
-            from pymilvus import MilvusClient
-
-            self.__class__._client = MilvusClient(**self._build_client_kwargs())
+            milvus_client_class = self._load_milvus_client_class()
+            self.__class__._client = milvus_client_class(**self._build_client_kwargs())
         return self.__class__._client
 
     def _extract_collection_dimension(self, collection_schema):
