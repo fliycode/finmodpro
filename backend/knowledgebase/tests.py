@@ -1856,6 +1856,24 @@ class VectorServiceDimensionTests(TestCase):
         self.override.disable()
         shutil.rmtree(self.media_root, ignore_errors=True)
 
+    @override_settings(MILVUS_URI="local-milvus.db")
+    def test_load_milvus_client_class_ignores_env_uri_for_local_db_mode(self):
+        original_import = __import__
+
+        def import_side_effect(name, globals=None, locals=None, fromlist=(), level=0):
+            if name == "pymilvus":
+                self.assertNotIn("MILVUS_URI", os.environ)
+                return SimpleNamespace(MilvusClient=Mock(name="MilvusClient"))
+            return original_import(name, globals, locals, fromlist, level)
+
+        with patch.dict(os.environ, {"MILVUS_URI": "local-milvus.db"}, clear=False), patch(
+            "builtins.__import__",
+            side_effect=import_side_effect,
+        ):
+            milvus_client_class = VectorService()._load_milvus_client_class()
+
+        self.assertIsInstance(milvus_client_class, Mock)
+
     def test_index_creates_collection_with_actual_embedding_dimension(self):
         document = create_document_from_upload(
             uploaded_file=SimpleUploadedFile(
