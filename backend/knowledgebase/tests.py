@@ -1228,6 +1228,127 @@ class KnowledgebaseDocumentServiceTests(TestCase):
             "Liquidity risk\n\nwas stable.\n\nCapitaladequacy improved.",
         )
 
+    def test_parser_service_returns_structured_txt_result(self):
+        document = create_document_from_upload(
+            uploaded_file=SimpleUploadedFile(
+                "memo.txt",
+                b"Liquidity  risk\r\n\r\nremained stable.\n\n\nCapital-\nadequacy improved.",
+                content_type="text/plain",
+            ),
+            title="Memo",
+            source_date="2026-04-15",
+        )
+
+        result = ParserService().parse(document)
+
+        self.assertEqual(
+            result,
+            {
+                "parsed_text": "Liquidity risk\n\nremained stable.\n\nCapitaladequacy improved.",
+                "document_metadata": {
+                    "source_parser": "txt",
+                    "fallback_used": False,
+                },
+                "chunk_metadata_defaults": {
+                    "source_strategy": "local",
+                },
+            },
+        )
+
+    @patch("knowledgebase.services.parser_service.parse_via_unstructured", create=True)
+    def test_parser_service_routes_docx_to_unstructured(self, mocked_parse_via_unstructured):
+        mocked_parse_via_unstructured.return_value = {
+            "parsed_text": "board approved a revised policy",
+            "document_metadata": {
+                "source_parser": "unstructured",
+                "source_strategy": "auto",
+                "fallback_used": False,
+                "element_count": 3,
+            },
+            "chunk_metadata_defaults": {
+                "page_number": 1,
+                "section_title": "Policy",
+                "element_types": ["Title", "NarrativeText"],
+                "source_parser": "unstructured",
+                "source_strategy": "auto",
+            },
+        }
+        document = create_document_from_upload(
+            uploaded_file=SimpleUploadedFile(
+                "policy.docx",
+                b"fake-docx-binary",
+                content_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            ),
+            title="Policy",
+            source_date="2026-04-15",
+        )
+
+        result = ParserService().parse(document)
+
+        self.assertEqual(
+            result,
+            {
+                "parsed_text": "board approved a revised policy",
+                "document_metadata": {
+                    "source_parser": "unstructured",
+                    "source_strategy": "auto",
+                    "fallback_used": False,
+                    "element_count": 3,
+                },
+                "chunk_metadata_defaults": {
+                    "page_number": 1,
+                    "section_title": "Policy",
+                    "element_types": ["Title", "NarrativeText"],
+                    "source_parser": "unstructured",
+                    "source_strategy": "auto",
+                },
+            },
+        )
+
+    @patch("knowledgebase.services.parser_service.parse_via_unstructured", side_effect=ValueError("upstream timeout"), create=True)
+    @patch("knowledgebase.services.parser_service.ParserService._parse_pdf", return_value="pdf fallback text")
+    def test_parser_service_falls_back_to_pypdf_for_pdf(self, mocked_parse_pdf, mocked_parse_via_unstructured):
+        document = create_document_from_upload(
+            uploaded_file=SimpleUploadedFile(
+                "report.pdf",
+                b"%PDF-1.4 fake",
+                content_type="application/pdf",
+            ),
+            title="Report",
+            source_date="2026-04-15",
+        )
+
+        result = ParserService().parse(document)
+
+        self.assertEqual(
+            result,
+            {
+                "parsed_text": "pdf fallback text",
+                "document_metadata": {
+                    "source_parser": "pypdf",
+                    "fallback_used": True,
+                },
+                "chunk_metadata_defaults": {
+                    "source_strategy": "fallback",
+                },
+            },
+        )
+
+    @patch("knowledgebase.services.parser_service.parse_via_unstructured", side_effect=ValueError("upstream timeout"), create=True)
+    def test_parser_service_fails_fast_for_docx_when_unstructured_fails(self, mocked_parse_via_unstructured):
+        document = create_document_from_upload(
+            uploaded_file=SimpleUploadedFile(
+                "report.docx",
+                b"fake-docx-binary",
+                content_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            ),
+            title="Report",
+            source_date="2026-04-15",
+        )
+
+        with self.assertRaisesMessage(ValueError, "upstream timeout"):
+            ParserService().parse(document)
+
     def test_chunk_service_uses_fixed_length_with_overlap(self):
         chunks = build_document_chunks(
             "abcdefghij1234567890",
