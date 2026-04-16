@@ -282,6 +282,28 @@ ollama list
 
 ## 八、推荐组合
 
+## 八、LLaMA-Factory Runner
+
+### 当前作用
+
+- FinModPro 当前只把训练执行当成外部子系统
+- 平台内部负责 `FineTuneRun` 控制面、导出包、callback 验证和候选模型登记
+- 实际 GPU 训练仍由外部 `LLaMA-Factory` runner 执行
+
+### 关键变量
+
+- `FINE_TUNE_EXPORT_ROOT`
+- `FINE_TUNE_EXPORT_BASE_URL`
+- `FINE_TUNE_CALLBACK_SECRET`
+
+### 当前边界
+
+- 不在 Django / Celery 里直接执行 `llamafactory-cli`
+- 训练成功后应优先回流到 `provider=litellm` 的候选 `ModelConfig`
+- callback 只允许更新单个 `FineTuneRun`，不应复用后台管理员登录态
+
+## 九、推荐组合
+
 ### 最小本地启动
 
 适合先把前后端跑起来：
@@ -301,7 +323,7 @@ ollama list
 - Milvus Lite（当前仓库默认推荐）或你自己的远程 Milvus URI
 - Ollama 本机启动
 
-## 八、常用联调命令
+## 十、常用联调命令
 
 ```bash
 cd /root/finmodpro/backend
@@ -316,7 +338,7 @@ python manage.py runserver 127.0.0.1:8000
 
 如果你启用了 MySQL / Redis，请在 `source .env` 之前先把对应变量改好。
 
-## 七、当前边界说明
+## 十一、当前边界说明
 
 - 本文档只覆盖当前仓库代码已经真实读取或依赖到的服务与配置
 - 当前 **不** 提供 Docker Compose 一键编排

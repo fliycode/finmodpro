@@ -1175,6 +1175,11 @@ class FineTuneRunApiTests(TestCase):
     def setUp(self):
         self.client = Client()
         seed_roles_and_permissions()
+        self.export_dir = tempfile.mkdtemp()
+        self.override = override_settings(FINE_TUNE_EXPORT_ROOT=self.export_dir)
+        self.override.enable()
+        self.addCleanup(self.override.disable)
+        self.addCleanup(shutil.rmtree, self.export_dir, True)
 
         self.admin_user = User.objects.create_user(
             username="ops-finetune-admin",
@@ -1212,9 +1217,8 @@ class FineTuneRunApiTests(TestCase):
                     "dataset_name": "财报基准集",
                     "dataset_version": "2026Q1",
                     "strategy": "lora",
-                    "status": "running",
-                    "artifact_path": "/artifacts/runs/ft-20260413",
-                    "metrics": {"loss": 0.12, "f1_score": 0.91},
+                    "runner_name": "llamafactory-runner-a",
+                    "training_config": {"learning_rate": 1e-4, "epochs": 3},
                     "notes": "外部训练任务登记中。",
                 }
             ),
@@ -1227,8 +1231,10 @@ class FineTuneRunApiTests(TestCase):
         self.assertEqual(payload["code"], 0)
         self.assertEqual(payload["data"]["fine_tune_run"]["base_model_id"], base_model.id)
         self.assertEqual(payload["data"]["fine_tune_run"]["dataset_name"], "财报基准集")
-        self.assertEqual(payload["data"]["fine_tune_run"]["status"], "running")
-        self.assertEqual(payload["data"]["fine_tune_run"]["metrics"]["f1_score"], 0.91)
+        self.assertEqual(payload["data"]["fine_tune_run"]["status"], "pending")
+        self.assertEqual(payload["data"]["fine_tune_run"]["runner_name"], "llamafactory-runner-a")
+        self.assertEqual(payload["data"]["fine_tune_run"]["training_config"]["epochs"], 3)
+        self.assertTrue(payload["data"]["fine_tune_run"]["callback_token"].startswith("ftcb_"))
         self.assertEqual(FineTuneRun.objects.count(), 1)
 
     def test_list_fine_tunes_returns_model_lineage(self):
@@ -1278,8 +1284,24 @@ class FineTuneRunApiTests(TestCase):
                 "dataset_version",
                 "strategy",
                 "status",
+                "run_key",
+                "external_job_id",
+                "runner_name",
                 "artifact_path",
+                "export_path",
+                "deployment_endpoint",
+                "deployment_model_name",
+                "dataset_manifest",
+                "training_config",
+                "artifact_manifest",
                 "metrics",
+                "failure_reason",
+                "queued_at",
+                "started_at",
+                "finished_at",
+                "last_heartbeat_at",
+                "callback_token",
+                "registered_model_config_id",
                 "notes",
                 "created_at",
                 "updated_at",
@@ -1319,9 +1341,17 @@ class FineTuneRunApiTests(TestCase):
         self.assertEqual(payload["data"]["fine_tune_run"]["artifact_path"], "/artifacts/runs/ft-20260413")
         self.assertEqual(payload["data"]["fine_tune_run"]["metrics"]["f1_score"], 0.95)
         self.assertEqual(payload["data"]["fine_tune_run"]["notes"], "训练结果已回写平台。")
+        self.assertEqual(payload["data"]["fine_tune_run"]["artifact_manifest"], {})
 
 
 class FineTuneRunControlPlaneTests(TestCase):
+    def setUp(self):
+        self.export_dir = tempfile.mkdtemp()
+        self.override = override_settings(FINE_TUNE_EXPORT_ROOT=self.export_dir)
+        self.override.enable()
+        self.addCleanup(self.override.disable)
+        self.addCleanup(shutil.rmtree, self.export_dir, True)
+
     def test_create_fine_tune_run_generates_control_plane_metadata(self):
         base_model = get_active_model_config(ModelConfig.CAPABILITY_CHAT)
 
@@ -1352,6 +1382,11 @@ class FineTuneRunCallbackApiTests(TestCase):
     def setUp(self):
         self.client = Client()
         seed_roles_and_permissions()
+        self.export_dir = tempfile.mkdtemp()
+        self.override = override_settings(FINE_TUNE_EXPORT_ROOT=self.export_dir)
+        self.override.enable()
+        self.addCleanup(self.override.disable)
+        self.addCleanup(shutil.rmtree, self.export_dir, True)
 
         self.admin_user = User.objects.create_user(
             username="ops-finetune-callback-admin",
@@ -1443,3 +1478,34 @@ class FineTuneRunCallbackApiTests(TestCase):
             payload["data"]["fine_tune_run"]["artifact_manifest"]["adapter_path"],
             "/artifacts/ft-001",
         )
+
+    def test_runner_callback_registers_inactive_litellm_candidate_model(self):
+        base_model = get_active_model_config(ModelConfig.CAPABILITY_CHAT)
+        run = create_fine_tune_run(
+            payload={
+                "base_model_id": base_model.id,
+                "dataset_name": "财报基准集",
+                "dataset_version": "2026Q2",
+                "strategy": "lora",
+                "notes": "等待外部训练回写。",
+            }
+        )
+
+        response = self.client.post(
+            f"/api/ops/fine-tunes/{run.id}/callback",
+            data=json.dumps(
+                {
+                    "status": "succeeded",
+                    "deployment_endpoint": "http://localhost:4000",
+                    "deployment_model_name": "finmodpro-ft-chat",
+                }
+            ),
+            content_type="application/json",
+            HTTP_X_FINE_TUNE_TOKEN=run.callback_token,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        run.refresh_from_db()
+        self.assertIsNotNone(run.registered_model_config_id)
+        self.assertEqual(run.registered_model_config.provider, ModelConfig.PROVIDER_LITELLM)
+        self.assertFalse(run.registered_model_config.is_active)

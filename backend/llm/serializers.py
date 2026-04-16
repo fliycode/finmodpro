@@ -156,6 +156,11 @@ class FineTuneRunSummarySerializer(serializers.ModelSerializer):
     base_model_name = serializers.CharField(source="base_model.name")
     base_model_capability = serializers.CharField(source="base_model.capability")
     base_model_provider = serializers.CharField(source="base_model.provider")
+    callback_token = serializers.SerializerMethodField()
+    registered_model_config_id = serializers.IntegerField(source="registered_model_config.id", allow_null=True)
+
+    def get_callback_token(self, obj):
+        return getattr(obj, "callback_token", "")
 
     class Meta:
         model = FineTuneRun
@@ -169,8 +174,24 @@ class FineTuneRunSummarySerializer(serializers.ModelSerializer):
             "dataset_version",
             "strategy",
             "status",
+            "run_key",
+            "external_job_id",
+            "runner_name",
             "artifact_path",
+            "export_path",
+            "deployment_endpoint",
+            "deployment_model_name",
+            "dataset_manifest",
+            "training_config",
+            "artifact_manifest",
             "metrics",
+            "failure_reason",
+            "queued_at",
+            "started_at",
+            "finished_at",
+            "last_heartbeat_at",
+            "callback_token",
+            "registered_model_config_id",
             "notes",
             "created_at",
             "updated_at",
@@ -182,9 +203,8 @@ class FineTuneRunCreateSerializer(serializers.Serializer):
     dataset_name = serializers.CharField(max_length=255)
     dataset_version = serializers.CharField(required=False, allow_blank=True, max_length=128, default="")
     strategy = serializers.CharField(required=False, allow_blank=True, max_length=64, default="lora")
-    status = serializers.ChoiceField(choices=FineTuneRun.STATUS_CHOICES, required=False, default=FineTuneRun.STATUS_PENDING)
-    artifact_path = serializers.CharField(required=False, allow_blank=True, max_length=500, default="")
-    metrics = serializers.DictField(required=False, default=dict)
+    runner_name = serializers.CharField(required=False, allow_blank=True, max_length=128, default="")
+    training_config = serializers.DictField(required=False, default=dict)
     notes = serializers.CharField(required=False, allow_blank=True, default="")
 
 
@@ -194,5 +214,19 @@ class FineTuneRunUpdateSerializer(serializers.Serializer):
     strategy = serializers.CharField(required=False, allow_blank=True, max_length=64)
     status = serializers.ChoiceField(choices=FineTuneRun.STATUS_CHOICES, required=False)
     artifact_path = serializers.CharField(required=False, allow_blank=True, max_length=500)
+    deployment_endpoint = serializers.CharField(required=False, allow_blank=True, max_length=500)
+    deployment_model_name = serializers.CharField(required=False, allow_blank=True, max_length=255)
     metrics = serializers.DictField(required=False)
+    artifact_manifest = serializers.DictField(required=False)
+    failure_reason = serializers.CharField(required=False, allow_blank=True)
     notes = serializers.CharField(required=False, allow_blank=True)
+
+
+class FineTuneRunCallbackSerializer(serializers.Serializer):
+    status = serializers.ChoiceField(choices=FineTuneRun.STATUS_CHOICES, required=False)
+    external_job_id = serializers.CharField(required=False, allow_blank=True, max_length=255)
+    metrics = serializers.DictField(required=False, default=dict)
+    artifact_manifest = serializers.DictField(required=False, default=dict)
+    deployment_endpoint = serializers.CharField(required=False, allow_blank=True, max_length=500)
+    deployment_model_name = serializers.CharField(required=False, allow_blank=True, max_length=255)
+    failure_reason = serializers.CharField(required=False, allow_blank=True, default="")

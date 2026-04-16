@@ -136,6 +136,16 @@ class FineTuneRun(models.Model):
         related_name="fine_tune_runs",
         on_delete=models.CASCADE,
     )
+    registered_model_config = models.ForeignKey(
+        ModelConfig,
+        related_name="registered_fine_tune_runs",
+        on_delete=models.SET_NULL,
+        blank=True,
+        null=True,
+    )
+    run_key = models.CharField(max_length=64, blank=True, default="", db_index=True)
+    external_job_id = models.CharField(max_length=255, blank=True, default="", db_index=True)
+    runner_name = models.CharField(max_length=128, blank=True, default="")
     dataset_name = models.CharField(max_length=255)
     dataset_version = models.CharField(max_length=128, blank=True, default="")
     strategy = models.CharField(max_length=64, default="lora")
@@ -146,7 +156,19 @@ class FineTuneRun(models.Model):
         db_index=True,
     )
     artifact_path = models.CharField(max_length=500, blank=True, default="")
+    export_path = models.CharField(max_length=500, blank=True, default="")
+    deployment_endpoint = models.CharField(max_length=500, blank=True, default="")
+    deployment_model_name = models.CharField(max_length=255, blank=True, default="")
+    callback_token_hash = models.CharField(max_length=128, blank=True, default="")
+    dataset_manifest = models.JSONField(default=dict, blank=True)
+    training_config = models.JSONField(default=dict, blank=True)
+    artifact_manifest = models.JSONField(default=dict, blank=True)
     metrics = models.JSONField(default=dict, blank=True)
+    queued_at = models.DateTimeField(blank=True, null=True, db_index=True)
+    started_at = models.DateTimeField(blank=True, null=True)
+    finished_at = models.DateTimeField(blank=True, null=True)
+    last_heartbeat_at = models.DateTimeField(blank=True, null=True)
+    failure_reason = models.TextField(blank=True, default="")
     notes = models.TextField(blank=True, default="")
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
