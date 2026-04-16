@@ -323,8 +323,9 @@ const formatFineTuneLineage = (config) => {
 
 const formatFineTuneControlPlane = (run) => {
   const exportStatus = run.dataset_manifest?.export_status || "pending";
+  const callbackState = run.callback_token ? "callback 已签发" : "callback 已隐藏";
   const registration = run.registered_model_config_id ? `候选模型 #${run.registered_model_config_id}` : "未注册候选模型";
-  return `${run.run_key || "未分配 run_key"} / export:${exportStatus} / ${registration}`;
+  return `${run.run_key || "未分配 run_key"} / export:${exportStatus} / ${callbackState} / ${registration}`;
 };
 
 const formatDate = (dateStr) => {

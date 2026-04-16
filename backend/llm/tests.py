@@ -1509,3 +1509,85 @@ class FineTuneRunCallbackApiTests(TestCase):
         self.assertIsNotNone(run.registered_model_config_id)
         self.assertEqual(run.registered_model_config.provider, ModelConfig.PROVIDER_LITELLM)
         self.assertFalse(run.registered_model_config.is_active)
+
+    def test_runner_callback_is_idempotent_for_candidate_model_registration(self):
+        base_model = get_active_model_config(ModelConfig.CAPABILITY_CHAT)
+        run = create_fine_tune_run(
+            payload={
+                "base_model_id": base_model.id,
+                "dataset_name": "财报基准集",
+                "dataset_version": "2026Q2",
+                "strategy": "lora",
+                "notes": "等待外部训练回写。",
+            }
+        )
+
+        callback_payload = {
+            "status": "succeeded",
+            "deployment_endpoint": "http://localhost:4000",
+            "deployment_model_name": "finmodpro-ft-chat",
+        }
+        first_response = self.client.post(
+            f"/api/ops/fine-tunes/{run.id}/callback",
+            data=json.dumps(callback_payload),
+            content_type="application/json",
+            HTTP_X_FINE_TUNE_TOKEN=run.callback_token,
+        )
+        second_response = self.client.post(
+            f"/api/ops/fine-tunes/{run.id}/callback",
+            data=json.dumps(callback_payload),
+            content_type="application/json",
+            HTTP_X_FINE_TUNE_TOKEN=run.callback_token,
+        )
+
+        self.assertEqual(first_response.status_code, 200)
+        self.assertEqual(second_response.status_code, 200)
+        run.refresh_from_db()
+        self.assertEqual(ModelConfig.objects.filter(name__contains=run.run_key).count(), 1)
+
+    def test_failed_runner_callback_does_not_register_candidate_model(self):
+        base_model = get_active_model_config(ModelConfig.CAPABILITY_CHAT)
+        run = create_fine_tune_run(
+            payload={
+                "base_model_id": base_model.id,
+                "dataset_name": "财报基准集",
+                "dataset_version": "2026Q2",
+                "strategy": "lora",
+                "notes": "等待外部训练回写。",
+            }
+        )
+
+        response = self.client.post(
+            f"/api/ops/fine-tunes/{run.id}/callback",
+            data=json.dumps({"status": "failed", "failure_reason": "gpu oom"}),
+            content_type="application/json",
+            HTTP_X_FINE_TUNE_TOKEN=run.callback_token,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        run.refresh_from_db()
+        self.assertIsNone(run.registered_model_config_id)
+
+    def test_admin_can_fetch_export_bundle_detail(self):
+        base_model = get_active_model_config(ModelConfig.CAPABILITY_CHAT)
+        run = create_fine_tune_run(
+            payload={
+                "base_model_id": base_model.id,
+                "dataset_name": "财报基准集",
+                "dataset_version": "2026Q2",
+                "strategy": "lora",
+                "notes": "等待外部训练回写。",
+            }
+        )
+
+        response = self.client.get(
+            f"/api/ops/fine-tunes/{run.id}/export",
+            HTTP_AUTHORIZATION=f"Bearer {self.admin_access_token}",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()["data"]
+        self.assertEqual(payload["fine_tune_run_id"], run.id)
+        self.assertEqual(payload["run_key"], run.run_key)
+        self.assertEqual(payload["manifest"]["dataset_name"], "财报基准集")
+        self.assertIn("train.jsonl", [item["name"] for item in payload["files"]])

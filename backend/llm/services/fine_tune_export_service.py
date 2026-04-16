@@ -70,3 +70,38 @@ def create_export_bundle(*, fine_tune_run):
         "export_path": str(export_dir),
         "dataset_manifest": manifest,
     }
+
+
+def get_export_bundle_detail(*, fine_tune_run):
+    export_dir = Path(fine_tune_run.export_path or "")
+    if not export_dir.exists():
+        return {
+            "fine_tune_run_id": fine_tune_run.id,
+            "run_key": fine_tune_run.run_key,
+            "export_path": fine_tune_run.export_path,
+            "manifest": {},
+            "files": [],
+        }
+
+    manifest_path = export_dir / "manifest.json"
+    manifest = {}
+    if manifest_path.exists():
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+
+    files = []
+    for path in sorted(export_dir.iterdir()):
+        files.append(
+            {
+                "name": path.name,
+                "path": str(path),
+                "size_bytes": path.stat().st_size if path.is_file() else 0,
+            }
+        )
+
+    return {
+        "fine_tune_run_id": fine_tune_run.id,
+        "run_key": fine_tune_run.run_key,
+        "export_path": str(export_dir),
+        "manifest": manifest,
+        "files": files,
+    }
