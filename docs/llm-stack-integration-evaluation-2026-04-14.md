@@ -2,6 +2,25 @@
 
 更新时间：2026-04-14
 
+## 当前推进状态（2026-04-16）
+
+相对本文最初评估时，当前仓库已经推进到下面这个状态：
+
+| 项目 | 当前状态 | 代码/文档落点 |
+|---|---|---|
+| LiteLLM | 已完成第一阶段接入 | `backend/llm/services/providers/litellm_provider.py`、`deploy/litellm/config.yaml`、`docker-compose.prod.yml` |
+| Langfuse | 已完成第一阶段接入 | `backend/common/observability.py`、`backend/.env.example` |
+| Unstructured | 已完成第一阶段接入 | `backend/knowledgebase/services/parser_service.py`、`backend/knowledgebase/services/unstructured_client.py`、`docker-compose.prod.yml` |
+| LLaMA-Factory | 未进入执行接入，进入子系统设计阶段 | `backend/llm/models.py`、`backend/llm/services/fine_tune_service.py`、`frontend/src/components/ModelConfig.vue` |
+| LlamaIndex | 仍为 Deferred | 无运行时代码接入 |
+
+因此这份评估文档对应的实际推进顺序已经变成：
+
+1. `P0`：`LiteLLM + Langfuse` 已完成
+2. `P1`：`Unstructured` 已完成
+3. `P2`：继续推进 `LLaMA-Factory` 的训练子系统设计与控制面边界
+4. `Deferred`：`LlamaIndex` 继续按需评估
+
 ## 1. 结论先说
 
 ### 推荐结论
