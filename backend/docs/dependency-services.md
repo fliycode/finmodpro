@@ -251,7 +251,36 @@ ollama list
 - 本地开发默认可留空
 - 接入 Cloud 后再填
 
-## 七、推荐组合
+## 七、Unstructured Parser Service
+
+### 当前作用
+
+- 为 `pdf/docx` 提供第一阶段结构化解析能力
+- backend / celery 通过 `UNSTRUCTURED_API_URL` 访问内部 HTTP 服务
+- 解析层与 chunk / embedding / retrieval 主链路解耦
+
+### 推荐默认值
+
+- 本地或容器开发环境：`UNSTRUCTURED_API_URL=http://unstructured-api:8000`
+- `pdf` 允许回退到 `pypdf`
+- `docx` 不做本地回退，解析失败应直接暴露给上游
+
+### 关键变量
+
+- `UNSTRUCTURED_API_URL`
+- `UNSTRUCTURED_API_KEY`
+- `UNSTRUCTURED_TIMEOUT_SECONDS`
+- `UNSTRUCTURED_PDF_STRATEGY`
+- `UNSTRUCTURED_DOCX_STRATEGY`
+- `UNSTRUCTURED_PDF_FALLBACK_ENABLED`
+
+### 说明
+
+- 当前仓库只把 Unstructured 作为解析边界，不改变 chunk / embedding / retrieval / API 语义
+- 生产部署时应把该服务保留在内部网络，不对公网暴露
+- 当 Unstructured 不可用时，只有 `pdf` 会退回到 `pypdf`
+
+## 八、推荐组合
 
 ### 最小本地启动
 
