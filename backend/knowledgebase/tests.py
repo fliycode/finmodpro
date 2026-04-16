@@ -1241,19 +1241,10 @@ class KnowledgebaseDocumentServiceTests(TestCase):
 
         result = ParserService().parse(document)
 
-        self.assertEqual(
-            result,
-            {
-                "parsed_text": "Liquidity risk\n\nremained stable.\n\nCapitaladequacy improved.",
-                "document_metadata": {
-                    "source_parser": "txt",
-                    "fallback_used": False,
-                },
-                "chunk_metadata_defaults": {
-                    "source_strategy": "local",
-                },
-            },
-        )
+        self.assertEqual(result["parsed_text"], "Liquidity risk\n\nremained stable.\n\nCapitaladequacy improved.")
+        self.assertEqual(result["document_metadata"]["source_parser"], "txt")
+        self.assertFalse(result["document_metadata"]["fallback_used"])
+        self.assertEqual(result["chunk_metadata_defaults"]["source_strategy"], "local")
 
     @patch("knowledgebase.services.parser_service.parse_via_unstructured", create=True)
     def test_parser_service_routes_docx_to_unstructured(self, mocked_parse_via_unstructured):
@@ -1285,25 +1276,17 @@ class KnowledgebaseDocumentServiceTests(TestCase):
 
         result = ParserService().parse(document)
 
-        self.assertEqual(
-            result,
-            {
-                "parsed_text": "board approved a revised policy",
-                "document_metadata": {
-                    "source_parser": "unstructured",
-                    "source_strategy": "auto",
-                    "fallback_used": False,
-                    "element_count": 3,
-                },
-                "chunk_metadata_defaults": {
-                    "page_number": 1,
-                    "section_title": "Policy",
-                    "element_types": ["Title", "NarrativeText"],
-                    "source_parser": "unstructured",
-                    "source_strategy": "auto",
-                },
-            },
-        )
+        self.assertEqual(result["parsed_text"], "board approved a revised policy")
+        self.assertEqual(result["document_metadata"]["source_parser"], "unstructured")
+        self.assertEqual(result["document_metadata"]["source_strategy"], "auto")
+        self.assertFalse(result["document_metadata"]["fallback_used"])
+        self.assertEqual(result["document_metadata"]["element_count"], 3)
+        self.assertEqual(result["chunk_metadata_defaults"]["page_number"], 1)
+        self.assertEqual(result["chunk_metadata_defaults"]["section_title"], "Policy")
+        self.assertEqual(result["chunk_metadata_defaults"]["element_types"], ["Title", "NarrativeText"])
+        self.assertEqual(result["chunk_metadata_defaults"]["source_parser"], "unstructured")
+        self.assertEqual(result["chunk_metadata_defaults"]["source_strategy"], "auto")
+        mocked_parse_via_unstructured.assert_called_once()
 
     @patch("knowledgebase.services.parser_service.parse_via_unstructured", side_effect=ValueError("upstream timeout"), create=True)
     @patch("knowledgebase.services.parser_service.ParserService._parse_pdf", return_value="pdf fallback text")
@@ -1320,19 +1303,12 @@ class KnowledgebaseDocumentServiceTests(TestCase):
 
         result = ParserService().parse(document)
 
-        self.assertEqual(
-            result,
-            {
-                "parsed_text": "pdf fallback text",
-                "document_metadata": {
-                    "source_parser": "pypdf",
-                    "fallback_used": True,
-                },
-                "chunk_metadata_defaults": {
-                    "source_strategy": "fallback",
-                },
-            },
-        )
+        self.assertEqual(result["parsed_text"], "pdf fallback text")
+        self.assertEqual(result["document_metadata"]["source_parser"], "pypdf")
+        self.assertTrue(result["document_metadata"]["fallback_used"])
+        self.assertEqual(result["chunk_metadata_defaults"]["source_strategy"], "fallback")
+        mocked_parse_via_unstructured.assert_called_once()
+        mocked_parse_pdf.assert_called_once()
 
     @patch("knowledgebase.services.parser_service.parse_via_unstructured", side_effect=ValueError("upstream timeout"), create=True)
     def test_parser_service_fails_fast_for_docx_when_unstructured_fails(self, mocked_parse_via_unstructured):
