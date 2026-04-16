@@ -243,6 +243,13 @@ export const llmApi = {
     };
   },
 
+  async getFineTuneExportDetail(id) {
+    return unwrap(await apiConfig.fetchJson(`/api/ops/fine-tunes/${id}/export/`, {
+      method: 'GET',
+      auth: true,
+    }));
+  },
+
   async updateFineTuneRun(id, payload) {
     const data = unwrap(await apiConfig.fetchJson(`/api/ops/fine-tunes/${id}/`, {
       method: 'PATCH',

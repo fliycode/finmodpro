@@ -3,6 +3,7 @@ from django.urls import path
 from llm.controllers.fine_tune_controller import (
     FineTuneRunCallbackView,
     FineTuneRunDetailView,
+    FineTuneRunExportDetailView,
     FineTuneRunListCreateView,
 )
 from llm.controllers.evaluation_controller import EvalRecordListCreateView
@@ -39,6 +40,16 @@ urlpatterns = [
         "fine-tunes/<int:fine_tune_run_id>/callback/",
         FineTuneRunCallbackView.as_view(),
         name="fine-tune-callback",
+    ),
+    path(
+        "fine-tunes/<int:fine_tune_run_id>/export",
+        FineTuneRunExportDetailView.as_view(),
+        name="fine-tune-export-detail-legacy",
+    ),
+    path(
+        "fine-tunes/<int:fine_tune_run_id>/export/",
+        FineTuneRunExportDetailView.as_view(),
+        name="fine-tune-export-detail",
     ),
     path(
         "model-configs/test-connection",
