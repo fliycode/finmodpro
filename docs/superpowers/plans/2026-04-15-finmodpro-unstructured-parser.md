@@ -40,7 +40,7 @@
 from knowledgebase.services.parser_service import ParserService
 
 
-class KnowledgebaseServiceTests(TestCase):
+class KnowledgebaseDocumentServiceTests(TestCase):
     def test_parser_service_returns_structured_txt_result(self):
         document = create_document_from_upload(
             uploaded_file=SimpleUploadedFile(
@@ -102,7 +102,7 @@ Run:
 
 ```bash
 cd /root/finmodpro
-backend/.venv/bin/python backend/manage.py test knowledgebase.tests.KnowledgebaseServiceTests.test_parser_service_returns_structured_txt_result knowledgebase.tests.KnowledgebaseServiceTests.test_parser_service_routes_docx_to_unstructured -v 2
+backend/.venv/bin/python backend/manage.py test knowledgebase.tests.KnowledgebaseDocumentServiceTests.test_parser_service_returns_structured_txt_result knowledgebase.tests.KnowledgebaseDocumentServiceTests.test_parser_service_routes_docx_to_unstructured -v 2
 ```
 
 Expected: FAIL because `ParserService.parse()` currently returns a string and there is no `parse_via_unstructured` helper.
@@ -154,7 +154,7 @@ Run:
 
 ```bash
 cd /root/finmodpro
-backend/.venv/bin/python backend/manage.py test knowledgebase.tests.KnowledgebaseServiceTests.test_parser_service_falls_back_to_pypdf_for_pdf knowledgebase.tests.KnowledgebaseServiceTests.test_parser_service_fails_fast_for_docx_when_unstructured_fails -v 2
+backend/.venv/bin/python backend/manage.py test knowledgebase.tests.KnowledgebaseDocumentServiceTests.test_parser_service_falls_back_to_pypdf_for_pdf knowledgebase.tests.KnowledgebaseDocumentServiceTests.test_parser_service_fails_fast_for_docx_when_unstructured_fails -v 2
 ```
 
 Expected: FAIL because parser fallback metadata does not exist yet.
@@ -303,7 +303,7 @@ Run:
 
 ```bash
 cd /root/finmodpro
-backend/.venv/bin/python backend/manage.py test knowledgebase.tests.KnowledgebaseServiceTests.test_parser_service_returns_structured_txt_result knowledgebase.tests.KnowledgebaseServiceTests.test_parser_service_routes_docx_to_unstructured knowledgebase.tests.KnowledgebaseServiceTests.test_parser_service_falls_back_to_pypdf_for_pdf knowledgebase.tests.KnowledgebaseServiceTests.test_parser_service_fails_fast_for_docx_when_unstructured_fails -v 2
+backend/.venv/bin/python backend/manage.py test knowledgebase.tests.KnowledgebaseDocumentServiceTests.test_parser_service_returns_structured_txt_result knowledgebase.tests.KnowledgebaseDocumentServiceTests.test_parser_service_routes_docx_to_unstructured knowledgebase.tests.KnowledgebaseDocumentServiceTests.test_parser_service_falls_back_to_pypdf_for_pdf knowledgebase.tests.KnowledgebaseDocumentServiceTests.test_parser_service_fails_fast_for_docx_when_unstructured_fails -v 2
 ```
 
 Expected: PASS.
@@ -396,7 +396,7 @@ Run:
 
 ```bash
 cd /root/finmodpro
-backend/.venv/bin/python backend/manage.py test knowledgebase.tests.KnowledgebaseServiceTests.test_parse_document_writes_parser_provenance_to_version_record knowledgebase.tests.KnowledgebaseServiceTests.test_chunk_document_merges_parser_metadata_defaults -v 2
+backend/.venv/bin/python backend/manage.py test knowledgebase.tests.KnowledgebaseDocumentServiceTests.test_parse_document_writes_parser_provenance_to_version_record knowledgebase.tests.KnowledgebaseDocumentServiceTests.test_chunk_document_merges_parser_metadata_defaults -v 2
 ```
 
 Expected: FAIL because `parse_document()` still expects a string and `_build_chunk_metadata()` does not accept parser defaults.
@@ -463,7 +463,7 @@ Run:
 
 ```bash
 cd /root/finmodpro
-backend/.venv/bin/python backend/manage.py test knowledgebase.tests.KnowledgebaseServiceTests.test_parse_document_writes_parser_provenance_to_version_record knowledgebase.tests.KnowledgebaseServiceTests.test_chunk_document_merges_parser_metadata_defaults knowledgebase.tests.KnowledgebaseServiceTests.test_ingest_document_marks_ingestion_task_failed_when_parsing_raises knowledgebase.tests.KnowledgebaseApiTests.test_document_detail_returns_parsed_text -v 2
+backend/.venv/bin/python backend/manage.py test knowledgebase.tests.KnowledgebaseDocumentServiceTests.test_parse_document_writes_parser_provenance_to_version_record knowledgebase.tests.KnowledgebaseDocumentServiceTests.test_chunk_document_merges_parser_metadata_defaults knowledgebase.tests.KnowledgebaseDocumentServiceTests.test_ingest_document_marks_task_failed_when_parser_raises knowledgebase.tests.KnowledgebaseApiTests.test_document_upload_list_detail_and_ingest_flow -v 2
 ```
 
 Expected: PASS.
@@ -565,7 +565,7 @@ Run:
 
 ```bash
 cd /root/finmodpro
-backend/.venv/bin/python backend/manage.py test knowledgebase.tests.KnowledgebaseServiceTests -v 2
+backend/.venv/bin/python backend/manage.py test knowledgebase.tests.KnowledgebaseDocumentServiceTests -v 2
 ```
 
 Expected: PASS.
