@@ -1,6 +1,10 @@
 import re
 from pathlib import Path
 
+from django.conf import settings
+
+from knowledgebase.services.unstructured_client import parse_via_unstructured
+
 
 class ParserService:
     _MULTISPACE_PATTERN = re.compile(r"[^\S\r\n]+")
@@ -14,6 +18,59 @@ class ParserService:
         cleaned = re.sub(r"[ \t]+\n", "\n", cleaned)
         cleaned = self._MULTIBLANK_PATTERN.sub("\n\n", cleaned)
         return cleaned.strip()
+
+    def _base_document_metadata(self, *, source_parser, source_strategy, fallback_used, element_count=0):
+        return {
+            "source_parser": source_parser,
+            "source_strategy": source_strategy,
+            "fallback_used": fallback_used,
+            "element_count": element_count,
+        }
+
+    def _base_chunk_metadata_defaults(self, *, source_parser, source_strategy):
+        return {
+            "page_number": None,
+            "section_title": "",
+            "element_types": [],
+            "source_parser": source_parser,
+            "source_strategy": source_strategy,
+        }
+
+    def _structured_result(
+        self,
+        *,
+        parsed_text,
+        source_parser,
+        source_strategy,
+        fallback_used,
+        element_count=0,
+        chunk_metadata_defaults=None,
+        document_metadata=None,
+    ):
+        result = {
+            "parsed_text": self.clean_text(parsed_text),
+            "document_metadata": self._base_document_metadata(
+                source_parser=source_parser,
+                source_strategy=source_strategy,
+                fallback_used=fallback_used,
+                element_count=element_count,
+            ),
+            "chunk_metadata_defaults": self._base_chunk_metadata_defaults(
+                source_parser=source_parser,
+                source_strategy=source_strategy,
+            ),
+        }
+        if document_metadata:
+            result["document_metadata"].update(document_metadata)
+            result["document_metadata"]["source_parser"] = source_parser
+            result["document_metadata"]["source_strategy"] = source_strategy
+            result["document_metadata"]["fallback_used"] = fallback_used
+            result["document_metadata"].setdefault("element_count", element_count)
+        if chunk_metadata_defaults:
+            result["chunk_metadata_defaults"].update(chunk_metadata_defaults)
+            result["chunk_metadata_defaults"]["source_parser"] = source_parser
+            result["chunk_metadata_defaults"]["source_strategy"] = source_strategy
+        return result
 
     def _parse_pdf(self, file_path):
         try:
@@ -29,16 +86,73 @@ class ParserService:
                 pages.append(extracted.strip())
         return "\n\n".join(pages)
 
+    def _txt_result(self, text):
+        return self._structured_result(
+            parsed_text=text,
+            source_parser="txt",
+            source_strategy="local",
+            fallback_used=False,
+            element_count=0,
+        )
+
+    def _pdf_fallback_result(self, text):
+        return self._structured_result(
+            parsed_text=text,
+            source_parser="pypdf",
+            source_strategy="fallback",
+            fallback_used=True,
+            element_count=0,
+        )
+
     def parse(self, document):
         file_path = Path(document.file.path)
         if document.doc_type == "txt":
-            return self.clean_text(file_path.read_text(encoding="utf-8"))
+            return self._txt_result(file_path.read_text(encoding="utf-8"))
 
         if document.doc_type == "pdf":
-            return self.clean_text(self._parse_pdf(file_path))
+            try:
+                result = parse_via_unstructured(
+                    file_path=file_path,
+                    filename=document.filename,
+                    content_type="application/pdf",
+                    strategy=settings.UNSTRUCTURED_PDF_STRATEGY,
+                )
+                parsed_text = self.clean_text((result or {}).get("parsed_text", ""))
+                if not parsed_text:
+                    raise ValueError("Unstructured 返回空文本。")
+                return self._structured_result(
+                    parsed_text=parsed_text,
+                    source_parser="unstructured",
+                    source_strategy=settings.UNSTRUCTURED_PDF_STRATEGY,
+                    fallback_used=False,
+                    element_count=((result or {}).get("document_metadata") or {}).get("element_count", 0),
+                    chunk_metadata_defaults=((result or {}).get("chunk_metadata_defaults") or {}),
+                    document_metadata=((result or {}).get("document_metadata") or {}),
+                )
+            except ValueError:
+                if not settings.UNSTRUCTURED_PDF_FALLBACK_ENABLED:
+                    raise
+                return self._pdf_fallback_result(self._parse_pdf(file_path))
 
         if document.doc_type == "docx":
-            raise ValueError("DOCX 解析暂未实现。")
+            result = parse_via_unstructured(
+                file_path=file_path,
+                filename=document.filename,
+                content_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                strategy=settings.UNSTRUCTURED_DOCX_STRATEGY,
+            )
+            parsed_text = self.clean_text((result or {}).get("parsed_text", ""))
+            if not parsed_text:
+                raise ValueError("Unstructured 返回空文本。")
+            return self._structured_result(
+                parsed_text=parsed_text,
+                source_parser="unstructured",
+                source_strategy=settings.UNSTRUCTURED_DOCX_STRATEGY,
+                fallback_used=False,
+                element_count=((result or {}).get("document_metadata") or {}).get("element_count", 0),
+                chunk_metadata_defaults=((result or {}).get("chunk_metadata_defaults") or {}),
+                document_metadata=((result or {}).get("document_metadata") or {}),
+            )
 
         raise ValueError("不支持的文档类型。")
 

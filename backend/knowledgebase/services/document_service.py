@@ -501,9 +501,24 @@ def _update_ingestion_task_step(ingestion_task, *, current_step):
     ingestion_task.save(update_fields=["current_step", "updated_at"])
 
 
-def _build_chunk_metadata(document, index):
+def _update_version_record_from_parser(document, parser_result):
     version_record = _get_version_record(document)
-    return {
+    if version_record is None:
+        return
+
+    document_metadata = (parser_result or {}).get("document_metadata") or {}
+    version_record.source_metadata = {
+        **(version_record.source_metadata or {}),
+        **document_metadata,
+    }
+    if document_metadata.get("fallback_used"):
+        version_record.processing_notes = "pdf parse fallback to pypdf"
+    version_record.save(update_fields=["source_metadata", "processing_notes"])
+
+
+def _build_chunk_metadata(document, index, parser_defaults=None):
+    version_record = _get_version_record(document)
+    metadata = {
         "document_id": document.id,
         "document_title": document.title,
         "doc_type": document.doc_type,
@@ -515,22 +530,29 @@ def _build_chunk_metadata(document, index):
         "chunk_index": index,
         "page_label": f"chunk-{index + 1}",
     }
+    return {
+        **metadata,
+        **(parser_defaults or {}),
+    }
 
 
 def parse_document(document):
-    parsed_text = parse_document_file(document)
-    document.parsed_text = parsed_text
+    parser_result = parse_document_file(document)
+    document.parsed_text = parser_result["parsed_text"]
     document.error_message = ""
     document.save(update_fields=["parsed_text", "error_message", "updated_at"])
+    _update_version_record_from_parser(document, parser_result)
     _update_document_status(document, status=Document.STATUS_PARSED)
-    return parsed_text
+    return parser_result
 
 
-def chunk_document(document, parsed_text):
+def chunk_document(document, parser_result):
+    parsed_text = (parser_result or {}).get("parsed_text", "")
+    parser_defaults = (parser_result or {}).get("chunk_metadata_defaults") or {}
     DocumentChunk.objects.filter(document=document).delete()
     chunks = build_document_chunks(
         parsed_text,
-        metadata_builder=lambda index: _build_chunk_metadata(document, index),
+        metadata_builder=lambda index: _build_chunk_metadata(document, index, parser_defaults),
     )
     DocumentChunk.objects.bulk_create(
         [
@@ -599,13 +621,13 @@ def ingest_document(document, ingestion_task=None):
         input_data={"document_title": document.title},
     ) as observation:
         try:
-            parsed_text = parse_document(document)
+            parser_result = parse_document(document)
             if ingestion_task is not None:
                 _update_ingestion_task_step(
                     ingestion_task,
                     current_step=IngestionTask.STEP_CHUNKING,
                 )
-            chunks = chunk_document(document, parsed_text)
+            chunks = chunk_document(document, parser_result)
             if ingestion_task is not None:
                 _update_ingestion_task_step(
                     ingestion_task,
