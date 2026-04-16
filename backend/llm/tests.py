@@ -17,6 +17,7 @@ from authentication.models import User
 from authentication.services.jwt_service import generate_access_token
 from llm.models import EvalRecord, FineTuneRun, ModelConfig
 from llm.services.model_config_service import get_active_model_config
+from llm.services.fine_tune_service import create_fine_tune_run
 from llm.services.prompt_service import load_prompt_template, render_prompt
 from llm.services.providers.ollama_provider import (
     OllamaChatProvider,
@@ -1318,3 +1319,127 @@ class FineTuneRunApiTests(TestCase):
         self.assertEqual(payload["data"]["fine_tune_run"]["artifact_path"], "/artifacts/runs/ft-20260413")
         self.assertEqual(payload["data"]["fine_tune_run"]["metrics"]["f1_score"], 0.95)
         self.assertEqual(payload["data"]["fine_tune_run"]["notes"], "训练结果已回写平台。")
+
+
+class FineTuneRunControlPlaneTests(TestCase):
+    def test_create_fine_tune_run_generates_control_plane_metadata(self):
+        base_model = get_active_model_config(ModelConfig.CAPABILITY_CHAT)
+
+        fine_tune_run = create_fine_tune_run(
+            payload={
+                "base_model_id": base_model.id,
+                "dataset_name": "财报基准集",
+                "dataset_version": "2026Q2",
+                "strategy": "lora",
+                "notes": "等待导出训练数据。",
+            }
+        )
+
+        self.assertTrue(fine_tune_run.run_key.startswith("ft-"))
+        self.assertTrue(fine_tune_run.callback_token.startswith("ftcb_"))
+        self.assertNotEqual(fine_tune_run.callback_token_hash, fine_tune_run.callback_token)
+        self.assertIsNotNone(fine_tune_run.queued_at)
+        self.assertEqual(fine_tune_run.status, FineTuneRun.STATUS_PENDING)
+        self.assertEqual(fine_tune_run.dataset_manifest["dataset_name"], "财报基准集")
+        self.assertIn("export_status", fine_tune_run.dataset_manifest)
+
+
+@override_settings(
+    JWT_SECRET_KEY="test-jwt-secret",
+    JWT_ACCESS_TOKEN_LIFETIME_SECONDS=3600,
+)
+class FineTuneRunCallbackApiTests(TestCase):
+    def setUp(self):
+        self.client = Client()
+        seed_roles_and_permissions()
+
+        self.admin_user = User.objects.create_user(
+            username="ops-finetune-callback-admin",
+            password="secret123",
+            email="ops-finetune-callback-admin@example.com",
+        )
+        self.admin_user.groups.add(Group.objects.get(name=ROLE_ADMIN))
+        self.admin_access_token = generate_access_token(self.admin_user)
+
+    def test_list_fine_tunes_exposes_control_plane_fields(self):
+        base_model = get_active_model_config(ModelConfig.CAPABILITY_CHAT)
+        run = FineTuneRun.objects.create(
+            base_model=base_model,
+            dataset_name="财报基准集",
+            dataset_version="2026Q2",
+            strategy="lora",
+            status=FineTuneRun.STATUS_PENDING,
+            artifact_path="",
+            metrics={},
+            notes="等待外部训练结果。",
+        )
+
+        response = self.client.get(
+            "/api/ops/fine-tunes",
+            HTTP_AUTHORIZATION=f"Bearer {self.admin_access_token}",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        first_run = response.json()["data"]["fine_tune_runs"][0]
+        self.assertEqual(first_run["id"], run.id)
+        self.assertIn("run_key", first_run)
+        self.assertIn("runner_name", first_run)
+        self.assertIn("export_path", first_run)
+        self.assertIn("deployment_endpoint", first_run)
+        self.assertIn("registered_model_config_id", first_run)
+
+    def test_runner_callback_requires_valid_token(self):
+        base_model = get_active_model_config(ModelConfig.CAPABILITY_CHAT)
+        run = FineTuneRun.objects.create(
+            base_model=base_model,
+            dataset_name="财报基准集",
+            dataset_version="2026Q2",
+            strategy="lora",
+            status=FineTuneRun.STATUS_PENDING,
+            artifact_path="",
+            metrics={},
+            notes="等待外部训练结果。",
+        )
+
+        response = self.client.post(
+            f"/api/ops/fine-tunes/{run.id}/callback",
+            data=json.dumps({"status": "running"}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 401)
+        self.assertEqual(response.json()["message"], "回调令牌无效。")
+
+    def test_runner_callback_updates_status_and_artifact_without_admin_session(self):
+        base_model = get_active_model_config(ModelConfig.CAPABILITY_CHAT)
+        run = create_fine_tune_run(
+            payload={
+                "base_model_id": base_model.id,
+                "dataset_name": "财报基准集",
+                "dataset_version": "2026Q2",
+                "strategy": "lora",
+                "notes": "等待外部训练回写。",
+            }
+        )
+
+        response = self.client.post(
+            f"/api/ops/fine-tunes/{run.id}/callback",
+            data=json.dumps(
+                {
+                    "status": "succeeded",
+                    "metrics": {"f1_score": 0.94},
+                    "artifact_manifest": {"adapter_path": "/artifacts/ft-001"},
+                }
+            ),
+            content_type="application/json",
+            HTTP_X_FINE_TUNE_TOKEN=run.callback_token,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["data"]["fine_tune_run"]["status"], "succeeded")
+        self.assertEqual(payload["data"]["fine_tune_run"]["metrics"]["f1_score"], 0.94)
+        self.assertEqual(
+            payload["data"]["fine_tune_run"]["artifact_manifest"]["adapter_path"],
+            "/artifacts/ft-001",
+        )
