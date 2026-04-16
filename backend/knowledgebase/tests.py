@@ -24,6 +24,8 @@ from knowledgebase.services.document_service import (
     enqueue_document_ingestion,
     get_document_for_user,
     ingest_document,
+    chunk_document,
+    parse_document,
     vectorize_document,
 )
 from knowledgebase.services.vector_service import VectorService
@@ -1324,6 +1326,80 @@ class KnowledgebaseDocumentServiceTests(TestCase):
 
         with self.assertRaisesMessage(ValueError, "upstream timeout"):
             ParserService().parse(document)
+
+    @patch("knowledgebase.services.document_service.parse_document_file")
+    def test_parse_document_writes_parser_provenance_to_version_record(self, mocked_parse_document_file):
+        mocked_parse_document_file.return_value = {
+            "parsed_text": "capital buffer improved across the quarter",
+            "document_metadata": {
+                "source_parser": "unstructured",
+                "source_strategy": "auto",
+                "fallback_used": False,
+                "element_count": 4,
+            },
+            "chunk_metadata_defaults": {
+                "page_number": 2,
+                "section_title": "Capital",
+                "element_types": ["Title", "NarrativeText"],
+                "source_parser": "unstructured",
+                "source_strategy": "auto",
+            },
+        }
+        document = create_document_from_upload(
+            uploaded_file=SimpleUploadedFile(
+                "capital.txt",
+                b"capital buffer",
+                content_type="text/plain",
+            ),
+            title="Capital",
+            source_date="2026-04-15",
+        )
+
+        result = parse_document(document)
+        document.refresh_from_db()
+
+        self.assertEqual(result["parsed_text"], "capital buffer improved across the quarter")
+        self.assertEqual(document.parsed_text, "capital buffer improved across the quarter")
+        self.assertEqual(document.status, Document.STATUS_PARSED)
+        self.assertEqual(document.version_record.source_metadata["source_parser"], "unstructured")
+        self.assertEqual(document.version_record.source_metadata["element_count"], 4)
+
+    def test_chunk_document_merges_parser_metadata_defaults(self):
+        document = create_document_from_upload(
+            uploaded_file=SimpleUploadedFile(
+                "liquidity.txt",
+                b"liquidity coverage ratio stayed above target",
+                content_type="text/plain",
+            ),
+            title="Liquidity",
+            source_date="2026-04-15",
+        )
+
+        parser_result = {
+            "parsed_text": "liquidity coverage ratio stayed above target",
+            "document_metadata": {
+                "source_parser": "pypdf",
+                "source_strategy": "fallback",
+                "fallback_used": True,
+                "element_count": 0,
+            },
+            "chunk_metadata_defaults": {
+                "page_number": 7,
+                "section_title": "Liquidity",
+                "element_types": ["NarrativeText"],
+                "source_parser": "pypdf",
+                "source_strategy": "fallback",
+            },
+        }
+
+        chunks = chunk_document(document, parser_result)
+
+        self.assertEqual(chunks[0]["metadata"]["page_number"], 7)
+        self.assertEqual(chunks[0]["metadata"]["section_title"], "Liquidity")
+        self.assertEqual(chunks[0]["metadata"]["element_types"], ["NarrativeText"])
+        self.assertEqual(chunks[0]["metadata"]["source_parser"], "pypdf")
+        self.assertEqual(chunks[0]["metadata"]["source_strategy"], "fallback")
+        self.assertEqual(chunks[0]["metadata"]["document_id"], document.id)
 
     def test_chunk_service_uses_fixed_length_with_overlap(self):
         chunks = build_document_chunks(
