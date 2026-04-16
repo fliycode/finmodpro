@@ -24,6 +24,8 @@ from knowledgebase.services.document_service import (
     enqueue_document_ingestion,
     get_document_for_user,
     ingest_document,
+    chunk_document,
+    parse_document,
     vectorize_document,
 )
 from knowledgebase.services.vector_service import VectorService
@@ -1227,6 +1229,177 @@ class KnowledgebaseDocumentServiceTests(TestCase):
             cleaned,
             "Liquidity risk\n\nwas stable.\n\nCapitaladequacy improved.",
         )
+
+    def test_parser_service_returns_structured_txt_result(self):
+        document = create_document_from_upload(
+            uploaded_file=SimpleUploadedFile(
+                "memo.txt",
+                b"Liquidity  risk\r\n\r\nremained stable.\n\n\nCapital-\nadequacy improved.",
+                content_type="text/plain",
+            ),
+            title="Memo",
+            source_date="2026-04-15",
+        )
+
+        result = ParserService().parse(document)
+
+        self.assertEqual(result["parsed_text"], "Liquidity risk\n\nremained stable.\n\nCapitaladequacy improved.")
+        self.assertEqual(result["document_metadata"]["source_parser"], "txt")
+        self.assertFalse(result["document_metadata"]["fallback_used"])
+        self.assertEqual(result["chunk_metadata_defaults"]["source_strategy"], "local")
+
+    @patch("knowledgebase.services.parser_service.parse_via_unstructured", create=True)
+    def test_parser_service_routes_docx_to_unstructured(self, mocked_parse_via_unstructured):
+        mocked_parse_via_unstructured.return_value = {
+            "parsed_text": "board approved a revised policy",
+            "document_metadata": {
+                "source_parser": "unstructured",
+                "source_strategy": "auto",
+                "fallback_used": False,
+                "element_count": 3,
+            },
+            "chunk_metadata_defaults": {
+                "page_number": 1,
+                "section_title": "Policy",
+                "element_types": ["Title", "NarrativeText"],
+                "source_parser": "unstructured",
+                "source_strategy": "auto",
+            },
+        }
+        document = create_document_from_upload(
+            uploaded_file=SimpleUploadedFile(
+                "policy.docx",
+                b"fake-docx-binary",
+                content_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            ),
+            title="Policy",
+            source_date="2026-04-15",
+        )
+
+        result = ParserService().parse(document)
+
+        self.assertEqual(result["parsed_text"], "board approved a revised policy")
+        self.assertEqual(result["document_metadata"]["source_parser"], "unstructured")
+        self.assertEqual(result["document_metadata"]["source_strategy"], "auto")
+        self.assertFalse(result["document_metadata"]["fallback_used"])
+        self.assertEqual(result["document_metadata"]["element_count"], 3)
+        self.assertEqual(result["chunk_metadata_defaults"]["page_number"], 1)
+        self.assertEqual(result["chunk_metadata_defaults"]["section_title"], "Policy")
+        self.assertEqual(result["chunk_metadata_defaults"]["element_types"], ["Title", "NarrativeText"])
+        self.assertEqual(result["chunk_metadata_defaults"]["source_parser"], "unstructured")
+        self.assertEqual(result["chunk_metadata_defaults"]["source_strategy"], "auto")
+        mocked_parse_via_unstructured.assert_called_once()
+
+    @patch("knowledgebase.services.parser_service.parse_via_unstructured", side_effect=ValueError("upstream timeout"), create=True)
+    @patch("knowledgebase.services.parser_service.ParserService._parse_pdf", return_value="pdf fallback text")
+    def test_parser_service_falls_back_to_pypdf_for_pdf(self, mocked_parse_pdf, mocked_parse_via_unstructured):
+        document = create_document_from_upload(
+            uploaded_file=SimpleUploadedFile(
+                "report.pdf",
+                b"%PDF-1.4 fake",
+                content_type="application/pdf",
+            ),
+            title="Report",
+            source_date="2026-04-15",
+        )
+
+        result = ParserService().parse(document)
+
+        self.assertEqual(result["parsed_text"], "pdf fallback text")
+        self.assertEqual(result["document_metadata"]["source_parser"], "pypdf")
+        self.assertTrue(result["document_metadata"]["fallback_used"])
+        self.assertEqual(result["chunk_metadata_defaults"]["source_strategy"], "fallback")
+        mocked_parse_via_unstructured.assert_called_once()
+        mocked_parse_pdf.assert_called_once()
+
+    @patch("knowledgebase.services.parser_service.parse_via_unstructured", side_effect=ValueError("upstream timeout"), create=True)
+    def test_parser_service_fails_fast_for_docx_when_unstructured_fails(self, mocked_parse_via_unstructured):
+        document = create_document_from_upload(
+            uploaded_file=SimpleUploadedFile(
+                "report.docx",
+                b"fake-docx-binary",
+                content_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            ),
+            title="Report",
+            source_date="2026-04-15",
+        )
+
+        with self.assertRaisesMessage(ValueError, "upstream timeout"):
+            ParserService().parse(document)
+
+    @patch("knowledgebase.services.document_service.parse_document_file")
+    def test_parse_document_writes_parser_provenance_to_version_record(self, mocked_parse_document_file):
+        mocked_parse_document_file.return_value = {
+            "parsed_text": "capital buffer improved across the quarter",
+            "document_metadata": {
+                "source_parser": "unstructured",
+                "source_strategy": "auto",
+                "fallback_used": False,
+                "element_count": 4,
+            },
+            "chunk_metadata_defaults": {
+                "page_number": 2,
+                "section_title": "Capital",
+                "element_types": ["Title", "NarrativeText"],
+                "source_parser": "unstructured",
+                "source_strategy": "auto",
+            },
+        }
+        document = create_document_from_upload(
+            uploaded_file=SimpleUploadedFile(
+                "capital.txt",
+                b"capital buffer",
+                content_type="text/plain",
+            ),
+            title="Capital",
+            source_date="2026-04-15",
+        )
+
+        result = parse_document(document)
+        document.refresh_from_db()
+
+        self.assertEqual(result["parsed_text"], "capital buffer improved across the quarter")
+        self.assertEqual(document.parsed_text, "capital buffer improved across the quarter")
+        self.assertEqual(document.status, Document.STATUS_PARSED)
+        self.assertEqual(document.version_record.source_metadata["source_parser"], "unstructured")
+        self.assertEqual(document.version_record.source_metadata["element_count"], 4)
+
+    def test_chunk_document_merges_parser_metadata_defaults(self):
+        document = create_document_from_upload(
+            uploaded_file=SimpleUploadedFile(
+                "liquidity.txt",
+                b"liquidity coverage ratio stayed above target",
+                content_type="text/plain",
+            ),
+            title="Liquidity",
+            source_date="2026-04-15",
+        )
+
+        parser_result = {
+            "parsed_text": "liquidity coverage ratio stayed above target",
+            "document_metadata": {
+                "source_parser": "pypdf",
+                "source_strategy": "fallback",
+                "fallback_used": True,
+                "element_count": 0,
+            },
+            "chunk_metadata_defaults": {
+                "page_number": 7,
+                "section_title": "Liquidity",
+                "element_types": ["NarrativeText"],
+                "source_parser": "pypdf",
+                "source_strategy": "fallback",
+            },
+        }
+
+        chunks = chunk_document(document, parser_result)
+
+        self.assertEqual(chunks[0]["metadata"]["page_number"], 7)
+        self.assertEqual(chunks[0]["metadata"]["section_title"], "Liquidity")
+        self.assertEqual(chunks[0]["metadata"]["element_types"], ["NarrativeText"])
+        self.assertEqual(chunks[0]["metadata"]["source_parser"], "pypdf")
+        self.assertEqual(chunks[0]["metadata"]["source_strategy"], "fallback")
+        self.assertEqual(chunks[0]["metadata"]["document_id"], document.id)
 
     def test_chunk_service_uses_fixed_length_with_overlap(self):
         chunks = build_document_chunks(
