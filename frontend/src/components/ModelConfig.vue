@@ -39,6 +39,8 @@ const defaultFineTuneFormState = () => ({
   dataset_name: "",
   dataset_version: "",
   strategy: "lora",
+  runner_name: "",
+  training_config_json: "{\n  \"epochs\": 3\n}",
   status: "pending",
   artifact_path: "",
   metrics_json: "{\n  \"f1_score\": 0.9\n}",
@@ -130,6 +132,8 @@ const openEditFineTune = (run) => {
   fineTuneForm.dataset_name = run.dataset_name;
   fineTuneForm.dataset_version = run.dataset_version;
   fineTuneForm.strategy = run.strategy;
+  fineTuneForm.runner_name = run.runner_name || "";
+  fineTuneForm.training_config_json = JSON.stringify(run.training_config || {}, null, 2);
   fineTuneForm.status = run.status;
   fineTuneForm.artifact_path = run.artifact_path;
   fineTuneForm.metrics_json = JSON.stringify(run.metrics || {}, null, 2);
@@ -142,6 +146,29 @@ const buildFineTunePayload = () => {
     throw new Error("请选择基础模型");
   }
 
+  let trainingConfig = {};
+  if (fineTuneForm.training_config_json.trim()) {
+    try {
+      trainingConfig = JSON.parse(fineTuneForm.training_config_json);
+    } catch (error) {
+      throw new Error("训练配置 JSON 格式不正确");
+    }
+  }
+
+  const payload = {
+    base_model_id: Number(fineTuneForm.base_model_id),
+    dataset_name: fineTuneForm.dataset_name.trim(),
+    dataset_version: fineTuneForm.dataset_version.trim(),
+    strategy: fineTuneForm.strategy.trim() || "lora",
+    runner_name: fineTuneForm.runner_name.trim(),
+    training_config: trainingConfig,
+    notes: fineTuneForm.notes.trim(),
+  };
+
+  if (!editingFineTuneId.value) {
+    return payload;
+  }
+
   let metrics = {};
   if (fineTuneForm.metrics_json.trim()) {
     try {
@@ -152,14 +179,10 @@ const buildFineTunePayload = () => {
   }
 
   return {
-    base_model_id: Number(fineTuneForm.base_model_id),
-    dataset_name: fineTuneForm.dataset_name.trim(),
-    dataset_version: fineTuneForm.dataset_version.trim(),
-    strategy: fineTuneForm.strategy.trim() || "lora",
+    ...payload,
     status: fineTuneForm.status,
     artifact_path: fineTuneForm.artifact_path.trim(),
     metrics,
-    notes: fineTuneForm.notes.trim(),
   };
 };
 
@@ -265,8 +288,8 @@ const submitFineTune = async () => {
       await llmApi.updateFineTuneRun(editingFineTuneId.value, payload);
       flash.success("微调登记已更新");
     } else {
-      await llmApi.createFineTuneRun(payload);
-      flash.success("微调登记已创建");
+      const result = await llmApi.createFineTuneRun(payload);
+      flash.success(result?.fine_tune_run?.callback_token ? "微调任务已创建，回调令牌已生成" : "微调任务已创建");
     }
     fineTuneDrawerVisible.value = false;
     resetFineTuneForm();
@@ -296,6 +319,12 @@ const formatFineTuneLineage = (config) => {
   const dataset = config.latest_fine_tune_dataset || "未命名数据集";
   const status = config.latest_fine_tune_status || "unknown";
   return `${count} 次 / ${dataset} / ${status}`;
+};
+
+const formatFineTuneControlPlane = (run) => {
+  const exportStatus = run.dataset_manifest?.export_status || "pending";
+  const registration = run.registered_model_config_id ? `候选模型 #${run.registered_model_config_id}` : "未注册候选模型";
+  return `${run.run_key || "未分配 run_key"} / export:${exportStatus} / ${registration}`;
 };
 
 const formatDate = (dateStr) => {
@@ -425,7 +454,7 @@ watch(fineTuneFilterModelId, () => {
       </el-table>
     </AppSectionCard>
 
-    <AppSectionCard title="微调登记" desc="训练与产物仍保持外部执行，这里只登记 base model、数据集、指标和候选状态。" admin>
+    <AppSectionCard title="微调控制面" desc="训练执行仍保持外部运行，这里登记数据集、导出、回调与候选模型回流状态。" admin>
       <div class="registry-toolbar">
         <el-select
           v-model="fineTuneFilterModelId"
@@ -466,11 +495,22 @@ watch(fineTuneFilterModelId, () => {
         <el-table-column prop="dataset_name" label="数据集" min-width="160" />
         <el-table-column prop="dataset_version" label="版本" width="120" />
         <el-table-column prop="strategy" label="策略" width="100" />
+        <el-table-column label="运行标识" min-width="220">
+          <template #default="{ row }">
+            <div class="mono-text">{{ row.run_key || '待生成' }}</div>
+            <div class="muted-text">{{ row.runner_name || 'runner 未指定' }}</div>
+          </template>
+        </el-table-column>
         <el-table-column label="状态" width="120">
           <template #default="{ row }">
             <el-tag :type="row.status === 'succeeded' ? 'success' : row.status === 'running' ? 'warning' : row.status === 'failed' ? 'danger' : 'info'">
               {{ row.status }}
             </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="控制面状态" min-width="260">
+          <template #default="{ row }">
+            <span class="muted-text">{{ formatFineTuneControlPlane(row) }}</span>
           </template>
         </el-table-column>
         <el-table-column label="产物路径" min-width="220">
@@ -575,6 +615,19 @@ watch(fineTuneFilterModelId, () => {
             <el-form-item label="策略">
               <el-input v-model="fineTuneForm.strategy" placeholder="例如：lora" />
             </el-form-item>
+            <el-form-item label="Runner">
+              <el-input v-model="fineTuneForm.runner_name" placeholder="例如：llamafactory-runner-a" />
+            </el-form-item>
+          </div>
+          <el-form-item label="训练配置 JSON">
+            <el-input
+              v-model="fineTuneForm.training_config_json"
+              type="textarea"
+              :rows="5"
+              placeholder='{"epochs": 3, "learning_rate": 0.0001}'
+            />
+          </el-form-item>
+          <div class="form-grid" v-if="editingFineTuneId">
             <el-form-item label="状态">
               <el-select v-model="fineTuneForm.status" style="width: 100%">
                 <el-option label="待处理" value="pending" />
@@ -583,11 +636,11 @@ watch(fineTuneFilterModelId, () => {
                 <el-option label="失败" value="failed" />
               </el-select>
             </el-form-item>
+            <el-form-item label="产物路径">
+              <el-input v-model="fineTuneForm.artifact_path" placeholder="例如：/artifacts/runs/ft-20260413" />
+            </el-form-item>
           </div>
-          <el-form-item label="产物路径">
-            <el-input v-model="fineTuneForm.artifact_path" placeholder="例如：/artifacts/runs/ft-20260413" />
-          </el-form-item>
-          <el-form-item label="指标 JSON">
+          <el-form-item v-if="editingFineTuneId" label="指标 JSON">
             <el-input
               v-model="fineTuneForm.metrics_json"
               type="textarea"

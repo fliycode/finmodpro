@@ -3,10 +3,12 @@ from rest_framework.views import APIView
 from common.api_response import error_response, success_response
 from llm.controllers.model_config_controller import _require_manage_permission
 from llm.serializers import (
+    FineTuneRunCallbackSerializer,
     FineTuneRunCreateSerializer,
     FineTuneRunSummarySerializer,
     FineTuneRunUpdateSerializer,
 )
+from llm.services.fine_tune_callback_service import apply_runner_callback, verify_callback_token
 from llm.services.fine_tune_service import (
     create_fine_tune_run,
     get_fine_tune_run,
@@ -68,4 +70,23 @@ class FineTuneRunDetailView(APIView):
         serializer = FineTuneRunUpdateSerializer(data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)
         updated = update_fine_tune_run(fine_tune_run=fine_tune_run, payload=serializer.validated_data)
+        return success_response(data={"fine_tune_run": FineTuneRunSummarySerializer(updated).data})
+
+
+class FineTuneRunCallbackView(APIView):
+    authentication_classes = []
+    permission_classes = []
+
+    def post(self, request, fine_tune_run_id):
+        fine_tune_run = get_fine_tune_run(fine_tune_run_id=fine_tune_run_id)
+        if fine_tune_run is None:
+            return error_response(code=404, message="微调记录不存在。", status_code=404)
+
+        callback_token = request.headers.get("X-Fine-Tune-Token", "")
+        if not verify_callback_token(fine_tune_run=fine_tune_run, token=callback_token):
+            return error_response(code=401, message="回调令牌无效。", status_code=401)
+
+        serializer = FineTuneRunCallbackSerializer(data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        updated = apply_runner_callback(fine_tune_run=fine_tune_run, payload=serializer.validated_data)
         return success_response(data={"fine_tune_run": FineTuneRunSummarySerializer(updated).data})

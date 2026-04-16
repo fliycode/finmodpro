@@ -64,20 +64,32 @@ test('normalizeFineTunePayload preserves lineage metadata', () => {
         base_model_capability: 'chat',
         base_model_provider: 'ollama',
         dataset_name: '财报基准集',
-        dataset_version: '2026Q1',
-        strategy: 'lora',
-        status: 'succeeded',
-        artifact_path: '/artifacts/runs/ft-20260413',
-        metrics: { f1_score: 0.92 },
-        notes: '外部训练完成后登记。',
-      },
-    ],
+      dataset_version: '2026Q1',
+      strategy: 'lora',
+      status: 'succeeded',
+      run_key: 'ft-202604160001-ab12cd',
+      runner_name: 'llamafactory-runner-a',
+      artifact_path: '/artifacts/runs/ft-20260413',
+      export_path: '/exports/fine-tune-runs/ft-20260413',
+      deployment_endpoint: 'http://localhost:4000',
+      deployment_model_name: 'finmodpro-ft-chat',
+      dataset_manifest: { export_status: 'ready' },
+      training_config: { epochs: 3 },
+      artifact_manifest: { adapter_path: '/artifacts/runs/ft-20260413' },
+      metrics: { f1_score: 0.92 },
+      callback_token: 'ftcb_visible_once',
+      registered_model_config_id: 9,
+      notes: '外部训练完成后登记。',
+    },
+  ],
   });
 
   assert.equal(payload.total, 1);
   assert.equal(payload.fine_tune_runs[0].base_model_name, 'default-chat');
   assert.equal(payload.fine_tune_runs[0].dataset_name, '财报基准集');
   assert.equal(payload.fine_tune_runs[0].metrics.f1_score, 0.92);
+  assert.equal(payload.fine_tune_runs[0].run_key, 'ft-202604160001-ab12cd');
+  assert.equal(payload.fine_tune_runs[0].registered_model_config_id, 9);
 });
 
 test('normalizeEvaluationRecord and normalizeFineTuneRun provide stable defaults', () => {
