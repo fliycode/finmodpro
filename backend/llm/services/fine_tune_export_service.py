@@ -105,3 +105,45 @@ def get_export_bundle_detail(*, fine_tune_run):
         "manifest": manifest,
         "files": files,
     }
+
+
+def get_runner_execution_spec(*, fine_tune_run, request):
+    export_detail = get_export_bundle_detail(fine_tune_run=fine_tune_run)
+    base_url = settings.FINE_TUNE_EXPORT_BASE_URL.strip().rstrip("/")
+
+    export_files = []
+    for item in export_detail["files"]:
+        file_url = ""
+        if base_url:
+            file_url = f"{base_url}/{fine_tune_run.run_key}/{item['name']}"
+        export_files.append(
+            {
+                **item,
+                "url": file_url,
+            }
+        )
+
+    return {
+        "fine_tune_run_id": fine_tune_run.id,
+        "run_key": fine_tune_run.run_key,
+        "status": fine_tune_run.status,
+        "training_job": {
+            "framework": "llamafactory",
+            "strategy": fine_tune_run.strategy,
+            "base_model_name": fine_tune_run.base_model.model_name,
+            "runner_name": fine_tune_run.runner_name,
+            "training_config": fine_tune_run.training_config,
+            "dataset_name": fine_tune_run.dataset_name,
+            "dataset_version": fine_tune_run.dataset_version,
+        },
+        "export_bundle": {
+            "export_path": export_detail["export_path"],
+            "base_url": base_url,
+            "manifest": export_detail["manifest"],
+            "files": export_files,
+        },
+        "callback": {
+            "url": request.build_absolute_uri(f"/api/ops/fine-tunes/{fine_tune_run.id}/callback/"),
+            "token_header": "X-Fine-Tune-Token",
+        },
+    }

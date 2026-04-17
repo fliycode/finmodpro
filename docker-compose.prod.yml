@@ -186,7 +186,7 @@ services:
       LANGFUSE_PUBLIC_KEY: ${LANGFUSE_PUBLIC_KEY:-}
       LANGFUSE_SECRET_KEY: ${LANGFUSE_SECRET_KEY:-}
     volumes:
-      - ./deploy/litellm/config.yaml:/app/config.yaml:ro
+      - ./deploy/litellm/rendered.config.yaml:/app/config.yaml:ro
     ports:
       - "4000:4000"
     depends_on:

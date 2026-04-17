@@ -3,6 +3,7 @@ import shutil
 import tempfile
 from unittest.mock import patch
 
+from django.apps import apps
 from django.contrib.auth.models import Group
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.db import IntegrityError
@@ -11,6 +12,15 @@ from django.test import Client, TestCase, override_settings
 from authentication.models import User
 from authentication.services.jwt_service import generate_access_token
 from chat.models import ChatMessage, ChatSession
+from chat.serializers import ChatMessageSerializer, ChatSessionSerializer
+from chat.services.session_service import dispatch_session_maintenance_tasks
+from chat.services.session_service import (
+    create_chat_session,
+    create_session_message,
+    finalize_session_message,
+    persist_session_turn,
+)
+from chat.services.summary_service import update_session_summary
 from common.exceptions import (
     ModelNotConfiguredError,
     ProviderConfigurationError,
@@ -378,6 +388,214 @@ class ChatAskApiTests(TestCase):
             ],
         )
 
+    @patch("chat.services.ask_service.retrieve", return_value=[])
+    def test_chat_ask_finalizes_assistant_message_and_updates_session_counters(
+        self, mocked_retrieve
+    ):
+        session = ChatSession.objects.create(
+            user=self.user,
+            title="问答持久化",
+            context_filters={"dataset_id": 7},
+        )
+
+        response = self.client.post(
+            "/api/chat/ask",
+            data=json.dumps({"question": "cash flow outlook", "session_id": session.id}),
+            content_type="application/json",
+            HTTP_AUTHORIZATION=f"Bearer {self.access_token}",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        response_payload = response.json()
+        mocked_retrieve.assert_called_once_with(
+            query="cash flow outlook",
+            filters={"dataset_id": 7},
+            top_k=5,
+        )
+        session.refresh_from_db()
+        self.assertEqual(
+            getattr(session, "message_count", None),
+            2,
+            "ChatSession must track message_count after persisted turns.",
+        )
+        self.assertIsNotNone(
+            getattr(session, "last_message_at", None),
+            "ChatSession must track last_message_at after persisted turns.",
+        )
+        assistant_message = session.messages.get(role=ChatMessage.ROLE_ASSISTANT)
+        self.assertEqual(
+            getattr(ChatMessage, "STATUS_COMPLETE", None),
+            "complete",
+            "ChatMessage must define STATUS_COMPLETE for finalized assistant turns.",
+        )
+        self.assertEqual(
+            getattr(assistant_message, "status", None),
+            "complete",
+            "ChatMessage must persist assistant status for finalized turns.",
+        )
+        self.assertEqual(assistant_message.content, response_payload["answer"])
+        self.assertTrue(assistant_message.content)
+
+    @patch("chat.services.ask_service.retrieve", return_value=[])
+    def test_chat_stream_finalizes_assistant_message_and_updates_session_counters(
+        self, mocked_retrieve
+    ):
+        session = ChatSession.objects.create(
+            user=self.user,
+            title="流式问答持久化",
+            context_filters={"dataset_id": 11},
+        )
+
+        response = self.client.post(
+            "/api/chat/ask/stream",
+            data=json.dumps({"question": "cash flow outlook", "session_id": session.id}),
+            content_type="application/json",
+            HTTP_AUTHORIZATION=f"Bearer {self.access_token}",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        body = b"".join(response.streaming_content).decode("utf-8")
+        self.assertIn("event: done", body)
+        mocked_retrieve.assert_called_once_with(
+            query="cash flow outlook",
+            filters={"dataset_id": 11},
+            top_k=5,
+        )
+        session.refresh_from_db()
+        self.assertEqual(
+            getattr(session, "message_count", None),
+            2,
+            "ChatSession must track message_count after streamed turns.",
+        )
+        self.assertIsNotNone(
+            getattr(session, "last_message_at", None),
+            "ChatSession must track last_message_at after streamed turns.",
+        )
+        assistant_message = session.messages.get(role=ChatMessage.ROLE_ASSISTANT)
+        self.assertEqual(
+            getattr(ChatMessage, "STATUS_COMPLETE", None),
+            "complete",
+            "ChatMessage must define STATUS_COMPLETE for streamed assistant turns.",
+        )
+        self.assertEqual(
+            getattr(assistant_message, "status", None),
+            "complete",
+            "ChatMessage must persist assistant status for streamed turns.",
+        )
+        self.assertTrue(assistant_message.content)
+        self.assertIn(assistant_message.content, body)
+
+    @override_settings(
+        CELERY_TASK_ALWAYS_EAGER=False,
+        CELERY_BROKER_URL="redis://127.0.0.1:6379/0",
+    )
+    @patch("chat.tasks.extract_session_memories_task.delay")
+    @patch("chat.tasks.update_session_summary_task.delay")
+    @patch("chat.tasks.update_session_title_task.delay")
+    @patch("chat.services.ask_service.retrieve", return_value=[])
+    def test_chat_ask_dispatches_session_maintenance_tasks(
+        self,
+        mocked_retrieve,
+        mocked_title_delay,
+        mocked_summary_delay,
+        mocked_memory_delay,
+    ):
+        session = ChatSession.objects.create(
+            user=self.user,
+            title="维护任务调度",
+            context_filters={"dataset_id": 7},
+        )
+
+        response = self.client.post(
+            "/api/chat/ask",
+            data=json.dumps({"question": "liquidity outlook", "session_id": session.id}),
+            content_type="application/json",
+            HTTP_AUTHORIZATION=f"Bearer {self.access_token}",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        mocked_retrieve.assert_called_once_with(
+            query="liquidity outlook",
+            filters={"dataset_id": 7},
+            top_k=5,
+        )
+        mocked_title_delay.assert_called_once_with(session.id)
+        mocked_summary_delay.assert_called_once_with(session.id)
+        mocked_memory_delay.assert_called_once_with(session.id)
+
+    @patch(
+        "chat.services.ask_service.dispatch_session_maintenance_tasks",
+        side_effect=RuntimeError("maintenance queue unavailable"),
+    )
+    @patch("chat.services.ask_service.retrieve", return_value=[])
+    def test_chat_ask_succeeds_when_session_maintenance_dispatch_fails(
+        self,
+        mocked_retrieve,
+        mocked_dispatch,
+    ):
+        session = ChatSession.objects.create(
+            user=self.user,
+            title="维护失败不应影响问答",
+            context_filters={"dataset_id": 7},
+        )
+
+        response = self.client.post(
+            "/api/chat/ask",
+            data=json.dumps({"question": "cash flow outlook", "session_id": session.id}),
+            content_type="application/json",
+            HTTP_AUTHORIZATION=f"Bearer {self.access_token}",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        mocked_retrieve.assert_called_once_with(
+            query="cash flow outlook",
+            filters={"dataset_id": 7},
+            top_k=5,
+        )
+        mocked_dispatch.assert_called_once_with(session_id=session.id)
+        session.refresh_from_db()
+        assistant_message = session.messages.get(role=ChatMessage.ROLE_ASSISTANT)
+        self.assertEqual(assistant_message.status, ChatMessage.STATUS_COMPLETE)
+        self.assertEqual(assistant_message.content, response.json()["answer"])
+
+    @patch(
+        "chat.services.ask_service.dispatch_session_maintenance_tasks",
+        side_effect=RuntimeError("maintenance queue unavailable"),
+    )
+    @patch("chat.services.ask_service.retrieve", return_value=[])
+    def test_chat_stream_succeeds_when_session_maintenance_dispatch_fails(
+        self,
+        mocked_retrieve,
+        mocked_dispatch,
+    ):
+        session = ChatSession.objects.create(
+            user=self.user,
+            title="流式维护失败不应影响问答",
+            context_filters={"dataset_id": 11},
+        )
+
+        response = self.client.post(
+            "/api/chat/ask/stream",
+            data=json.dumps({"question": "cash flow outlook", "session_id": session.id}),
+            content_type="application/json",
+            HTTP_AUTHORIZATION=f"Bearer {self.access_token}",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        body = b"".join(response.streaming_content).decode("utf-8")
+        self.assertIn("event: done", body)
+        mocked_retrieve.assert_called_once_with(
+            query="cash flow outlook",
+            filters={"dataset_id": 11},
+            top_k=5,
+        )
+        mocked_dispatch.assert_called_once_with(session_id=session.id)
+        session.refresh_from_db()
+        assistant_message = session.messages.get(role=ChatMessage.ROLE_ASSISTANT)
+        self.assertEqual(assistant_message.status, ChatMessage.STATUS_COMPLETE)
+        self.assertTrue(assistant_message.content)
+        self.assertIn(assistant_message.content, body)
+
     def test_chat_ask_requires_question_or_query(self):
         response = self.client.post(
             "/api/chat/ask",
@@ -567,6 +785,41 @@ class ChatSessionModelTests(TestCase):
         self.assertEqual(session.context_filters, {})
         self.assertEqual(user.chat_sessions.count(), 1)
 
+    def test_chat_session_defaults_include_memory_foundation_fields(self):
+        user = User.objects.create_user(
+            username="session-defaults",
+            password="secret123",
+            email="session-defaults@example.com",
+        )
+
+        session = ChatSession.objects.create(user=user)
+
+        self.assertEqual(session.title, "新会话")
+        self.assertEqual(
+            getattr(ChatSession, "TITLE_STATUS_PENDING", None),
+            "pending",
+            "ChatSession must define TITLE_STATUS_PENDING.",
+        )
+        self.assertEqual(
+            getattr(session, "title_status", None),
+            "pending",
+            "ChatSession must persist title_status on each session.",
+        )
+        self.assertEqual(
+            getattr(session, "rolling_summary", None),
+            "",
+            "ChatSession must persist rolling_summary.",
+        )
+        self.assertEqual(
+            getattr(session, "message_count", None),
+            0,
+            "ChatSession must persist message_count.",
+        )
+        self.assertIsNone(
+            getattr(session, "last_message_at", None),
+            "ChatSession must persist last_message_at.",
+        )
+
     def test_chat_session_allows_rag_scope_filters_without_strong_document_binding(self):
         user = User.objects.create_user(
             username="session-scope",
@@ -642,6 +895,25 @@ class ChatSessionCreateApiTests(TestCase):
         self.assertEqual(payload["data"]["session"]["context_filters"], {})
         self.assertEqual(payload["data"]["session"]["user_id"], self.user.id)
         self.assertEqual(ChatSession.objects.count(), 1)
+
+    def test_create_session_returns_session_truth_defaults(self):
+        response = self.client.post(
+            "/api/chat/sessions",
+            data=json.dumps({}),
+            content_type="application/json",
+            HTTP_AUTHORIZATION=f"Bearer {self.access_token}",
+        )
+
+        self.assertEqual(response.status_code, 201)
+        session_payload = response.json()["data"]["session"]
+        self.assertIn("title_status", session_payload)
+        self.assertEqual(session_payload["title_status"], "pending")
+        self.assertIn("rolling_summary", session_payload)
+        self.assertEqual(session_payload["rolling_summary"], "")
+        self.assertIn("message_count", session_payload)
+        self.assertEqual(session_payload["message_count"], 0)
+        self.assertIn("last_message_at", session_payload)
+        self.assertIsNone(session_payload["last_message_at"])
 
     def test_create_session_accepts_title_and_context_filters(self):
         response = self.client.post(
@@ -787,6 +1059,31 @@ class ChatSessionListApiTests(TestCase):
         self.assertEqual(payload["data"]["sessions"][0]["id"], own_session.id)
         self.assertEqual(payload["data"]["sessions"][0]["title"], "我的会话")
         self.assertEqual(payload["data"]["sessions"][0]["last_message_preview"], "我的最后一条消息")
+
+    def test_list_sessions_includes_session_truth_fields(self):
+        session = ChatSession.objects.create(
+            user=self.user,
+            title="会话真相字段",
+            context_filters={"dataset_id": 7},
+        )
+
+        response = self.client.get(
+            "/api/chat/sessions",
+            HTTP_AUTHORIZATION=f"Bearer {self.access_token}",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        session_payload = next(
+            item for item in response.json()["data"]["sessions"] if item["id"] == session.id
+        )
+        self.assertIn("title_status", session_payload)
+        self.assertEqual(session_payload["title_status"], "pending")
+        self.assertIn("rolling_summary", session_payload)
+        self.assertEqual(session_payload["rolling_summary"], "")
+        self.assertIn("message_count", session_payload)
+        self.assertEqual(session_payload["message_count"], 0)
+        self.assertIn("last_message_at", session_payload)
+        self.assertIsNone(session_payload["last_message_at"])
 
     def test_list_sessions_orders_by_recently_updated_desc(self):
         older_session = ChatSession.objects.create(user=self.user, title="较早更新")
@@ -1071,3 +1368,551 @@ class ChatMessageModelTests(TestCase):
         self.session.delete()
 
         self.assertEqual(ChatMessage.objects.count(), 0)
+
+
+class ChatSessionServiceTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username="session-service-user",
+            password="secret123",
+            email="session-service@example.com",
+        )
+        self.session = ChatSession.objects.create(user=self.user, title="服务测试会话")
+
+    def test_create_chat_session_marks_manual_titles_ready(self):
+        session = create_chat_session(user=self.user, title="人工命名会话")
+
+        self.assertEqual(session.title, "人工命名会话")
+        self.assertEqual(session.title_status, ChatSession.TITLE_STATUS_READY)
+        self.assertEqual(session.title_source, ChatSession.TITLE_SOURCE_MANUAL)
+
+    def test_create_chat_session_treats_explicit_placeholder_title_as_manual_intent(self):
+        session = create_chat_session(user=self.user, title="新会话")
+
+        self.assertEqual(session.title, "新会话")
+        self.assertEqual(session.title_status, ChatSession.TITLE_STATUS_READY)
+        self.assertEqual(session.title_source, ChatSession.TITLE_SOURCE_MANUAL)
+
+    def test_create_session_message_rolls_back_when_session_update_fails(self):
+        with patch(
+            "chat.services.session_service.ChatSession.objects.filter"
+        ) as mocked_filter:
+            mocked_filter.return_value.update.side_effect = RuntimeError("session update failed")
+
+            with self.assertRaises(RuntimeError):
+                create_session_message(
+                    session=self.session,
+                    role=ChatMessage.ROLE_USER,
+                    content="需要回滚的消息",
+                )
+
+        self.assertEqual(self.session.messages.count(), 0)
+        self.session.refresh_from_db()
+        self.assertEqual(self.session.message_count, 0)
+        self.assertIsNone(self.session.last_message_at)
+
+    def test_finalize_session_message_rolls_back_message_changes_when_session_update_fails(self):
+        message = ChatMessage.objects.create(
+            session=self.session,
+            role=ChatMessage.ROLE_ASSISTANT,
+            content="",
+            status=ChatMessage.STATUS_PENDING,
+        )
+
+        with patch(
+            "chat.services.session_service.ChatSession.objects.filter"
+        ) as mocked_filter:
+            mocked_filter.return_value.update.side_effect = RuntimeError("session update failed")
+
+            with self.assertRaises(RuntimeError):
+                finalize_session_message(
+                    message=message,
+                    content="应被回滚的回答",
+                    citations=[{"id": 1}],
+                    model_metadata={"answer_mode": "cited"},
+                )
+
+        message.refresh_from_db()
+        self.assertEqual(message.content, "")
+        self.assertEqual(message.status, ChatMessage.STATUS_PENDING)
+        self.assertEqual(message.citations_json, [])
+        self.assertEqual(message.model_metadata_json, {})
+
+    def test_persist_session_turn_rolls_back_both_messages_when_second_insert_fails(self):
+        real_create_session_message = create_session_message
+        create_calls = {"count": 0}
+
+        def fail_on_second_insert(*args, **kwargs):
+            create_calls["count"] += 1
+            if create_calls["count"] == 2:
+                raise RuntimeError("assistant insert failed")
+            return real_create_session_message(*args, **kwargs)
+
+        with patch(
+            "chat.services.session_service.create_session_message",
+            side_effect=fail_on_second_insert,
+        ):
+            with self.assertRaises(RuntimeError):
+                persist_session_turn(
+                    session=self.session,
+                    question="第一条",
+                    answer="第二条",
+                )
+
+        self.session.refresh_from_db()
+        self.assertEqual(self.session.messages.count(), 0)
+        self.assertEqual(self.session.message_count, 0)
+        self.assertIsNone(self.session.last_message_at)
+
+    def test_dispatch_session_maintenance_tasks_isolates_per_job_enqueue_failures(self):
+        dispatch_attempts = []
+
+        def dispatch_side_effect(task, session_id):
+            dispatch_attempts.append(task.name)
+            if task.name == "chat.update_session_title_task":
+                raise RuntimeError("title queue unavailable")
+            return f"queued:{task.name}:{session_id}"
+
+        with patch(
+            "chat.services.session_service._dispatch_session_task",
+            side_effect=dispatch_side_effect,
+        ):
+            results = dispatch_session_maintenance_tasks(session_id=self.session.id)
+
+        self.assertEqual(
+            dispatch_attempts,
+            [
+                "chat.update_session_title_task",
+                "chat.update_session_summary_task",
+                "chat.extract_session_memories_task",
+            ],
+        )
+        self.assertEqual(
+            results,
+            [
+                f"queued:chat.update_session_summary_task:{self.session.id}",
+                f"queued:chat.extract_session_memories_task:{self.session.id}",
+            ],
+        )
+
+
+class ChatContextServiceTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username="context-service-user",
+            password="secret123",
+            email="context-service@example.com",
+        )
+        self.session = ChatSession.objects.create(
+            user=self.user,
+            title="上下文组装",
+            rolling_summary="这是已沉淀的会话摘要。",
+            context_filters={"dataset_id": 7},
+        )
+        ChatMessage.objects.create(
+            session=self.session,
+            role=ChatMessage.ROLE_USER,
+            content="上一轮先看现金流。",
+        )
+        ChatMessage.objects.create(
+            session=self.session,
+            role=ChatMessage.ROLE_ASSISTANT,
+            content="上一轮回答聚焦经营现金流。",
+        )
+        ChatMessage.objects.create(
+            session=self.session,
+            role=ChatMessage.ROLE_ASSISTANT,
+            content="这条失败消息不应进入上下文。",
+            status=ChatMessage.STATUS_FAILED,
+        )
+
+    @override_settings(CHAT_CONTEXT_RECENT_MESSAGES=6, CHAT_MEMORY_RESULT_LIMIT=3)
+    def test_build_chat_messages_orders_summary_history_memories_and_citations(self):
+        from chat.services.context_service import build_chat_messages
+
+        citations = [
+            {
+                "document_title": "Liquidity memo",
+                "page_label": "chunk-1",
+                "snippet": "liquidity stayed above internal floor",
+            }
+        ]
+        memories = [
+            {
+                "title": "用户偏好",
+                "content": "先给结论，再给依据。",
+            }
+        ]
+
+        with patch(
+            "chat.services.context_service.search_memories",
+            return_value=memories,
+        ) as mocked_search_memories, patch(
+            "chat.services.context_service.render_prompt",
+            side_effect=lambda template_name, **context: context["context"],
+        ):
+            messages = build_chat_messages(
+                session=self.session,
+                question="最新流动性结论是什么？",
+                citations=citations,
+                filters={"dataset_id": 7},
+            )
+
+        self.assertEqual(len(messages), 1)
+        self.assertEqual(messages[0]["role"], "user")
+        prompt = messages[0]["content"]
+        mocked_search_memories.assert_called_once_with(
+            user=self.user,
+            query="最新流动性结论是什么？",
+            dataset_id=7,
+            limit=3,
+        )
+        self.assertLess(prompt.index("会话摘要"), prompt.index("最近对话"))
+        self.assertLess(prompt.index("最近对话"), prompt.index("长期记忆"))
+        self.assertLess(prompt.index("长期记忆"), prompt.index("参考资料"))
+        self.assertIn("这是已沉淀的会话摘要。", prompt)
+        self.assertIn("上一轮先看现金流。", prompt)
+        self.assertIn("上一轮回答聚焦经营现金流。", prompt)
+        self.assertNotIn("这条失败消息不应进入上下文。", prompt)
+        self.assertIn("用户偏好", prompt)
+        self.assertIn("Liquidity memo", prompt)
+
+
+class ChatSummaryServiceTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username="summary-service-user",
+            password="secret123",
+            email="summary-service@example.com",
+        )
+        self.session = ChatSession.objects.create(
+            user=self.user,
+            title="摘要服务测试",
+            rolling_summary="保留更新后的摘要",
+            summary_updated_through_message_id=9999,
+        )
+
+    @override_settings(CHAT_SUMMARY_TRIGGER_MESSAGES=2)
+    def test_update_session_summary_skips_stale_overwrite_when_newer_summary_is_recorded(self):
+        ChatMessage.objects.create(
+            session=self.session,
+            role=ChatMessage.ROLE_USER,
+            content="第一条问题",
+        )
+        assistant_message = ChatMessage.objects.create(
+            session=self.session,
+            role=ChatMessage.ROLE_ASSISTANT,
+            content="第一条回答",
+        )
+        ChatSession.objects.filter(id=self.session.id).update(
+            rolling_summary="更新后的摘要",
+            summary_updated_through_message_id=assistant_message.id + 10,
+        )
+
+        summary = update_session_summary(session_id=self.session.id)
+
+        self.session.refresh_from_db()
+        self.assertEqual(summary, "更新后的摘要")
+        self.assertEqual(self.session.rolling_summary, "更新后的摘要")
+        self.assertEqual(
+            self.session.summary_updated_through_message_id,
+            assistant_message.id + 10,
+        )
+
+
+class ChatMemoryItemModelTests(TestCase):
+    def _get_memory_item_model(self):
+        try:
+            return apps.get_model("chat", "MemoryItem")
+        except LookupError:
+            self.fail("chat.MemoryItem must exist for durable memory support.")
+
+    def test_memory_item_supports_user_global_and_dataset_scopes(self):
+        user = User.objects.create_user(
+            username="memory-user",
+            password="secret123",
+            email="memory@example.com",
+        )
+        memory_item_model = self._get_memory_item_model()
+
+        self.assertEqual(
+            getattr(memory_item_model, "SCOPE_USER_GLOBAL", None),
+            "user_global",
+            "MemoryItem must define SCOPE_USER_GLOBAL.",
+        )
+        self.assertEqual(
+            getattr(memory_item_model, "SCOPE_DATASET", None),
+            "dataset",
+            "MemoryItem must define SCOPE_DATASET.",
+        )
+        self.assertEqual(
+            getattr(memory_item_model, "TYPE_USER_PREFERENCE", None),
+            "user_preference",
+            "MemoryItem must define TYPE_USER_PREFERENCE.",
+        )
+        self.assertEqual(
+            getattr(memory_item_model, "TYPE_WORK_RULE", None),
+            "work_rule",
+            "MemoryItem must define TYPE_WORK_RULE.",
+        )
+
+        global_item = memory_item_model.objects.create(
+            user=user,
+            scope_type=memory_item_model.SCOPE_USER_GLOBAL,
+            scope_key="",
+            memory_type=memory_item_model.TYPE_USER_PREFERENCE,
+            title="偏好结构化回答",
+            content="先给结论后给依据。",
+        )
+        dataset_item = memory_item_model.objects.create(
+            user=user,
+            scope_type=memory_item_model.SCOPE_DATASET,
+            scope_key="7",
+            memory_type=memory_item_model.TYPE_WORK_RULE,
+            title="数据集 7 长期关注点",
+            content="重点跟踪流动性恶化。",
+        )
+
+        self.assertFalse(global_item.pinned)
+        self.assertEqual(dataset_item.scope_key, "7")
+
+
+class ChatSerializerTests(TestCase):
+    def test_chat_session_serializer_marks_truth_fields_read_only(self):
+        serializer = ChatSessionSerializer()
+
+        self.assertTrue(serializer.fields["session_id"].read_only)
+        self.assertTrue(serializer.fields["user_id"].read_only)
+        self.assertTrue(serializer.fields["title_status"].read_only)
+        self.assertTrue(serializer.fields["title_source"].read_only)
+        self.assertTrue(serializer.fields["rolling_summary"].read_only)
+        self.assertTrue(serializer.fields["message_count"].read_only)
+        self.assertTrue(serializer.fields["last_message_at"].read_only)
+
+    def test_chat_message_serializer_marks_bookkeeping_fields_read_only(self):
+        serializer = ChatMessageSerializer()
+
+        self.assertTrue(serializer.fields["sequence"].read_only)
+        self.assertTrue(serializer.fields["status"].read_only)
+        self.assertTrue(serializer.fields["citations_json"].read_only)
+        self.assertTrue(serializer.fields["model_metadata_json"].read_only)
+        self.assertTrue(serializer.fields["client_message_id"].read_only)
+
+
+class ChatMemoryEvidenceModelTests(TestCase):
+    def _get_memory_models(self):
+        try:
+            return (
+                apps.get_model("chat", "MemoryItem"),
+                apps.get_model("chat", "MemoryEvidence"),
+            )
+        except LookupError as exc:
+            self.fail(f"chat memory evidence models must exist: {exc}")
+
+    def test_memory_evidence_requires_session_or_message_source(self):
+        memory_item_model, memory_evidence_model = self._get_memory_models()
+        user = User.objects.create_user(
+            username="memory-evidence-user",
+            password="secret123",
+            email="memory-evidence@example.com",
+        )
+        memory_item = memory_item_model.objects.create(
+            user=user,
+            scope_type=memory_item_model.SCOPE_USER_GLOBAL,
+            scope_key="",
+            memory_type=memory_item_model.TYPE_USER_PREFERENCE,
+            title="偏好结构化回答",
+            content="先给结论后给依据。",
+        )
+
+        with self.assertRaises(IntegrityError):
+            memory_evidence_model.objects.create(memory_item=memory_item)
+
+    def test_memory_evidence_allows_single_session_source(self):
+        memory_item_model, memory_evidence_model = self._get_memory_models()
+        user = User.objects.create_user(
+            username="memory-evidence-source-user",
+            password="secret123",
+            email="memory-evidence-source@example.com",
+        )
+        session = ChatSession.objects.create(user=user, title="证据来源会话")
+        memory_item = memory_item_model.objects.create(
+            user=user,
+            scope_type=memory_item_model.SCOPE_USER_GLOBAL,
+            scope_key="",
+            memory_type=memory_item_model.TYPE_USER_PREFERENCE,
+            title="偏好结构化回答",
+            content="先给结论后给依据。",
+        )
+
+        evidence = memory_evidence_model.objects.create(
+            memory_item=memory_item,
+            session=session,
+            evidence_excerpt="来自会话的证据片段",
+        )
+
+        self.assertEqual(evidence.session_id, session.id)
+        self.assertIsNone(evidence.message_id)
+
+
+@override_settings(
+    JWT_SECRET_KEY="test-jwt-secret",
+    JWT_ACCESS_TOKEN_LIFETIME_SECONDS=3600,
+)
+class ChatMemoryGovernanceApiTests(TestCase):
+    def setUp(self):
+        self.client = Client()
+        seed_roles_and_permissions()
+        self.user = User.objects.create_user(
+            username="memory-admin",
+            password="secret123",
+            email="memory-admin@example.com",
+        )
+        self.user.groups.add(Group.objects.get(name=ROLE_ADMIN))
+        self.access_token = generate_access_token(self.user)
+        self.other_user = User.objects.create_user(
+            username="memory-other",
+            password="secret123",
+            email="memory-other@example.com",
+        )
+        self.other_user.groups.add(Group.objects.get(name=ROLE_ADMIN))
+
+    def _get_memory_item_model(self):
+        try:
+            return apps.get_model("chat", "MemoryItem")
+        except LookupError:
+            self.fail("chat.MemoryItem must exist before memory governance APIs can be exercised.")
+
+    def _get_memory_item_constant(self, memory_item_model, constant_name):
+        constant_value = getattr(memory_item_model, constant_name, None)
+        self.assertIsNotNone(
+            constant_value,
+            f"MemoryItem must define {constant_name} before governance tests can create fixtures.",
+        )
+        return constant_value
+
+    def _create_memory_item(self, **overrides):
+        memory_item_model = self._get_memory_item_model()
+        payload = {
+            "user": self.user,
+            "scope_type": self._get_memory_item_constant(memory_item_model, "SCOPE_USER_GLOBAL"),
+            "scope_key": "",
+            "memory_type": self._get_memory_item_constant(
+                memory_item_model, "TYPE_USER_PREFERENCE"
+            ),
+            "title": "偏好表格",
+            "content": "先给表格再给解释。",
+        }
+        payload.update(overrides)
+        return memory_item_model.objects.create(**payload)
+
+    def test_memory_list_filters_by_scope_and_query(self):
+        matching_memory = self._create_memory_item(
+            title="偏好表格",
+            content="先给表格再给解释。",
+        )
+        self._create_memory_item(
+            title="偏好口语化回答",
+            content="先给摘要再给解释。",
+        )
+        self._create_memory_item(
+            user=self.other_user,
+            title="他人的偏好表格",
+            content="不应返回给当前用户。",
+        )
+        memory_item_model = self._get_memory_item_model()
+        self._create_memory_item(
+            scope_type=self._get_memory_item_constant(memory_item_model, "SCOPE_DATASET"),
+            scope_key="7",
+            title="数据集 7 关注点",
+            content="也不应出现在 user_global 列表里。",
+        )
+
+        response = self.client.get(
+            "/api/chat/memories?scope_type=user_global&q=表格",
+            HTTP_AUTHORIZATION=f"Bearer {self.access_token}",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["code"], 0)
+        self.assertEqual(payload["message"], "ok")
+        self.assertEqual(len(payload["data"]["memories"]), 1)
+        self.assertEqual(payload["data"]["memories"][0]["id"], matching_memory.id)
+        self.assertEqual(payload["data"]["memories"][0]["title"], "偏好表格")
+        self.assertEqual(payload["data"]["memories"][0]["scope_type"], "user_global")
+        self.assertEqual(payload["data"]["memories"][0]["scope_key"], "")
+
+    def test_memory_evidence_returns_memory_and_evidence_entries(self):
+        memory_item = self._create_memory_item(
+            title="偏好结构化回答",
+            content="先给表格再给解释。",
+        )
+
+        response = self.client.get(
+            f"/api/chat/memories/{memory_item.id}/evidence",
+            HTTP_AUTHORIZATION=f"Bearer {self.access_token}",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["code"], 0)
+        self.assertEqual(payload["message"], "ok")
+        self.assertEqual(payload["data"]["memory"]["id"], memory_item.id)
+        self.assertEqual(payload["data"]["memory"]["title"], "偏好结构化回答")
+        self.assertIn("evidence", payload["data"])
+        self.assertIsInstance(payload["data"]["evidence"], list)
+        self.assertGreaterEqual(len(payload["data"]["evidence"]), 1)
+        first_entry = payload["data"]["evidence"][0]
+        self.assertIn("created_at", first_entry)
+
+    def test_memory_pin_updates_memory_state(self):
+        memory_item = self._create_memory_item(
+            title="偏好结构化回答",
+            content="先给结论后给依据。",
+        )
+
+        response = self.client.post(
+            f"/api/chat/memories/{memory_item.id}/pin",
+            data=json.dumps({"pinned": True}),
+            content_type="application/json",
+            HTTP_AUTHORIZATION=f"Bearer {self.access_token}",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["code"], 0)
+        self.assertEqual(payload["message"], "ok")
+        self.assertTrue(payload["data"]["memory"]["pinned"])
+        memory_item.refresh_from_db()
+        self.assertTrue(memory_item.pinned)
+
+    def test_memory_delete_hides_memory_from_active_list(self):
+        deleted_memory = self._create_memory_item(
+            title="待删除记忆",
+            content="删除后不应再出现在活跃列表中。",
+        )
+        survivor_memory = self._create_memory_item(
+            title="保留记忆",
+            content="删除其他项后仍应保留。",
+        )
+
+        response = self.client.delete(
+            f"/api/chat/memories/{deleted_memory.id}",
+            HTTP_AUTHORIZATION=f"Bearer {self.access_token}",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["code"], 0)
+        self.assertEqual(payload["message"], "ok")
+        self.assertEqual(payload["data"]["memory"]["id"], deleted_memory.id)
+
+        list_response = self.client.get(
+            "/api/chat/memories?scope_type=user_global",
+            HTTP_AUTHORIZATION=f"Bearer {self.access_token}",
+        )
+        self.assertEqual(list_response.status_code, 200)
+        returned_ids = [item["id"] for item in list_response.json()["data"]["memories"]]
+        self.assertNotIn(deleted_memory.id, returned_ids)
+        self.assertIn(survivor_memory.id, returned_ids)

@@ -1383,10 +1383,15 @@ class FineTuneRunCallbackApiTests(TestCase):
         self.client = Client()
         seed_roles_and_permissions()
         self.export_dir = tempfile.mkdtemp()
-        self.override = override_settings(FINE_TUNE_EXPORT_ROOT=self.export_dir)
+        self.generated_config_dir = tempfile.mkdtemp()
+        self.override = override_settings(
+            FINE_TUNE_EXPORT_ROOT=self.export_dir,
+            LITELLM_GENERATED_CONFIG_ROOT=self.generated_config_dir,
+        )
         self.override.enable()
         self.addCleanup(self.override.disable)
         self.addCleanup(shutil.rmtree, self.export_dir, True)
+        self.addCleanup(shutil.rmtree, self.generated_config_dir, True)
 
         self.admin_user = User.objects.create_user(
             username="ops-finetune-callback-admin",
@@ -1510,6 +1515,41 @@ class FineTuneRunCallbackApiTests(TestCase):
         self.assertEqual(run.registered_model_config.provider, ModelConfig.PROVIDER_LITELLM)
         self.assertFalse(run.registered_model_config.is_active)
 
+    def test_runner_callback_generates_litellm_alias_config_artifact(self):
+        base_model = get_active_model_config(ModelConfig.CAPABILITY_CHAT)
+        run = create_fine_tune_run(
+            payload={
+                "base_model_id": base_model.id,
+                "dataset_name": "财报基准集",
+                "dataset_version": "2026Q2",
+                "strategy": "lora",
+                "notes": "等待外部训练回写。",
+            }
+        )
+
+        response = self.client.post(
+            f"/api/ops/fine-tunes/{run.id}/callback",
+            data=json.dumps(
+                {
+                    "status": "succeeded",
+                    "deployment_endpoint": "http://127.0.0.1:9000/v1",
+                    "deployment_model_name": "finmodpro-ft-chat",
+                }
+            ),
+            content_type="application/json",
+            HTTP_X_FINE_TUNE_TOKEN=run.callback_token,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        run.refresh_from_db()
+        artifact_manifest = run.artifact_manifest
+        self.assertEqual(artifact_manifest["litellm_alias"], "finmodpro-ft-chat")
+        config_path = artifact_manifest["litellm_config_path"]
+        self.assertTrue(Path(config_path).exists())
+        config_body = Path(config_path).read_text(encoding="utf-8")
+        self.assertIn("model_name: finmodpro-ft-chat", config_body)
+        self.assertIn("api_base: http://127.0.0.1:9000/v1", config_body)
+
     def test_runner_callback_is_idempotent_for_candidate_model_registration(self):
         base_model = get_active_model_config(ModelConfig.CAPABILITY_CHAT)
         run = create_fine_tune_run(
@@ -1591,3 +1631,323 @@ class FineTuneRunCallbackApiTests(TestCase):
         self.assertEqual(payload["run_key"], run.run_key)
         self.assertEqual(payload["manifest"]["dataset_name"], "财报基准集")
         self.assertIn("train.jsonl", [item["name"] for item in payload["files"]])
+
+    def test_runner_spec_requires_valid_token(self):
+        base_model = get_active_model_config(ModelConfig.CAPABILITY_CHAT)
+        run = create_fine_tune_run(
+            payload={
+                "base_model_id": base_model.id,
+                "dataset_name": "财报基准集",
+                "dataset_version": "2026Q2",
+                "strategy": "lora",
+                "notes": "等待 runner 拉取执行说明。",
+            }
+        )
+
+        response = self.client.get(f"/api/ops/fine-tunes/{run.id}/runner-spec")
+
+        self.assertEqual(response.status_code, 401)
+        self.assertEqual(response.json()["message"], "回调令牌无效。")
+
+    @override_settings(FINE_TUNE_EXPORT_BASE_URL="https://runner-downloads.example/exports")
+    def test_runner_can_fetch_execution_spec_with_export_and_callback_contract(self):
+        base_model = get_active_model_config(ModelConfig.CAPABILITY_CHAT)
+        run = create_fine_tune_run(
+            payload={
+                "base_model_id": base_model.id,
+                "dataset_name": "财报基准集",
+                "dataset_version": "2026Q2",
+                "strategy": "lora",
+                "runner_name": "llamafactory-runner-a",
+                "notes": "等待 runner 拉取执行说明。",
+                "training_config": {"epochs": 3, "learning_rate": 0.0001},
+            }
+        )
+
+        response = self.client.get(
+            f"/api/ops/fine-tunes/{run.id}/runner-spec",
+            HTTP_X_FINE_TUNE_TOKEN=run.callback_token,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()["data"]
+        self.assertEqual(payload["fine_tune_run_id"], run.id)
+        self.assertEqual(payload["run_key"], run.run_key)
+        self.assertEqual(payload["training_job"]["framework"], "llamafactory")
+        self.assertEqual(payload["training_job"]["base_model_name"], base_model.model_name)
+        self.assertEqual(payload["training_job"]["runner_name"], "llamafactory-runner-a")
+        self.assertEqual(payload["training_job"]["training_config"]["epochs"], 3)
+        self.assertEqual(payload["callback"]["token_header"], "X-Fine-Tune-Token")
+        self.assertTrue(payload["callback"]["url"].endswith(f"/api/ops/fine-tunes/{run.id}/callback/"))
+        self.assertEqual(payload["export_bundle"]["manifest"]["dataset_name"], "财报基准集")
+        self.assertEqual(payload["export_bundle"]["base_url"], "https://runner-downloads.example/exports")
+
+        file_names = [item["name"] for item in payload["export_bundle"]["files"]]
+        self.assertIn("manifest.json", file_names)
+        self.assertIn("train.jsonl", file_names)
+        manifest_file = next(item for item in payload["export_bundle"]["files"] if item["name"] == "manifest.json")
+        self.assertTrue(
+            manifest_file["url"].endswith(f"{run.run_key}/manifest.json"),
+            msg=manifest_file["url"],
+        )
+
+
+class FineTuneRunnerClientTests(TestCase):
+    def test_fetch_runner_spec_uses_token_header_and_unwraps_data(self):
+        from llm.services.fine_tune_runner_client import fetch_runner_spec
+
+        captured_request = {}
+
+        def fake_urlopen(req, timeout=30):
+            captured_request["url"] = req.full_url
+            captured_request["token"] = req.headers.get("X-fine-tune-token")
+            return _FakeHttpResponse(
+                {
+                    "code": 0,
+                    "message": "ok",
+                    "data": {
+                        "fine_tune_run_id": 7,
+                        "run_key": "ft-20260416",
+                        "export_bundle": {"export_path": "/tmp/ft-20260416", "files": []},
+                    },
+                }
+            )
+
+        with patch("llm.services.fine_tune_runner_client.request.urlopen", side_effect=fake_urlopen):
+            payload = fetch_runner_spec(
+                api_base_url="http://127.0.0.1:8000",
+                fine_tune_run_id=7,
+                token="ftcb_test_token",
+            )
+
+        self.assertEqual(captured_request["url"], "http://127.0.0.1:8000/api/ops/fine-tunes/7/runner-spec/")
+        self.assertEqual(captured_request["token"], "ftcb_test_token")
+        self.assertEqual(payload["run_key"], "ft-20260416")
+
+    def test_materialize_export_bundle_downloads_missing_files(self):
+        from llm.services.fine_tune_runner_client import materialize_export_bundle
+
+        work_dir = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, work_dir, True)
+        requested_urls = []
+        spec = {
+            "run_key": "ft-20260416",
+            "export_bundle": {
+                "export_path": "/nonexistent/ft-20260416",
+                "files": [
+                    {"name": "manifest.json", "url": "https://runner-downloads.example/exports/ft-20260416/manifest.json"},
+                    {"name": "train.jsonl", "url": "https://runner-downloads.example/exports/ft-20260416/train.jsonl"},
+                ],
+            },
+        }
+
+        def fake_urlopen(req, timeout=30):
+            requested_urls.append(req.full_url if hasattr(req, "full_url") else req)
+            if str(requested_urls[-1]).endswith("manifest.json"):
+                return _FakeHttpResponse({"dataset_name": "财报基准集"})
+            return _FakeHttpResponse({"sample": "ok"})
+
+        with patch("llm.services.fine_tune_runner_client.request.urlopen", side_effect=fake_urlopen):
+            export_dir = materialize_export_bundle(spec=spec, work_dir=work_dir)
+
+        manifest_path = Path(export_dir) / "manifest.json"
+        train_path = Path(export_dir) / "train.jsonl"
+        self.assertTrue(manifest_path.exists())
+        self.assertTrue(train_path.exists())
+        self.assertEqual(len(requested_urls), 2)
+        self.assertIn("dataset_name", manifest_path.read_text(encoding="utf-8"))
+
+    def test_build_llamafactory_command_maps_training_config_to_cli_args(self):
+        from llm.services.fine_tune_runner_client import build_llamafactory_command
+
+        command = build_llamafactory_command(
+            spec={
+                "training_job": {
+                    "strategy": "lora",
+                    "base_model_name": "Qwen/Qwen2.5-7B-Instruct",
+                    "training_config": {
+                        "epochs": 3,
+                        "learning_rate": 0.0001,
+                        "batch_size": 2,
+                        "cutoff_len": 1024,
+                    },
+                }
+            },
+            export_dir="/tmp/ft-20260416",
+            output_dir="/tmp/ft-20260416/output",
+        )
+
+        self.assertEqual(command[:2], ["llamafactory-cli", "train"])
+        self.assertIn("--model_name_or_path", command)
+        self.assertIn("Qwen/Qwen2.5-7B-Instruct", command)
+        self.assertIn("--dataset_dir", command)
+        self.assertIn("/tmp/ft-20260416", command)
+        self.assertIn("--dataset", command)
+        self.assertIn("finmodpro_train", command)
+        self.assertIn("--finetuning_type", command)
+        self.assertIn("lora", command)
+        self.assertIn("--num_train_epochs", command)
+        self.assertIn("3", command)
+        self.assertIn("--learning_rate", command)
+        self.assertIn("0.0001", command)
+        self.assertIn("--per_device_train_batch_size", command)
+        self.assertIn("2", command)
+
+    def test_report_runner_status_posts_callback_payload(self):
+        from llm.services.fine_tune_runner_client import report_runner_status
+
+        captured_request = {}
+
+        def fake_urlopen(req, timeout=30):
+            captured_request["url"] = req.full_url
+            captured_request["token"] = req.headers.get("X-fine-tune-token")
+            captured_request["method"] = req.get_method()
+            captured_request["payload"] = json.loads(req.data.decode("utf-8"))
+            return _FakeHttpResponse({"code": 0, "message": "ok", "data": {"fine_tune_run": {"status": "running"}}})
+
+        with patch("llm.services.fine_tune_runner_client.request.urlopen", side_effect=fake_urlopen):
+            response = report_runner_status(
+                api_base_url="http://127.0.0.1:8000",
+                fine_tune_run_id=7,
+                token="ftcb_test_token",
+                payload={"status": "running", "external_job_id": "runner-local-7"},
+            )
+
+        self.assertEqual(captured_request["url"], "http://127.0.0.1:8000/api/ops/fine-tunes/7/callback/")
+        self.assertEqual(captured_request["token"], "ftcb_test_token")
+        self.assertEqual(captured_request["method"], "POST")
+        self.assertEqual(captured_request["payload"]["status"], "running")
+        self.assertEqual(response["fine_tune_run"]["status"], "running")
+
+    def test_run_remote_fine_tune_dry_run_skips_execution_and_callbacks(self):
+        from llm.services.fine_tune_runner_client import run_remote_fine_tune
+
+        spec = {
+            "run_key": "ft-20260416",
+            "training_job": {
+                "strategy": "lora",
+                "base_model_name": "Qwen/Qwen2.5-7B-Instruct",
+                "training_config": {"epochs": 3},
+            },
+            "export_bundle": {"export_path": "/tmp/ft-20260416", "files": []},
+        }
+
+        with patch("llm.services.fine_tune_runner_client.fetch_runner_spec", return_value=spec), \
+             patch("llm.services.fine_tune_runner_client.materialize_export_bundle", return_value="/tmp/ft-20260416"), \
+             patch("llm.services.fine_tune_runner_client.report_runner_status") as mocked_report, \
+             patch("llm.services.fine_tune_runner_client.subprocess.run") as mocked_run:
+            result = run_remote_fine_tune(
+                api_base_url="http://127.0.0.1:8000",
+                fine_tune_run_id=7,
+                token="ftcb_test_token",
+                work_dir="/tmp/runner-workdir",
+                dry_run=True,
+            )
+
+        self.assertEqual(result["spec"]["run_key"], "ft-20260416")
+        mocked_report.assert_not_called()
+        mocked_run.assert_not_called()
+
+    def test_run_remote_fine_tune_reports_deployment_metadata_on_success(self):
+        from llm.services.fine_tune_runner_client import run_remote_fine_tune
+
+        spec = {
+            "run_key": "ft-20260416",
+            "training_job": {
+                "strategy": "lora",
+                "base_model_name": "Qwen/Qwen2.5-7B-Instruct",
+                "training_config": {"epochs": 3},
+            },
+            "export_bundle": {"export_path": "/tmp/ft-20260416", "files": []},
+        }
+
+        with patch("llm.services.fine_tune_runner_client.fetch_runner_spec", return_value=spec), \
+             patch("llm.services.fine_tune_runner_client.materialize_export_bundle", return_value="/tmp/ft-20260416"), \
+             patch("llm.services.fine_tune_runner_client.report_runner_status") as mocked_report, \
+             patch("llm.services.fine_tune_runner_client.subprocess.run") as mocked_run:
+            result = run_remote_fine_tune(
+                api_base_url="http://127.0.0.1:8000",
+                fine_tune_run_id=7,
+                token="ftcb_test_token",
+                work_dir="/tmp/runner-workdir",
+                deployment_endpoint="http://127.0.0.1:9000/v1",
+                deployment_model_name="finmodpro-ft-chat",
+            )
+
+        mocked_run.assert_called_once()
+        self.assertEqual(mocked_report.call_count, 2)
+        running_payload = mocked_report.call_args_list[0].kwargs["payload"]
+        success_payload = mocked_report.call_args_list[1].kwargs["payload"]
+        self.assertEqual(running_payload["status"], "running")
+        self.assertEqual(success_payload["status"], "succeeded")
+        self.assertEqual(success_payload["deployment_endpoint"], "http://127.0.0.1:9000/v1")
+        self.assertEqual(success_payload["deployment_model_name"], "finmodpro-ft-chat")
+        self.assertEqual(success_payload["artifact_manifest"]["adapter_path"], "/tmp/runner-workdir/ft-20260416/artifacts")
+        self.assertEqual(result["callback_payload"]["deployment_model_name"], "finmodpro-ft-chat")
+
+
+class LiteLLMConfigRenderTests(TestCase):
+    def test_rendered_config_includes_generated_alias_entries_before_settings(self):
+        from llm.services.litellm_config_render_service import render_litellm_config
+
+        base_config = (
+            "model_list:\n"
+            "  - model_name: chat-default\n"
+            "    litellm_params:\n"
+            "      model: deepseek/deepseek-chat\n"
+            "litellm_settings:\n"
+            "  success_callback: [\"langfuse\"]\n"
+        )
+        generated_snippet = (
+            "model_list:\n"
+            "  - model_name: finmodpro-ft-chat\n"
+            "    litellm_params:\n"
+            "      model: openai/finmodpro-ft-chat\n"
+            "      api_base: http://127.0.0.1:9000/v1\n"
+        )
+
+        rendered = render_litellm_config(base_config=base_config, generated_snippets=[generated_snippet])
+
+        self.assertIn("model_name: chat-default", rendered)
+        self.assertIn("model_name: finmodpro-ft-chat", rendered)
+        self.assertIn("api_base: http://127.0.0.1:9000/v1", rendered)
+        self.assertLess(rendered.index("model_name: finmodpro-ft-chat"), rendered.index("litellm_settings:"))
+
+    def test_build_rendered_litellm_config_writes_output_file(self):
+        from llm.services.litellm_config_render_service import build_rendered_litellm_config
+
+        temp_dir = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, temp_dir, True)
+        base_path = Path(temp_dir) / "base.yaml"
+        generated_root = Path(temp_dir) / "generated"
+        output_path = Path(temp_dir) / "rendered.yaml"
+        generated_root.mkdir(parents=True, exist_ok=True)
+
+        base_path.write_text(
+            "model_list:\n"
+            "  - model_name: chat-default\n"
+            "    litellm_params:\n"
+            "      model: deepseek/deepseek-chat\n"
+            "litellm_settings:\n"
+            "  success_callback: [\"langfuse\"]\n",
+            encoding="utf-8",
+        )
+        (generated_root / "ft-1.yaml").write_text(
+            "model_list:\n"
+            "  - model_name: finmodpro-ft-chat\n"
+            "    litellm_params:\n"
+            "      model: openai/finmodpro-ft-chat\n"
+            "      api_base: http://127.0.0.1:9000/v1\n",
+            encoding="utf-8",
+        )
+
+        result = build_rendered_litellm_config(
+            base_config_path=base_path,
+            generated_root=generated_root,
+            output_path=output_path,
+        )
+
+        self.assertEqual(result["generated_count"], 1)
+        self.assertTrue(output_path.exists())
+        rendered = output_path.read_text(encoding="utf-8")
+        self.assertIn("model_name: finmodpro-ft-chat", rendered)

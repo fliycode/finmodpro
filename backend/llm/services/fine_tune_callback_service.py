@@ -5,6 +5,7 @@ from django.conf import settings
 from django.utils import timezone
 
 from llm.models import FineTuneRun, ModelConfig
+from llm.services.litellm_alias_service import provision_litellm_alias
 
 
 def hash_callback_token(token):
@@ -69,6 +70,14 @@ def apply_runner_callback(*, fine_tune_run, payload):
     fine_tune_run.save()
 
     if fine_tune_run.status == FineTuneRun.STATUS_SUCCEEDED:
+        alias_artifact = provision_litellm_alias(fine_tune_run=fine_tune_run)
+        if alias_artifact:
+            updated_artifact_manifest = {
+                **(fine_tune_run.artifact_manifest or {}),
+                **alias_artifact,
+            }
+            fine_tune_run.artifact_manifest = updated_artifact_manifest
+            fine_tune_run.save(update_fields=["artifact_manifest", "updated_at"])
         register_candidate_model_config(fine_tune_run=fine_tune_run)
 
     fine_tune_run.refresh_from_db()

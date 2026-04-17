@@ -59,6 +59,12 @@ FINE_TUNE_EXPORT_ROOT = Path(
 )
 FINE_TUNE_EXPORT_BASE_URL = get_env("FINE_TUNE_EXPORT_BASE_URL", "")
 FINE_TUNE_CALLBACK_SECRET = get_env("FINE_TUNE_CALLBACK_SECRET", SECRET_KEY)
+LITELLM_GENERATED_CONFIG_ROOT = Path(
+    get_env(
+        "LITELLM_GENERATED_CONFIG_ROOT",
+        str(BASE_DIR.parent / "deploy" / "litellm" / "generated"),
+    )
+)
 
 CELERY_BROKER_URL = get_env("CELERY_BROKER_URL", "memory://")
 CELERY_RESULT_BACKEND = get_env("CELERY_RESULT_BACKEND", "cache+memory://")
