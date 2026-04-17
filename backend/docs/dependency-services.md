@@ -381,7 +381,8 @@ python3 scripts/llamafactory_runner.py \
 说明：
 
 - 在这个默认组合下，聊天维护任务会因为 `CELERY_BROKER_URL=memory://` 而由 Django 进程直接执行，不依赖额外 worker
-- 如果你把 `CHAT_*` 变量配成非法非整数值，服务层会退回默认值；如果配成 `0` 或负数，运行时会至少按 `1` 条处理
+- 如果你把 `CHAT_*` 变量配成非法非整数值，Django 会在加载 `settings.py` 时启动失败
+- 如果你把它们配成合法整数但值为 `0` 或负数，运行时会至少按 `1` 条处理
 
 ### 更完整本地演示
 

@@ -128,7 +128,8 @@
 - `CHAT_CONTEXT_RECENT_MESSAGES` 控制问答上下文中带入多少条最近的已完成消息
 - `CHAT_MEMORY_RESULT_LIMIT` 控制单次问答最多带入多少条长期记忆
 - `CHAT_SUMMARY_TRIGGER_MESSAGES` 控制会话累计多少条已完成消息后才开始生成 `rolling_summary`
-- 以上变量都要求整数；如果写成非法值会退回默认值，若写成 `0` 或负数，服务层会按至少 `1` 条处理
+- 以上变量都要求整数；如果写成非法非整数值，Django 会在加载 `settings.py` 时启动失败
+- 如果值是合法整数但写成 `0` 或负数，服务层会按至少 `1` 条处理
 
 ### Knowledge Base / Milvus
 
