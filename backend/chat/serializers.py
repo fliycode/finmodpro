@@ -1,6 +1,6 @@
 from rest_framework import serializers
 
-from chat.models import ChatMessage, ChatSession
+from chat.models import ChatMessage, ChatSession, MemoryEvidence, MemoryItem
 
 
 class CreateChatSessionSerializer(serializers.Serializer):
@@ -82,3 +82,46 @@ class ChatSessionDetailSerializer(ChatSessionSerializer):
 
     class Meta(ChatSessionSerializer.Meta):
         fields = ChatSessionSerializer.Meta.fields + ["messages"]
+
+
+class MemoryItemSerializer(serializers.ModelSerializer):
+    confidence_score = serializers.FloatField(read_only=True)
+
+    class Meta:
+        model = MemoryItem
+        fields = [
+            "id",
+            "memory_type",
+            "scope_type",
+            "scope_key",
+            "title",
+            "content",
+            "confidence_score",
+            "source_kind",
+            "status",
+            "pinned",
+            "updated_at",
+        ]
+        read_only_fields = fields
+
+
+class MemoryEvidenceSerializer(serializers.ModelSerializer):
+    session_id = serializers.IntegerField(allow_null=True, read_only=True)
+    message_id = serializers.IntegerField(allow_null=True, read_only=True)
+
+    class Meta:
+        model = MemoryEvidence
+        fields = [
+            "id",
+            "session_id",
+            "message_id",
+            "evidence_excerpt",
+            "extractor_version",
+            "confirmation_status",
+            "created_at",
+        ]
+        read_only_fields = fields
+
+
+class MemoryPinSerializer(serializers.Serializer):
+    pinned = serializers.BooleanField()

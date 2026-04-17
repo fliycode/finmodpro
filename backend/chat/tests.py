@@ -14,7 +14,7 @@ from authentication.services.jwt_service import generate_access_token
 from chat.models import ChatMessage, ChatSession
 from chat.serializers import ChatMessageSerializer, ChatSessionSerializer
 from chat.services.ask_service import stream_question
-from chat.services.memory_service import extract_session_memories
+from chat.services.memory_service import delete_memory_item, extract_session_memories, set_memory_pin_state
 from chat.services.session_service import dispatch_session_maintenance_tasks
 from chat.services.session_service import (
     create_chat_session,
@@ -1909,6 +1909,18 @@ class ChatMemoryGovernanceApiTests(TestCase):
         )
         return constant_value
 
+    def _get_memory_evidence_model(self):
+        try:
+            return apps.get_model("chat", "MemoryEvidence")
+        except LookupError:
+            self.fail("chat.MemoryEvidence must exist before evidence APIs can be exercised.")
+
+    def _get_memory_action_log_model(self):
+        try:
+            return apps.get_model("chat", "MemoryActionLog")
+        except LookupError:
+            self.fail("chat.MemoryActionLog must exist before governance actions can be audited.")
+
     def _create_memory_item(self, **overrides):
         memory_item_model = self._get_memory_item_model()
         payload = {
@@ -1923,6 +1935,24 @@ class ChatMemoryGovernanceApiTests(TestCase):
         }
         payload.update(overrides)
         return memory_item_model.objects.create(**payload)
+
+    def _assert_memory_contract(self, memory_payload, **expected_values):
+        required_keys = {
+            "id",
+            "memory_type",
+            "scope_type",
+            "scope_key",
+            "title",
+            "content",
+            "confidence_score",
+            "source_kind",
+            "status",
+            "pinned",
+            "updated_at",
+        }
+        self.assertTrue(required_keys.issubset(memory_payload.keys()))
+        for key, value in expected_values.items():
+            self.assertEqual(memory_payload[key], value)
 
     def test_memory_list_filters_by_scope_and_query(self):
         matching_memory = self._create_memory_item(
@@ -1960,11 +1990,53 @@ class ChatMemoryGovernanceApiTests(TestCase):
         self.assertEqual(payload["data"]["memories"][0]["title"], "偏好表格")
         self.assertEqual(payload["data"]["memories"][0]["scope_type"], "user_global")
         self.assertEqual(payload["data"]["memories"][0]["scope_key"], "")
+        self._assert_memory_contract(
+            payload["data"]["memories"][0],
+            id=matching_memory.id,
+            title="偏好表格",
+            scope_type="user_global",
+            scope_key="",
+        )
+
+    def test_memory_list_filters_by_dataset_scope_key(self):
+        memory_item_model = self._get_memory_item_model()
+        matching_memory = self._create_memory_item(
+            scope_type=self._get_memory_item_constant(memory_item_model, "SCOPE_DATASET"),
+            scope_key="7",
+            title="数据集 7 重点",
+            content="只应返回给 scope_key=7 的请求。",
+        )
+        self._create_memory_item(
+            scope_type=self._get_memory_item_constant(memory_item_model, "SCOPE_DATASET"),
+            scope_key="8",
+            title="数据集 8 重点",
+            content="不应返回给 scope_key=7 的请求。",
+        )
+
+        response = self.client.get(
+            "/api/chat/memories?scope_type=dataset&scope_key=7",
+            HTTP_AUTHORIZATION=f"Bearer {self.access_token}",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(len(payload["data"]["memories"]), 1)
+        self.assertEqual(payload["data"]["memories"][0]["id"], matching_memory.id)
+        self.assertEqual(payload["data"]["memories"][0]["scope_key"], "7")
 
     def test_memory_evidence_returns_memory_and_evidence_entries(self):
         memory_item = self._create_memory_item(
             title="偏好结构化回答",
             content="先给表格再给解释。",
+        )
+        evidence_model = self._get_memory_evidence_model()
+        action_log_model = self._get_memory_action_log_model()
+        session = ChatSession.objects.create(user=self.user, title="记忆证据会话")
+        evidence_model.objects.create(
+            memory_item=memory_item,
+            session=session,
+            evidence_excerpt="来自会话的证据片段",
+            extractor_version="task4_memory_v1",
         )
 
         response = self.client.get(
@@ -1982,7 +2054,38 @@ class ChatMemoryGovernanceApiTests(TestCase):
         self.assertIsInstance(payload["data"]["evidence"], list)
         self.assertGreaterEqual(len(payload["data"]["evidence"]), 1)
         first_entry = payload["data"]["evidence"][0]
+        self.assertEqual(first_entry["evidence_excerpt"], "来自会话的证据片段")
         self.assertIn("created_at", first_entry)
+        self._assert_memory_contract(
+            payload["data"]["memory"],
+            id=memory_item.id,
+            title="偏好结构化回答",
+        )
+        self.assertTrue(
+            action_log_model.objects.filter(
+                memory_item=memory_item,
+                actor_user=self.user,
+                action=action_log_model.ACTION_VIEW,
+            ).exists()
+        )
+
+    def test_memory_pin_requires_explicit_boolean_payload(self):
+        memory_item = self._create_memory_item(
+            title="偏好结构化回答",
+            content="先给结论后给依据。",
+        )
+
+        response = self.client.post(
+            f"/api/chat/memories/{memory_item.id}/pin",
+            data=json.dumps({}),
+            content_type="application/json",
+            HTTP_AUTHORIZATION=f"Bearer {self.access_token}",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        payload = response.json()
+        self.assertEqual(payload["code"], 400)
+        self.assertIn("pinned", payload["data"])
 
     def test_memory_pin_updates_memory_state(self):
         memory_item = self._create_memory_item(
@@ -2004,6 +2107,41 @@ class ChatMemoryGovernanceApiTests(TestCase):
         self.assertTrue(payload["data"]["memory"]["pinned"])
         memory_item.refresh_from_db()
         self.assertTrue(memory_item.pinned)
+
+    @patch("chat.services.memory_service.MemoryActionLog.objects.create")
+    def test_memory_pin_state_rolls_back_when_audit_logging_fails(self, mocked_create):
+        memory_item = self._create_memory_item(pinned=False)
+        mocked_create.side_effect = RuntimeError("audit log failed")
+
+        with self.assertRaises(RuntimeError):
+            set_memory_pin_state(
+                memory_item=memory_item,
+                actor_user=self.user,
+                pinned=True,
+            )
+
+        memory_item.refresh_from_db()
+        self.assertFalse(memory_item.pinned)
+
+    @patch("chat.services.memory_service.MemoryActionLog.objects.create")
+    def test_memory_delete_rolls_back_when_audit_logging_fails(self, mocked_create):
+        memory_item_model = self._get_memory_item_model()
+        memory_item = self._create_memory_item(
+            status=self._get_memory_item_constant(memory_item_model, "STATUS_ACTIVE")
+        )
+        mocked_create.side_effect = RuntimeError("audit log failed")
+
+        with self.assertRaises(RuntimeError):
+            delete_memory_item(
+                memory_item=memory_item,
+                actor_user=self.user,
+            )
+
+        memory_item.refresh_from_db()
+        self.assertEqual(
+            memory_item.status,
+            self._get_memory_item_constant(memory_item_model, "STATUS_ACTIVE"),
+        )
 
     def test_memory_delete_hides_memory_from_active_list(self):
         deleted_memory = self._create_memory_item(
