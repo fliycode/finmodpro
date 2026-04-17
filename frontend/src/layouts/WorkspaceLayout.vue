@@ -7,7 +7,7 @@ import FlashStack from '../components/ui/FlashStack.vue';
 </script>
 
 <template>
-  <div class="app-shell">
+  <div class="app-shell app-shell--workspace">
     <AppSidebar area="workspace" />
     <div class="app-shell__main">
       <AppTopbar
@@ -18,7 +18,7 @@ import FlashStack from '../components/ui/FlashStack.vue';
         compact
       />
       <FlashStack />
-      <div class="app-shell__content">
+      <div class="app-shell__content app-shell__content--workspace">
         <RouterView />
       </div>
     </div>

@@ -56,6 +56,38 @@ test('normalizeHistoryItems keeps preview and timestamp fields display-safe', ()
   assert.ok(items[0].timestamp.length > 0);
 });
 
+test('normalizeHistoryItems also accepts camelCase session truth fields', () => {
+  const items = normalizeHistoryItems([
+    {
+      id: 4,
+      title: '现金流跟踪',
+      titleStatus: 'failed',
+      titleSource: 'system',
+      rollingSummary: '摘要失败后保留了最新会话概览。',
+      lastMessagePreview: '请继续检查现金短债比。',
+      messageCount: 2,
+      lastMessageAt: '2026-04-11T08:30:00Z',
+      contextFilters: { dataset_id: 11 },
+    },
+  ]);
+
+  assert.deepEqual(items[0], {
+    id: 4,
+    title: '现金流跟踪',
+    preview: '请继续检查现金短债比。',
+    summaryPreview: '摘要失败后保留了最新会话概览。',
+    timestamp: items[0].timestamp,
+    rawTimestamp: '2026-04-11T08:30:00Z',
+    updatedAt: '2026-04-11T08:30:00Z',
+    titleStatus: 'failed',
+    titleSource: 'system',
+    rollingSummary: '摘要失败后保留了最新会话概览。',
+    messageCount: 2,
+    lastMessageAt: '2026-04-11T08:30:00Z',
+    contextFilters: { dataset_id: 11 },
+  });
+});
+
 test('session truth label helpers return readable labels', () => {
   assert.equal(getSessionTitleStatusLabel('pending'), '标题生成中');
   assert.equal(getSessionTitleStatusLabel('ready'), '标题已生成');

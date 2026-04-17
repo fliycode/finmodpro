@@ -1,4 +1,6 @@
 <script setup>
+import { getSessionTitleSourceLabel, getSessionTitleStatusLabel } from '../lib/workspace-qa.js';
+
 const props = defineProps({
   items: {
     type: Array,
@@ -16,6 +18,10 @@ const props = defineProps({
     type: Boolean,
     default: false,
   },
+  showSessionMetadata: {
+    type: Boolean,
+    default: false,
+  },
 });
 
 const emit = defineEmits(['open-session', 'refresh', 'export-session']);
@@ -26,6 +32,19 @@ const handleOpenSession = (id) => {
 
 const handleExportSession = (id) => {
   emit('export-session', id);
+};
+
+const shouldShowSummaryPreview = (item) =>
+  Boolean(item?.summaryPreview) && item.summaryPreview !== item.preview;
+
+const shouldShowTitleStatus = (item) =>
+  Boolean(item?.titleStatus) && item.titleStatus !== 'ready';
+
+const getDatasetLabel = (item) => {
+  const datasetId = item?.contextFilters?.dataset_id;
+  return datasetId === null || datasetId === undefined || datasetId === ''
+    ? ''
+    : `数据集 ${datasetId}`;
 };
 </script>
 
@@ -62,11 +81,31 @@ const handleExportSession = (id) => {
         :class="{ 'is-active': String(activeSessionId) === String(item.id) }"
       >
         <div class="item-main">
-          <div class="item-title">{{ item.title }}</div>
+          <div class="item-title-row">
+            <div class="item-title">{{ item.title }}</div>
+            <div v-if="showSessionMetadata" class="item-badges">
+              <span class="item-badge">
+                {{ getSessionTitleSourceLabel(item.titleSource) }}
+              </span>
+              <span
+                v-if="shouldShowTitleStatus(item)"
+                class="item-badge item-badge--status"
+              >
+                {{ getSessionTitleStatusLabel(item.titleStatus) }}
+              </span>
+              <span v-if="getDatasetLabel(item)" class="item-badge">
+                {{ getDatasetLabel(item) }}
+              </span>
+            </div>
+          </div>
+          <div v-if="showSessionMetadata && shouldShowSummaryPreview(item)" class="item-summary">
+            {{ item.summaryPreview }}
+          </div>
           <div class="item-preview">{{ item.preview }}</div>
         </div>
         <div class="item-meta">
           <div class="item-time">{{ item.timestamp }}</div>
+          <div v-if="showSessionMetadata" class="item-count">{{ item.messageCount }} 条消息</div>
           <div class="item-actions">
             <button type="button" class="view-btn" @click="handleOpenSession(item.id)">继续对话</button>
             <button
@@ -193,6 +232,13 @@ const handleExportSession = (id) => {
   gap: 6px;
 }
 
+.item-title-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
 .item-title {
   font-weight: 600;
   color: var(--text-primary);
@@ -202,13 +248,46 @@ const handleExportSession = (id) => {
   font-size: 14px;
 }
 
+.item-badges {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.item-badge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 22px;
+  padding: 0 8px;
+  border-radius: 999px;
+  background: var(--surface-3);
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.item-badge--status {
+  background: rgba(176, 125, 12, 0.12);
+  color: #8a5a00;
+}
+
+.item-summary,
 .item-preview {
   font-size: 12px;
   color: var(--text-secondary);
+  line-height: 1.5;
+}
+
+.item-summary {
+  color: var(--text-primary);
+}
+
+.item-preview {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  line-height: 1.5;
 }
 
 .item-meta {
@@ -223,6 +302,11 @@ const handleExportSession = (id) => {
 .item-time {
   font-size: 12px;
   color: var(--text-muted);
+}
+
+.item-count {
+  font-size: 12px;
+  color: var(--text-secondary);
 }
 
 .item-actions {
@@ -279,5 +363,28 @@ const handleExportSession = (id) => {
   0% { opacity: 1; }
   50% { opacity: 0.45; }
   100% { opacity: 1; }
+}
+
+@media (max-width: 760px) {
+  .history-item,
+  .skeleton-item {
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .item-title-row,
+  .item-meta {
+    align-items: flex-start;
+  }
+
+  .item-badges,
+  .item-actions {
+    justify-content: flex-start;
+  }
+
+  .item-meta {
+    margin-left: 0;
+    gap: 10px;
+  }
 }
 </style>
