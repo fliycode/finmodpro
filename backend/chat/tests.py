@@ -149,6 +149,11 @@ class ChatAskApiTests(TestCase):
     def setUp(self):
         self.client = Client()
         seed_roles_and_permissions()
+        self.vector_clear_patcher = patch(
+            "rag.services.vector_store_service.VectorService.clear",
+            return_value=None,
+        )
+        self.vector_clear_patcher.start()
         clear_store()
         self.embedding_provider_patcher = patch(
             "knowledgebase.services.embedding_service.get_embedding_provider",
@@ -208,6 +213,7 @@ class ChatAskApiTests(TestCase):
         self.vector_index_patcher.stop()
         shutil.rmtree(self.media_root, ignore_errors=True)
         clear_store()
+        self.vector_clear_patcher.stop()
 
     def test_chat_ask_returns_answer_and_citations_from_retrieval(self):
         response = self.client.post(
