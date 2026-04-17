@@ -5,6 +5,7 @@ from llm.controllers.fine_tune_controller import (
     FineTuneRunDetailView,
     FineTuneRunExportDetailView,
     FineTuneRunListCreateView,
+    FineTuneRunRunnerSpecView,
 )
 from llm.controllers.evaluation_controller import EvalRecordListCreateView
 from llm.controllers.model_config_controller import (
@@ -50,6 +51,16 @@ urlpatterns = [
         "fine-tunes/<int:fine_tune_run_id>/export/",
         FineTuneRunExportDetailView.as_view(),
         name="fine-tune-export-detail",
+    ),
+    path(
+        "fine-tunes/<int:fine_tune_run_id>/runner-spec",
+        FineTuneRunRunnerSpecView.as_view(),
+        name="fine-tune-runner-spec-legacy",
+    ),
+    path(
+        "fine-tunes/<int:fine_tune_run_id>/runner-spec/",
+        FineTuneRunRunnerSpecView.as_view(),
+        name="fine-tune-runner-spec",
     ),
     path(
         "model-configs/test-connection",

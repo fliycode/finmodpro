@@ -1,6 +1,6 @@
 # FinModPro 开源 LLM 基础设施接入评估
 
-更新时间：2026-04-14
+更新时间：2026-04-16
 
 ## 当前推进状态（2026-04-16）
 
@@ -11,14 +11,14 @@
 | LiteLLM | 已完成第一阶段接入 | `backend/llm/services/providers/litellm_provider.py`、`deploy/litellm/config.yaml`、`docker-compose.prod.yml` |
 | Langfuse | 已完成第一阶段接入 | `backend/common/observability.py`、`backend/.env.example` |
 | Unstructured | 已完成第一阶段接入 | `backend/knowledgebase/services/parser_service.py`、`backend/knowledgebase/services/unstructured_client.py`、`docker-compose.prod.yml` |
-| LLaMA-Factory | 未进入执行接入，进入子系统设计阶段 | `backend/llm/models.py`、`backend/llm/services/fine_tune_service.py`、`frontend/src/components/ModelConfig.vue` |
+| LLaMA-Factory | 已完成仓库内第一阶段接入：控制面、runner 契约、最小 runner 客户端、LiteLLM alias 片段生成与渲染；真实训练与在线部署仍依赖外部基础设施 | `backend/llm/services/fine_tune_export_service.py`、`backend/llm/controllers/fine_tune_controller.py`、`backend/llm/services/fine_tune_runner_client.py`、`backend/llm/services/litellm_alias_service.py`、`backend/llm/services/litellm_config_render_service.py`、`scripts/llamafactory_runner.py`、`scripts/render_litellm_config.py` |
 | LlamaIndex | 仍为 Deferred | 无运行时代码接入 |
 
 因此这份评估文档对应的实际推进顺序已经变成：
 
 1. `P0`：`LiteLLM + Langfuse` 已完成
 2. `P1`：`Unstructured` 已完成
-3. `P2`：继续推进 `LLaMA-Factory` 的训练子系统设计与控制面边界
+3. `P2`：`LLaMA-Factory` 的仓库内交付已基本完成，下一步转向真实外部训练 / 推理 / LiteLLM 在线加载联调
 4. `Deferred`：`LlamaIndex` 继续按需评估
 
 ## 1. 结论先说
@@ -257,15 +257,25 @@ Unstructured 当前官方文档明确推荐优先使用：
 
 ## 6. 为什么 LLaMA-Factory 值得接，但必须独立成子系统
 
-### 6.1 当前仓库已经有训练登记雏形
+### 6.1 当前仓库已经不只是训练登记，而是第一阶段控制面
 
 现有代码里已经有：
 
-- `backend/llm/models.py` 中的 `FineTuneRun`
+- `backend/llm/models.py` 中扩展后的 `FineTuneRun`
 - `backend/llm/services/fine_tune_service.py`
-- `frontend/src/components/ModelConfig.vue` 中的微调登记 UI
+- `backend/llm/services/fine_tune_export_service.py`
+- `backend/llm/services/fine_tune_callback_service.py`
+- `backend/llm/controllers/fine_tune_controller.py`
+- `frontend/src/components/ModelConfig.vue` 中的微调控制面 UI
 
-但这只是 registry，不是训练系统。
+这说明仓库当前已经具备：
+
+- 训练任务登记
+- 导出 LLaMA-Factory 兼容的 export bundle
+- 外部 runner 回调鉴权与状态回写
+- 训练成功后回流为候选 `litellm` 模型配置
+
+但它依然不是训练执行系统。
 
 ### 6.2 LLaMA-Factory 最适合补的不是“页面”，而是“训练执行面”
 
@@ -307,13 +317,21 @@ LLaMA-Factory 官方文档当前重点是：
 - 和当前 Django + Celery + Milvus 的在线服务职责完全不同
 - 直接耦合后，部署和排障复杂度会飙升
 
-### 6.5 合理的第一步
+### 6.5 当前已经完成的第一步，以及下一步该做什么
 
-不要先做“在线训练按钮一键跑”，而是先做三件事：
+当前仓库已经完成了五件关键事情：
 
-1. 补全 `FineTuneRun` 的 job metadata 字段设计
-2. 定义训练数据集导出格式
-3. 明确训练产物如何回流到 LiteLLM / 推理服务
+1. 补全 `FineTuneRun` 的 job metadata 与回调字段
+2. 定义并落地训练数据导出格式
+3. 提供外部 runner 拉取 `runner-spec` 的执行协议
+4. 提供仓库内可执行的最小 runner client / CLI
+5. 明确并实现训练产物回流到 LiteLLM 候选模型、alias 片段与渲染配置的路径
+
+因此仓库内下一步不该回头继续做 registry/UI；代码层面真正剩下的是外部基础设施联调：
+
+1. 接入真实 `LLaMA-Factory` / GPU 训练环境，而不是最小本地 runner client
+2. 让训练产物真正挂到 vLLM 或其它 OpenAI-compatible 推理服务
+3. 让运行中的 LiteLLM 实例加载渲染后的配置，而不是只在仓库内生成配置产物
 
 ## 7. 为什么 LlamaIndex 现在不该优先接
 
@@ -435,10 +453,10 @@ LlamaIndex 官方文档当前最突出的价值有两类：
 
 ### 阶段 4：训练子系统
 
-1. 用 LLaMA-Factory 承接训练执行
-2. 训练产物通过 vLLM 或其他推理服务暴露
-3. LiteLLM 收口训练模型入口
-4. 前端再做真正的训练页
+1. 已完成：FinModPro 控制面负责 run metadata、export bundle、callback、候选模型回流
+2. 已完成：仓库内最小 runner client / CLI 与 runner-spec 契约
+3. 已完成：LiteLLM alias 片段生成与渲染配置输出
+4. 待完成：真实外部训练执行、推理部署、LiteLLM 在线加载联调
 
 目标：把训练能力做成独立系统，而不是把训练逻辑塞进在线应用。
 

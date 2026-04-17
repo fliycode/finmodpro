@@ -295,12 +295,71 @@ ollama list
 - `FINE_TUNE_EXPORT_ROOT`
 - `FINE_TUNE_EXPORT_BASE_URL`
 - `FINE_TUNE_CALLBACK_SECRET`
+- `LITELLM_GENERATED_CONFIG_ROOT`
 
 ### 当前边界
 
 - 不在 Django / Celery 里直接执行 `llamafactory-cli`
 - 训练成功后应优先回流到 `provider=litellm` 的候选 `ModelConfig`
 - callback 只允许更新单个 `FineTuneRun`，不应复用后台管理员登录态
+- 外部 runner 应通过 `GET /api/ops/fine-tunes/<id>/runner-spec/` 拉取执行说明，并使用 `X-Fine-Tune-Token` 做鉴权
+
+### Runner 接口契约
+
+当前仓库已经提供给外部执行器的最小契约有两条：
+
+- `GET /api/ops/fine-tunes/<id>/runner-spec/`
+  - 使用 `X-Fine-Tune-Token`
+  - 返回训练框架、基础模型、训练参数摘要、export bundle 文件列表、callback URL
+- `POST /api/ops/fine-tunes/<id>/callback/`
+  - 使用同一个 `X-Fine-Tune-Token`
+  - 回写 `status`、`metrics`、`artifact_manifest`、`deployment_endpoint`、`deployment_model_name`
+
+`FINE_TUNE_EXPORT_BASE_URL` 的作用是给 `runner-spec` 里的导出文件生成可下载 URL。
+如果这个变量为空，runner 仍然能拿到本地 `export_path` 和文件清单，但默认假设执行器与导出目录之间已经有共享挂载或别的文件分发手段。
+
+`LITELLM_GENERATED_CONFIG_ROOT` 的作用是保存训练成功后自动生成的 LiteLLM alias 配置片段。
+当前实现会在成功 callback 且带 `deployment_endpoint + deployment_model_name` 时生成 `<run_key>.yaml`，供后续部署或人工合并到主 `config.yaml`。
+
+如果你想把这些片段渲染成一份可直接挂载给 LiteLLM 的配置文件，可以执行：
+
+```bash
+python3 scripts/render_litellm_config.py
+```
+
+默认会读取：
+
+- `deploy/litellm/config.yaml`
+- `deploy/litellm/generated/*.yaml`
+
+并输出：
+
+- `deploy/litellm/rendered.config.yaml`
+
+当前 `docker-compose.prod.yml` 中的 `litellm` 服务默认挂载的也是这份 `rendered.config.yaml`，`scripts/deploy.sh` 会在 `docker compose up` 前先执行一次渲染。
+
+### 最小 runner 命令
+
+仓库当前自带一个最小 runner 客户端：
+
+```bash
+python3 scripts/llamafactory_runner.py \
+  --api-base-url http://127.0.0.1:8000 \
+  --run-id 1 \
+  --token ftcb_xxx \
+  --work-dir /tmp/finmodpro-runner \
+  --deployment-endpoint http://127.0.0.1:9000/v1 \
+  --deployment-model-name finmodpro-ft-chat \
+  --dry-run
+```
+
+它会：
+
+- 拉取 `runner-spec`
+- 优先复用本地 `export_path`，否则按 `runner-spec` 里的文件 URL 下载 bundle
+- 组装 `llamafactory-cli train ...` 命令
+- 非 `--dry-run` 模式下回写 `running -> succeeded/failed`
+- 如果提供部署参数，则在成功回写后自动生成 LiteLLM alias 配置片段
 
 ## 九、推荐组合
 

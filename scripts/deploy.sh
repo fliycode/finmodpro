@@ -22,6 +22,8 @@ git fetch --all --prune
 git checkout main
 git pull --ff-only origin main
 
+python3 "$APP_DIR/scripts/render_litellm_config.py"
+
 docker compose -f "$COMPOSE_FILE" up -d --build
 
 "$APP_DIR/scripts/smoke-check.sh"

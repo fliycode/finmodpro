@@ -9,7 +9,7 @@ from llm.serializers import (
     FineTuneRunUpdateSerializer,
 )
 from llm.services.fine_tune_callback_service import apply_runner_callback, verify_callback_token
-from llm.services.fine_tune_export_service import get_export_bundle_detail
+from llm.services.fine_tune_export_service import get_export_bundle_detail, get_runner_execution_spec
 from llm.services.fine_tune_service import (
     create_fine_tune_run,
     get_fine_tune_run,
@@ -107,3 +107,19 @@ class FineTuneRunExportDetailView(APIView):
             return error_response(code=404, message="微调记录不存在。", status_code=404)
 
         return success_response(data=get_export_bundle_detail(fine_tune_run=fine_tune_run))
+
+
+class FineTuneRunRunnerSpecView(APIView):
+    authentication_classes = []
+    permission_classes = []
+
+    def get(self, request, fine_tune_run_id):
+        fine_tune_run = get_fine_tune_run(fine_tune_run_id=fine_tune_run_id)
+        if fine_tune_run is None:
+            return error_response(code=404, message="微调记录不存在。", status_code=404)
+
+        callback_token = request.headers.get("X-Fine-Tune-Token", "")
+        if not verify_callback_token(fine_tune_run=fine_tune_run, token=callback_token):
+            return error_response(code=401, message="回调令牌无效。", status_code=401)
+
+        return success_response(data=get_runner_execution_spec(fine_tune_run=fine_tune_run, request=request))
