@@ -17,6 +17,14 @@ def generate_session_title(*, session_id):
 
     default_title = ChatSession._meta.get_field("title").default
     current_title = (session.title or "").strip()
+    if session.title_source == ChatSession.TITLE_SOURCE_MANUAL:
+        title = current_title or default_title
+        if session.title_status != ChatSession.TITLE_STATUS_READY or session.title != title:
+            session.title = title
+            session.title_status = ChatSession.TITLE_STATUS_READY
+            session.save(update_fields=["title", "title_status", "updated_at"])
+        return title
+
     if current_title and current_title != default_title:
         if session.title_status != ChatSession.TITLE_STATUS_READY:
             session.title_status = ChatSession.TITLE_STATUS_READY
