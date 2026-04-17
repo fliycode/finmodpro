@@ -16,6 +16,7 @@ const props = defineProps({
 
 const profile = computed(() => authStorage.getProfile());
 const items = computed(() => getNavItems(props.area, profile.value));
+const isWorkspaceCompact = computed(() => props.area === 'workspace');
 
 const areaMeta = computed(() => {
   if (props.area === 'admin') {
@@ -64,7 +65,7 @@ const navGroups = computed(() => {
 
 <template>
   <aside class="app-sidebar">
-    <div class="app-sidebar__brand">
+    <div class="app-sidebar__brand" :title="isWorkspaceCompact ? areaMeta.label : undefined">
       <div class="app-sidebar__brand-mark">
         <img class="app-sidebar__brand-logo" :src="finmodproMark" alt="FinModPro" />
       </div>
@@ -79,7 +80,14 @@ const navGroups = computed(() => {
       <section v-for="group in navGroups" :key="group.id" class="app-sidebar__group">
         <p class="app-sidebar__group-label">{{ group.label }}</p>
         <div class="app-sidebar__group-items">
-          <RouterLink v-for="item in group.items" :key="item.id" :to="item.to" class="app-sidebar__item">
+          <RouterLink
+            v-for="item in group.items"
+            :key="item.id"
+            :to="item.to"
+            class="app-sidebar__item"
+            :title="isWorkspaceCompact ? item.label : undefined"
+            :aria-label="isWorkspaceCompact ? item.label : undefined"
+          >
             <span class="app-sidebar__item-icon">
               <AppIcon :name="item.icon" />
             </span>

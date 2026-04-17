@@ -39,6 +39,37 @@ test('normalizeMemoryItems keeps memory scope and display labels stable', () => 
   });
 });
 
+test('normalizeMemoryItems also accepts camelCase memory fields', () => {
+  const items = normalizeMemoryItems([
+    {
+      id: 9,
+      memoryType: 'confirmed_fact',
+      scopeType: 'project',
+      scopeKey: 'alpha',
+      title: '项目 Alpha 基线',
+      content: '项目 Alpha 默认按季度复核。',
+      sourceKind: 'auto',
+      pinned: false,
+      updatedAt: '2026-04-17T09:30:00Z',
+    },
+  ]);
+
+  assert.deepEqual(items[0], {
+    id: 9,
+    title: '项目 Alpha 基线',
+    content: '项目 Alpha 默认按季度复核。',
+    memoryType: 'confirmed_fact',
+    memoryTypeLabel: '确认事实',
+    scopeType: 'project',
+    scopeKey: 'alpha',
+    scopeLabel: '项目 alpha',
+    sourceKind: 'auto',
+    sourceLabel: '自动提取',
+    pinned: false,
+    updatedAt: '2026-04-17T09:30:00Z',
+  });
+});
+
 test('memory label helpers keep unknown values safe', () => {
   assert.equal(buildMemoryScopeLabel('user_global', ''), '全局记忆');
   assert.equal(buildMemoryScopeLabel('project', 'alpha'), '项目 alpha');

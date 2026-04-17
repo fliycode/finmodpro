@@ -4,7 +4,11 @@ import { useRoute, useRouter } from 'vue-router';
 
 import { chatApi } from '../../api/chat.js';
 import ChatHistory from '../../components/ChatHistory.vue';
-import { buildSessionExportDownload } from '../../lib/workspace-qa.js';
+import {
+  buildSessionExportDownload,
+  getSessionTitleSourceLabel,
+  getSessionTitleStatusLabel,
+} from '../../lib/workspace-qa.js';
 
 const route = useRoute();
 const router = useRouter();
@@ -16,6 +20,9 @@ const errorMessage = ref('');
 
 const activeSessionId = computed(() => route.query.session ?? null);
 const activeDatasetId = computed(() => route.query.dataset ?? null);
+const selectedSession = computed(() =>
+  historyItems.value.find((item) => String(item.id) === String(activeSessionId.value)) || null,
+);
 
 const refreshHistory = async () => {
   isLoading.value = true;
@@ -142,6 +149,18 @@ onMounted(async () => {
         <p v-if="activeDatasetId" class="history-filters__hint">
           当前按数据集 {{ activeDatasetId }} 查看相关会话。
         </p>
+        <div v-if="selectedSession" class="history-session-summary">
+          <span class="history-session-summary__eyebrow">当前选中会话</span>
+          <strong>{{ selectedSession.title }}</strong>
+          <div class="history-session-summary__meta">
+            <span>{{ getSessionTitleSourceLabel(selectedSession.titleSource) }}</span>
+            <span>{{ getSessionTitleStatusLabel(selectedSession.titleStatus) }}</span>
+            <span>{{ selectedSession.messageCount }} 条消息</span>
+            <span v-if="selectedSession.contextFilters?.dataset_id">
+              数据集 {{ selectedSession.contextFilters.dataset_id }}
+            </span>
+          </div>
+        </div>
       </div>
     </section>
 
@@ -154,6 +173,7 @@ onMounted(async () => {
       :is-loading="isLoading"
       :active-session-id="activeSessionId"
       :enable-export="true"
+      :show-session-metadata="true"
       @refresh="refreshHistory"
       @open-session="openSession"
       @export-session="exportSession"
@@ -223,6 +243,32 @@ onMounted(async () => {
   margin: 0;
   color: var(--text-secondary);
   font-size: 13px;
+}
+
+.history-session-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px;
+  border-radius: 14px;
+  background: var(--surface-3);
+  color: var(--text-primary);
+}
+
+.history-session-summary__eyebrow {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.history-session-summary__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  color: var(--text-secondary);
+  font-size: 12px;
 }
 
 .history-error {

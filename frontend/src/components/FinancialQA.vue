@@ -8,10 +8,13 @@ import { qaApi } from '../api/qa.js';
 import {
   getActiveSessionLabel,
   getDefaultSessionFilters,
+  getSessionTitleSourceLabel,
+  getSessionTitleStatusLabel,
   normalizeDatasetId,
   normalizeHistoryItems,
 } from '../lib/workspace-qa.js';
 import ChatHistory from './ChatHistory.vue';
+import ChatMemoryDrawer from './ChatMemoryDrawer.vue';
 
 const props = defineProps({
   sessionId: {
@@ -30,11 +33,14 @@ const messages = ref([{ role: 'system', content: DEFAULT_SYSTEM_MESSAGE, tone: '
 const isAsking = ref(false);
 const messagesContainer = ref(null);
 const sessionOptions = ref([]);
+const activeSessionSnapshot = ref(null);
 const datasets = ref([]);
 const isLoadingSessions = ref(false);
 const isLoadingDatasets = ref(false);
 const isHydratingSession = ref(false);
+const activeSessionLoadFailed = ref(false);
 const historyDrawerOpen = ref(false);
+const memoryDrawerOpen = ref(false);
 const activeSessionFilters = ref({});
 
 const hasStreamingAssistant = computed(() =>
@@ -42,12 +48,64 @@ const hasStreamingAssistant = computed(() =>
 );
 
 const activeSessionLabel = computed(() =>
-  getActiveSessionLabel(sessionOptions.value, currentSessionId.value),
+  activeSessionRecord.value?.title || getActiveSessionLabel(sessionOptions.value, currentSessionId.value),
 );
 
 const historyItems = computed(() => normalizeHistoryItems(sessionOptions.value));
+const activeSessionRecord = computed(() =>
+  historyItems.value.find((item) => String(item.id) === String(currentSessionId.value))
+  || activeSessionSnapshot.value
+  || null,
+);
 const activeDatasetId = computed(() =>
   activeSessionFilters.value?.dataset_id ?? normalizeDatasetId(route.query.dataset),
+);
+const hasResolvedActiveSessionRecord = computed(() =>
+  Boolean(currentSessionId.value && activeSessionRecord.value),
+);
+const activeSessionStatusLabel = computed(() =>
+  !currentSessionId.value
+    ? '新对话'
+    : activeSessionLoadFailed.value && !hasResolvedActiveSessionRecord.value
+      ? '会话加载失败'
+      : hasResolvedActiveSessionRecord.value
+        ? getSessionTitleStatusLabel(activeSessionRecord.value.titleStatus)
+        : '会话加载中'
+);
+const activeSessionSourceLabel = computed(() =>
+  hasResolvedActiveSessionRecord.value
+    ? getSessionTitleSourceLabel(activeSessionRecord.value.titleSource)
+    : '',
+);
+const activeSessionMessageLabel = computed(() => {
+  if (!currentSessionId.value) {
+    return '等待首轮问答';
+  }
+
+  if (activeSessionLoadFailed.value && !hasResolvedActiveSessionRecord.value) {
+    return '元数据不可用';
+  }
+
+  if (!hasResolvedActiveSessionRecord.value) {
+    return '正在同步会话';
+  }
+
+  return `${activeSessionRecord.value?.messageCount ?? 0} 条消息`;
+});
+const activeSessionDatasetLabel = computed(() => {
+  if (activeSessionLoadFailed.value && !hasResolvedActiveSessionRecord.value) {
+    return '范围未知';
+  }
+
+  const datasetId = activeSessionRecord.value?.contextFilters?.dataset_id ?? activeDatasetId.value;
+  return datasetId === null || datasetId === undefined || datasetId === ''
+    ? '全部数据集'
+    : `数据集 ${datasetId}`;
+});
+const activeSessionSummary = computed(() =>
+  activeSessionRecord.value?.rollingSummary
+  || activeSessionRecord.value?.summaryPreview
+  || '',
 );
 
 const selectedDatasetId = computed({
@@ -152,9 +210,11 @@ const clearSessionRoute = async () => {
 const loadSession = async (id) => {
   if (!id) return;
   isHydratingSession.value = true;
+  activeSessionLoadFailed.value = false;
   try {
     const session = await chatApi.getSession(id);
     activeSessionFilters.value = session.contextFilters || {};
+    activeSessionSnapshot.value = normalizeHistoryItems([session])[0] || null;
     if (Array.isArray(session.messages) && session.messages.length > 0) {
       messages.value = session.messages;
     } else {
@@ -166,6 +226,8 @@ const loadSession = async (id) => {
     }
   } catch (error) {
     console.error('加载会话失败:', error);
+    activeSessionLoadFailed.value = true;
+    activeSessionSnapshot.value = null;
     messages.value = [{
       role: 'system',
       content: '加载会话失败，请刷新页面后重试。',
@@ -191,6 +253,8 @@ const openSession = async (id) => {
 
 const startNewConversation = async () => {
   currentSessionId.value = null;
+  activeSessionLoadFailed.value = false;
+  activeSessionSnapshot.value = null;
   query.value = '';
   activeSessionFilters.value = getDefaultSessionFilters(route.query.dataset);
   resetConversation();
@@ -206,6 +270,8 @@ watch(() => props.sessionId, async (newId) => {
     return;
   }
   if (!newId) {
+    activeSessionLoadFailed.value = false;
+    activeSessionSnapshot.value = null;
     activeSessionFilters.value = getDefaultSessionFilters(route.query.dataset);
     resetConversation();
   }
@@ -259,6 +325,8 @@ const handleAsk = async () => {
         });
         if (session?.id) {
           currentSessionId.value = session.id;
+          activeSessionLoadFailed.value = false;
+          activeSessionSnapshot.value = normalizeHistoryItems([session])[0] || null;
           activeSessionFilters.value = session.contextFilters || activeSessionFilters.value;
           await refreshSessionOptions();
           await syncSessionRoute(session.id);
@@ -332,7 +400,7 @@ const handleAsk = async () => {
           <div class="qa-shell__title-row">
             <h1 class="qa-shell__title">{{ activeSessionLabel }}</h1>
             <span class="qa-shell__session-state">
-              {{ currentSessionId ? '延续会话中' : '新对话' }}
+              {{ activeSessionStatusLabel }}
             </span>
           </div>
           <div class="qa-shell__filters">
@@ -350,11 +418,24 @@ const handleAsk = async () => {
               </select>
             </label>
           </div>
+          <div class="qa-shell__session-meta">
+            <span class="qa-shell__meta-pill">{{ activeSessionDatasetLabel }}</span>
+            <span v-if="activeSessionSourceLabel" class="qa-shell__meta-pill">
+              {{ activeSessionSourceLabel }}
+            </span>
+            <span class="qa-shell__meta-pill">{{ activeSessionMessageLabel }}</span>
+          </div>
+          <p v-if="activeSessionSummary" class="qa-shell__session-summary">
+            {{ activeSessionSummary }}
+          </p>
         </div>
 
         <div class="qa-shell__actions">
           <button class="ghost-btn" type="button" @click="historyDrawerOpen = true">
             历史会话
+          </button>
+          <button class="ghost-btn" type="button" @click="memoryDrawerOpen = true">
+            记忆
           </button>
           <button class="ghost-btn ghost-btn--primary" type="button" @click="startNewConversation">
             新对话
@@ -436,22 +517,30 @@ const handleAsk = async () => {
         :items="historyItems"
         :is-loading="isLoadingSessions"
         :active-session-id="currentSessionId"
+        :show-session-metadata="true"
         @refresh="refreshSessionOptions"
         @open-session="openSession"
       />
     </el-drawer>
+
+    <ChatMemoryDrawer
+      v-model:open="memoryDrawerOpen"
+      :dataset-id="activeDatasetId"
+    />
   </div>
 </template>
 
 <style scoped>
 .qa-page {
-  min-height: calc(100vh - 142px);
+  flex: 1;
+  min-height: 0;
 }
 
 .qa-shell {
-  min-height: calc(100vh - 170px);
   display: flex;
+  flex: 1;
   flex-direction: column;
+  min-height: 0;
   padding: 0;
   overflow: hidden;
 }
@@ -459,9 +548,9 @@ const handleAsk = async () => {
 .qa-shell__toolbar {
   display: flex;
   justify-content: space-between;
-  gap: 18px;
+  gap: 14px;
   align-items: center;
-  padding: 18px 22px 14px;
+  padding: 15px 20px 12px;
   border-bottom: 1px solid rgba(20, 32, 51, 0.08);
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(248, 250, 252, 0.94));
 }
@@ -476,7 +565,13 @@ const handleAsk = async () => {
 .qa-shell__filters {
   display: flex;
   flex-wrap: wrap;
-  gap: 10px;
+  gap: 8px;
+}
+
+.qa-shell__session-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
 .qa-shell__dataset-picker {
@@ -489,9 +584,9 @@ const handleAsk = async () => {
 }
 
 .qa-shell__dataset-picker select {
-  min-height: 36px;
-  min-width: 220px;
-  padding: 0 12px;
+  min-height: 34px;
+  min-width: 210px;
+  padding: 0 11px;
   border-radius: 12px;
   border: 1px solid var(--line-strong);
   background: #fff;
@@ -515,9 +610,21 @@ const handleAsk = async () => {
 
 .qa-shell__title {
   margin: 0;
-  font-size: 24px;
+  font-size: 22px;
   line-height: 1.1;
   color: var(--text-primary);
+}
+
+.qa-shell__meta-pill {
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;
+  padding: 0 10px;
+  border-radius: 999px;
+  background: var(--surface-3);
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 600;
 }
 
 .qa-shell__session-state {
@@ -532,15 +639,22 @@ const handleAsk = async () => {
   font-weight: 600;
 }
 
+.qa-shell__session-summary {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
 .qa-shell__actions {
   display: flex;
-  gap: 10px;
+  gap: 8px;
   flex-wrap: wrap;
 }
 
 .ghost-btn {
-  min-height: 38px;
-  padding: 0 14px;
+  min-height: 36px;
+  padding: 0 13px;
   border-radius: 999px;
   border: 1px solid var(--line-strong);
   background: #fff;
@@ -557,7 +671,7 @@ const handleAsk = async () => {
 
 .chat-window {
   flex: 1;
-  min-height: calc(100vh - 260px);
+  min-height: 0;
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.98) 0%, rgba(243, 245, 247, 0.95) 100%);
   display: flex;
   flex-direction: column;
@@ -565,17 +679,19 @@ const handleAsk = async () => {
 
 .messages {
   flex: 1;
-  padding: 24px 26px 18px;
+  min-height: 0;
+  padding: 20px clamp(18px, 2.4vw, 32px) 14px;
   overflow-y: auto;
   display: flex;
   flex-direction: column;
-  gap: 18px;
+  gap: 16px;
 }
 
 .message {
   display: flex;
   gap: 14px;
-  max-width: min(96%, 1120px);
+  width: min(100%, 1320px);
+  max-width: 100%;
 }
 
 .message.user {
@@ -585,7 +701,7 @@ const handleAsk = async () => {
 
 .message.system {
   align-self: center;
-  max-width: min(100%, 860px);
+  width: min(100%, 920px);
 }
 
 .message.system .message-content {
@@ -630,7 +746,7 @@ const handleAsk = async () => {
 .bubble {
   position: relative;
   border-radius: 18px;
-  padding: 15px 17px;
+  padding: 14px 16px;
   background: #fff;
   color: #142033;
   box-shadow: 0 14px 30px rgba(15, 23, 42, 0.06);
@@ -687,7 +803,7 @@ const handleAsk = async () => {
 .citations-container {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 8px;
 }
 
 .citations-title {
@@ -699,14 +815,14 @@ const handleAsk = async () => {
 
 .citations-list {
   display: grid;
-  gap: 10px;
+  gap: 8px;
 }
 
 .citation-card {
   border: 1px solid rgba(20, 32, 51, 0.08);
   background: rgba(255, 255, 255, 0.9);
   border-radius: 16px;
-  padding: 12px 14px;
+  padding: 11px 13px;
 }
 
 .citation-card__header {
@@ -742,16 +858,19 @@ const handleAsk = async () => {
 }
 
 .input-area {
-  padding: 16px 22px 22px;
+  flex-shrink: 0;
+  padding: 14px clamp(18px, 2.2vw, 24px) 18px;
   border-top: 1px solid rgba(20, 32, 51, 0.08);
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 92px;
+  grid-template-columns: minmax(0, 1fr) 88px;
   gap: 12px;
-  background: rgba(255, 255, 255, 0.92);
+  background: rgba(255, 255, 255, 0.94);
+  backdrop-filter: blur(14px);
 }
 
 .input-area textarea {
-  min-height: 108px;
+  min-height: 116px;
+  max-height: 30svh;
   resize: vertical;
   border-radius: 18px;
   border: 1px solid rgba(20, 32, 51, 0.12);

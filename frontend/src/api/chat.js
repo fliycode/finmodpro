@@ -96,12 +96,14 @@ export const createChatApi = (overrides = {}) => {
       });
       return normalizeSession(data, sessionId) || {
         id: sessionId,
-        title: '未命名会话',
+        title: '新会话',
         titleStatus: 'pending',
         titleSource: 'ai',
         rollingSummary: '',
         messageCount: 0,
         lastMessageAt: null,
+        createdAt: '',
+        updatedAt: '',
         contextFilters: {},
         messages: [],
       };

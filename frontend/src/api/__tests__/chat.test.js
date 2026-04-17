@@ -41,6 +41,46 @@ test('listHistory normalizes session truth fields from backend payloads', async 
   assert.deepEqual(sessions[0].contextFilters, { dataset_id: 7 });
 });
 
+test('listHistory also accepts camelCase session truth fields', async () => {
+  const api = createChatApi({
+    fetchJson: async () => ({
+      data: {
+        sessions: [
+          {
+            id: 19,
+            title: '现金流预警跟踪',
+            titleStatus: 'failed',
+            titleSource: 'system',
+            rollingSummary: '摘要任务失败，回退到原始消息。',
+            lastMessagePreview: '请继续关注现金流覆盖率。',
+            messageCount: 3,
+            lastMessageAt: '2026-04-17T09:00:00Z',
+            contextFilters: { dataset_id: 9 },
+          },
+        ],
+      },
+    }),
+  });
+
+  const sessions = await api.listHistory();
+
+  assert.deepEqual(sessions[0], {
+    id: 19,
+    title: '现金流预警跟踪',
+    preview: '请继续关注现金流覆盖率。',
+    summaryPreview: '摘要任务失败，回退到原始消息。',
+    timestamp: sessions[0].timestamp,
+    rawTimestamp: '2026-04-17T09:00:00Z',
+    updatedAt: '2026-04-17T09:00:00Z',
+    titleStatus: 'failed',
+    titleSource: 'system',
+    rollingSummary: '摘要任务失败，回退到原始消息。',
+    messageCount: 3,
+    lastMessageAt: '2026-04-17T09:00:00Z',
+    contextFilters: { dataset_id: 9 },
+  });
+});
+
 test('createSession normalizes backend session truth defaults', async () => {
   const api = createChatApi({
     fetchJson: async () => ({
@@ -68,6 +108,38 @@ test('createSession normalizes backend session truth defaults', async () => {
   assert.equal(session.rollingSummary, '');
   assert.equal(session.messageCount, 0);
   assert.equal(session.lastMessageAt, null);
+});
+
+test('createSession also accepts camelCase session truth fields', async () => {
+  const api = createChatApi({
+    fetchJson: async () => ({
+      data: {
+        session: {
+          id: 7,
+          title: '估值口径校准',
+          titleStatus: 'ready',
+          titleSource: 'manual',
+          rollingSummary: '用户确认后续统一采用最新估值口径。',
+          messageCount: 1,
+          lastMessageAt: '2026-04-17T10:00:00Z',
+          createdAt: '2026-04-17T09:55:00Z',
+          updatedAt: '2026-04-17T10:00:00Z',
+          contextFilters: { dataset_id: 12 },
+          messages: [],
+        },
+      },
+    }),
+  });
+
+  const session = await api.createSession();
+
+  assert.equal(session.titleStatus, 'ready');
+  assert.equal(session.titleSource, 'manual');
+  assert.equal(session.rollingSummary, '用户确认后续统一采用最新估值口径。');
+  assert.equal(session.messageCount, 1);
+  assert.equal(session.lastMessageAt, '2026-04-17T10:00:00Z');
+  assert.equal(session.createdAt, '2026-04-17T09:55:00Z');
+  assert.equal(session.updatedAt, '2026-04-17T10:00:00Z');
 });
 
 test('getSession keeps session truth fields and message bookkeeping fields', async () => {
@@ -123,5 +195,81 @@ test('getSession keeps session truth fields and message bookkeeping fields', asy
     content: '请总结偿债能力风险。',
     createdAt: '2026-04-17T07:59:00Z',
     updatedAt: '2026-04-17T07:59:00Z',
+  });
+});
+
+test('getSession accepts camelCase message bookkeeping fields and fallback includes timestamps', async () => {
+  const api = createChatApi({
+    fetchJson: async () => ({
+      data: {
+        session: {
+          id: 10,
+          title: '营运资金周转',
+          titleStatus: 'ready',
+          titleSource: 'ai',
+          rollingSummary: '用户正在追问营运资金周转变化。',
+          messageCount: 1,
+          lastMessageAt: '2026-04-17T11:00:00Z',
+          createdAt: '2026-04-17T10:58:00Z',
+          updatedAt: '2026-04-17T11:00:00Z',
+          contextFilters: {},
+          messages: [
+            {
+              id: 31,
+              sequence: 2,
+              role: 'assistant',
+              messageType: 'text',
+              status: 'complete',
+              citationsJson: [],
+              modelMetadataJson: { model: 'gpt-5.4-mini' },
+              clientMessageId: 'client-2',
+              content: '周转天数上升主要来自存货积压。',
+              createdAt: '2026-04-17T10:59:00Z',
+              updatedAt: '2026-04-17T11:00:00Z',
+            },
+          ],
+        },
+      },
+    }),
+  });
+
+  const session = await api.getSession(10);
+
+  assert.equal(session.createdAt, '2026-04-17T10:58:00Z');
+  assert.equal(session.updatedAt, '2026-04-17T11:00:00Z');
+  assert.deepEqual(session.messages[0], {
+    id: 31,
+    sequence: 2,
+    role: 'assistant',
+    messageType: 'text',
+    status: 'complete',
+    citationsJson: [],
+    modelMetadataJson: { model: 'gpt-5.4-mini' },
+    clientMessageId: 'client-2',
+    content: '周转天数上升主要来自存货积压。',
+    createdAt: '2026-04-17T10:59:00Z',
+    updatedAt: '2026-04-17T11:00:00Z',
+  });
+});
+
+test('getSession fallback matches the normalized session shape fully', async () => {
+  const api = createChatApi({
+    fetchJson: async () => null,
+  });
+
+  const session = await api.getSession(88);
+
+  assert.deepEqual(session, {
+    id: 88,
+    title: '新会话',
+    titleStatus: 'pending',
+    titleSource: 'ai',
+    rollingSummary: '',
+    messageCount: 0,
+    lastMessageAt: null,
+    createdAt: '',
+    updatedAt: '',
+    contextFilters: {},
+    messages: [],
   });
 });
