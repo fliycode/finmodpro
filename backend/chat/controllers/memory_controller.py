@@ -1,44 +1,30 @@
-from django.db.models import Q
 from rest_framework.views import APIView
 
-from chat.models import MemoryActionLog, MemoryEvidence, MemoryItem
+from chat.models import MemoryEvidence, MemoryItem
+from chat.serializers import MemoryEvidenceSerializer, MemoryItemSerializer, MemoryPinSerializer
+from chat.services.memory_service import (
+    delete_memory_item,
+    get_memory_item_for_user,
+    list_memory_evidence_for_memory,
+    list_memory_items_for_user,
+    record_memory_view,
+    set_memory_pin_state,
+)
 from common.api_response import error_response, success_response
 from rbac.services.authz_service import get_authenticated_user, user_has_permission
 
 
-def _serialize_memory(memory):
-    return {
-        "id": memory.id,
-        "scope_type": memory.scope_type,
-        "scope_key": memory.scope_key,
-        "memory_type": memory.memory_type,
-        "title": memory.title,
-        "content": memory.content,
-        "confidence_score": float(memory.confidence_score),
-        "source_kind": memory.source_kind,
-        "status": memory.status,
-        "pinned": memory.pinned,
-        "fingerprint": memory.fingerprint,
-        "last_verified_at": memory.last_verified_at.isoformat() if memory.last_verified_at else None,
-        "created_at": memory.created_at.isoformat() if memory.created_at else None,
-        "updated_at": memory.updated_at.isoformat() if memory.updated_at else None,
-    }
-
-
-def _serialize_evidence(evidence):
-    return {
-        "id": evidence.id,
-        "session_id": evidence.session_id,
-        "message_id": evidence.message_id,
-        "evidence_excerpt": evidence.evidence_excerpt,
-        "extractor_version": evidence.extractor_version,
-        "confirmation_status": evidence.confirmation_status,
-        "created_at": evidence.created_at.isoformat() if evidence.created_at else None,
-    }
-
-
-def _get_memory_for_user(*, user, memory_id):
-    return MemoryItem.objects.get(id=memory_id, user=user)
+def _build_validation_error_response(errors):
+    message = "请求失败。"
+    if isinstance(errors, dict):
+        for value in errors.values():
+            if isinstance(value, (list, tuple)) and value:
+                message = str(value[0])
+                break
+            if value:
+                message = str(value)
+                break
+    return error_response(code=400, message=message, data=errors, status_code=400)
 
 
 class ChatMemoryListView(APIView):
@@ -52,21 +38,13 @@ class ChatMemoryListView(APIView):
         if not user_has_permission(user, "auth.ask_financial_qa"):
             return error_response(code=403, message="无权限。", status_code=403)
 
-        queryset = MemoryItem.objects.filter(user=user, status=MemoryItem.STATUS_ACTIVE)
-
-        scope_type = (request.query_params.get("scope_type") or "").strip()
-        if scope_type:
-          queryset = queryset.filter(scope_type=scope_type)
-
-        query = " ".join(str(request.query_params.get("q") or "").split()).strip()
-        if query:
-            for token in query.split():
-                queryset = queryset.filter(
-                    Q(title__icontains=token) | Q(content__icontains=token)
-                )
-
-        memories = [_serialize_memory(item) for item in queryset.order_by("-pinned", "-updated_at", "-id")]
-        return success_response(data={"memories": memories})
+        memories = list_memory_items_for_user(
+            user=user,
+            scope_type=request.query_params.get("scope_type"),
+            scope_key=request.query_params.get("scope_key"),
+            query=request.query_params.get("q"),
+        )
+        return success_response(data={"memories": MemoryItemSerializer(memories, many=True).data})
 
 
 class ChatMemoryEvidenceView(APIView):
@@ -81,12 +59,14 @@ class ChatMemoryEvidenceView(APIView):
             return error_response(code=403, message="无权限。", status_code=403)
 
         try:
-            memory = _get_memory_for_user(user=user, memory_id=memory_id)
+            memory = get_memory_item_for_user(user=user, memory_id=memory_id)
         except MemoryItem.DoesNotExist:
             return error_response(code=404, message="记忆不存在。", status_code=404)
 
-        evidence_items = list(memory.evidence_items.order_by("-created_at", "-id"))
-        evidence_payload = [_serialize_evidence(item) for item in evidence_items]
+        evidence_items = list_memory_evidence_for_memory(memory_item=memory)
+        record_memory_view(memory_item=memory, actor_user=user)
+
+        evidence_payload = MemoryEvidenceSerializer(evidence_items, many=True).data
         if not evidence_payload:
             evidence_payload = [
                 {
@@ -102,7 +82,7 @@ class ChatMemoryEvidenceView(APIView):
 
         return success_response(
             data={
-                "memory": _serialize_memory(memory),
+                "memory": MemoryItemSerializer(memory).data,
                 "evidence": evidence_payload,
             }
         )
@@ -119,22 +99,21 @@ class ChatMemoryPinView(APIView):
         if not user_has_permission(user, "auth.ask_financial_qa"):
             return error_response(code=403, message="无权限。", status_code=403)
 
+        serializer = MemoryPinSerializer(data=request.data if isinstance(request.data, dict) else {})
+        if not serializer.is_valid():
+            return _build_validation_error_response(serializer.errors)
+
         try:
-            memory = _get_memory_for_user(user=user, memory_id=memory_id)
+            memory = get_memory_item_for_user(user=user, memory_id=memory_id)
         except MemoryItem.DoesNotExist:
             return error_response(code=404, message="记忆不存在。", status_code=404)
 
-        payload = request.data if isinstance(request.data, dict) else {}
-        pinned = bool(payload.get("pinned"))
-        memory.pinned = pinned
-        memory.save(update_fields=["pinned", "updated_at"])
-        MemoryActionLog.objects.create(
+        memory = set_memory_pin_state(
             memory_item=memory,
             actor_user=user,
-            action=MemoryActionLog.ACTION_PIN if pinned else MemoryActionLog.ACTION_UNPIN,
-            details_json={"pinned": pinned},
+            pinned=serializer.validated_data["pinned"],
         )
-        return success_response(data={"memory": _serialize_memory(memory)})
+        return success_response(data={"memory": MemoryItemSerializer(memory).data})
 
 
 class ChatMemoryDeleteView(APIView):
@@ -149,16 +128,9 @@ class ChatMemoryDeleteView(APIView):
             return error_response(code=403, message="无权限。", status_code=403)
 
         try:
-            memory = _get_memory_for_user(user=user, memory_id=memory_id)
+            memory = get_memory_item_for_user(user=user, memory_id=memory_id)
         except MemoryItem.DoesNotExist:
             return error_response(code=404, message="记忆不存在。", status_code=404)
 
-        memory.status = MemoryItem.STATUS_DELETED
-        memory.save(update_fields=["status", "updated_at"])
-        MemoryActionLog.objects.create(
-            memory_item=memory,
-            actor_user=user,
-            action=MemoryActionLog.ACTION_DELETE,
-            details_json={},
-        )
-        return success_response(data={"memory": _serialize_memory(memory)})
+        memory = delete_memory_item(memory_item=memory, actor_user=user)
+        return success_response(data={"memory": MemoryItemSerializer(memory).data})

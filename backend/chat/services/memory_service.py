@@ -1,9 +1,10 @@
 import hashlib
 
 from django.conf import settings
+from django.db import transaction
 from django.db.models import Q
 
-from chat.models import ChatMessage, ChatSession, MemoryEvidence, MemoryItem
+from chat.models import ChatMessage, ChatSession, MemoryActionLog, MemoryEvidence, MemoryItem
 
 
 def _get_memory_limit(limit):
@@ -14,6 +15,77 @@ def _get_memory_limit(limit):
         return max(int(raw_value), 1)
     except (TypeError, ValueError):
         return 5
+
+
+def _normalize_query(value):
+    return " ".join(str(value or "").split()).strip()
+
+
+def list_memory_items_for_user(*, user, scope_type="", scope_key="", query=""):
+    queryset = MemoryItem.objects.filter(
+        user=user,
+        status=MemoryItem.STATUS_ACTIVE,
+    )
+
+    normalized_scope_type = str(scope_type or "").strip()
+    if normalized_scope_type:
+        queryset = queryset.filter(scope_type=normalized_scope_type)
+
+    normalized_scope_key = str(scope_key or "").strip()
+    if normalized_scope_key:
+        queryset = queryset.filter(scope_key=normalized_scope_key)
+
+    normalized_query = _normalize_query(query)
+    if normalized_query:
+        for token in normalized_query.split():
+            queryset = queryset.filter(
+                Q(title__icontains=token) | Q(content__icontains=token)
+            )
+
+    return list(queryset.order_by("-pinned", "-updated_at", "-id"))
+
+
+def get_memory_item_for_user(*, user, memory_id):
+    return MemoryItem.objects.get(id=memory_id, user=user)
+
+
+def list_memory_evidence_for_memory(*, memory_item):
+    return list(memory_item.evidence_items.order_by("-created_at", "-id"))
+
+
+def record_memory_view(*, memory_item, actor_user):
+    return MemoryActionLog.objects.create(
+        memory_item=memory_item,
+        actor_user=actor_user,
+        action=MemoryActionLog.ACTION_VIEW,
+        details_json={},
+    )
+
+
+def set_memory_pin_state(*, memory_item, actor_user, pinned):
+    with transaction.atomic():
+        memory_item.pinned = pinned
+        memory_item.save(update_fields=["pinned", "updated_at"])
+        MemoryActionLog.objects.create(
+            memory_item=memory_item,
+            actor_user=actor_user,
+            action=MemoryActionLog.ACTION_PIN if pinned else MemoryActionLog.ACTION_UNPIN,
+            details_json={"pinned": pinned},
+        )
+    return memory_item
+
+
+def delete_memory_item(*, memory_item, actor_user):
+    with transaction.atomic():
+        memory_item.status = MemoryItem.STATUS_DELETED
+        memory_item.save(update_fields=["status", "updated_at"])
+        MemoryActionLog.objects.create(
+            memory_item=memory_item,
+            actor_user=actor_user,
+            action=MemoryActionLog.ACTION_DELETE,
+            details_json={},
+        )
+    return memory_item
 
 
 def search_memories(*, user, query="", dataset_id=None, limit=None):
@@ -30,7 +102,7 @@ def search_memories(*, user, query="", dataset_id=None, limit=None):
         )
     queryset = queryset.filter(scope_filter)
 
-    normalized_query = " ".join(str(query or "").split()).strip()
+    normalized_query = _normalize_query(query)
     if normalized_query:
         for token in normalized_query.split():
             queryset = queryset.filter(
