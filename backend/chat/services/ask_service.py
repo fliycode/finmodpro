@@ -175,6 +175,7 @@ def stream_question(*, question, filters=None, top_k=5, session=None):
                 if assistant_message is not None:
                     fail_session_message(
                         message=assistant_message,
+                        content="".join(chunks),
                         model_metadata={"answer_mode": payload["answer_mode"]},
                     )
                 raise

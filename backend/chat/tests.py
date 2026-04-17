@@ -13,6 +13,8 @@ from authentication.models import User
 from authentication.services.jwt_service import generate_access_token
 from chat.models import ChatMessage, ChatSession
 from chat.serializers import ChatMessageSerializer, ChatSessionSerializer
+from chat.services.ask_service import stream_question
+from chat.services.memory_service import extract_session_memories
 from chat.services.session_service import dispatch_session_maintenance_tasks
 from chat.services.session_service import (
     create_chat_session,
@@ -21,6 +23,7 @@ from chat.services.session_service import (
     persist_session_turn,
 )
 from chat.services.summary_service import update_session_summary
+from chat.services.title_service import generate_session_title
 from common.exceptions import (
     ModelNotConfiguredError,
     ProviderConfigurationError,
@@ -1495,6 +1498,57 @@ class ChatSessionServiceTests(TestCase):
             ],
         )
 
+    def test_generate_session_title_preserves_manual_placeholder_title(self):
+        session = ChatSession.objects.create(
+            user=self.user,
+            title="新会话",
+            title_status=ChatSession.TITLE_STATUS_READY,
+            title_source=ChatSession.TITLE_SOURCE_MANUAL,
+        )
+        ChatMessage.objects.create(
+            session=session,
+            role=ChatMessage.ROLE_USER,
+            content="这是不应覆盖手动标题的问题",
+        )
+
+        title = generate_session_title(session_id=session.id)
+
+        session.refresh_from_db()
+        self.assertEqual(title, "新会话")
+        self.assertEqual(session.title, "新会话")
+        self.assertEqual(session.title_status, ChatSession.TITLE_STATUS_READY)
+        self.assertEqual(session.title_source, ChatSession.TITLE_SOURCE_MANUAL)
+
+    @patch("chat.services.ask_service.retrieve", return_value=[])
+    def test_stream_question_preserves_partial_assistant_content_when_stream_fails(
+        self, mocked_retrieve
+    ):
+        class PartialFailureChatProvider:
+            def stream(self, *, messages, options=None):
+                yield "第一段回答"
+                raise RuntimeError("stream interrupted")
+
+        with patch(
+            "chat.services.ask_service.get_chat_provider",
+            return_value=PartialFailureChatProvider(),
+        ):
+            event_stream = stream_question(
+                question="现金流展望",
+                session=self.session,
+            )
+            meta_event = next(event_stream)
+            chunk_event = next(event_stream)
+            with self.assertRaises(RuntimeError):
+                next(event_stream)
+
+        self.assertEqual(meta_event["event"], "meta")
+        self.assertEqual(chunk_event, {"event": "chunk", "data": {"content": "第一段回答"}})
+        mocked_retrieve.assert_called_once_with(query="现金流展望", filters={}, top_k=5)
+        self.session.refresh_from_db()
+        assistant_message = self.session.messages.get(role=ChatMessage.ROLE_ASSISTANT)
+        self.assertEqual(assistant_message.status, ChatMessage.STATUS_FAILED)
+        self.assertEqual(assistant_message.content, "第一段回答")
+
 
 class ChatContextServiceTests(TestCase):
     def setUp(self):
@@ -1617,6 +1671,70 @@ class ChatSummaryServiceTests(TestCase):
         self.assertEqual(
             self.session.summary_updated_through_message_id,
             assistant_message.id + 10,
+        )
+
+
+class ChatMemoryExtractionServiceTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username="memory-extract-user",
+            password="secret123",
+            email="memory-extract@example.com",
+        )
+        self.session = ChatSession.objects.create(
+            user=self.user,
+            title="记忆提取测试",
+            context_filters={"dataset_id": 7},
+        )
+
+    def test_extract_session_memories_creates_deduplicated_items_for_explicit_cues(self):
+        user_preference_message = ChatMessage.objects.create(
+            session=self.session,
+            role=ChatMessage.ROLE_USER,
+            content="以后请先给结论，再给依据。",
+        )
+        work_rule_message = ChatMessage.objects.create(
+            session=self.session,
+            role=ChatMessage.ROLE_USER,
+            content="请记住：这个数据集务必优先关注流动性风险。",
+        )
+
+        first_result = extract_session_memories(session_id=self.session.id)
+        second_result = extract_session_memories(session_id=self.session.id)
+
+        memory_item_model = apps.get_model("chat", "MemoryItem")
+        memory_evidence_model = apps.get_model("chat", "MemoryEvidence")
+        self.assertEqual(len(first_result), 2)
+        self.assertEqual(second_result, [])
+        self.assertEqual(memory_item_model.objects.count(), 2)
+        self.assertEqual(memory_evidence_model.objects.count(), 2)
+
+        preference_memory = memory_item_model.objects.get(
+            memory_type=memory_item_model.TYPE_USER_PREFERENCE
+        )
+        self.assertEqual(preference_memory.scope_type, memory_item_model.SCOPE_USER_GLOBAL)
+        self.assertIn("以后请先给结论", preference_memory.content)
+
+        work_rule_memory = memory_item_model.objects.get(
+            memory_type=memory_item_model.TYPE_WORK_RULE
+        )
+        self.assertEqual(work_rule_memory.scope_type, memory_item_model.SCOPE_DATASET)
+        self.assertEqual(work_rule_memory.scope_key, "7")
+        self.assertIn("优先关注流动性风险", work_rule_memory.content)
+
+        self.assertTrue(
+            memory_evidence_model.objects.filter(
+                memory_item=preference_memory,
+                session=self.session,
+                message_id=user_preference_message.id,
+            ).exists()
+        )
+        self.assertTrue(
+            memory_evidence_model.objects.filter(
+                memory_item=work_rule_memory,
+                session=self.session,
+                message_id=work_rule_message.id,
+            ).exists()
         )
 
 
