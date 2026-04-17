@@ -7,6 +7,8 @@ import {
   buildSessionExportDownload,
   formatHistoryTimestamp,
   getActiveSessionLabel,
+  getSessionTitleSourceLabel,
+  getSessionTitleStatusLabel,
   normalizeDatasetId,
   normalizeHistoryItems,
 } from '../workspace-qa.js';
@@ -37,14 +39,30 @@ test('normalizeHistoryItems keeps preview and timestamp fields display-safe', ()
     {
       id: 3,
       title: '',
-      lastMessagePreview: '最近一条消息',
-      updatedAt: '2026-04-10T07:00:00Z',
+      title_status: 'ready',
+      title_source: 'ai',
+      rolling_summary: '这是会话摘要',
+      message_count: 6,
+      last_message_at: '2026-04-10T07:00:00Z',
     },
   ]);
 
   assert.equal(items[0].title, '未命名会话');
-  assert.equal(items[0].preview, '最近一条消息');
+  assert.equal(items[0].preview, '这是会话摘要');
+  assert.equal(items[0].titleStatus, 'ready');
+  assert.equal(items[0].titleSource, 'ai');
+  assert.equal(items[0].messageCount, 6);
+  assert.equal(items[0].lastMessageAt, '2026-04-10T07:00:00Z');
   assert.ok(items[0].timestamp.length > 0);
+});
+
+test('session truth label helpers return readable labels', () => {
+  assert.equal(getSessionTitleStatusLabel('pending'), '标题生成中');
+  assert.equal(getSessionTitleStatusLabel('ready'), '标题已生成');
+  assert.equal(getSessionTitleStatusLabel('failed'), '标题生成失败');
+  assert.equal(getSessionTitleSourceLabel('ai'), 'AI 标题');
+  assert.equal(getSessionTitleSourceLabel('manual'), '手动标题');
+  assert.equal(getSessionTitleSourceLabel('legacy'), '历史标题');
 });
 
 test('formatHistoryTimestamp returns placeholder for empty values', () => {

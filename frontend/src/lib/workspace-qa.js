@@ -12,6 +12,24 @@ export function getDefaultSessionFilters(datasetQueryValue) {
   return datasetId === null ? {} : { dataset_id: datasetId };
 }
 
+const SESSION_TITLE_STATUS_LABELS = {
+  pending: '标题生成中',
+  ready: '标题已生成',
+  failed: '标题生成失败',
+};
+
+const SESSION_TITLE_SOURCE_LABELS = {
+  ai: 'AI 标题',
+  manual: '手动标题',
+  legacy: '历史标题',
+  system: '系统标题',
+};
+
+const normalizeCount = (value) => {
+  const numericValue = Number(value);
+  return Number.isFinite(numericValue) ? numericValue : 0;
+};
+
 export function formatHistoryTimestamp(value) {
   if (!value) {
     return '最近无更新';
@@ -42,19 +60,41 @@ export function getActiveSessionLabel(sessionOptions, currentSessionId) {
   return matched?.title || '当前会话';
 }
 
+export function getSessionTitleStatusLabel(status) {
+  return SESSION_TITLE_STATUS_LABELS[status] || '标题状态未知';
+}
+
+export function getSessionTitleSourceLabel(source) {
+  return SESSION_TITLE_SOURCE_LABELS[source] || '未知标题来源';
+}
+
 export function normalizeHistoryItems(items) {
   if (!Array.isArray(items)) {
     return [];
   }
 
-  return items.map((item) => ({
-    id: item.id,
+  return items.map((item) => {
+    const rollingSummary = item.rollingSummary ?? item.rolling_summary ?? '';
+    const lastMessagePreview = item.lastMessagePreview ?? item.last_message_preview ?? '';
+    const lastMessageAt = item.lastMessageAt ?? item.last_message_at ?? '';
+    const updatedAt = item.updatedAt ?? item.updated_at ?? item.timestamp ?? lastMessageAt ?? '';
+
+    return {
+      id: item.id ?? item.session_id ?? null,
       title: item.title || '未命名会话',
-      preview: item.lastMessagePreview || item.lastMessage || '暂无会话内容',
-      timestamp: formatHistoryTimestamp(item.updatedAt || item.timestamp || item.updated_at),
-      rawTimestamp: item.updatedAt || item.timestamp || item.updated_at || '',
+      preview: lastMessagePreview || rollingSummary || item.lastMessage || '暂无会话内容',
+      summaryPreview: rollingSummary || lastMessagePreview || item.lastMessage || '',
+      timestamp: formatHistoryTimestamp(lastMessageAt || updatedAt),
+      rawTimestamp: lastMessageAt || updatedAt || '',
+      updatedAt: updatedAt || '',
+      titleStatus: item.titleStatus ?? item.title_status ?? 'pending',
+      titleSource: item.titleSource ?? item.title_source ?? 'ai',
+      rollingSummary,
+      messageCount: normalizeCount(item.messageCount ?? item.message_count ?? 0),
+      lastMessageAt: lastMessageAt || null,
       contextFilters: item.contextFilters || item.context_filters || {},
-    }));
+    };
+  });
 }
 
 export function buildHistoryQuery({ datasetId = null, keyword = '' } = {}) {
