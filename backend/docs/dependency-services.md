@@ -9,12 +9,14 @@
 - 数据库：SQLite
 - 缓存：Django `LocMemCache`
 - Celery：内存 broker / result backend
+- Chat maintenance：标题、摘要、长期记忆任务默认随请求内联执行
 - 向量存储：Milvus Lite（通过 `MILVUS_URI=milvus.db` 文件模式）
 - 模型服务：Ollama，可选；只有在你需要真实聊天/embedding 能力时才需要
 
 这意味着：
 
 - 想先把前后端跑起来，不需要先装 `MySQL / Redis`
+- 想先验证聊天问答链路，不额外起 Celery worker 也能看到标题/摘要/记忆维护逻辑跑通
 - 想演示更完整的依赖链路，再按本文档启用对应服务
 
 ## 一、MySQL
@@ -370,8 +372,16 @@ python3 scripts/llamafactory_runner.py \
 - SQLite
 - LocMemCache
 - Celery memory backend
+- `CHAT_CONTEXT_RECENT_MESSAGES=8`
+- `CHAT_MEMORY_RESULT_LIMIT=5`
+- `CHAT_SUMMARY_TRIGGER_MESSAGES=6`
 - Milvus Lite（`milvus.db`）
 - Ollama 可不启
+
+说明：
+
+- 在这个默认组合下，聊天维护任务会因为 `CELERY_BROKER_URL=memory://` 而由 Django 进程直接执行，不依赖额外 worker
+- 如果你把 `CHAT_*` 变量配成非法非整数值，服务层会退回默认值；如果配成 `0` 或负数，运行时会至少按 `1` 条处理
 
 ### 更完整本地演示
 
@@ -379,8 +389,14 @@ python3 scripts/llamafactory_runner.py \
 
 - MySQL Docker
 - Redis Docker
+- Redis 作为 Celery broker / backend（或其他真实 broker）
 - Milvus Lite（当前仓库默认推荐）或你自己的远程 Milvus URI
 - Ollama 本机启动
+
+补充：
+
+- 切到真实 broker 且未开启 `CELERY_TASK_ALWAYS_EAGER` 后，聊天标题、滚动摘要、长期记忆提取会改为异步入队
+- 这种模式下需要额外启动 Celery worker；否则问答接口仍会返回，但后台维护结果不会更新
 
 ## 十、常用联调命令
 

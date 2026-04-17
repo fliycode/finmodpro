@@ -113,7 +113,22 @@
 说明：
 
 - 当前默认值适合本地开发
-- 更完整的消息队列方案后续补充
+- 聊天会话标题、滚动摘要、长期记忆提取这 3 个维护任务共用当前 Celery 配置
+- 当 `CELERY_TASK_ALWAYS_EAGER=true`，或 `CELERY_BROKER_URL` 仍是默认 `memory://` 时，这些维护任务会在 Django 进程内直接执行
+- 当你切到真实 broker（如 Redis）且未开启 eager 时，任务会改为异步入队；此时需要有 Celery worker 消费，否则聊天主流程仍返回成功，但标题/摘要/记忆不会被后台刷新
+
+### Chat
+
+- `CHAT_CONTEXT_RECENT_MESSAGES`：默认 `8`
+- `CHAT_MEMORY_RESULT_LIMIT`：默认 `5`
+- `CHAT_SUMMARY_TRIGGER_MESSAGES`：默认 `6`
+
+说明：
+
+- `CHAT_CONTEXT_RECENT_MESSAGES` 控制问答上下文中带入多少条最近的已完成消息
+- `CHAT_MEMORY_RESULT_LIMIT` 控制单次问答最多带入多少条长期记忆
+- `CHAT_SUMMARY_TRIGGER_MESSAGES` 控制会话累计多少条已完成消息后才开始生成 `rolling_summary`
+- 以上变量都要求整数；如果写成非法值会退回默认值，若写成 `0` 或负数，服务层会按至少 `1` 条处理
 
 ### Knowledge Base / Milvus
 
