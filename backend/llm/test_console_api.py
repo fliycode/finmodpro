@@ -118,6 +118,28 @@ class LlmConsoleApiTests(TestCase):
         self.assertEqual(payload["active_models"]["chat"]["provider"], "deepseek")
         self.assertIn("deepseek", provider_keys)
 
+    def test_summary_marks_litellm_configured_when_config_exists_but_is_inactive(self):
+        ModelConfig.objects.create(
+            name="chat-default",
+            capability=ModelConfig.CAPABILITY_CHAT,
+            provider=ModelConfig.PROVIDER_LITELLM,
+            model_name="chat-default",
+            endpoint="http://localhost:4000",
+            is_active=False,
+            options={"api_key": "sk-litellm"},
+        )
+
+        response = self.client.get(
+            "/api/ops/llm/summary/",
+            HTTP_AUTHORIZATION=f"Bearer {self.access_token}",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()["data"]
+        litellm = next(item for item in payload["providers"] if item["key"] == "litellm")
+        self.assertEqual(litellm["status"], "configured")
+        self.assertEqual(litellm["active_count"], 0)
+
     def test_summary_marks_provider_missing_without_any_configs(self):
         response = self.client.get(
             "/api/ops/llm/summary/",
@@ -146,6 +168,8 @@ class LlmConsoleApiTests(TestCase):
         self.assertEqual(response.status_code, 200)
         payload = response.json()["data"]
         self.assertEqual(payload["overview"]["chat_request_count_24h"], 1)
+        self.assertEqual(payload["overview"]["retrieval_hit_count_24h"], 1)
+        self.assertEqual(payload["overview"]["avg_duration_ms_24h"], 180)
         self.assertIn("langfuse", payload)
 
     @override_settings(UNSTRUCTURED_API_URL="")
@@ -194,4 +218,14 @@ class LlmConsoleApiTests(TestCase):
         self.assertEqual(payload["parser_capabilities"]["pdf"]["parser"], "unstructured")
         self.assertTrue(payload["parser_capabilities"]["pdf"]["fallback"])
         self.assertFalse(payload["parser_capabilities"]["docx"]["fallback"])
+        self.assertEqual(
+            payload["ingestion_summary"],
+            {
+                "total_documents": 1,
+                "queued": 0,
+                "running": 0,
+                "succeeded": 0,
+                "failed": 1,
+            },
+        )
         self.assertEqual(payload["recent_failures"][0]["document_title"], "年报")
