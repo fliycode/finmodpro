@@ -190,5 +190,8 @@ class LlmConsoleApiTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         payload = response.json()["data"]
+        self.assertEqual(payload["parser_capabilities"]["txt"]["parser"], "local")
         self.assertEqual(payload["parser_capabilities"]["pdf"]["parser"], "unstructured")
+        self.assertTrue(payload["parser_capabilities"]["pdf"]["fallback"])
+        self.assertFalse(payload["parser_capabilities"]["docx"]["fallback"])
         self.assertEqual(payload["recent_failures"][0]["document_title"], "年报")
