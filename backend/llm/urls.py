@@ -1,5 +1,10 @@
 from django.urls import path
 
+from llm.controllers.console_controller import (
+    LlmConsoleKnowledgeView,
+    LlmConsoleObservabilityView,
+    LlmConsoleSummaryView,
+)
 from llm.controllers.fine_tune_controller import (
     FineTuneRunCallbackView,
     FineTuneRunDetailView,
@@ -18,6 +23,28 @@ from llm.controllers.prompt_config_controller import PromptConfigListView, Promp
 
 
 urlpatterns = [
+    path("llm/summary", LlmConsoleSummaryView.as_view(), name="llm-console-summary-legacy"),
+    path("llm/summary/", LlmConsoleSummaryView.as_view(), name="llm-console-summary"),
+    path(
+        "llm/observability",
+        LlmConsoleObservabilityView.as_view(),
+        name="llm-console-observability-legacy",
+    ),
+    path(
+        "llm/observability/",
+        LlmConsoleObservabilityView.as_view(),
+        name="llm-console-observability",
+    ),
+    path(
+        "llm/knowledge",
+        LlmConsoleKnowledgeView.as_view(),
+        name="llm-console-knowledge-legacy",
+    ),
+    path(
+        "llm/knowledge/",
+        LlmConsoleKnowledgeView.as_view(),
+        name="llm-console-knowledge",
+    ),
     path("evaluations", EvalRecordListCreateView.as_view(), name="evaluation-list-create-legacy"),
     path("evaluations/", EvalRecordListCreateView.as_view(), name="evaluation-list-create"),
     path("fine-tunes", FineTuneRunListCreateView.as_view(), name="fine-tune-list-create-legacy"),
