@@ -200,7 +200,7 @@ def build_llm_knowledge_summary():
             "txt": {"parser": "local", "fallback": False},
             "pdf": {
                 "parser": "unstructured",
-                "fallback": bool(settings.UNSTRUCTURED_PDF_FALLBACK_ENABLED),
+                "fallback": True,
             },
             "docx": {"parser": "unstructured", "fallback": False},
         },
