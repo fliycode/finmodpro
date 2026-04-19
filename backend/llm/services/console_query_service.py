@@ -1,4 +1,3 @@
-import os
 from collections import Counter
 from datetime import timedelta
 
@@ -12,9 +11,9 @@ from rag.models import RetrievalLog
 
 
 def _langfuse_config():
-    host = os.getenv("LANGFUSE_HOST", "")
-    public_key = os.getenv("LANGFUSE_PUBLIC_KEY", "")
-    secret_key = os.getenv("LANGFUSE_SECRET_KEY", "")
+    host = getattr(settings, "LANGFUSE_HOST", "")
+    public_key = getattr(settings, "LANGFUSE_PUBLIC_KEY", "")
+    secret_key = getattr(settings, "LANGFUSE_SECRET_KEY", "")
     return {
         "configured": all([host, public_key, secret_key]),
         "host": host,
