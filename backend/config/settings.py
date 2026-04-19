@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 
 from config.env import get_bool_env, get_env, get_int_env, get_list_env
@@ -49,6 +50,7 @@ KB_CHUNK_OVERLAP = get_int_env("KB_CHUNK_OVERLAP", 50)
 KB_EMBEDDING_DIMENSION = get_int_env("KB_EMBEDDING_DIMENSION", 64)
 
 UNSTRUCTURED_API_URL = get_env("UNSTRUCTURED_API_URL", "http://unstructured-api:8000")
+UNSTRUCTURED_API_URL_CONFIGURED = bool(os.getenv("UNSTRUCTURED_API_URL", "").strip())
 UNSTRUCTURED_API_KEY = get_env("UNSTRUCTURED_API_KEY", "")
 UNSTRUCTURED_TIMEOUT_SECONDS = get_int_env("UNSTRUCTURED_TIMEOUT_SECONDS", 30)
 UNSTRUCTURED_PDF_STRATEGY = get_env("UNSTRUCTURED_PDF_STRATEGY", "auto")
