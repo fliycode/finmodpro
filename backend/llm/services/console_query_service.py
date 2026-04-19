@@ -30,7 +30,7 @@ def _build_provider_status():
     running_fine_tunes = FineTuneRun.objects.filter(status=FineTuneRun.STATUS_RUNNING).count()
     has_fine_tune_runs = FineTuneRun.objects.exists()
     langfuse = _langfuse_config()
-    unstructured_configured = bool(getattr(settings, "UNSTRUCTURED_API_URL", ""))
+    unstructured_configured = getattr(settings, "UNSTRUCTURED_API_URL_CONFIGURED", False)
 
     providers = [
         {
@@ -109,6 +109,7 @@ def _serialize_failed_ingestion(task):
         "document_id": task.document_id,
         "document_title": task.document.title,
         "document_type": task.document.doc_type,
+        # Keep the task error if present; otherwise surface the document-level error for older failures.
         "message": task.error_message or task.document.error_message,
         "current_step": task.current_step,
         "updated_at": task.updated_at.isoformat(),
@@ -199,6 +200,7 @@ def build_llm_knowledge_summary():
             "txt": {"parser": "local", "fallback": False},
             "pdf": {
                 "parser": "unstructured",
+                # Task 1 UI contract: PDF fallback stays enabled regardless of service config.
                 "fallback": True,
             },
             "docx": {"parser": "unstructured", "fallback": False},

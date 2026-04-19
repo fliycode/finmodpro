@@ -172,8 +172,11 @@ class LlmConsoleApiTests(TestCase):
         self.assertEqual(payload["overview"]["avg_duration_ms_24h"], 180)
         self.assertIn("langfuse", payload)
 
-    @override_settings(UNSTRUCTURED_API_URL="")
-    def test_summary_marks_unstructured_missing_when_setting_is_blank(self):
+    @override_settings(
+        UNSTRUCTURED_API_URL="http://unstructured-api:8000",
+        UNSTRUCTURED_API_URL_CONFIGURED=False,
+    )
+    def test_summary_marks_unstructured_missing_when_config_flag_is_false(self):
         Document.objects.create(
             title="未入库文档",
             file=SimpleUploadedFile("report.pdf", b"pdf-content", content_type="application/pdf"),
