@@ -9,85 +9,88 @@ import {
   normalizeObservabilitySummary,
 } from '../llm-console.js';
 
-test('normalizeConsoleSummary provides stable provider and quick-link defaults', () => {
+test('normalizeConsoleSummary fills stable summary defaults for partial payloads', () => {
   const payload = normalizeConsoleSummary({
-    providers: [{ key: 'litellm', label: 'LiteLLM', status: 'connected', active_count: 2 }],
-    active_models: {
-      chat: { provider: 'litellm', model_name: 'chat-default', endpoint: 'http://localhost:4000' },
+    data: {
+      active_models: {
+        chat: { provider: 'litellm' },
+      },
+      recent_activity: {
+        chat_request_count_24h: 7,
+      },
+      quick_links: [{ label: '模型配置', to: '/admin/llm/models' }],
     },
-    recent_activity: {
-      chat_request_count_24h: 7,
-      failed_ingestion_count: 2,
-      running_fine_tune_count: 1,
-      latest_fine_tune_status: 'running',
-    },
-    quick_links: [{ label: '模型配置', to: '/admin/llm/models' }],
   });
 
-  assert.equal(payload.providers[0].key, 'litellm');
-  assert.equal(payload.active_models.chat.model_name, 'chat-default');
+  assert.deepEqual(payload.active_models, {
+    chat: {
+      provider: 'litellm',
+      model_name: '',
+      endpoint: '',
+      alias: '',
+      status: '',
+      raw: { provider: 'litellm' },
+    },
+    embedding: {
+      provider: '',
+      model_name: '',
+      endpoint: '',
+      alias: '',
+      status: '',
+      raw: {},
+    },
+  });
   assert.deepEqual(payload.recent_activity, {
     chat_request_count_24h: 7,
-    failed_ingestion_count: 2,
-    running_fine_tune_count: 1,
-    latest_fine_tune_status: 'running',
+    failed_ingestion_count: 0,
+    running_fine_tune_count: 0,
+    latest_fine_tune_status: '',
   });
   assert.equal(payload.quick_links[0].to, '/admin/llm/models');
 });
 
-test('normalizeObservabilitySummary keeps langfuse status and failure list', () => {
+test('normalizeObservabilitySummary fills stable overview and langfuse defaults', () => {
   const payload = normalizeObservabilitySummary({
-    overview: { chat_request_count_24h: 3, avg_duration_ms_24h: 120 },
+    overview: { avg_duration_ms_24h: 120 },
     recent_failures: [{ kind: 'ingestion', document_title: '年报' }],
-    langfuse: {
-      configured: true,
-      host: 'https://langfuse.example',
-      has_public_key: true,
-      has_secret_key: false,
-    },
+    langfuse: { host: 'https://langfuse.example' },
   });
 
-  assert.deepEqual(payload.overview, { chat_request_count_24h: 3, avg_duration_ms_24h: 120 });
+  assert.deepEqual(payload.overview, {
+    chat_request_count_24h: 0,
+    retrieval_hit_count_24h: 0,
+    avg_duration_ms_24h: 120,
+    failed_ingestion_count: 0,
+  });
   assert.equal(payload.recent_failures[0].document_title, '年报');
   assert.deepEqual(payload.langfuse, {
-    configured: true,
+    configured: false,
     host: 'https://langfuse.example',
-    has_public_key: true,
+    has_public_key: false,
     has_secret_key: false,
   });
 });
 
-test('normalizeKnowledgeSummary preserves parser capabilities and pipeline steps', () => {
+test('normalizeKnowledgeSummary fills stable ingestion summary defaults', () => {
   const payload = normalizeKnowledgeSummary({
-    parser_capabilities: {
-      pdf: { parser: 'unstructured', fallback: true },
-    },
-    ingestion_summary: {
-      total_documents: 11,
-      queued: 1,
-      running: 2,
-      succeeded: 6,
-      failed: 2,
-    },
-    recent_failures: [{ document_title: '年报' }],
-    pipeline_steps: ['解析', '切块', '向量化', '索引'],
+    ingestion_summary: { failed: 2 },
   });
 
-  assert.equal(payload.parser_capabilities.pdf.parser, 'unstructured');
   assert.deepEqual(payload.ingestion_summary, {
-    total_documents: 11,
-    queued: 1,
-    running: 2,
-    succeeded: 6,
+    total_documents: 0,
+    queued: 0,
+    running: 0,
+    succeeded: 0,
     failed: 2,
   });
-  assert.equal(payload.recent_failures[0].document_title, '年报');
-  assert.deepEqual(payload.pipeline_steps, ['解析', '切块', '向量化', '索引']);
 });
 
-test('buildProviderTone marks missing integrations as warning', () => {
+test('buildProviderTone maps configured providers to info', () => {
+  assert.equal(buildProviderTone({ status: 'configured' }), 'info');
   assert.equal(buildProviderTone({ status: 'missing' }), 'warning');
   assert.equal(buildProviderTone({ status: 'connected' }), 'success');
+  assert.equal(buildProviderTone({ status: 'idle' }), 'warning');
+  assert.equal(buildProviderTone({ status: 'unknown' }), 'warning');
 });
 
 test('buildKnowledgePipeline returns step cards in fixed order', () => {
