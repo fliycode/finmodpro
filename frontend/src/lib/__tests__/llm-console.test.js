@@ -23,6 +23,38 @@ test('normalizeConsoleSummary provides stable provider and quick-link defaults',
   assert.equal(payload.quick_links[0].to, '/admin/llm/models');
 });
 
+test('normalizeConsoleSummary accepts alias-style provider and model fields', () => {
+  const payload = normalizeConsoleSummary({
+    providers: [
+      {
+        name: 'LiteLLM',
+        activeCount: 4,
+        lastActiveAt: '2026-04-18T10:00:00Z',
+        base_url: 'http://localhost:4000',
+        modelName: 'qwen-max',
+        detail: '在线',
+      },
+    ],
+    active_models: {
+      chat: {
+        provider: 'litellm',
+        modelName: 'qwen-max',
+        base_url: 'http://localhost:4000',
+        alias: 'chat-default',
+      },
+    },
+  });
+
+  assert.equal(payload.providers[0].key, 'LiteLLM');
+  assert.equal(payload.providers[0].active_count, 4);
+  assert.equal(payload.providers[0].endpoint, 'http://localhost:4000');
+  assert.equal(payload.providers[0].model_name, 'qwen-max');
+  assert.equal(payload.providers[0].summary, '在线');
+  assert.equal(payload.active_models.chat.model_name, 'qwen-max');
+  assert.equal(payload.active_models.chat.endpoint, 'http://localhost:4000');
+  assert.equal(payload.active_models.chat.alias, 'chat-default');
+});
+
 test('normalizeObservabilitySummary keeps langfuse status and failure list', () => {
   const payload = normalizeObservabilitySummary({
     overview: { chat_request_count_24h: 3, avg_duration_ms_24h: 120 },
@@ -45,6 +77,16 @@ test('normalizeKnowledgeSummary preserves parser capabilities and pipeline steps
 
   assert.equal(payload.parser_capabilities.pdf.parser, 'unstructured');
   assert.deepEqual(payload.pipeline_steps, ['解析', '切块', '向量化', '索引']);
+});
+
+test('normalizeKnowledgeSummary accepts parser capability aliases', () => {
+  const payload = normalizeKnowledgeSummary({
+    parser_capabilities: {
+      pdf: { parser: 'unstructured', fallback: true, summary: '备用解析' },
+    },
+  });
+
+  assert.equal(payload.parser_capabilities.pdf.detail, '备用解析');
 });
 
 test('buildProviderTone marks missing integrations as warning', () => {
