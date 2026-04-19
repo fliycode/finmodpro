@@ -28,3 +28,11 @@ test('createLlmConsoleApi calls llm console summary endpoints', async () => {
   assert.deepEqual(requests.map((request) => request.options.method), ['GET', 'GET', 'GET']);
   assert.deepEqual(requests.map((request) => request.options.auth), [true, true, true]);
 });
+
+test('createLlmConsoleApi unwraps error envelopes', async () => {
+  const api = createLlmConsoleApi({
+    fetchJson: async () => ({ code: 500, message: '后端错误' }),
+  });
+
+  await assert.rejects(api.getSummary(), /后端错误/);
+});
