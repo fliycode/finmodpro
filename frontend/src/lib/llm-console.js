@@ -70,7 +70,7 @@ export function normalizeConsoleSummary(payload = {}) {
       kind: item?.kind ?? 'route',
       raw: item ?? {},
     })),
-    recent_failures: normalizeArray(data.recent_failures),
+    recent_activity: normalizeObject(data.recent_activity),
     overview: normalizeObject(data.overview),
     langfuse: normalizeObject(data.langfuse),
     raw: data,
@@ -81,21 +81,9 @@ export function normalizeObservabilitySummary(payload = {}) {
   const data = payload?.data && typeof payload.data === 'object' ? payload.data : payload || {};
 
   return {
-    overview: {
-      ...normalizeObject(data.overview),
-      chat_request_count_24h: toNumber(data?.overview?.chat_request_count_24h),
-      avg_duration_ms_24h: toNumber(data?.overview?.avg_duration_ms_24h),
-      failure_count_24h: toNumber(data?.overview?.failure_count_24h),
-      retried_request_count_24h: toNumber(data?.overview?.retried_request_count_24h),
-    },
+    overview: normalizeObject(data.overview),
     recent_failures: normalizeArray(data.recent_failures),
-    langfuse: {
-      ...normalizeObject(data.langfuse),
-      configured: Boolean(data?.langfuse?.configured),
-      host: data?.langfuse?.host ?? '',
-      project: data?.langfuse?.project ?? '',
-      workspace: data?.langfuse?.workspace ?? '',
-    },
+    langfuse: normalizeObject(data.langfuse),
     raw: data,
   };
 }
@@ -111,8 +99,8 @@ export function normalizeKnowledgeSummary(payload = {}) {
       ]),
     ),
     pipeline_steps: normalizeArray(data.pipeline_steps),
-    parser_failures: normalizeArray(data.parser_failures),
-    ingestion_status: normalizeObject(data.ingestion_status),
+    ingestion_summary: normalizeObject(data.ingestion_summary),
+    recent_failures: normalizeArray(data.recent_failures),
     raw: data,
   };
 }

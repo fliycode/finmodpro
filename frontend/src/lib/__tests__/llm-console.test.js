@@ -15,11 +15,23 @@ test('normalizeConsoleSummary provides stable provider and quick-link defaults',
     active_models: {
       chat: { provider: 'litellm', model_name: 'chat-default', endpoint: 'http://localhost:4000' },
     },
+    recent_activity: {
+      chat_request_count_24h: 7,
+      failed_ingestion_count: 2,
+      running_fine_tune_count: 1,
+      latest_fine_tune_status: 'running',
+    },
     quick_links: [{ label: '模型配置', to: '/admin/llm/models' }],
   });
 
   assert.equal(payload.providers[0].key, 'litellm');
   assert.equal(payload.active_models.chat.model_name, 'chat-default');
+  assert.deepEqual(payload.recent_activity, {
+    chat_request_count_24h: 7,
+    failed_ingestion_count: 2,
+    running_fine_tune_count: 1,
+    latest_fine_tune_status: 'running',
+  });
   assert.equal(payload.quick_links[0].to, '/admin/llm/models');
 });
 
@@ -27,12 +39,22 @@ test('normalizeObservabilitySummary keeps langfuse status and failure list', () 
   const payload = normalizeObservabilitySummary({
     overview: { chat_request_count_24h: 3, avg_duration_ms_24h: 120 },
     recent_failures: [{ kind: 'ingestion', document_title: '年报' }],
-    langfuse: { configured: true, host: 'https://langfuse.example' },
+    langfuse: {
+      configured: true,
+      host: 'https://langfuse.example',
+      has_public_key: true,
+      has_secret_key: false,
+    },
   });
 
-  assert.equal(payload.overview.chat_request_count_24h, 3);
+  assert.deepEqual(payload.overview, { chat_request_count_24h: 3, avg_duration_ms_24h: 120 });
   assert.equal(payload.recent_failures[0].document_title, '年报');
-  assert.equal(payload.langfuse.configured, true);
+  assert.deepEqual(payload.langfuse, {
+    configured: true,
+    host: 'https://langfuse.example',
+    has_public_key: true,
+    has_secret_key: false,
+  });
 });
 
 test('normalizeKnowledgeSummary preserves parser capabilities and pipeline steps', () => {
@@ -40,10 +62,26 @@ test('normalizeKnowledgeSummary preserves parser capabilities and pipeline steps
     parser_capabilities: {
       pdf: { parser: 'unstructured', fallback: true },
     },
+    ingestion_summary: {
+      total_documents: 11,
+      queued: 1,
+      running: 2,
+      succeeded: 6,
+      failed: 2,
+    },
+    recent_failures: [{ document_title: '年报' }],
     pipeline_steps: ['解析', '切块', '向量化', '索引'],
   });
 
   assert.equal(payload.parser_capabilities.pdf.parser, 'unstructured');
+  assert.deepEqual(payload.ingestion_summary, {
+    total_documents: 11,
+    queued: 1,
+    running: 2,
+    succeeded: 6,
+    failed: 2,
+  });
+  assert.equal(payload.recent_failures[0].document_title, '年报');
   assert.deepEqual(payload.pipeline_steps, ['解析', '切块', '向量化', '索引']);
 });
 
