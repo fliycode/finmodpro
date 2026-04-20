@@ -26,3 +26,19 @@ test('empty state disappears after the first real user or assistant message', ()
     false,
   );
 });
+
+test('shouldShowQaEmptyState handles non-array and empty inputs', () => {
+  assert.equal(shouldShowQaEmptyState(null), true);
+  assert.equal(shouldShowQaEmptyState(undefined), true);
+  assert.equal(shouldShowQaEmptyState([]), true);
+});
+
+test('empty state disappears after assistant message', () => {
+  assert.equal(
+    shouldShowQaEmptyState([
+      { role: 'system', content: '欢迎' },
+      { role: 'assistant', content: '这里是分析' },
+    ]),
+    false,
+  );
+});
