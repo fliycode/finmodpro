@@ -1,9 +1,9 @@
-const DEFAULT_SIDEBAR_PRESENTATION = {
+const DEFAULT_SIDEBAR_PRESENTATION = Object.freeze({
   mode: 'expanded',
   showBrandCopy: true,
   showGroupLabels: true,
   showItemLabels: true,
-};
+});
 
 export function getSidebarPresentation(area) {
   if (area === 'workspace' || area === 'admin') {
