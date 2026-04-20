@@ -18,6 +18,20 @@ const normalizeObjectWithDefaults = (value, defaults) => ({
   ...normalizeObject(value),
 });
 
+const getSafeExternalUrl = (value) => {
+  if (!value) {
+    return '';
+  }
+
+  try {
+    const normalizedValue = String(value).trim();
+    const parsedUrl = new URL(normalizedValue);
+    return ['http:', 'https:'].includes(parsedUrl.protocol) ? normalizedValue : '';
+  } catch {
+    return '';
+  }
+};
+
 const DEFAULT_ACTIVE_MODEL = {
   provider: '',
   model_name: '',
@@ -81,7 +95,7 @@ const normalizeActiveModel = (model) => {
     provider: item.provider ?? '',
     model_name: item.model_name ?? item.modelName ?? '',
     endpoint: item.endpoint ?? item.base_url ?? '',
-    alias: item.alias ?? '',
+    alias: item.alias ?? item.name ?? '',
     status: item.status ?? '',
     raw: item,
   };
@@ -141,7 +155,10 @@ export function normalizeObservabilitySummary(payload = {}) {
   return {
     overview: normalizeObjectWithDefaults(data.overview, DEFAULT_OBSERVABILITY_OVERVIEW),
     recent_failures: normalizeArray(data.recent_failures),
-    langfuse: normalizeObjectWithDefaults(data.langfuse, DEFAULT_LANGFUSE),
+    langfuse: {
+      ...normalizeObjectWithDefaults(data.langfuse, DEFAULT_LANGFUSE),
+      host: getSafeExternalUrl(data?.langfuse?.host),
+    },
     raw: data,
   };
 }
@@ -182,4 +199,48 @@ export function buildKnowledgePipeline(steps = []) {
     label: typeof step === 'string' ? step : String(step?.label ?? step?.name ?? ''),
     index: index + 1,
   }));
+}
+
+export function getInitialFineTuneFilterId(configs = [], currentFilterId = '') {
+  if (currentFilterId !== undefined && currentFilterId !== null && currentFilterId !== '') {
+    return currentFilterId;
+  }
+
+  const items = normalizeArray(configs);
+  const preferredChatModel = items.find((config) =>
+    ['chat', 'llm', 'generation'].includes(String(config?.capability ?? '').toLowerCase()),
+  );
+
+  return preferredChatModel?.id ?? items[0]?.id ?? '';
+}
+
+export function getConsolePageAlerts({ mode = 'models', configError = '', fineTuneError = '' } = {}) {
+  const alerts = [];
+
+  if (configError) {
+    alerts.push({ key: 'config', message: configError });
+  }
+
+  if (mode === 'fine-tunes' && fineTuneError) {
+    alerts.push({ key: 'fine-tunes', message: fineTuneError });
+  }
+
+  return alerts;
+}
+
+export function shouldShowConsoleConfigRetry({ mode = 'models', configError = '' } = {}) {
+  return mode === 'fine-tunes' && Boolean(configError);
+}
+
+export function formatConsoleTimestamp(value, fallback = '未记录') {
+  if (!value) {
+    return fallback;
+  }
+
+  const parsedDate = new Date(value);
+  if (Number.isNaN(parsedDate.getTime())) {
+    return value;
+  }
+
+  return parsedDate.toLocaleString();
 }

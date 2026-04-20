@@ -77,8 +77,28 @@ export const appRoutes = [
         component: () => import('../views/admin/AdminUsersView.vue'),
       },
       {
+        path: 'llm',
+        component: () => import('../views/admin/AdminLlmOverviewView.vue'),
+      },
+      {
+        path: 'llm/models',
+        component: () => import('../views/admin/AdminLlmModelsView.vue'),
+      },
+      {
+        path: 'llm/observability',
+        component: () => import('../views/admin/AdminLlmObservabilityView.vue'),
+      },
+      {
+        path: 'llm/knowledge',
+        component: () => import('../views/admin/AdminLlmKnowledgeView.vue'),
+      },
+      {
+        path: 'llm/fine-tunes',
+        component: () => import('../views/admin/AdminLlmFineTunesView.vue'),
+      },
+      {
         path: 'models',
-        component: () => import('../views/admin/AdminModelsView.vue'),
+        redirect: '/admin/llm/models',
       },
       {
         path: 'evaluation',

@@ -9,10 +9,14 @@ export const navigationMap = {
     { id: 'sentiment', label: '舆情分析', to: '/workspace/sentiment', icon: 'spark' },
   ],
   admin: [
-    { id: 'admin-overview', label: '仪表盘', to: '/admin/overview', icon: 'dashboard' },
-    { id: 'admin-users', label: '用户管理', to: '/admin/users', icon: 'users' },
-    { id: 'admin-models', label: '模型配置', to: '/admin/models', icon: 'sliders' },
-    { id: 'admin-evaluation', label: '评测结果', to: '/admin/evaluation', icon: 'beaker' },
+    { id: 'admin-overview', label: '仪表盘', to: '/admin/overview', icon: 'dashboard', group: 'admin-overview' },
+    { id: 'admin-users', label: '用户管理', to: '/admin/users', icon: 'users', group: 'admin-governance' },
+    { id: 'admin-llm-overview', label: '总览', to: '/admin/llm', icon: 'dashboard', group: 'admin-llm' },
+    { id: 'admin-llm-models', label: '模型配置', to: '/admin/llm/models', icon: 'sliders', group: 'admin-llm' },
+    { id: 'admin-llm-observability', label: '观测', to: '/admin/llm/observability', icon: 'eye', group: 'admin-llm' },
+    { id: 'admin-llm-knowledge', label: '知识库接入', to: '/admin/llm/knowledge', icon: 'database', group: 'admin-llm' },
+    { id: 'admin-llm-fine-tunes', label: 'LLaMA-Factory', to: '/admin/llm/fine-tunes', icon: 'spark', group: 'admin-llm' },
+    { id: 'admin-evaluation', label: '评测结果', to: '/admin/evaluation', icon: 'beaker', group: 'admin-governance' },
   ],
 };
 
