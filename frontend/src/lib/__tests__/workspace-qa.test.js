@@ -16,6 +16,10 @@ test('qa chrome only keeps the three primary actions', () => {
   });
 });
 
+test('qa chrome action order matches the simplified toolbar', () => {
+  assert.deepEqual(getQaChromeState().actions, ['history', 'memory', 'new']);
+});
+
 test('empty state disappears after the first real user or assistant message', () => {
   assert.equal(shouldShowQaEmptyState([{ role: 'system', content: '欢迎' }]), true);
   assert.equal(
