@@ -38,12 +38,17 @@ const navGroups = computed(() => {
       {
         id: 'admin-overview',
         label: '总览',
-        items: items.value.filter((item) => item.id === 'admin-overview'),
+        items: items.value.filter((item) => item.group === 'admin-overview'),
       },
       {
         id: 'admin-governance',
         label: '治理',
-        items: items.value.filter((item) => item.id !== 'admin-overview'),
+        items: items.value.filter((item) => item.group === 'admin-governance'),
+      },
+      {
+        id: 'admin-llm',
+        label: 'LLM 中台',
+        items: items.value.filter((item) => item.group === 'admin-llm'),
       },
     ].filter((group) => group.items.length > 0);
   }
