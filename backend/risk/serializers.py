@@ -118,10 +118,29 @@ class RiskReportSerializer(serializers.ModelSerializer):
 
 
 def parse_risk_extraction_payload(raw_content):
+    normalized_content = str(raw_content or "").strip()
+    if normalized_content.startswith("```"):
+        lines = normalized_content.splitlines()
+        if lines and lines[0].strip().startswith("```"):
+            lines = lines[1:]
+        if lines and lines[-1].strip() == "```":
+            lines = lines[:-1]
+        normalized_content = "\n".join(lines).strip()
+
     try:
-        payload = json.loads(raw_content)
+        payload = json.loads(normalized_content)
     except json.JSONDecodeError as exc:
         raise ValueError("风险抽取结果不是合法 JSON。") from exc
+
+    if isinstance(payload, dict) and isinstance(payload.get("events"), list):
+        payload["events"] = [
+            item
+            for item in payload["events"]
+            if not (
+                isinstance(item, dict)
+                and not str(item.get("company_name") or "").strip()
+            )
+        ]
 
     serializer = RiskExtractionSchemaSerializer(data=payload)
     serializer.is_valid(raise_exception=True)
