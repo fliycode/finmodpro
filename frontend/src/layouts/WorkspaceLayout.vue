@@ -13,7 +13,7 @@ import FlashStack from '../components/ui/FlashStack.vue';
       <AppTopbar
         eyebrow="用户端"
         title="业务工作区"
-        subtitle="问答、检索与风险摘要的连续工作区。"
+        subtitle="连续问答与分析工作区。"
         area="workspace"
         compact
       />
