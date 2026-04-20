@@ -137,3 +137,13 @@ export function shouldShowQaEmptyState(messages) {
 
   return !messages.some((message) => message?.role === 'user' || message?.role === 'assistant');
 }
+
+export function shouldShowFinancialQaEmptyState({ currentSessionId = null, messages } = {}) {
+  return !currentSessionId && shouldShowQaEmptyState(messages);
+}
+
+export function getSessionLoadFailureNotice(activeSessionLoadFailed) {
+  return activeSessionLoadFailed
+    ? '会话加载失败，当前仅显示系统状态。请刷新页面后重试。'
+    : '';
+}

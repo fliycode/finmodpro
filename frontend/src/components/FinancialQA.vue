@@ -7,10 +7,11 @@ import { kbApi } from '../api/knowledgebase.js';
 import { qaApi } from '../api/qa.js';
 import {
   getDefaultSessionFilters,
+  getSessionLoadFailureNotice,
   getQaChromeState,
   normalizeDatasetId,
   normalizeHistoryItems,
-  shouldShowQaEmptyState,
+  shouldShowFinancialQaEmptyState,
 } from '../lib/workspace-qa.js';
 import ChatHistory from './ChatHistory.vue';
 import ChatMemoryDrawer from './ChatMemoryDrawer.vue';
@@ -32,7 +33,6 @@ const messages = ref([{ role: 'system', content: DEFAULT_SYSTEM_MESSAGE, tone: '
 const isAsking = ref(false);
 const messagesContainer = ref(null);
 const sessionOptions = ref([]);
-const activeSessionSnapshot = ref(null);
 const datasets = ref([]);
 const isLoadingSessions = ref(false);
 const isLoadingDatasets = ref(false);
@@ -50,7 +50,13 @@ const historyItems = computed(() => normalizeHistoryItems(sessionOptions.value))
 const activeDatasetId = computed(() =>
   activeSessionFilters.value?.dataset_id ?? normalizeDatasetId(route.query.dataset),
 );
-const showEmptyState = computed(() => shouldShowQaEmptyState(messages.value));
+const showEmptyState = computed(() => shouldShowFinancialQaEmptyState({
+  currentSessionId: currentSessionId.value,
+  messages: messages.value,
+}));
+const sessionLoadFailureNotice = computed(() =>
+  getSessionLoadFailureNotice(activeSessionLoadFailed.value),
+);
 const visibleMessages = computed(() =>
   messages.value.filter((message, index) => !(
     showEmptyState.value
@@ -172,7 +178,6 @@ const loadSession = async (id) => {
   try {
     const session = await chatApi.getSession(id);
     activeSessionFilters.value = session.contextFilters || {};
-    activeSessionSnapshot.value = normalizeHistoryItems([session])[0] || null;
     if (Array.isArray(session.messages) && session.messages.length > 0) {
       messages.value = session.messages;
     } else {
@@ -185,7 +190,6 @@ const loadSession = async (id) => {
   } catch (error) {
     console.error('加载会话失败:', error);
     activeSessionLoadFailed.value = true;
-    activeSessionSnapshot.value = null;
     messages.value = [{
       role: 'system',
       content: '加载会话失败，请刷新页面后重试。',
@@ -212,7 +216,6 @@ const openSession = async (id) => {
 const startNewConversation = async () => {
   currentSessionId.value = null;
   activeSessionLoadFailed.value = false;
-  activeSessionSnapshot.value = null;
   query.value = '';
   activeSessionFilters.value = getDefaultSessionFilters(route.query.dataset);
   resetConversation();
@@ -245,7 +248,6 @@ watch(() => props.sessionId, async (newId) => {
   }
   if (!newId) {
     activeSessionLoadFailed.value = false;
-    activeSessionSnapshot.value = null;
     activeSessionFilters.value = getDefaultSessionFilters(route.query.dataset);
     resetConversation();
   }
@@ -300,7 +302,6 @@ const handleAsk = async () => {
         if (session?.id) {
           currentSessionId.value = session.id;
           activeSessionLoadFailed.value = false;
-          activeSessionSnapshot.value = normalizeHistoryItems([session])[0] || null;
           activeSessionFilters.value = session.contextFilters || activeSessionFilters.value;
           await refreshSessionOptions();
           await syncSessionRoute(session.id);
@@ -369,7 +370,7 @@ const handleAsk = async () => {
   <div class="qa-page">
     <div class="qa-shell ui-card">
       <div class="qa-shell__toolbar">
-        <div class="qa-shell__actions qa-shell__actions--primary">
+        <div class="qa-shell__actions">
           <button
             v-for="action in qaChromeState.actions"
             :key="action"
@@ -397,6 +398,9 @@ const handleAsk = async () => {
       </div>
 
       <div class="chat-window">
+        <div v-if="sessionLoadFailureNotice" class="qa-inline-notice" role="status">
+          {{ sessionLoadFailureNotice }}
+        </div>
         <div v-if="showEmptyState" class="qa-empty-state">
           <h2>开始新一轮分析</h2>
           <p>从历史会话继续、查看记忆，或直接输入新的金融问题。</p>
@@ -586,6 +590,17 @@ const handleAsk = async () => {
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.98) 0%, rgba(243, 245, 247, 0.95) 100%);
   display: flex;
   flex-direction: column;
+}
+
+.qa-inline-notice {
+  margin: 16px 20px 0;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(185, 28, 28, 0.12);
+  background: rgba(255, 245, 245, 0.92);
+  color: #991b1b;
+  font-size: 13px;
+  line-height: 1.5;
 }
 
 .qa-empty-state {

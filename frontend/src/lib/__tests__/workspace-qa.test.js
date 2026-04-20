@@ -2,7 +2,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
+  getSessionLoadFailureNotice,
   getQaChromeState,
+  shouldShowFinancialQaEmptyState,
   shouldShowQaEmptyState,
 } from '../workspace-qa.js';
 
@@ -45,4 +47,26 @@ test('empty state disappears after assistant message', () => {
     ]),
     false,
   );
+});
+
+test('financial qa empty state only shows for fresh conversations', () => {
+  assert.equal(
+    shouldShowFinancialQaEmptyState({
+      currentSessionId: null,
+      messages: [{ role: 'system', content: '欢迎' }],
+    }),
+    true,
+  );
+  assert.equal(
+    shouldShowFinancialQaEmptyState({
+      currentSessionId: 'session-1',
+      messages: [{ role: 'system', content: '已加载会话：空会话' }],
+    }),
+    false,
+  );
+});
+
+test('session load failure notice is only surfaced when a load fails', () => {
+  assert.equal(getSessionLoadFailureNotice(false), '');
+  assert.equal(getSessionLoadFailureNotice(true), '会话加载失败，当前仅显示系统状态。请刷新页面后重试。');
 });
