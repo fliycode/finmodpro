@@ -237,6 +237,7 @@ const handleQaAction = async (action) => {
 
   if (action === 'new') {
     await startNewConversation();
+    return;
   }
 };
 
