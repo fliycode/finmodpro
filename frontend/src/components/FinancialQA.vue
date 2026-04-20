@@ -6,12 +6,12 @@ import { chatApi } from '../api/chat.js';
 import { kbApi } from '../api/knowledgebase.js';
 import { qaApi } from '../api/qa.js';
 import {
-  getActiveSessionLabel,
   getDefaultSessionFilters,
-  getSessionTitleSourceLabel,
-  getSessionTitleStatusLabel,
+  getSessionLoadFailureNotice,
+  getQaChromeState,
   normalizeDatasetId,
   normalizeHistoryItems,
+  shouldShowFinancialQaEmptyState,
 } from '../lib/workspace-qa.js';
 import ChatHistory from './ChatHistory.vue';
 import ChatMemoryDrawer from './ChatMemoryDrawer.vue';
@@ -33,7 +33,6 @@ const messages = ref([{ role: 'system', content: DEFAULT_SYSTEM_MESSAGE, tone: '
 const isAsking = ref(false);
 const messagesContainer = ref(null);
 const sessionOptions = ref([]);
-const activeSessionSnapshot = ref(null);
 const datasets = ref([]);
 const isLoadingSessions = ref(false);
 const isLoadingDatasets = ref(false);
@@ -42,71 +41,36 @@ const activeSessionLoadFailed = ref(false);
 const historyDrawerOpen = ref(false);
 const memoryDrawerOpen = ref(false);
 const activeSessionFilters = ref({});
+const qaChromeState = getQaChromeState();
 
 const hasStreamingAssistant = computed(() =>
   messages.value.some((message) => message.isStreaming),
 );
-
-const activeSessionLabel = computed(() =>
-  activeSessionRecord.value?.title || getActiveSessionLabel(sessionOptions.value, currentSessionId.value),
-);
-
 const historyItems = computed(() => normalizeHistoryItems(sessionOptions.value));
-const activeSessionRecord = computed(() =>
-  historyItems.value.find((item) => String(item.id) === String(currentSessionId.value))
-  || activeSessionSnapshot.value
-  || null,
-);
 const activeDatasetId = computed(() =>
   activeSessionFilters.value?.dataset_id ?? normalizeDatasetId(route.query.dataset),
 );
-const hasResolvedActiveSessionRecord = computed(() =>
-  Boolean(currentSessionId.value && activeSessionRecord.value),
+const showEmptyState = computed(() => shouldShowFinancialQaEmptyState({
+  currentSessionId: currentSessionId.value,
+  messages: messages.value,
+}));
+const sessionLoadFailureNotice = computed(() =>
+  getSessionLoadFailureNotice(activeSessionLoadFailed.value),
 );
-const activeSessionStatusLabel = computed(() =>
-  !currentSessionId.value
-    ? '新对话'
-    : activeSessionLoadFailed.value && !hasResolvedActiveSessionRecord.value
-      ? '会话加载失败'
-      : hasResolvedActiveSessionRecord.value
-        ? getSessionTitleStatusLabel(activeSessionRecord.value.titleStatus)
-        : '会话加载中'
+const visibleMessages = computed(() =>
+  messages.value.filter((message, index) => !(
+    showEmptyState.value
+    && index === 0
+    && message?.role === 'system'
+    && message?.content === DEFAULT_SYSTEM_MESSAGE
+  )),
 );
-const activeSessionSourceLabel = computed(() =>
-  hasResolvedActiveSessionRecord.value
-    ? getSessionTitleSourceLabel(activeSessionRecord.value.titleSource)
-    : '',
-);
-const activeSessionMessageLabel = computed(() => {
-  if (!currentSessionId.value) {
-    return '等待首轮问答';
-  }
 
-  if (activeSessionLoadFailed.value && !hasResolvedActiveSessionRecord.value) {
-    return '元数据不可用';
-  }
-
-  if (!hasResolvedActiveSessionRecord.value) {
-    return '正在同步会话';
-  }
-
-  return `${activeSessionRecord.value?.messageCount ?? 0} 条消息`;
-});
-const activeSessionDatasetLabel = computed(() => {
-  if (activeSessionLoadFailed.value && !hasResolvedActiveSessionRecord.value) {
-    return '范围未知';
-  }
-
-  const datasetId = activeSessionRecord.value?.contextFilters?.dataset_id ?? activeDatasetId.value;
-  return datasetId === null || datasetId === undefined || datasetId === ''
-    ? '全部数据集'
-    : `数据集 ${datasetId}`;
-});
-const activeSessionSummary = computed(() =>
-  activeSessionRecord.value?.rollingSummary
-  || activeSessionRecord.value?.summaryPreview
-  || '',
-);
+const qaActionLabels = {
+  history: '历史会话',
+  memory: '记忆',
+  new: '新对话',
+};
 
 const selectedDatasetId = computed({
   get() {
@@ -214,7 +178,6 @@ const loadSession = async (id) => {
   try {
     const session = await chatApi.getSession(id);
     activeSessionFilters.value = session.contextFilters || {};
-    activeSessionSnapshot.value = normalizeHistoryItems([session])[0] || null;
     if (Array.isArray(session.messages) && session.messages.length > 0) {
       messages.value = session.messages;
     } else {
@@ -227,12 +190,6 @@ const loadSession = async (id) => {
   } catch (error) {
     console.error('加载会话失败:', error);
     activeSessionLoadFailed.value = true;
-    activeSessionSnapshot.value = null;
-    messages.value = [{
-      role: 'system',
-      content: '加载会话失败，请刷新页面后重试。',
-      tone: 'error',
-    }];
   } finally {
     isHydratingSession.value = false;
   }
@@ -254,13 +211,29 @@ const openSession = async (id) => {
 const startNewConversation = async () => {
   currentSessionId.value = null;
   activeSessionLoadFailed.value = false;
-  activeSessionSnapshot.value = null;
   query.value = '';
   activeSessionFilters.value = getDefaultSessionFilters(route.query.dataset);
   resetConversation();
   historyDrawerOpen.value = false;
   await clearSessionRoute();
   await refreshSessionOptions();
+};
+
+const handleQaAction = async (action) => {
+  if (action === 'history') {
+    historyDrawerOpen.value = true;
+    return;
+  }
+
+  if (action === 'memory') {
+    memoryDrawerOpen.value = true;
+    return;
+  }
+
+  if (action === 'new') {
+    await startNewConversation();
+    return;
+  }
 };
 
 watch(() => props.sessionId, async (newId) => {
@@ -271,7 +244,6 @@ watch(() => props.sessionId, async (newId) => {
   }
   if (!newId) {
     activeSessionLoadFailed.value = false;
-    activeSessionSnapshot.value = null;
     activeSessionFilters.value = getDefaultSessionFilters(route.query.dataset);
     resetConversation();
   }
@@ -326,7 +298,6 @@ const handleAsk = async () => {
         if (session?.id) {
           currentSessionId.value = session.id;
           activeSessionLoadFailed.value = false;
-          activeSessionSnapshot.value = normalizeHistoryItems([session])[0] || null;
           activeSessionFilters.value = session.contextFilters || activeSessionFilters.value;
           await refreshSessionOptions();
           await syncSessionRoute(session.id);
@@ -392,61 +363,52 @@ const handleAsk = async () => {
 </script>
 
 <template>
-  <div class="page-stack qa-page">
+  <div class="qa-page">
     <div class="qa-shell ui-card">
       <div class="qa-shell__toolbar">
-        <div class="qa-shell__heading">
-          <span class="qa-shell__eyebrow">智能问答</span>
-          <div class="qa-shell__title-row">
-            <h1 class="qa-shell__title">{{ activeSessionLabel }}</h1>
-            <span class="qa-shell__session-state">
-              {{ activeSessionStatusLabel }}
-            </span>
-          </div>
-          <div class="qa-shell__filters">
-            <label class="qa-shell__dataset-picker">
-              <span>数据集范围</span>
-              <select v-model="selectedDatasetId" :disabled="isLoadingDatasets">
-                <option value="">全部数据集</option>
-                <option
-                  v-for="dataset in datasets"
-                  :key="dataset.id"
-                  :value="String(dataset.id)"
-                >
-                  {{ dataset.name }}
-                </option>
-              </select>
-            </label>
-          </div>
-          <div class="qa-shell__session-meta">
-            <span class="qa-shell__meta-pill">{{ activeSessionDatasetLabel }}</span>
-            <span v-if="activeSessionSourceLabel" class="qa-shell__meta-pill">
-              {{ activeSessionSourceLabel }}
-            </span>
-            <span class="qa-shell__meta-pill">{{ activeSessionMessageLabel }}</span>
-          </div>
-          <p v-if="activeSessionSummary" class="qa-shell__session-summary">
-            {{ activeSessionSummary }}
-          </p>
+        <div class="qa-shell__actions">
+          <button
+            v-for="action in qaChromeState.actions"
+            :key="action"
+            :class="['ghost-btn', { 'ghost-btn--primary': action === 'new' }]"
+            type="button"
+            @click="handleQaAction(action)"
+          >
+            {{ qaActionLabels[action] ?? action }}
+          </button>
         </div>
 
-        <div class="qa-shell__actions">
-          <button class="ghost-btn" type="button" @click="historyDrawerOpen = true">
-            历史会话
-          </button>
-          <button class="ghost-btn" type="button" @click="memoryDrawerOpen = true">
-            记忆
-          </button>
-          <button class="ghost-btn ghost-btn--primary" type="button" @click="startNewConversation">
-            新对话
-          </button>
-        </div>
+        <label class="qa-shell__dataset-picker qa-shell__dataset-picker--subtle">
+          <span>数据集</span>
+          <select v-model="selectedDatasetId" :disabled="isLoadingDatasets">
+            <option value="">全部数据集</option>
+            <option
+              v-for="dataset in datasets"
+              :key="dataset.id"
+              :value="String(dataset.id)"
+            >
+              {{ dataset.name }}
+            </option>
+          </select>
+        </label>
       </div>
 
       <div class="chat-window">
-        <div ref="messagesContainer" class="messages">
+        <div v-if="sessionLoadFailureNotice" class="qa-inline-notice" role="status">
+          {{ sessionLoadFailureNotice }}
+        </div>
+        <div v-if="showEmptyState" class="qa-empty-state">
+          <h2>开始新一轮分析</h2>
+          <p>从历史会话继续、查看记忆，或直接输入新的金融问题。</p>
+        </div>
+
+        <div
+          ref="messagesContainer"
+          class="messages"
+          :class="{ 'messages--empty': showEmptyState }"
+        >
           <div
-            v-for="(msg, index) in messages"
+            v-for="(msg, index) in visibleMessages"
             :key="index"
             :class="['message', msg.role, msg.tone ? `tone-${msg.tone}` : '']"
           >
@@ -532,7 +494,18 @@ const handleAsk = async () => {
 
 <style scoped>
 .qa-page {
+  display: flex;
   flex: 1;
+  min-height: 0;
+}
+
+.qa-page,
+.qa-shell {
+  min-height: 0;
+}
+
+.chat-window,
+.messages {
   min-height: 0;
 }
 
@@ -540,7 +513,6 @@ const handleAsk = async () => {
   display: flex;
   flex: 1;
   flex-direction: column;
-  min-height: 0;
   padding: 0;
   overflow: hidden;
 }
@@ -548,30 +520,12 @@ const handleAsk = async () => {
 .qa-shell__toolbar {
   display: flex;
   justify-content: space-between;
-  gap: 14px;
-  align-items: center;
-  padding: 15px 20px 12px;
+  gap: 12px 16px;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  padding: 14px 20px;
   border-bottom: 1px solid rgba(20, 32, 51, 0.08);
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(248, 250, 252, 0.94));
-}
-
-.qa-shell__heading {
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.qa-shell__filters {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
-.qa-shell__session-meta {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
+  background: rgba(255, 255, 255, 0.94);
 }
 
 .qa-shell__dataset-picker {
@@ -583,67 +537,25 @@ const handleAsk = async () => {
   color: var(--text-secondary);
 }
 
+.qa-shell__dataset-picker--subtle {
+  gap: 5px;
+  margin-left: auto;
+}
+
+.qa-shell__dataset-picker--subtle span {
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
 .qa-shell__dataset-picker select {
-  min-height: 34px;
-  min-width: 210px;
+  min-height: 32px;
+  min-width: 196px;
   padding: 0 11px;
-  border-radius: 12px;
+  border-radius: 10px;
   border: 1px solid var(--line-strong);
   background: #fff;
   color: var(--text-primary);
-}
-
-.qa-shell__eyebrow {
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  color: var(--text-muted);
-}
-
-.qa-shell__title-row {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  flex-wrap: wrap;
-}
-
-.qa-shell__title {
-  margin: 0;
-  font-size: 22px;
-  line-height: 1.1;
-  color: var(--text-primary);
-}
-
-.qa-shell__meta-pill {
-  display: inline-flex;
-  align-items: center;
-  min-height: 28px;
-  padding: 0 10px;
-  border-radius: 999px;
-  background: var(--surface-3);
-  color: var(--text-secondary);
-  font-size: 12px;
-  font-weight: 600;
-}
-
-.qa-shell__session-state {
-  display: inline-flex;
-  align-items: center;
-  min-height: 28px;
-  padding: 0 10px;
-  border-radius: 999px;
-  background: var(--surface-3);
-  color: var(--text-secondary);
-  font-size: 12px;
-  font-weight: 600;
-}
-
-.qa-shell__session-summary {
-  margin: 0;
-  color: var(--text-secondary);
-  font-size: 13px;
-  line-height: 1.6;
 }
 
 .qa-shell__actions {
@@ -671,20 +583,53 @@ const handleAsk = async () => {
 
 .chat-window {
   flex: 1;
-  min-height: 0;
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.98) 0%, rgba(243, 245, 247, 0.95) 100%);
   display: flex;
   flex-direction: column;
 }
 
+.qa-inline-notice {
+  margin: 16px 20px 0;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(185, 28, 28, 0.12);
+  background: rgba(255, 245, 245, 0.92);
+  color: #991b1b;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.qa-empty-state {
+  margin: 20px 20px 0;
+  padding: 18px 20px;
+  border: 1px dashed var(--line-strong);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.78);
+}
+
+.qa-empty-state h2 {
+  margin: 0;
+  font-size: 20px;
+  color: var(--text-primary);
+}
+
+.qa-empty-state p {
+  margin: 8px 0 0;
+  color: var(--text-secondary);
+  line-height: 1.6;
+}
+
 .messages {
   flex: 1;
-  min-height: 0;
   padding: 20px clamp(18px, 2.4vw, 32px) 14px;
   overflow-y: auto;
   display: flex;
   flex-direction: column;
   gap: 16px;
+}
+
+.messages--empty {
+  padding-top: 12px;
 }
 
 .message {
@@ -945,8 +890,15 @@ const handleAsk = async () => {
 
 @media (max-width: 900px) {
   .qa-shell__toolbar {
-    flex-direction: column;
-    align-items: flex-start;
+    padding-inline: 16px;
+  }
+
+  .qa-shell__dataset-picker--subtle {
+    margin-left: 0;
+  }
+
+  .qa-shell__dataset-picker select {
+    min-width: min(100%, 280px);
   }
 
   .message {
