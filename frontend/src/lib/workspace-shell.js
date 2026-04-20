@@ -5,10 +5,6 @@ const DEFAULT_SIDEBAR_PRESENTATION = Object.freeze({
   showItemLabels: true,
 });
 
-export function getSidebarPresentation(area) {
-  if (area === 'workspace' || area === 'admin') {
-    return DEFAULT_SIDEBAR_PRESENTATION;
-  }
-
+export function getSidebarPresentation(_area) {
   return DEFAULT_SIDEBAR_PRESENTATION;
 }
