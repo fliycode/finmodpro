@@ -190,11 +190,6 @@ const loadSession = async (id) => {
   } catch (error) {
     console.error('加载会话失败:', error);
     activeSessionLoadFailed.value = true;
-    messages.value = [{
-      role: 'system',
-      content: '加载会话失败，请刷新页面后重试。',
-      tone: 'error',
-    }];
   } finally {
     isHydratingSession.value = false;
   }
