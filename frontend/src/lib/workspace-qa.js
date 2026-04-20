@@ -48,7 +48,7 @@ export function formatHistoryTimestamp(value) {
   }
 }
 
-export function getActiveSessionLabel(sessionOptions, currentSessionId) {
+function getActiveSessionLabel(sessionOptions, currentSessionId) {
   if (!currentSessionId) {
     return '新对话';
   }
@@ -120,6 +120,9 @@ export function buildSessionExportDownload(payload = {}) {
   };
 }
 
+// NOTE: The boolean flags below describe chrome elements that were removed from the UI.
+// They are intentionally retained to preserve the returned shape (tests/specs rely on it)
+// and to document reserved flags for future toolbar expansion.
 export function getQaChromeState() {
   return {
     showEyebrow: false,
