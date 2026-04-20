@@ -9,7 +9,5 @@ const sessionId = computed(() => route.query.session ?? null);
 </script>
 
 <template>
-  <div class="page-stack workspace-page">
-    <FinancialQA :session-id="sessionId" />
-  </div>
+  <FinancialQA :session-id="sessionId" />
 </template>
