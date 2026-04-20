@@ -6,6 +6,7 @@ import AppIcon from './AppIcon.vue';
 import finmodproMark from '../../assets/finmodpro-mark.svg';
 import { getNavItems } from '../../config/navigation.js';
 import { authStorage } from '../../lib/auth-storage.js';
+import { getSidebarPresentation } from '../../lib/workspace-shell.js';
 
 const props = defineProps({
   area: {
@@ -16,7 +17,7 @@ const props = defineProps({
 
 const profile = computed(() => authStorage.getProfile());
 const items = computed(() => getNavItems(props.area, profile.value));
-const isWorkspaceCompact = computed(() => props.area === 'workspace');
+const sidebarPresentation = computed(() => getSidebarPresentation(props.area));
 
 const areaMeta = computed(() => {
   if (props.area === 'admin') {
@@ -70,11 +71,14 @@ const navGroups = computed(() => {
 
 <template>
   <aside class="app-sidebar">
-    <div class="app-sidebar__brand" :title="isWorkspaceCompact ? areaMeta.label : undefined">
+    <div
+      class="app-sidebar__brand"
+      :title="sidebarPresentation.showBrandCopy ? undefined : areaMeta.label"
+    >
       <div class="app-sidebar__brand-mark">
         <img class="app-sidebar__brand-logo" :src="finmodproMark" alt="FinModPro" />
       </div>
-      <div class="app-sidebar__brand-copy">
+      <div v-if="sidebarPresentation.showBrandCopy" class="app-sidebar__brand-copy">
         <span class="app-sidebar__brand-eyebrow">FinModPro</span>
         <strong>{{ areaMeta.label }}</strong>
         <p>{{ areaMeta.sublabel }}</p>
@@ -83,20 +87,24 @@ const navGroups = computed(() => {
 
     <nav class="app-sidebar__nav" aria-label="Primary">
       <section v-for="group in navGroups" :key="group.id" class="app-sidebar__group">
-        <p class="app-sidebar__group-label">{{ group.label }}</p>
+        <p v-if="sidebarPresentation.showGroupLabels" class="app-sidebar__group-label">
+          {{ group.label }}
+        </p>
         <div class="app-sidebar__group-items">
           <RouterLink
             v-for="item in group.items"
             :key="item.id"
             :to="item.to"
             class="app-sidebar__item"
-            :title="isWorkspaceCompact ? item.label : undefined"
-            :aria-label="isWorkspaceCompact ? item.label : undefined"
+            :title="sidebarPresentation.showItemLabels ? undefined : item.label"
+            :aria-label="sidebarPresentation.showItemLabels ? undefined : item.label"
           >
             <span class="app-sidebar__item-icon">
               <AppIcon :name="item.icon" />
             </span>
-            <span class="app-sidebar__item-label">{{ item.label }}</span>
+            <span v-if="sidebarPresentation.showItemLabels" class="app-sidebar__item-label">
+              {{ item.label }}
+            </span>
           </RouterLink>
         </div>
       </section>
