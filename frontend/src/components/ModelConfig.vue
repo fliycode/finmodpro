@@ -1,8 +1,21 @@
 <script setup>
-import { computed, onMounted, reactive, ref, watch } from "vue";
+import { computed, onMounted, reactive, ref } from "vue";
+import { RouterLink } from "vue-router";
 import { llmApi, normalizeModelConfigPayload } from "../api/llm.js";
 import { useFlash } from "../lib/flash.js";
+import {
+  getConsolePageAlerts,
+  getInitialFineTuneFilterId,
+  shouldShowConsoleConfigRetry,
+} from "../lib/llm-console.js";
 import AppSectionCard from "./ui/AppSectionCard.vue";
+
+const props = defineProps({
+  mode: {
+    type: String,
+    default: "models",
+  },
+});
 
 const flash = useFlash();
 const configs = ref([]);
@@ -63,6 +76,32 @@ const fineTuneModelOptions = computed(() => configs.value.map((config) => ({
 const supportsTokenOptions = computed(() => ["deepseek", "litellm"].includes(form.provider));
 const drawerTitle = computed(() => (editingId.value ? "编辑模型配置" : "新增模型配置"));
 const fineTuneDrawerTitle = computed(() => (editingFineTuneId.value ? "编辑微调登记" : "新增微调登记"));
+const isModelsMode = computed(() => props.mode !== "fine-tunes");
+const isFineTunesMode = computed(() => props.mode === "fine-tunes");
+const pageAlerts = computed(() => getConsolePageAlerts({
+  mode: props.mode,
+  configError: errorMsg.value,
+  fineTuneError: fineTuneError.value,
+}));
+const showConfigRetry = computed(() => shouldShowConsoleConfigRetry({
+  mode: props.mode,
+  configError: errorMsg.value,
+}));
+const pageCopy = computed(() => {
+  if (isFineTunesMode.value) {
+    return {
+      eyebrow: "LLM 中台 / LLaMA-Factory",
+      title: "LLaMA-Factory 控制面",
+      subtitle: "把微调登记、导出状态、回调令牌和候选模型回流从模型配置页中拆出来，单独观察训练链路的当前阶段。",
+    };
+  }
+
+  return {
+    eyebrow: "LLM 中台 / 模型配置",
+    title: "模型配置与路由",
+    subtitle: "管理平台级对话和向量模型，并明确当前启用关系、LiteLLM alias 入口以及与微调回流模型的衔接方式。",
+  };
+});
 
 const resetForm = () => {
   Object.assign(form, defaultFormState());
@@ -192,9 +231,6 @@ const fetchConfigs = async () => {
   try {
     const data = await llmApi.getModelConfigs();
     configs.value = normalizeModelConfigPayload(data);
-    if (!fineTuneFilterModelId.value && chatConfigs.value[0]?.id) {
-      fineTuneFilterModelId.value = chatConfigs.value[0].id;
-    }
   } catch (error) {
     console.error("Failed to fetch model configs:", error);
     errorMsg.value = error.message || "加载模型配置失败";
@@ -337,11 +373,12 @@ const formatDate = (dateStr) => {
   }
 };
 
-onMounted(fetchConfigs);
-onMounted(fetchFineTunes);
-
-watch(fineTuneFilterModelId, () => {
-  fetchFineTunes();
+onMounted(async () => {
+  await fetchConfigs();
+  if (isFineTunesMode.value) {
+    fineTuneFilterModelId.value = getInitialFineTuneFilterId(configs.value, fineTuneFilterModelId.value);
+    await fetchFineTunes();
+  }
 });
 </script>
 
@@ -349,21 +386,47 @@ watch(fineTuneFilterModelId, () => {
   <div class="page-stack admin-page">
     <section class="page-hero page-hero--admin">
       <div>
-        <div class="page-hero__eyebrow">Admin / Models</div>
-        <h1 class="page-hero__title">模型配置管理</h1>
+        <div class="page-hero__eyebrow">{{ pageCopy.eyebrow }}</div>
+        <h1 class="page-hero__title">{{ pageCopy.title }}</h1>
         <p class="page-hero__subtitle">
-          管理平台级对话和向量模型。第一阶段支持 LiteLLM、Ollama 与 DeepSeek，智能问答会自动读取当前启用的 chat 模型。
+          {{ pageCopy.subtitle }}
         </p>
       </div>
-      <div class="model-page__actions">
+      <div v-if="isModelsMode" class="model-page__actions">
         <el-button @click="fetchConfigs" :loading="isLoading">刷新配置</el-button>
         <el-button type="primary" @click="openCreate('chat')">新增对话模型</el-button>
       </div>
+      <div v-else class="model-page__actions">
+        <el-button v-if="showConfigRetry" @click="fetchConfigs" :loading="isLoading">重试加载基础模型</el-button>
+        <el-button @click="fetchFineTunes" :loading="fineTuneLoading">刷新微调记录</el-button>
+        <el-button type="primary" @click="openCreateFineTune()">登记微调</el-button>
+      </div>
     </section>
 
-    <el-alert v-if="errorMsg" :title="errorMsg" type="error" show-icon :closable="false" />
+    <el-alert
+      v-for="alert in pageAlerts"
+      :key="alert.key"
+      :title="alert.message"
+      type="error"
+      show-icon
+      :closable="false"
+    />
 
-    <AppSectionCard title="对话模型" desc="支持 LiteLLM、Ollama 与 DeepSeek。启用新模型后，智能问答和其它 chat 能力会自动切换。" admin>
+    <template v-if="isModelsMode">
+      <AppSectionCard
+        title="LLaMA-Factory 回流关系"
+        desc="微调控制面已迁移到独立页面，模型页保留当前启用关系和回流线索，避免训练链路继续混在 provider CRUD 里。"
+        admin
+      >
+        <div class="model-page__split-callout">
+          <p class="muted-text">需要查看训练状态、导出进度或候选模型回流时，请直接进入独立的 LLaMA-Factory 页面。</p>
+          <RouterLink to="/admin/llm/fine-tunes" class="model-page__jump-link">
+            打开 LLaMA-Factory
+          </RouterLink>
+        </div>
+      </AppSectionCard>
+
+      <AppSectionCard title="对话模型" desc="支持 LiteLLM、Ollama 与 DeepSeek。启用新模型后，智能问答和其它 chat 能力会自动切换。" admin>
       <div v-if="isLoading && chatConfigs.length === 0" class="admin-empty-state">加载中...</div>
       <div v-else-if="chatConfigs.length === 0" class="admin-empty-state">暂无对话模型配置</div>
       <el-table v-else :data="chatConfigs" stripe style="width: 100%">
@@ -408,9 +471,9 @@ watch(fineTuneFilterModelId, () => {
           </template>
         </el-table-column>
       </el-table>
-    </AppSectionCard>
+      </AppSectionCard>
 
-    <AppSectionCard title="向量模型" desc="支持 LiteLLM 与 Ollama embedding 配置。" admin>
+      <AppSectionCard title="向量模型" desc="支持 LiteLLM 与 Ollama embedding 配置。" admin>
       <template #header>
         <el-button type="primary" @click="openCreate('embedding')">新增向量模型</el-button>
       </template>
@@ -453,9 +516,20 @@ watch(fineTuneFilterModelId, () => {
           </template>
         </el-table-column>
       </el-table>
-    </AppSectionCard>
+      </AppSectionCard>
+    </template>
 
-    <AppSectionCard title="微调控制面" desc="训练执行仍保持外部运行，这里登记数据集、导出、回调与候选模型回流状态。" admin>
+    <AppSectionCard
+      v-if="isFineTunesMode"
+      title="微调控制面"
+      desc="训练执行仍保持外部运行，这里登记数据集、导出、回调与候选模型回流状态。"
+      admin
+    >
+      <template #header>
+        <RouterLink to="/admin/llm/models" class="model-page__jump-link">
+          返回模型配置
+        </RouterLink>
+      </template>
       <div class="registry-toolbar">
         <el-select
           v-model="fineTuneFilterModelId"
@@ -463,6 +537,7 @@ watch(fineTuneFilterModelId, () => {
           clearable
           placeholder="按基础模型筛选"
           style="min-width: 280px"
+          @change="fetchFineTunes"
         >
           <el-option
             v-for="option in fineTuneModelOptions"
@@ -476,14 +551,6 @@ watch(fineTuneFilterModelId, () => {
           <el-button type="primary" @click="openCreateFineTune()">登记微调</el-button>
         </div>
       </div>
-      <el-alert
-        v-if="fineTuneError"
-        :title="fineTuneError"
-        type="error"
-        show-icon
-        :closable="false"
-        class="registry-alert"
-      />
       <div v-if="fineTuneLoading && fineTuneRuns.length === 0" class="admin-empty-state">加载中...</div>
       <div v-else-if="fineTuneRuns.length === 0" class="admin-empty-state">暂无微调登记</div>
       <el-table v-else :data="fineTuneRuns" stripe style="width: 100%">
@@ -537,7 +604,7 @@ watch(fineTuneFilterModelId, () => {
       </el-table>
     </AppSectionCard>
 
-    <el-drawer v-model="drawerVisible" :title="drawerTitle" size="520px" destroy-on-close>
+    <el-drawer v-if="isModelsMode" v-model="drawerVisible" :title="drawerTitle" size="520px" destroy-on-close>
       <div class="model-form">
         <el-form label-position="top">
           <el-form-item label="配置名称">
@@ -591,7 +658,7 @@ watch(fineTuneFilterModelId, () => {
       </div>
     </el-drawer>
 
-    <el-drawer v-model="fineTuneDrawerVisible" :title="fineTuneDrawerTitle" size="560px" destroy-on-close>
+    <el-drawer v-if="isFineTunesMode" v-model="fineTuneDrawerVisible" :title="fineTuneDrawerTitle" size="560px" destroy-on-close>
       <div class="model-form">
         <el-form label-position="top">
           <el-form-item label="基础模型">
@@ -669,6 +736,32 @@ watch(fineTuneFilterModelId, () => {
   gap: 12px;
 }
 
+.model-page__split-callout {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.model-page__jump-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 36px;
+  padding: 0 14px;
+  border: 1px solid var(--line-soft);
+  border-radius: 10px;
+  color: var(--text-primary);
+  background: var(--surface-1);
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.model-page__jump-link:hover {
+  border-color: var(--line-strong);
+  background: var(--surface-2);
+}
+
 .table-actions {
   display: flex;
   gap: 8px;
@@ -722,12 +815,9 @@ watch(fineTuneFilterModelId, () => {
   gap: 12px;
 }
 
-.registry-alert {
-  margin-bottom: 16px;
-}
-
 @media (max-width: 768px) {
   .model-page__actions,
+  .model-page__split-callout,
   .form-grid,
   .drawer-actions,
   .registry-toolbar,
