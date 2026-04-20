@@ -17,8 +17,9 @@ test('workspace sidebar uses expanded labels on desktop', () => {
 test('workspace presentation is no longer a rail', () => {
   const presentation = getSidebarPresentation('workspace');
 
-  assert.equal(presentation.mode, 'expanded');
-  assert.equal(presentation.showItemLabels, true);
+  assert.strictEqual(presentation.mode, 'expanded');
+  assert.notStrictEqual(presentation.mode, 'rail');
+  assert.strictEqual(presentation.showItemLabels, true);
 });
 
 test('admin sidebar keeps the default expanded presentation', () => {

@@ -367,9 +367,6 @@ textarea {
   min-width: 0;
 }
 
-.app-shell--workspace .app-sidebar__brand-copy {
-  display: flex;
-}
 
 .app-sidebar__brand-eyebrow {
   font-size: 11px;
@@ -904,9 +901,6 @@ textarea {
     border-right: 1px solid var(--line-soft);
   }
 
-  .app-shell--workspace .app-sidebar__brand-copy {
-    display: flex;
-  }
 
   .app-shell--workspace .app-sidebar__nav {
     width: auto;
@@ -924,9 +918,6 @@ textarea {
     border-top: 0;
   }
 
-  .app-shell--workspace .app-sidebar__group-label {
-    display: block;
-  }
 
   .app-shell--workspace .app-sidebar__group-items {
     align-items: stretch;
@@ -938,9 +929,6 @@ textarea {
     padding: 10px 12px;
   }
 
-  .app-shell--workspace .app-sidebar__item-label {
-    display: inline;
-  }
 
   .app-topbar {
     align-items: flex-start;
