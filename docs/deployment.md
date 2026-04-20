@@ -15,7 +15,7 @@
 - systemd service: `/etc/systemd/system/finmodpro-poll-deploy.service`
 - systemd timer: `/etc/systemd/system/finmodpro-poll-deploy.timer`
 
-Deployment is server-driven. GitHub remains the source-of-truth repo host, but GitHub Actions is not used for deployment.
+Deployment is server-driven and executed directly on the current server. GitHub remains the source-of-truth repo host, but the deploy path is `server pull main -> run deploy.sh`, not a GitHub Actions workflow.
 
 ## Server-side Environment Files
 
@@ -55,7 +55,7 @@ Before the first live deploy, confirm the target host has:
 
 ## Polling Auto-Deploy
 
-The host-local polling loop is the deployment entrypoint:
+The host-local polling loop is an optional auto-deploy entrypoint:
 
 ```bash
 /opt/finmodpro/scripts/poll-deploy.sh
@@ -80,7 +80,7 @@ Install these units on the host:
 - `/etc/systemd/system/finmodpro-poll-deploy.service`
 - `/etc/systemd/system/finmodpro-poll-deploy.timer`
 
-Recommended cadence: once per minute.
+Recommended cadence: once per minute when you want automatic polling deploys enabled.
 
 After writing or updating the unit files:
 
@@ -113,6 +113,13 @@ The script exits non-zero on any failure.
 It retries and exits non-zero if either endpoint never returns `200`.
 
 ## Manual Operations
+
+Direct deploy on the current server:
+
+```bash
+cd /opt/finmodpro
+./scripts/deploy.sh
+```
 
 Manual poll run:
 
