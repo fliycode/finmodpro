@@ -119,3 +119,21 @@ export function buildSessionExportDownload(payload = {}) {
     content: JSON.stringify(payload, null, 2),
   };
 }
+
+export function getQaChromeState() {
+  return {
+    showEyebrow: false,
+    showSessionState: false,
+    showSessionMeta: false,
+    showSessionSummary: false,
+    actions: ['history', 'memory', 'new'],
+  };
+}
+
+export function shouldShowQaEmptyState(messages) {
+  if (!Array.isArray(messages)) {
+    return true;
+  }
+
+  return !messages.some((message) => message?.role === 'user' || message?.role === 'assistant');
+}
