@@ -132,6 +132,90 @@ class RiskExtractionApiTests(TestCase):
         mocked_get_chat_provider.assert_not_called()
 
     @patch("risk.services.extraction_service.get_chat_provider")
+    def test_extract_document_ignores_events_without_company_name(self, mocked_get_chat_provider):
+        document = self.create_document(title="匿名风险纪要", filename="anonymous-risk.pdf")
+        DocumentChunk.objects.create(
+            document=document,
+            chunk_index=0,
+            content="再融资延迟导致流动性压力增加。",
+            metadata={"page": 1},
+        )
+        mocked_get_chat_provider.return_value.chat.return_value = json.dumps(
+            {
+                "events": [
+                    {
+                        "company_name": "",
+                        "risk_type": "liquidity",
+                        "risk_level": "medium",
+                        "event_time": None,
+                        "summary": "再融资延迟导致流动性压力增加。",
+                        "evidence_text": "再融资延迟导致流动性压力增加。",
+                        "confidence_score": "0.950",
+                        "chunk_id": None,
+                    }
+                ]
+            }
+        )
+
+        response = self.client.post(
+            f"/api/risk/documents/{document.id}/extract",
+            data=json.dumps({}),
+            content_type="application/json",
+            HTTP_AUTHORIZATION=f"Bearer {self.access_token}",
+        )
+
+        self.assertEqual(response.status_code, 201)
+        payload = response.json()
+        self.assertEqual(payload["code"], 0)
+        self.assertEqual(payload["data"]["document_id"], document.id)
+        self.assertEqual(payload["data"]["created_count"], 0)
+        self.assertEqual(payload["data"]["risk_events"], [])
+        self.assertEqual(RiskEvent.objects.count(), 0)
+
+    @patch("risk.services.extraction_service.get_chat_provider")
+    def test_extract_document_accepts_markdown_wrapped_json_payload(self, mocked_get_chat_provider):
+        document = self.create_document(title="带代码块风险纪要", filename="markdown-risk.pdf")
+        chunk = DocumentChunk.objects.create(
+            document=document,
+            chunk_index=0,
+            content="FinModPro Holdings 流动性风险上升，短债覆盖倍数下降。",
+            metadata={"page": 2},
+        )
+        mocked_get_chat_provider.return_value.chat.return_value = (
+            "```json\n"
+            "{\n"
+            '  "events": [\n'
+            "    {\n"
+            '      "company_name": "FinModPro Holdings",\n'
+            '      "risk_type": "liquidity",\n'
+            '      "risk_level": "high",\n'
+            '      "event_time": "2025-03-01T00:00:00+08:00",\n'
+            '      "summary": "流动性风险上升，短债覆盖倍数下降。",\n'
+            '      "evidence_text": "FinModPro Holdings 流动性风险上升，短债覆盖倍数下降。",\n'
+            '      "confidence_score": 0.910,\n'
+            f'      "chunk_id": {chunk.id}\n'
+            "    }\n"
+            "  ]\n"
+            "}\n"
+            "```"
+        )
+
+        response = self.client.post(
+            f"/api/risk/documents/{document.id}/extract",
+            data=json.dumps({}),
+            content_type="application/json",
+            HTTP_AUTHORIZATION=f"Bearer {self.access_token}",
+        )
+
+        self.assertEqual(response.status_code, 201)
+        payload = response.json()
+        self.assertEqual(payload["code"], 0)
+        self.assertEqual(payload["data"]["document_id"], document.id)
+        self.assertEqual(payload["data"]["created_count"], 1)
+        self.assertEqual(payload["data"]["risk_events"][0]["company_name"], "FinModPro Holdings")
+        self.assertEqual(payload["data"]["risk_events"][0]["chunk_id"], chunk.id)
+
+    @patch("risk.services.extraction_service.get_chat_provider")
     def test_retry_extract_document_records_retry_audit_and_creates_events(self, mocked_get_chat_provider):
         document = self.create_document(title="重试文档", filename="retry-risk.pdf")
         chunk = DocumentChunk.objects.create(
