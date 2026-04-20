@@ -48,7 +48,7 @@ export function formatHistoryTimestamp(value) {
   }
 }
 
-export function getActiveSessionLabel(sessionOptions, currentSessionId) {
+function getActiveSessionLabel(sessionOptions, currentSessionId) {
   if (!currentSessionId) {
     return '新对话';
   }
@@ -118,4 +118,35 @@ export function buildSessionExportDownload(payload = {}) {
     filename: `chat-session-${sessionId}.json`,
     content: JSON.stringify(payload, null, 2),
   };
+}
+
+// NOTE: The boolean flags below describe chrome elements that were removed from the UI.
+// They are intentionally retained to preserve the returned shape (tests/specs rely on it)
+// and to document reserved flags for future toolbar expansion.
+export function getQaChromeState() {
+  return {
+    showEyebrow: false,
+    showSessionState: false,
+    showSessionMeta: false,
+    showSessionSummary: false,
+    actions: ['history', 'memory', 'new'],
+  };
+}
+
+export function shouldShowQaEmptyState(messages) {
+  if (!Array.isArray(messages)) {
+    return true;
+  }
+
+  return !messages.some((message) => message?.role === 'user' || message?.role === 'assistant');
+}
+
+export function shouldShowFinancialQaEmptyState({ currentSessionId = null, messages } = {}) {
+  return !currentSessionId && shouldShowQaEmptyState(messages);
+}
+
+export function getSessionLoadFailureNotice(activeSessionLoadFailed) {
+  return activeSessionLoadFailed
+    ? '会话加载失败，当前仅显示系统状态。请刷新页面后重试。'
+    : '';
 }
