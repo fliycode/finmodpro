@@ -1,61 +1,91 @@
-import { createApiConfig, joinUrl } from './config.js';
-import { authStorage } from '../lib/auth-storage.js';
+import { createApiConfig } from './config.js';
 
-const parseResponse = async (response) => {
-  const data = await response.json().catch(() => ({}));
-
-  if (!response.ok) {
-    throw new Error(data.message || '请求失败，请稍后重试');
+const getCookieValue = (name) => {
+  if (typeof document === 'undefined') {
+    return '';
   }
 
-  return data;
+  return document.cookie
+    .split(';')
+    .map((value) => value.trim())
+    .find((value) => value.startsWith(`${name}=`))
+    ?.slice(name.length + 1) || '';
 };
 
-const postJson = async (config, path, payload) => {
-  const response = await config.fetchImpl(joinUrl(config.baseURL, path), {
-    method: 'POST',
-    headers: config.headers,
-    body: JSON.stringify(payload),
-  });
-
-  return parseResponse(response);
+const withCsrfHeaders = (headers = {}) => {
+  const csrfToken = getCookieValue('csrftoken');
+  return csrfToken
+    ? {
+        ...headers,
+        'X-CSRFToken': decodeURIComponent(csrfToken),
+      }
+    : headers;
 };
 
-const getJson = async (config, path) => {
-  const token = authStorage.getToken();
-  const headers = { ...config.headers };
-  if (token) {
-    headers['Authorization'] = `Bearer ${token}`;
+const ensureCsrfCookie = async (config) => {
+  if (getCookieValue('csrftoken')) {
+    return;
   }
 
-  const response = await config.fetchImpl(joinUrl(config.baseURL, path), {
+  await config.fetchJson('/api/auth/csrf', {
     method: 'GET',
-    headers,
+    credentials: 'include',
   });
-
-  return parseResponse(response);
 };
 
 export const createAuthApi = (overrides = {}) => {
   const config = createApiConfig(overrides);
 
   return {
-    login(payload) {
-      return postJson(config, '/api/auth/login', {
-        username: payload.username,
-        password: payload.password,
+    async login(payload) {
+      await ensureCsrfCookie(config);
+      return config.fetchJson('/api/auth/login', {
+        method: 'POST',
+        credentials: 'include',
+        headers: withCsrfHeaders(),
+        body: JSON.stringify({
+          username: payload.username,
+          password: payload.password,
+          remember_me: Boolean(payload.rememberMe),
+        }),
       });
     },
-    register(payload) {
-      return postJson(config, '/api/auth/register', {
-        username: payload.username,
-        password: payload.password,
-        email: payload.email,
+    async register(payload) {
+      await ensureCsrfCookie(config);
+      return config.fetchJson('/api/auth/register', {
+        method: 'POST',
+        credentials: 'include',
+        headers: withCsrfHeaders(),
+        body: JSON.stringify({
+          username: payload.username,
+          password: payload.password,
+          email: payload.email,
+        }),
       });
     },
-    me() {
-      return getJson(config, '/api/auth/me');
-    }
+    me(options = {}) {
+      return config.fetchJson('/api/auth/me', {
+        method: 'GET',
+        auth: true,
+        skipAuthRefresh: options.skipAuthRefresh,
+      });
+    },
+    async refresh() {
+      await ensureCsrfCookie(config);
+      return config.fetchJson('/api/auth/refresh', {
+        method: 'POST',
+        credentials: 'include',
+        headers: withCsrfHeaders(),
+      });
+    },
+    async logout() {
+      await ensureCsrfCookie(config);
+      return config.fetchJson('/api/auth/logout', {
+        method: 'POST',
+        credentials: 'include',
+        headers: withCsrfHeaders(),
+      });
+    },
   };
 };
 

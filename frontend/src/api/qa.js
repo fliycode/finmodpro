@@ -1,4 +1,4 @@
-import { createApiConfig, joinUrl } from './config.js';
+import { createApiConfig } from './config.js';
 
 const apiConfig = createApiConfig();
 
@@ -130,9 +130,8 @@ export const qaApi = {
       top_k,
       ...(sessionId ? { session_id: sessionId } : {}),
     };
-    const response = await apiConfig.fetchImpl(joinUrl(apiConfig.baseURL, '/api/chat/ask/stream'), {
+    const response = await apiConfig.fetchWithAuth('/api/chat/ask/stream', {
       method: 'POST',
-      headers: apiConfig.getAuthHeaders(),
       body: JSON.stringify(payload),
       auth: true,
     });

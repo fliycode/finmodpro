@@ -2,9 +2,9 @@
 import { onMounted, reactive, ref } from 'vue';
 import { useRouter } from 'vue-router';
 
-import { authApi } from '../../api/auth.js';
 import AuthLanding from '../../components/AuthLanding.vue';
 import { validateAuthForm } from '../../lib/auth-form.js';
+import { authSession } from '../../lib/auth-session.js';
 import { authStorage } from '../../lib/auth-storage.js';
 import { resolveHomeRoute } from '../../lib/session-state.js';
 
@@ -24,6 +24,7 @@ const formData = reactive({
   password: '',
   confirmPassword: '',
   agreeTerms: false,
+  rememberMe: false,
 });
 
 const errors = reactive({
@@ -83,22 +84,16 @@ const submit = async (event) => {
 
   try {
     if (activeTab.value === 'login') {
-      const response = await authApi.login({
+      const { profile } = await authSession.login({
         username: formData.username,
         password: formData.password,
+        rememberMe: formData.rememberMe,
       });
-
-      if (response.access_token) {
-        authStorage.saveToken(response.access_token);
-      }
-
-      const profile = await authApi.me();
-      authStorage.saveProfile(profile);
       await router.replace(resolveHomeRoute(profile));
       return;
     }
 
-    await authApi.register({
+    await authSession.register({
       username: formData.username,
       email: formData.email,
       password: formData.password,

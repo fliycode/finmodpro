@@ -1,6 +1,7 @@
 import { createRouter, createWebHistory } from 'vue-router';
 
 import { authStorage } from '../lib/auth-storage.js';
+import { authSession } from '../lib/auth-session.js';
 import { canAccessRoute, resolveEntryRoute, resolveHomeRoute } from '../lib/session-state.js';
 import { appRoutes } from './routes.js';
 
@@ -9,8 +10,9 @@ const router = createRouter({
   routes: appRoutes,
 });
 
-router.beforeEach((to) => {
-  const token = authStorage.getToken();
+router.beforeEach(async (to) => {
+  const authenticated = await authSession.ensureSession();
+  const token = authenticated ? authStorage.getToken() : null;
   const profile = authStorage.getProfile();
 
   if (to.path === '/') {

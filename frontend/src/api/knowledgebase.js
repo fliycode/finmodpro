@@ -1,5 +1,4 @@
-import { createApiConfig, joinUrl } from './config.js';
-import { authStorage } from '../lib/auth-storage.js';
+import { createApiConfig } from './config.js';
 import { buildKnowledgebaseQuery } from '../lib/knowledgebase-workspace.js';
 
 const apiConfig = createApiConfig();
@@ -10,15 +9,6 @@ const parseResponse = async (response) => {
     throw new Error(data.message || '请求失败，请稍后重试');
   }
   return data;
-};
-
-const getHeaders = () => {
-  const token = authStorage.getToken();
-  const headers = { ...apiConfig.headers };
-  if (token) {
-    headers.Authorization = `Bearer ${token}`;
-  }
-  return headers;
 };
 
 const formatDateTime = (value) => {
@@ -241,12 +231,10 @@ export const normalizeDocument = (doc, fallback = {}) => {
 
 export const kbApi = {
   async listDatasets() {
-    const response = await apiConfig.fetchImpl(joinUrl(apiConfig.baseURL, '/api/knowledgebase/datasets'), {
+    const data = await apiConfig.fetchJson('/api/knowledgebase/datasets', {
       method: 'GET',
-      headers: getHeaders(),
       auth: true,
     });
-    const data = await parseResponse(response);
     const datasets = Array.isArray(data.datasets) ? data.datasets : [];
     return {
       datasets: datasets.map((dataset) => normalizeDataset(dataset)),
@@ -255,13 +243,11 @@ export const kbApi = {
   },
 
   async createDataset(payload = {}) {
-    const response = await apiConfig.fetchImpl(joinUrl(apiConfig.baseURL, '/api/knowledgebase/datasets'), {
+    const data = await apiConfig.fetchJson('/api/knowledgebase/datasets', {
       method: 'POST',
-      headers: getHeaders(),
-      body: JSON.stringify(payload),
       auth: true,
+      body: JSON.stringify(payload),
     });
-    const data = await parseResponse(response);
     return normalizeDataset(data.dataset || data);
   },
 
@@ -270,12 +256,10 @@ export const kbApi = {
     const path = query.toString()
       ? `/api/knowledgebase/documents?${query.toString()}`
       : '/api/knowledgebase/documents';
-    const response = await apiConfig.fetchImpl(joinUrl(apiConfig.baseURL, path), {
+    const data = await apiConfig.fetchJson(path, {
       method: 'GET',
-      headers: getHeaders(),
       auth: true,
     });
-    const data = await parseResponse(response);
     const docs = Array.isArray(data.documents)
       ? data.documents
       : Array.isArray(data)
@@ -299,10 +283,10 @@ export const kbApi = {
       formData.append('dataset_id', options.datasetId);
     }
 
-    const headers = getHeaders();
+    const headers = apiConfig.getAuthHeaders();
     delete headers['Content-Type'];
 
-    const response = await apiConfig.fetchImpl(joinUrl(apiConfig.baseURL, '/api/knowledgebase/documents'), {
+    const response = await apiConfig.fetchWithAuth('/api/knowledgebase/documents', {
       method: 'POST',
       headers,
       body: formData,
@@ -320,12 +304,10 @@ export const kbApi = {
   },
 
   async listDocumentVersions(documentId) {
-    const response = await apiConfig.fetchImpl(joinUrl(apiConfig.baseURL, `/api/knowledgebase/documents/${documentId}/versions`), {
+    const data = await apiConfig.fetchJson(`/api/knowledgebase/documents/${documentId}/versions`, {
       method: 'GET',
-      headers: getHeaders(),
       auth: true,
     });
-    const data = await parseResponse(response);
     return {
       documentId: Number(data.document_id || documentId),
       currentVersion: Number(data.current_version || 1),
@@ -348,18 +330,15 @@ export const kbApi = {
     );
     formData.append('processing_notes', metadata.processingNotes || '');
 
-    const headers = getHeaders();
+    const headers = apiConfig.getAuthHeaders();
     delete headers['Content-Type'];
 
-    const response = await apiConfig.fetchImpl(
-      joinUrl(apiConfig.baseURL, `/api/knowledgebase/documents/${documentId}/versions`),
-      {
-        method: 'POST',
-        headers,
-        body: formData,
-        auth: true,
-      },
-    );
+    const response = await apiConfig.fetchWithAuth(`/api/knowledgebase/documents/${documentId}/versions`, {
+      method: 'POST',
+      headers,
+      body: formData,
+      auth: true,
+    });
     const data = await parseResponse(response);
     return {
       ...data,
@@ -368,12 +347,10 @@ export const kbApi = {
   },
 
   async ingestDocument(documentId) {
-    const response = await apiConfig.fetchImpl(joinUrl(apiConfig.baseURL, `/api/knowledgebase/documents/${documentId}/ingest`), {
+    const data = await apiConfig.fetchJson(`/api/knowledgebase/documents/${documentId}/ingest`, {
       method: 'POST',
-      headers: getHeaders(),
       auth: true,
     });
-    const data = await parseResponse(response);
     return {
       ...data,
       document: data.document ? normalizeDocument(data.document) : null,
@@ -381,23 +358,19 @@ export const kbApi = {
   },
 
   async getDocumentDetail(documentId) {
-    const response = await apiConfig.fetchImpl(joinUrl(apiConfig.baseURL, `/api/knowledgebase/documents/${documentId}`), {
+    const data = await apiConfig.fetchJson(`/api/knowledgebase/documents/${documentId}`, {
       method: 'GET',
-      headers: getHeaders(),
       auth: true,
     });
-    const data = await parseResponse(response);
     const doc = data.document || data.data || data;
     return normalizeDocument(doc);
   },
 
   async getDocumentChunks(documentId) {
-    const response = await apiConfig.fetchImpl(joinUrl(apiConfig.baseURL, `/api/knowledgebase/documents/${documentId}/chunks`), {
+    const data = await apiConfig.fetchJson(`/api/knowledgebase/documents/${documentId}/chunks`, {
       method: 'GET',
-      headers: getHeaders(),
       auth: true,
     });
-    const data = await parseResponse(response);
     return (data.chunks || []).map((chunk) => ({
       id: chunk.id,
       chunkIndex: Number(chunk.chunk_index || 0),
@@ -409,23 +382,19 @@ export const kbApi = {
   },
 
   async batchIngestDocuments(documentIds) {
-    const response = await apiConfig.fetchImpl(joinUrl(apiConfig.baseURL, '/api/knowledgebase/documents/batch/ingest'), {
+    return apiConfig.fetchJson('/api/knowledgebase/documents/batch/ingest', {
       method: 'POST',
-      headers: getHeaders(),
-      body: JSON.stringify({ document_ids: documentIds }),
       auth: true,
+      body: JSON.stringify({ document_ids: documentIds }),
     });
-    return parseResponse(response);
   },
 
   async batchDeleteDocuments(documentIds) {
-    const response = await apiConfig.fetchImpl(joinUrl(apiConfig.baseURL, '/api/knowledgebase/documents/batch/delete'), {
+    return apiConfig.fetchJson('/api/knowledgebase/documents/batch/delete', {
       method: 'POST',
-      headers: getHeaders(),
-      body: JSON.stringify({ document_ids: documentIds }),
       auth: true,
+      body: JSON.stringify({ document_ids: documentIds }),
     });
-    return parseResponse(response);
   },
 
   isProcessingStatus(status) {

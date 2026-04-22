@@ -1,13 +1,4 @@
-import { createApiConfig, joinUrl } from './config.js';
-import { authStorage } from '../lib/auth-storage.js';
-
-const parseJsonResponse = async (response) => {
-  const data = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    throw new Error(data.message || '请求失败，请稍后重试');
-  }
-  return data;
-};
+import { createApiConfig } from './config.js';
 
 const parseAttachmentError = async (response) => {
   const data = await response.json().catch(() => ({}));
@@ -24,15 +15,6 @@ const buildQueryString = (params = {}) => {
   return query.toString();
 };
 
-const buildAuthHeaders = (baseHeaders) => {
-  const token = authStorage.getToken();
-  const headers = { ...baseHeaders };
-  if (token) {
-    headers.Authorization = `Bearer ${token}`;
-  }
-  return headers;
-};
-
 const resolveFilenameFromDisposition = (contentDisposition, fallback) => {
   const match = /filename="([^"]+)"/i.exec(String(contentDisposition || ''));
   return match?.[1] || fallback;
@@ -42,13 +24,11 @@ export const createRiskApi = (overrides = {}) => {
   const apiConfig = createApiConfig(overrides);
 
   const requestJson = async (path, { method = 'GET', body } = {}) => {
-    const response = await apiConfig.fetchImpl(joinUrl(apiConfig.baseURL, path), {
+    return apiConfig.fetchJson(path, {
       method,
-      headers: buildAuthHeaders(apiConfig.headers),
       body: body ? JSON.stringify(body) : undefined,
+      auth: true,
     });
-
-    return parseJsonResponse(response);
   };
 
   return {
@@ -107,9 +87,9 @@ export const createRiskApi = (overrides = {}) => {
         ? `/api/risk/reports/${reportId}/export?${queryString}`
         : `/api/risk/reports/${reportId}/export`;
 
-      const response = await apiConfig.fetchImpl(joinUrl(apiConfig.baseURL, path), {
+      const response = await apiConfig.fetchWithAuth(path, {
         method: 'GET',
-        headers: buildAuthHeaders(apiConfig.headers),
+        auth: true,
       });
 
       if (!response.ok) {
