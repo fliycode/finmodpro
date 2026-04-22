@@ -4,18 +4,22 @@ from django.db import models, transaction
 class ModelConfig(models.Model):
     CAPABILITY_CHAT = "chat"
     CAPABILITY_EMBEDDING = "embedding"
+    CAPABILITY_RERANK = "rerank"
     CAPABILITY_CHOICES = (
         (CAPABILITY_CHAT, "Chat"),
         (CAPABILITY_EMBEDDING, "Embedding"),
+        (CAPABILITY_RERANK, "Rerank"),
     )
 
     PROVIDER_OLLAMA = "ollama"
     PROVIDER_DEEPSEEK = "deepseek"
     PROVIDER_LITELLM = "litellm"
+    PROVIDER_DASHSCOPE = "dashscope"
     PROVIDER_CHOICES = (
         (PROVIDER_OLLAMA, "Ollama"),
         (PROVIDER_DEEPSEEK, "DeepSeek"),
         (PROVIDER_LITELLM, "LiteLLM"),
+        (PROVIDER_DASHSCOPE, "DashScope"),
     )
 
     name = models.CharField(max_length=255)
