@@ -4,6 +4,7 @@ import { RouterLink, useRouter } from 'vue-router';
 
 import finmodproMark from '../../assets/finmodpro-mark.svg';
 import { getTopbarActions } from '../../config/navigation.js';
+import { authSession } from '../../lib/auth-session.js';
 import { AUTH_EXPIRED_MESSAGE, authStorage } from '../../lib/auth-storage.js';
 import { useFlash } from '../../lib/flash.js';
 
@@ -52,7 +53,7 @@ const actions = computed(() => {
 });
 
 const handleLogout = async () => {
-  authStorage.clear();
+  await authSession.logout();
   await router.replace('/login');
 };
 

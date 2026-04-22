@@ -1,6 +1,8 @@
 import os
 from pathlib import Path
 
+from django.core.exceptions import ImproperlyConfigured
+
 from config.env import get_bool_env, get_env, get_int_env, get_list_env
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -22,16 +24,20 @@ CORS_ALLOWED_ORIGINS = get_list_env(
         "http://47.85.103.76:5173",
     ],
 )
+CORS_ALLOW_CREDENTIALS = get_bool_env("DJANGO_CORS_ALLOW_CREDENTIALS", True)
 MEDIA_URL = get_env("MEDIA_URL", "/media/")
 MEDIA_ROOT = Path(get_env("MEDIA_ROOT", str(BASE_DIR / "media")))
 
-DB_ENGINE = get_env("DB_ENGINE", "sqlite")
-DB_NAME = get_env("DB_NAME", str(BASE_DIR / "db.sqlite3"))
+DB_ENGINE = get_env("DB_ENGINE", "mysql")
+DB_NAME = get_env("DB_NAME", "finmodpro")
 DB_HOST = get_env("DB_HOST", "127.0.0.1")
 DB_PORT = get_int_env("DB_PORT", 3306)
 DB_USER = get_env("DB_USER", "root")
 DB_PASSWORD = get_env("DB_PASSWORD", "")
 DB_CONN_MAX_AGE = get_int_env("DB_CONN_MAX_AGE", 60)
+
+if DB_ENGINE != "mysql":
+    raise ImproperlyConfigured("Only MySQL is supported.")
 
 REDIS_ENABLED = get_bool_env("REDIS_ENABLED", False)
 REDIS_HOST = get_env("REDIS_HOST", "127.0.0.1")
@@ -89,8 +95,25 @@ JWT_SECRET_KEY = get_env("JWT_SECRET_KEY", SECRET_KEY)
 JWT_ALGORITHM = get_env("JWT_ALGORITHM", "HS256")
 JWT_ACCESS_TOKEN_LIFETIME_SECONDS = get_int_env(
     "JWT_ACCESS_TOKEN_LIFETIME_SECONDS",
-    7200,
+    900,
 )
+JWT_REMEMBER_ME_LIFETIME_SECONDS = get_int_env(
+    "JWT_REMEMBER_ME_LIFETIME_SECONDS",
+    7 * 24 * 60 * 60,
+)
+AUTH_REFRESH_TOKEN_LIFETIME_SECONDS = get_int_env(
+    "AUTH_REFRESH_TOKEN_LIFETIME_SECONDS",
+    24 * 60 * 60,
+)
+AUTH_REMEMBER_ME_REFRESH_TOKEN_LIFETIME_SECONDS = get_int_env(
+    "AUTH_REMEMBER_ME_REFRESH_TOKEN_LIFETIME_SECONDS",
+    7 * 24 * 60 * 60,
+)
+AUTH_REFRESH_COOKIE_NAME = get_env("AUTH_REFRESH_COOKIE_NAME", "finmodpro_refresh")
+AUTH_REFRESH_COOKIE_PATH = get_env("AUTH_REFRESH_COOKIE_PATH", "/api/auth")
+AUTH_REFRESH_COOKIE_SAMESITE = get_env("AUTH_REFRESH_COOKIE_SAMESITE", "Lax")
+AUTH_REFRESH_COOKIE_SECURE = get_bool_env("AUTH_REFRESH_COOKIE_SECURE", False)
+AUTH_REFRESH_COOKIE_DOMAIN = get_env("AUTH_REFRESH_COOKIE_DOMAIN", "")
 
 INSTALLED_APPS = [
     "django.contrib.admin",
@@ -142,28 +165,20 @@ TEMPLATES = [
 WSGI_APPLICATION = "config.wsgi.application"
 ASGI_APPLICATION = "config.asgi.application"
 
-if DB_ENGINE == "mysql":
-    DATABASES = {
-        "default": {
-            "ENGINE": "django.db.backends.mysql",
-            "NAME": DB_NAME,
-            "USER": DB_USER,
-            "PASSWORD": DB_PASSWORD,
-            "HOST": DB_HOST,
-            "PORT": DB_PORT,
-            "CONN_MAX_AGE": DB_CONN_MAX_AGE,
-            "OPTIONS": {
-                "charset": "utf8mb4",
-            },
+DATABASES = {
+    "default": {
+        "ENGINE": "django.db.backends.mysql",
+        "NAME": DB_NAME,
+        "USER": DB_USER,
+        "PASSWORD": DB_PASSWORD,
+        "HOST": DB_HOST,
+        "PORT": DB_PORT,
+        "CONN_MAX_AGE": DB_CONN_MAX_AGE,
+        "OPTIONS": {
+            "charset": "utf8mb4",
         }
     }
-else:
-    DATABASES = {
-        "default": {
-            "ENGINE": "django.db.backends.sqlite3",
-            "NAME": DB_NAME,
-        }
-    }
+}
 
 if REDIS_ENABLED:
     redis_auth = f":{REDIS_PASSWORD}@" if REDIS_PASSWORD else ""

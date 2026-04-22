@@ -1,6 +1,7 @@
 import { AUTH_EXPIRED_MESSAGE, authStorage } from '../lib/auth-storage.js';
 
 const FALLBACK_BASE_URL = 'http://localhost:8000';
+let authRefreshHandler = null;
 
 const isPrivateIpv4Host = (host) => {
   const parts = String(host || '').split('.').map(Number);
@@ -71,6 +72,10 @@ const handleUnauthorized = (browserWindow) => {
   }
 };
 
+export const registerAuthRefreshHandler = (handler) => {
+  authRefreshHandler = handler;
+};
+
 export const createApiConfig = (overrides = {}) => {
   const isProd =
     overrides.isProd ??
@@ -99,14 +104,6 @@ export const createApiConfig = (overrides = {}) => {
 
   const selectedFetch = overrides.fetchImpl || fetch;
 
-  const fetchImpl = async (url, options) => {
-    const response = await selectedFetch(url, options);
-    if (response.status === 401 && options?.auth) {
-      handleUnauthorized(browserWindow);
-    }
-    return response;
-  };
-
   const getAuthHeaders = (headers = {}) => {
     const token = authStorage.getToken();
     const resolvedHeaders = {
@@ -122,17 +119,52 @@ export const createApiConfig = (overrides = {}) => {
     return resolvedHeaders;
   };
 
+  const buildRequestOptions = (options = {}) => {
+    const requestHeaders = options.auth
+      ? getAuthHeaders(options.headers)
+      : {
+          'Content-Type': 'application/json',
+          ...(overrides.headers || {}),
+          ...(options.headers || {}),
+        };
+
+    return {
+      ...options,
+      headers: requestHeaders,
+      credentials: options.credentials,
+    };
+  };
+
+  const request = async (path, options = {}) => {
+    const url = joinUrl(baseURL, path);
+    let response = await selectedFetch(url, buildRequestOptions(options));
+
+    if (
+      response.status === 401
+      && options.auth
+      && !options.skipAuthRefresh
+      && typeof authRefreshHandler === 'function'
+    ) {
+      const refreshed = await authRefreshHandler();
+      if (refreshed) {
+        response = await selectedFetch(
+          url,
+          buildRequestOptions({ ...options, skipAuthRefresh: true }),
+        );
+      }
+    }
+
+    if (response.status === 401 && options.auth) {
+      handleUnauthorized(browserWindow);
+    }
+
+    return response;
+  };
+
   const parseJson = async (response) => response.json().catch(() => ({}));
 
   const fetchJson = async (path, options = {}) => {
-    const response = await fetchImpl(joinUrl(baseURL, path), {
-      ...options,
-      headers: options.auth ? getAuthHeaders(options.headers) : {
-        'Content-Type': 'application/json',
-        ...(overrides.headers || {}),
-        ...(options.headers || {}),
-      },
-    });
+    const response = await request(path, options);
     const data = await parseJson(response);
 
     if (!response.ok) {
@@ -151,7 +183,8 @@ export const createApiConfig = (overrides = {}) => {
       'Content-Type': 'application/json',
       ...(overrides.headers || {}),
     },
-    fetchImpl,
+    fetchImpl: selectedFetch,
+    fetchWithAuth: request,
     fetchJson,
     getAuthHeaders,
   };

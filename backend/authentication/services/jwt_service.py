@@ -24,9 +24,14 @@ def _sign(message):
     ).digest()
 
 
-def generate_access_token(user):
+def generate_access_token(user, lifetime_seconds=None):
     issued_at = datetime.now(tz=timezone.utc)
-    expires_at = issued_at + timedelta(seconds=settings.JWT_ACCESS_TOKEN_LIFETIME_SECONDS)
+    token_lifetime_seconds = (
+        settings.JWT_ACCESS_TOKEN_LIFETIME_SECONDS
+        if lifetime_seconds is None
+        else lifetime_seconds
+    )
+    expires_at = issued_at + timedelta(seconds=token_lifetime_seconds)
     payload = {
         "sub": user.username,
         "user_id": user.id,

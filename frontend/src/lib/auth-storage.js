@@ -1,52 +1,80 @@
-const TOKEN_KEY = 'finmodpro_token';
-const USER_KEY = 'finmodpro_user';
-const GROUPS_KEY = 'finmodpro_groups';
-const PERMISSIONS_KEY = 'finmodpro_permissions';
 const FLASH_KEY = 'finmodpro_flash_message';
 
 export const AUTH_EXPIRED_MESSAGE = '登录已过期，请重新登录';
 
+const EMPTY_PROFILE = {
+  user: {},
+  groups: [],
+  permissions: [],
+};
+
+let currentToken = null;
+let currentProfile = EMPTY_PROFILE;
+
+const getStorage = (storageName) => {
+  try {
+    return globalThis[storageName] ?? null;
+  } catch {
+    return null;
+  }
+};
+
+const readFirstValue = (key) => {
+  const sessionStorageRef = getStorage('sessionStorage');
+  const localStorageRef = getStorage('localStorage');
+
+  for (const storage of [sessionStorageRef, localStorageRef].filter(Boolean)) {
+    const value = storage.getItem(key);
+    if (value !== null) {
+      return value;
+    }
+  }
+
+  return null;
+};
+
 export const authStorage = {
   saveToken(token) {
-    localStorage.setItem(TOKEN_KEY, token);
+    currentToken = token;
   },
   getToken() {
-    return localStorage.getItem(TOKEN_KEY);
+    return currentToken;
   },
   saveProfile(profile) {
-    localStorage.setItem(USER_KEY, JSON.stringify({
-      id: profile.id,
-      username: profile.username,
-      email: profile.email
-    }));
-    localStorage.setItem(GROUPS_KEY, JSON.stringify(profile.groups || []));
-    localStorage.setItem(PERMISSIONS_KEY, JSON.stringify(profile.permissions || []));
-  },
-  getProfile() {
-    try {
-      return {
-        user: JSON.parse(localStorage.getItem(USER_KEY) || '{}'),
-        groups: JSON.parse(localStorage.getItem(GROUPS_KEY) || '[]'),
-        permissions: JSON.parse(localStorage.getItem(PERMISSIONS_KEY) || '[]')
-      };
-    } catch (e) {
-      return { user: {}, groups: [], permissions: [] };
+    currentProfile = {
+      user: {
+        id: profile?.id ?? profile?.user?.id,
+        username: profile?.username ?? profile?.user?.username,
+        email: profile?.email ?? profile?.user?.email,
+      },
+      groups: profile?.groups || [],
+      permissions: profile?.permissions || [],
+    };
+
+    if (currentProfile.user.id === undefined) {
+      currentProfile = EMPTY_PROFILE;
     }
   },
+  getProfile() {
+    return currentProfile;
+  },
   saveFlashMessage(message) {
-    localStorage.setItem(FLASH_KEY, message);
+    const flashStorage = getStorage('localStorage') || getStorage('sessionStorage');
+    flashStorage?.setItem(FLASH_KEY, message);
   },
   consumeFlashMessage() {
-    const message = localStorage.getItem(FLASH_KEY);
+    const message = readFirstValue(FLASH_KEY);
     if (message) {
-      localStorage.removeItem(FLASH_KEY);
+      const sessionStorageRef = getStorage('sessionStorage');
+      const localStorageRef = getStorage('localStorage');
+      [sessionStorageRef, localStorageRef].filter(Boolean).forEach((storage) => {
+        storage.removeItem(FLASH_KEY);
+      });
     }
     return message;
   },
   clear() {
-    localStorage.removeItem(TOKEN_KEY);
-    localStorage.removeItem(USER_KEY);
-    localStorage.removeItem(GROUPS_KEY);
-    localStorage.removeItem(PERMISSIONS_KEY);
-  }
+    currentToken = null;
+    currentProfile = EMPTY_PROFILE;
+  },
 };

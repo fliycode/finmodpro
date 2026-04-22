@@ -33,3 +33,9 @@ def authenticate_user(*, username, password):
 
     ensure_user_role_bindings(user)
     return user
+
+
+def get_user_by_id(user_id):
+    user = User.objects.get(id=user_id)
+    ensure_user_role_bindings(user)
+    return user

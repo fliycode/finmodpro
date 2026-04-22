@@ -234,6 +234,13 @@ watch(() => props.activeTab, () => {
                   <span v-if="errors.agreeTerms" class="error-msg">{{ errors.agreeTerms }}</span>
                 </div>
 
+                <div v-if="activeTab === 'login'" class="form-group checkbox-group checkbox-group--compact">
+                  <label class="checkbox-label" for="rememberMe">
+                    <input id="rememberMe" v-model="formData.rememberMe" type="checkbox" :disabled="isLoading" />
+                    <span>7 天内记住我</span>
+                  </label>
+                </div>
+
                 <button type="submit" class="primary-button" :disabled="isLoading">
                   <span v-if="isLoading" class="loader"></span>
                   <span v-else>{{ submitLabel }}</span>
@@ -683,6 +690,10 @@ watch(() => props.activeTab, () => {
 
 .checkbox-group {
   gap: 8px;
+}
+
+.checkbox-group--compact {
+  margin-top: -4px;
 }
 
 .checkbox-label {
