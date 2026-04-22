@@ -69,11 +69,14 @@ const chatConfigs = computed(() =>
 const embeddingConfigs = computed(() =>
   configs.value.filter((c) => ["embedding", "embed", "vector"].includes(String(c.capability).toLowerCase())),
 );
+const rerankConfigs = computed(() =>
+  configs.value.filter((c) => ["rerank"].includes(String(c.capability).toLowerCase())),
+);
 const fineTuneModelOptions = computed(() => configs.value.map((config) => ({
   value: config.id,
   label: `${config.name} · ${config.model_name}`,
 })));
-const supportsTokenOptions = computed(() => ["deepseek", "litellm"].includes(form.provider));
+const supportsTokenOptions = computed(() => ["deepseek", "litellm", "dashscope"].includes(form.provider));
 const drawerTitle = computed(() => (editingId.value ? "编辑模型配置" : "新增模型配置"));
 const fineTuneDrawerTitle = computed(() => (editingFineTuneId.value ? "编辑微调登记" : "新增微调登记"));
 const isModelsMode = computed(() => props.mode !== "fine-tunes");
@@ -112,7 +115,7 @@ const openCreate = (capability = "chat") => {
   resetForm();
   form.capability = capability;
   form.provider = "litellm";
-  form.model_name = capability === "embedding" ? "embed-default" : "chat-default";
+  form.model_name = capability === "embedding" ? "embed-default" : capability === "rerank" ? "rerank-default" : "chat-default";
   form.endpoint = "http://localhost:4000";
   drawerVisible.value = true;
 };
@@ -426,7 +429,7 @@ onMounted(async () => {
         </div>
       </AppSectionCard>
 
-      <AppSectionCard title="对话模型" desc="支持 LiteLLM、Ollama 与 DeepSeek。启用新模型后，智能问答和其它 chat 能力会自动切换。" admin>
+      <AppSectionCard title="对话模型" desc="支持 LiteLLM 与 DeepSeek。启用新模型后，智能问答和其它 chat 能力会自动切换。" admin>
       <div v-if="isLoading && chatConfigs.length === 0" class="admin-empty-state">加载中...</div>
       <div v-else-if="chatConfigs.length === 0" class="admin-empty-state">暂无对话模型配置</div>
       <el-table v-else :data="chatConfigs" stripe style="width: 100%">
@@ -473,7 +476,7 @@ onMounted(async () => {
       </el-table>
       </AppSectionCard>
 
-      <AppSectionCard title="向量模型" desc="支持 LiteLLM 与 Ollama embedding 配置。" admin>
+      <AppSectionCard title="向量模型" desc="支持 LiteLLM 与 DashScope embedding 配置。" admin>
       <template #header>
         <el-button type="primary" @click="openCreate('embedding')">新增向量模型</el-button>
       </template>
@@ -498,6 +501,44 @@ onMounted(async () => {
             <div class="muted-text lineage-text">
               {{ formatFineTuneLineage(row) }}
             </div>
+          </template>
+        </el-table-column>
+        <el-table-column label="更新时间" min-width="180">
+          <template #default="{ row }">
+            <span class="muted-text">{{ formatDate(row.updated_at) }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="操作" width="210" fixed="right">
+          <template #default="{ row }">
+            <div class="table-actions">
+              <el-button size="small" plain @click="openEdit(row)">编辑</el-button>
+              <el-button size="small" :type="row.is_active ? 'danger' : 'primary'" plain @click="toggleActivation(row)">
+                {{ row.is_active ? "停用" : "启用" }}
+              </el-button>
+            </div>
+          </template>
+        </el-table-column>
+      </el-table>
+      </AppSectionCard>
+
+      <AppSectionCard title="重排序模型" desc="支持 DashScope rerank 配置，用于检索结果重排序以提升召回质量。" admin>
+      <template #header>
+        <el-button type="primary" @click="openCreate('rerank')">新增重排序模型</el-button>
+      </template>
+      <div v-if="isLoading && rerankConfigs.length === 0" class="admin-empty-state">加载中...</div>
+      <div v-else-if="rerankConfigs.length === 0" class="admin-empty-state">暂无重排序模型配置</div>
+      <el-table v-else :data="rerankConfigs" stripe style="width: 100%">
+        <el-table-column prop="name" label="配置名称" min-width="160" />
+        <el-table-column prop="provider" label="Provider" width="120" />
+        <el-table-column prop="model_name" label="模型名" min-width="180" />
+        <el-table-column label="接口地址" min-width="220">
+          <template #default="{ row }">
+            <span class="mono-text">{{ row.endpoint || "默认" }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="状态" width="100">
+          <template #default="{ row }">
+            <el-tag :type="row.is_active ? 'success' : 'info'">{{ row.is_active ? "已启用" : "未启用" }}</el-tag>
           </template>
         </el-table-column>
         <el-table-column label="更新时间" min-width="180">
@@ -614,13 +655,14 @@ onMounted(async () => {
             <el-select v-model="form.capability" style="width: 100%">
               <el-option label="对话模型" value="chat" />
               <el-option label="向量模型" value="embedding" />
+              <el-option label="重排序模型" value="rerank" />
             </el-select>
           </el-form-item>
           <el-form-item label="Provider">
             <el-select v-model="form.provider" style="width: 100%">
               <el-option label="LiteLLM" value="litellm" />
               <el-option label="DeepSeek" value="deepseek" />
-              <el-option label="Ollama" value="ollama" />
+              <el-option label="DashScope" value="dashscope" />
             </el-select>
           </el-form-item>
           <el-form-item label="模型名称">
