@@ -209,7 +209,7 @@ class DashboardStatsApiTests(TestCase):
         self.assertEqual(data["risk_event_count"], 2)
         self.assertEqual(data["pending_risk_event_count"], 1)
         self.assertEqual(data["high_risk_event_count"], 2)
-        self.assertEqual(data["active_model_count"], 2)
+        self.assertEqual(data["active_model_count"], 3)
         self.assertEqual(data["chat_request_count_24h"], 1)
         self.assertEqual(data["retrieval_hit_rate_7d"], "60.0%")
         self.assertEqual(data["retryable_ingestion_count"], 1)

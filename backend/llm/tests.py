@@ -19,13 +19,8 @@ from llm.models import EvalRecord, FineTuneRun, ModelConfig
 from llm.services.model_config_service import get_active_model_config
 from llm.services.fine_tune_service import create_fine_tune_run
 from llm.services.prompt_service import load_prompt_template, render_prompt
-from llm.services.providers.ollama_provider import (
-    OllamaChatProvider,
-    OllamaEmbeddingProvider,
-)
 from llm.services.providers.deepseek_provider import DeepSeekChatProvider
 from llm.services.runtime_service import (
-    _normalize_ollama_endpoint,
     get_chat_provider,
     get_embedding_provider,
 )
@@ -110,10 +105,16 @@ class ModelConfigListApiTests(TestCase):
         payload = response.json()
         self.assertEqual(payload["code"], 0)
         self.assertEqual(payload["message"], "ok")
-        self.assertEqual(payload["data"]["total"], 3)
+        self.assertEqual(payload["data"]["total"], 5)
         self.assertEqual(
             [item["name"] for item in payload["data"]["model_configs"]],
-            ["default-chat", "qwen-chat", "default-embedding"],
+            [
+                "default-chat",
+                "qwen-chat",
+                "default-embedding",
+                "default-dashscope-embedding",
+                "default-dashscope-rerank",
+            ],
         )
 
         first_row = payload["data"]["model_configs"][0]

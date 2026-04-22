@@ -9,3 +9,8 @@ class BaseChatProvider:
 class BaseEmbeddingProvider:
     def embed(self, *, texts, options=None):
         raise NotImplementedError
+
+
+class BaseRerankProvider:
+    def rerank(self, *, query, documents, top_n=None, options=None):
+        raise NotImplementedError

@@ -51,8 +51,9 @@ def retrieve(*, query, filters=None, top_k=5):
             filters=filters,
             top_k=normalized_top_k,
         )
-        reranked = rerank_results(results)
+        reranked = rerank_results(results, query=query)
         for item in reranked:
-            item["rerank_score"] = item["score"]
+            if "rerank_score" not in item:
+                item["rerank_score"] = item.get("score", 0.0)
         observation.update(output={"result_count": len(reranked)})
         return reranked
