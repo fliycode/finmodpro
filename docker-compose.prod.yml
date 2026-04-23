@@ -50,7 +50,7 @@ services:
       KB_CHUNK_SIZE: ${KB_CHUNK_SIZE:-400}
       KB_CHUNK_OVERLAP: ${KB_CHUNK_OVERLAP:-50}
       KB_EMBEDDING_DIMENSION: ${KB_EMBEDDING_DIMENSION:-64}
-      UNSTRUCTURED_API_URL: ${UNSTRUCTURED_API_URL:-http://unstructured-api:8000}
+      UNSTRUCTURED_API_URL: ${UNSTRUCTURED_API_URL:-}
       UNSTRUCTURED_API_KEY: ${UNSTRUCTURED_API_KEY:-}
       UNSTRUCTURED_TIMEOUT_SECONDS: ${UNSTRUCTURED_TIMEOUT_SECONDS:-30}
       UNSTRUCTURED_PDF_STRATEGY: ${UNSTRUCTURED_PDF_STRATEGY:-auto}
@@ -70,10 +70,6 @@ services:
       litellm:
         condition: service_started
       milvus:
-        condition: service_started
-      ollama:
-        condition: service_started
-      unstructured-api:
         condition: service_started
     healthcheck:
       test: ["CMD-SHELL", "python -c \"import sys, urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health/', timeout=5); sys.exit(0)\""]
@@ -121,7 +117,7 @@ services:
       KB_CHUNK_SIZE: ${KB_CHUNK_SIZE:-400}
       KB_CHUNK_OVERLAP: ${KB_CHUNK_OVERLAP:-50}
       KB_EMBEDDING_DIMENSION: ${KB_EMBEDDING_DIMENSION:-64}
-      UNSTRUCTURED_API_URL: ${UNSTRUCTURED_API_URL:-http://unstructured-api:8000}
+      UNSTRUCTURED_API_URL: ${UNSTRUCTURED_API_URL:-}
       UNSTRUCTURED_API_KEY: ${UNSTRUCTURED_API_KEY:-}
       UNSTRUCTURED_TIMEOUT_SECONDS: ${UNSTRUCTURED_TIMEOUT_SECONDS:-30}
       UNSTRUCTURED_PDF_STRATEGY: ${UNSTRUCTURED_PDF_STRATEGY:-auto}
@@ -139,10 +135,6 @@ services:
       litellm:
         condition: service_started
       milvus:
-        condition: service_started
-      ollama:
-        condition: service_started
-      unstructured-api:
         condition: service_started
 
   mysql:
@@ -189,9 +181,6 @@ services:
       - ./deploy/litellm/rendered.config.yaml:/app/config.yaml:ro
     ports:
       - "4000:4000"
-    depends_on:
-      ollama:
-        condition: service_started
     restart: unless-stopped
 
   etcd:
@@ -236,24 +225,6 @@ services:
         condition: service_started
     restart: unless-stopped
 
-  ollama:
-    image: ollama/ollama:0.6.2
-    ports:
-      - "11434:11434"
-    volumes:
-      - ollama_data:/root/.ollama
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD-SHELL", "ollama list >/dev/null 2>&1 || exit 1"]
-      interval: 30s
-      timeout: 10s
-      retries: 5
-      start_period: 20s
-
-  unstructured-api:
-    image: downloads.unstructured.io/unstructured-io/unstructured-api:latest
-    restart: unless-stopped
-
 volumes:
   backend_media:
   mysql_data:
@@ -261,4 +232,3 @@ volumes:
   etcd_data:
   minio_data:
   milvus_data:
-  ollama_data:
