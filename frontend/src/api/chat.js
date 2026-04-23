@@ -6,15 +6,18 @@ const normalizeMessage = (message) => {
     return null;
   }
 
+  const citations = Array.isArray(message.citations ?? message.citationsJson ?? message.citations_json)
+    ? (message.citations ?? message.citationsJson ?? message.citations_json)
+    : [];
+
   return {
     id: message.id ?? null,
     sequence: message.sequence ?? null,
     role: message.role ?? 'assistant',
     messageType: message.messageType ?? message.message_type ?? 'text',
     status: message.status ?? 'complete',
-    citationsJson: Array.isArray(message.citationsJson ?? message.citations_json)
-      ? (message.citationsJson ?? message.citations_json)
-      : [],
+    citations,
+    citationsJson: citations,
     modelMetadataJson:
       message.modelMetadataJson && typeof message.modelMetadataJson === 'object'
         ? message.modelMetadataJson
