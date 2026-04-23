@@ -150,3 +150,18 @@ export function getSessionLoadFailureNotice(activeSessionLoadFailed) {
     ? '会话加载失败，当前仅显示系统状态。请刷新页面后重试。'
     : '';
 }
+
+export function updateMessageAt(messages, index, patch = {}) {
+  if (!Array.isArray(messages) || index < 0 || index >= messages.length) {
+    return Array.isArray(messages) ? [...messages] : [];
+  }
+
+  return messages.map((message, messageIndex) => (
+    messageIndex === index ? { ...message, ...patch } : message
+  ));
+}
+
+export function getCitationDisclosureLabel(citations = []) {
+  const count = Array.isArray(citations) ? citations.length : 0;
+  return count > 0 ? `引用依据（${count} 条）` : '引用依据';
+}

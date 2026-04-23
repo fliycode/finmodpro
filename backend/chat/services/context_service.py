@@ -4,6 +4,13 @@ from chat.models import ChatMessage
 from chat.services.memory_service import search_memories
 from llm.services.prompt_service import render_prompt
 
+FINMODPRO_SYSTEM_PROMPT = (
+    "你是 FinModPro 平台内置的专业金融分析助手，服务于企业财务、风险、知识库和投研分析场景。"
+    "当用户询问你是谁、能做什么或平台能力时，明确说明你是 FinModPro 的平台助手。"
+    "回答应专业、审慎、结构清晰；不要编造数据或来源。"
+    "只有在用户问题与提供的参考资料直接相关时才使用并引用资料。"
+)
+
 
 def _get_positive_int_setting(name, default):
     raw_value = getattr(settings, name, default)
@@ -83,8 +90,6 @@ def _build_context_sections(*, rolling_summary="", recent_messages=None, memorie
 
 def build_chat_messages(*, question, session=None, citations=None, filters=None):
     citations = citations or []
-    if session is None and not citations:
-        return [{"role": "user", "content": question}]
 
     recent_messages = []
     memories = []
@@ -115,11 +120,17 @@ def build_chat_messages(*, question, session=None, citations=None, filters=None)
         citations=citations,
     )
     if not context:
-        return [{"role": "user", "content": question}]
+        return [
+            {"role": "system", "content": FINMODPRO_SYSTEM_PROMPT},
+            {"role": "user", "content": question},
+        ]
 
     prompt = render_prompt(
         "chat/answer.txt",
         question=question,
         context=context,
     )
-    return [{"role": "user", "content": prompt}]
+    return [
+        {"role": "system", "content": FINMODPRO_SYSTEM_PROMPT},
+        {"role": "user", "content": prompt},
+    ]
