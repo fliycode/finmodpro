@@ -256,6 +256,6 @@ def chat_ask_stream_view(request):
             )
 
     response = StreamingHttpResponse(stream_response(), content_type="text/event-stream")
-    response["Cache-Control"] = "no-cache"
+    response["Cache-Control"] = "no-cache, no-transform"
     response["X-Accel-Buffering"] = "no"
     return response

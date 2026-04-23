@@ -269,6 +269,8 @@ class ChatAskApiTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response["Content-Type"], "text/event-stream")
+        self.assertEqual(response["Cache-Control"], "no-cache, no-transform")
+        self.assertEqual(response["X-Accel-Buffering"], "no")
         body = b"".join(response.streaming_content).decode("utf-8")
         self.assertIn('event: meta', body)
         self.assertIn('"answer_mode": "cited"', body)
