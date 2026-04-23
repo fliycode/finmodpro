@@ -261,10 +261,22 @@ class ChatAskApiTests(TestCase):
         self.assertGreaterEqual(payload["duration_ms"], 0)
 
     def test_chat_ask_identity_question_skips_knowledgebase_retrieval(self):
+        session = ChatSession.objects.create(
+            user=self.user,
+            title="旧会话",
+            rolling_summary="参考上下文描述的是另一个系统。",
+        )
+        create_session_message(
+            session=session,
+            role=ChatMessage.ROLE_USER,
+            content="另一个系统是谁？",
+            status=ChatMessage.STATUS_COMPLETE,
+        )
+
         with patch("chat.services.ask_service.retrieve", return_value=[]) as mocked_retrieve:
             response = self.client.post(
                 "/api/chat/ask",
-                data=json.dumps({"question": "你是谁？"}),
+                data=json.dumps({"question": "你是谁？", "session_id": session.id}),
                 content_type="application/json",
                 HTTP_AUTHORIZATION=f"Bearer {self.access_token}",
             )
@@ -273,6 +285,8 @@ class ChatAskApiTests(TestCase):
         payload = response.json()
         self.assertEqual(payload["answer_mode"], "direct")
         self.assertEqual(payload["citations"], [])
+        self.assertNotIn("参考上下文", payload["answer"])
+        self.assertNotIn("另一个系统", payload["answer"])
         mocked_retrieve.assert_not_called()
 
     def test_chat_ask_filters_weak_retrieval_matches(self):

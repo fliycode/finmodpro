@@ -118,11 +118,15 @@ def _prepare_answer(question, filters=None, top_k=5, session=None):
     if _is_direct_assistant_question(question):
         retrieval_results = []
         answer_mode = "direct"
+        prompt_session = None
+        prompt_filters = {}
     else:
         retrieval_results = _select_relevant_results(
             retrieve(query=question, filters=resolved_filters, top_k=top_k)
         )
         answer_mode = "cited" if retrieval_results else "fallback"
+        prompt_session = session
+        prompt_filters = resolved_filters
     retrieval_payload = build_retrieval_response(query=question, results=retrieval_results)
     citations = retrieval_payload["citations"]
     duration_ms = int((time.monotonic() - started_at) * 1000)
@@ -130,10 +134,10 @@ def _prepare_answer(question, filters=None, top_k=5, session=None):
         "question": question,
         "query": question,
         "messages": build_chat_messages(
-            session=session,
+            session=prompt_session,
             question=question,
             citations=citations,
-            filters=resolved_filters,
+            filters=prompt_filters,
         ),
         "citations": citations,
         "answer_mode": answer_mode,
