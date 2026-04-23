@@ -1,4 +1,5 @@
 import logging
+import re
 import time
 
 from chat.services.context_service import build_chat_messages
@@ -17,11 +18,90 @@ from rag.services.retrieval_service import build_retrieval_response, retrieve
 
 logger = logging.getLogger(__name__)
 
+MAX_CHAT_CITATIONS = 3
+MIN_CHAT_CITATION_SCORE = 0.12
 
-def _build_answer_notice(citations):
-    if citations:
+_DIRECT_ASSISTANT_PATTERNS = (
+    "你是谁",
+    "你是什么",
+    "介绍一下你",
+    "介绍一下自己",
+    "你能做什么",
+    "你可以做什么",
+    "who are you",
+    "what are you",
+)
+
+_CITATION_INDEX_PATTERN = re.compile(
+    r"(?:\[|【)\s*(\d{1,2})\s*(?:\]|】)|(?:资料|引用|依据)\s*(\d{1,2})"
+)
+
+
+def _build_answer_notice(answer_mode):
+    if answer_mode != "fallback":
         return None
     return "当前回答未命中知识库引用，仅基于通用模型能力生成，请注意甄别。"
+
+
+def _normalize_question_text(question):
+    return " ".join(str(question or "").strip().lower().split())
+
+
+def _is_direct_assistant_question(question):
+    normalized = _normalize_question_text(question)
+    if not normalized:
+        return False
+    return any(pattern in normalized for pattern in _DIRECT_ASSISTANT_PATTERNS)
+
+
+def _numeric_score(item, key):
+    try:
+        return float(item.get(key))
+    except (TypeError, ValueError):
+        return None
+
+
+def _best_relevance_score(item):
+    scores = [
+        _numeric_score(item, "rerank_score"),
+        _numeric_score(item, "score"),
+        _numeric_score(item, "keyword_score"),
+        _numeric_score(item, "vector_score"),
+    ]
+    numeric_scores = [score for score in scores if score is not None]
+    if not numeric_scores:
+        return None
+    return max(numeric_scores)
+
+
+def _select_relevant_results(results):
+    relevant = []
+    for item in results:
+        score = _best_relevance_score(item)
+        if score is not None and score < MIN_CHAT_CITATION_SCORE:
+            continue
+        relevant.append(item)
+    return relevant[:MAX_CHAT_CITATIONS]
+
+
+def _filter_citations_used_by_answer(citations, answer):
+    citations = citations or []
+    used_indexes = set()
+    for match in _CITATION_INDEX_PATTERN.finditer(str(answer or "")):
+        raw_index = match.group(1) or match.group(2)
+        try:
+            used_indexes.add(int(raw_index))
+        except (TypeError, ValueError):
+            continue
+
+    if not used_indexes:
+        return citations
+
+    return [
+        citation
+        for index, citation in enumerate(citations, start=1)
+        if index in used_indexes
+    ]
 
 
 def _resolve_filters(filters=None, session=None):
@@ -35,7 +115,14 @@ def _resolve_filters(filters=None, session=None):
 def _prepare_answer(question, filters=None, top_k=5, session=None):
     started_at = time.monotonic()
     resolved_filters = _resolve_filters(filters, session=session)
-    retrieval_results = retrieve(query=question, filters=resolved_filters, top_k=top_k)
+    if _is_direct_assistant_question(question):
+        retrieval_results = []
+        answer_mode = "direct"
+    else:
+        retrieval_results = _select_relevant_results(
+            retrieve(query=question, filters=resolved_filters, top_k=top_k)
+        )
+        answer_mode = "cited" if retrieval_results else "fallback"
     retrieval_payload = build_retrieval_response(query=question, results=retrieval_results)
     citations = retrieval_payload["citations"]
     duration_ms = int((time.monotonic() - started_at) * 1000)
@@ -49,8 +136,8 @@ def _prepare_answer(question, filters=None, top_k=5, session=None):
             filters=resolved_filters,
         ),
         "citations": citations,
-        "answer_mode": "cited" if citations else "fallback",
-        "answer_notice": _build_answer_notice(citations),
+        "answer_mode": answer_mode,
+        "answer_notice": _build_answer_notice(answer_mode),
         "duration_ms": duration_ms,
         "retrieval_results": retrieval_results,
         "filters": resolved_filters,
@@ -101,19 +188,22 @@ def ask_question(*, question, filters=None, top_k=5, session=None):
             raise
 
         if assistant_message is not None:
+            final_citations = _filter_citations_used_by_answer(payload["citations"], answer)
             finalize_session_message(
                 message=assistant_message,
                 content=answer,
-                citations=payload["citations"],
+                citations=final_citations,
                 model_metadata={"answer_mode": payload["answer_mode"]},
             )
             _dispatch_session_maintenance_tasks_non_blocking(session_id=session.id)
+        else:
+            final_citations = _filter_citations_used_by_answer(payload["citations"], answer)
 
         _record_retrieval_log(payload)
         observation.update(
             output={
                 "answer_mode": payload["answer_mode"],
-                "citation_count": len(payload["citations"]),
+                "citation_count": len(final_citations),
                 "duration_ms": payload["duration_ms"],
             }
         )
@@ -121,7 +211,7 @@ def ask_question(*, question, filters=None, top_k=5, session=None):
             "question": payload["question"],
             "query": payload["query"],
             "answer": answer,
-            "citations": payload["citations"],
+            "citations": final_citations,
             "answer_mode": payload["answer_mode"],
             "answer_notice": payload["answer_notice"],
             "duration_ms": payload["duration_ms"],
@@ -150,7 +240,8 @@ def stream_question(*, question, filters=None, top_k=5, session=None):
                 "data": {
                     "question": payload["question"],
                     "query": payload["query"],
-                    "citations": payload["citations"],
+                    "citations": [],
+                    "citation_count": len(payload["citations"]),
                     "answer_mode": payload["answer_mode"],
                     "answer_notice": payload["answer_notice"],
                     "duration_ms": payload["duration_ms"],
@@ -181,11 +272,12 @@ def stream_question(*, question, filters=None, top_k=5, session=None):
                 raise
 
             answer = "".join(chunks)
+            final_citations = _filter_citations_used_by_answer(payload["citations"], answer)
             if assistant_message is not None:
                 finalize_session_message(
                     message=assistant_message,
                     content=answer,
-                    citations=payload["citations"],
+                    citations=final_citations,
                     model_metadata={"answer_mode": payload["answer_mode"]},
                 )
                 _dispatch_session_maintenance_tasks_non_blocking(session_id=session.id)
@@ -194,7 +286,7 @@ def stream_question(*, question, filters=None, top_k=5, session=None):
             observation.update(
                 output={
                     "answer_mode": payload["answer_mode"],
-                    "citation_count": len(payload["citations"]),
+                    "citation_count": len(final_citations),
                     "duration_ms": payload["duration_ms"],
                     "stream_chunk_count": len(chunks),
                 }
@@ -203,7 +295,7 @@ def stream_question(*, question, filters=None, top_k=5, session=None):
                 "event": "done",
                 "data": {
                     "answer": answer,
-                    "citations": payload["citations"],
+                    "citations": final_citations,
                     "answer_mode": payload["answer_mode"],
                     "answer_notice": payload["answer_notice"],
                     "duration_ms": payload["duration_ms"],

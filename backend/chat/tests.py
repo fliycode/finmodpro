@@ -14,6 +14,7 @@ from authentication.services.jwt_service import generate_access_token
 from chat.models import ChatMessage, ChatSession
 from chat.serializers import ChatMessageSerializer, ChatSessionSerializer
 from chat.services.ask_service import stream_question
+from chat.services.context_service import build_chat_messages
 from chat.services.memory_service import delete_memory_item, extract_session_memories, set_memory_pin_state
 from chat.services.session_service import dispatch_session_maintenance_tasks
 from chat.services.session_service import (
@@ -45,7 +46,7 @@ class FakeEmbeddingProvider:
 
 class FakeChatProvider:
     def chat(self, *, messages, options=None):
-        return messages[0]["content"]
+        return messages[-1]["content"]
 
     def stream(self, *, messages, options=None):
         content = self.chat(messages=messages, options=options)
@@ -259,6 +260,107 @@ class ChatAskApiTests(TestCase):
         self.assertIn("duration_ms", payload)
         self.assertGreaterEqual(payload["duration_ms"], 0)
 
+    def test_chat_ask_identity_question_skips_knowledgebase_retrieval(self):
+        with patch("chat.services.ask_service.retrieve", return_value=[]) as mocked_retrieve:
+            response = self.client.post(
+                "/api/chat/ask",
+                data=json.dumps({"question": "你是谁？"}),
+                content_type="application/json",
+                HTTP_AUTHORIZATION=f"Bearer {self.access_token}",
+            )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["answer_mode"], "direct")
+        self.assertEqual(payload["citations"], [])
+        mocked_retrieve.assert_not_called()
+
+    def test_chat_ask_filters_weak_retrieval_matches(self):
+        weak_match = {
+            "document_title": "Unrelated memo",
+            "doc_type": "txt",
+            "source_date": "2025-02-18",
+            "page_label": "chunk-9",
+            "snippet": "only a very weak incidental overlap",
+            "score": 0.05,
+            "rerank_score": 0.05,
+        }
+        with patch("chat.services.ask_service.retrieve", return_value=[weak_match]):
+            response = self.client.post(
+                "/api/chat/ask",
+                data=json.dumps({"question": "利润率趋势"}),
+                content_type="application/json",
+                HTTP_AUTHORIZATION=f"Bearer {self.access_token}",
+            )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["answer_mode"], "fallback")
+        self.assertEqual(payload["citations"], [])
+
+    def test_chat_ask_limits_citations_to_focused_evidence(self):
+        results = [
+            {
+                "document_title": f"Evidence {index}",
+                "doc_type": "txt",
+                "source_date": "2025-02-18",
+                "page_label": f"chunk-{index}",
+                "snippet": f"revenue and margin evidence {index}",
+                "score": 0.9 - (index * 0.05),
+                "rerank_score": 0.9 - (index * 0.05),
+            }
+            for index in range(5)
+        ]
+        with patch("chat.services.ask_service.retrieve", return_value=results):
+            response = self.client.post(
+                "/api/chat/ask",
+                data=json.dumps({"question": "revenue and margin outlook", "top_k": 5}),
+                content_type="application/json",
+                HTTP_AUTHORIZATION=f"Bearer {self.access_token}",
+            )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(len(payload["citations"]), 3)
+        self.assertEqual(
+            [citation["document_title"] for citation in payload["citations"]],
+            ["Evidence 0", "Evidence 1", "Evidence 2"],
+        )
+
+    def test_chat_ask_returns_only_citations_used_by_answer(self):
+        class IndexedCitationProvider:
+            def chat(self, *, messages, options=None):
+                return "根据[2]，利润率改善更明显。"
+
+        results = [
+            {
+                "document_title": f"Evidence {index}",
+                "doc_type": "txt",
+                "source_date": "2025-02-18",
+                "page_label": f"chunk-{index}",
+                "snippet": f"margin evidence {index}",
+                "score": 0.8,
+                "rerank_score": 0.8,
+            }
+            for index in range(3)
+        ]
+        with (
+            patch("chat.services.ask_service.retrieve", return_value=results),
+            patch("chat.services.ask_service.get_chat_provider", return_value=IndexedCitationProvider()),
+        ):
+            response = self.client.post(
+                "/api/chat/ask",
+                data=json.dumps({"question": "margin outlook", "top_k": 3}),
+                content_type="application/json",
+                HTTP_AUTHORIZATION=f"Bearer {self.access_token}",
+            )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["answer"], "根据[2]，利润率改善更明显。")
+        self.assertEqual(len(payload["citations"]), 1)
+        self.assertEqual(payload["citations"][0]["document_title"], "Evidence 1")
+
     def test_chat_stream_returns_initial_metadata_event_and_chunks(self):
         response = self.client.post(
             "/api/chat/ask/stream",
@@ -276,6 +378,7 @@ class ChatAskApiTests(TestCase):
         self.assertIn('"answer_mode": "cited"', body)
         self.assertIn('event: chunk', body)
         self.assertIn('event: done', body)
+        self.assertIn('"citations": []', body.split("event: chunk", 1)[0])
 
     def test_chat_stream_fallback_reports_notice_when_no_citations(self):
         response = self.client.post(
@@ -289,6 +392,14 @@ class ChatAskApiTests(TestCase):
         body = b"".join(response.streaming_content).decode("utf-8")
         self.assertIn('"answer_mode": "fallback"', body)
         self.assertIn("answer_notice", body)
+
+    def test_build_chat_messages_always_includes_platform_system_prompt(self):
+        messages = build_chat_messages(question="你是谁？")
+
+        self.assertEqual(messages[0]["role"], "system")
+        self.assertIn("FinModPro", messages[0]["content"])
+        self.assertIn("平台助手", messages[0]["content"])
+        self.assertEqual(messages[1], {"role": "user", "content": "你是谁？"})
 
     @patch("chat.services.ask_service.retrieve", return_value=[])
     def test_chat_ask_persists_session_messages_and_uses_session_filters(self, mocked_retrieve):

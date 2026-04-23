@@ -7,10 +7,12 @@ import { kbApi } from '../api/knowledgebase.js';
 import { qaApi } from '../api/qa.js';
 import {
   getDefaultSessionFilters,
+  getCitationDisclosureLabel,
   getSessionLoadFailureNotice,
   getQaChromeState,
   normalizeDatasetId,
   normalizeHistoryItems,
+  updateMessageAt,
   shouldShowFinancialQaEmptyState,
 } from '../lib/workspace-qa.js';
 import ChatHistory from './ChatHistory.vue';
@@ -312,42 +314,53 @@ const handleAsk = async () => {
       }
     }
 
-    const assistantMessage = createAssistantPlaceholder();
-    messages.value.push(assistantMessage);
+    messages.value.push(createAssistantPlaceholder());
+    const assistantMessageIndex = messages.value.length - 1;
+    const updateAssistantMessage = (patch) => {
+      messages.value = updateMessageAt(messages.value, assistantMessageIndex, patch);
+    };
     await scrollToBottom();
 
     const finalState = await qaApi.streamQuestion(currentQuery, {
       sessionId: currentSessionId.value,
       filters: activeSessionFilters.value,
       onMeta(meta) {
-        assistantMessage.citations = meta.citations;
-        assistantMessage.answer_mode = meta.answer_mode;
-        assistantMessage.answer_notice = meta.answer_notice;
-        assistantMessage.duration_ms = meta.duration_ms;
+        updateAssistantMessage({
+          citations: meta.citations,
+          answer_mode: meta.answer_mode,
+          answer_notice: meta.answer_notice,
+          duration_ms: meta.duration_ms,
+        });
       },
       onChunk(content, state) {
-        assistantMessage.content = state.answer || `${assistantMessage.content}${content}`;
+        updateAssistantMessage({ content: state.answer || content });
       },
       onDone(doneState) {
-        assistantMessage.content = doneState.answer || assistantMessage.content || '未获取到回答，请稍后重试。';
-        assistantMessage.citations = doneState.citations;
-        assistantMessage.answer_mode = doneState.answer_mode;
-        assistantMessage.answer_notice = doneState.answer_notice;
-        assistantMessage.duration_ms = doneState.duration_ms;
+        updateAssistantMessage({
+          content: doneState.answer || messages.value[assistantMessageIndex]?.content || '未获取到回答，请稍后重试。',
+          citations: doneState.citations,
+          answer_mode: doneState.answer_mode,
+          answer_notice: doneState.answer_notice,
+          duration_ms: doneState.duration_ms,
+        });
       },
     });
 
-    assistantMessage.isStreaming = false;
-    assistantMessage.content = finalState.answer || assistantMessage.content || '未获取到回答，请稍后重试。';
+    updateAssistantMessage({
+      isStreaming: false,
+      content: finalState.answer || messages.value[assistantMessageIndex]?.content || '未获取到回答，请稍后重试。',
+    });
     await refreshSessionOptions();
   } catch (error) {
     const lastMessage = messages.value[messages.value.length - 1];
     if (lastMessage?.isStreaming) {
-      lastMessage.isStreaming = false;
-      lastMessage.isError = true;
-      lastMessage.content = getFriendlyErrorMessage(error);
-      lastMessage.citations = [];
-      lastMessage.answer_notice = '';
+      messages.value = updateMessageAt(messages.value, messages.value.length - 1, {
+        isStreaming: false,
+        isError: true,
+        content: getFriendlyErrorMessage(error),
+        citations: [],
+        answer_notice: '',
+      });
     } else {
       messages.value.push({
         role: 'assistant',
@@ -425,8 +438,11 @@ const handleAsk = async () => {
                 </div>
               </div>
 
-              <div v-if="msg.citations && msg.citations.length > 0" class="citations-container">
-                <div class="citations-title">引用依据</div>
+              <details v-if="msg.citations && msg.citations.length > 0" class="citations-container">
+                <summary class="citations-title">
+                  {{ getCitationDisclosureLabel(msg.citations) }}
+                  <span class="citations-title__hint">展开查看</span>
+                </summary>
                 <div class="citations-list">
                   <div v-for="(cite, i) in msg.citations" :key="i" class="citation-card">
                     <div class="citation-card__header">
@@ -441,7 +457,7 @@ const handleAsk = async () => {
                     <div class="cite-snippet">{{ cite.snippet }}</div>
                   </div>
                 </div>
-              </div>
+              </details>
             </div>
           </div>
 
@@ -746,21 +762,53 @@ const handleAsk = async () => {
 }
 
 .citations-container {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
+  border: 1px solid rgba(20, 32, 51, 0.08);
+  background: rgba(255, 255, 255, 0.78);
+  border-radius: 14px;
+  padding: 0;
 }
 
 .citations-title {
+  cursor: pointer;
+  list-style: none;
+  padding: 10px 12px;
   font-size: 12px;
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: #5a677d;
+  user-select: none;
+}
+
+.citations-title::-webkit-details-marker {
+  display: none;
+}
+
+.citations-title::before {
+  content: '›';
+  display: inline-block;
+  margin-right: 8px;
+  color: #2457c5;
+  font-size: 15px;
+  transform: rotate(0deg);
+  transition: transform 160ms ease;
+}
+
+.citations-container[open] .citations-title::before {
+  transform: rotate(90deg);
+}
+
+.citations-title__hint {
+  margin-left: 8px;
+  color: #8a94a6;
+  font-size: 11px;
+  letter-spacing: 0;
+  text-transform: none;
 }
 
 .citations-list {
   display: grid;
   gap: 8px;
+  padding: 0 10px 10px;
 }
 
 .citation-card {

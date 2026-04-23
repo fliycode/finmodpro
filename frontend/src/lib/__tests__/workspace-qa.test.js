@@ -4,6 +4,8 @@ import assert from 'node:assert/strict';
 import {
   getSessionLoadFailureNotice,
   getQaChromeState,
+  getCitationDisclosureLabel,
+  updateMessageAt,
   shouldShowFinancialQaEmptyState,
   shouldShowQaEmptyState,
 } from '../workspace-qa.js';
@@ -69,4 +71,30 @@ test('financial qa empty state only shows for fresh conversations', () => {
 test('session load failure notice is only surfaced when a load fails', () => {
   assert.equal(getSessionLoadFailureNotice(false), '');
   assert.equal(getSessionLoadFailureNotice(true), '会话加载失败，当前仅显示系统状态。请刷新页面后重试。');
+});
+
+test('streaming message updates replace the array item to trigger reactivity', () => {
+  const original = [
+    { role: 'user', content: 'Q' },
+    { role: 'assistant', content: '', isStreaming: true },
+  ];
+
+  const updated = updateMessageAt(original, 1, { content: 'partial answer' });
+
+  assert.notEqual(updated, original);
+  assert.notEqual(updated[1], original[1]);
+  assert.deepEqual(updated[1], {
+    role: 'assistant',
+    content: 'partial answer',
+    isStreaming: true,
+  });
+});
+
+test('citation disclosure label summarizes hidden evidence', () => {
+  assert.equal(getCitationDisclosureLabel([]), '引用依据');
+  assert.equal(getCitationDisclosureLabel([{ document_title: 'A' }]), '引用依据（1 条）');
+  assert.equal(
+    getCitationDisclosureLabel([{ document_title: 'A' }, { document_title: 'B' }]),
+    '引用依据（2 条）',
+  );
 });
