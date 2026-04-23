@@ -1203,6 +1203,14 @@ class ChatSessionDetailApiTests(TestCase):
             sequence=2,
             role=ChatMessage.ROLE_ASSISTANT,
             content="第二条回答",
+            citations_json=[
+                {
+                    "document_title": "压力测试报告",
+                    "doc_type": "pdf",
+                    "page_label": "p.3",
+                    "snippet": "资本充足率压力测试结果。",
+                }
+            ],
         )
         ChatMessage.objects.create(
             session=self.session,
@@ -1230,6 +1238,18 @@ class ChatSessionDetailApiTests(TestCase):
         self.assertEqual(
             [message["sequence"] for message in payload["data"]["session"]["messages"]],
             [1, 2],
+        )
+        assistant_message = payload["data"]["session"]["messages"][1]
+        self.assertEqual(
+            assistant_message["citations_json"],
+            [
+                {
+                    "document_title": "压力测试报告",
+                    "doc_type": "pdf",
+                    "page_label": "p.3",
+                    "snippet": "资本充足率压力测试结果。",
+                }
+            ],
         )
 
     def test_session_detail_requires_authentication(self):
