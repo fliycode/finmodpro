@@ -118,6 +118,13 @@ export const createChatApi = (overrides = {}) => {
         auth: true,
       });
     },
+
+    async deleteSession(sessionId) {
+      return fetchJson(`/api/chat/sessions/${sessionId}`, {
+        method: 'DELETE',
+        auth: true,
+      });
+    },
   };
 };
 

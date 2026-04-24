@@ -24,7 +24,7 @@ const props = defineProps({
   },
 });
 
-const emit = defineEmits(['open-session', 'refresh', 'export-session']);
+const emit = defineEmits(['open-session', 'refresh', 'export-session', 'delete-session']);
 
 const handleOpenSession = (id) => {
   emit('open-session', id);
@@ -32,6 +32,10 @@ const handleOpenSession = (id) => {
 
 const handleExportSession = (id) => {
   emit('export-session', id);
+};
+
+const handleDeleteSession = (id) => {
+  emit('delete-session', id);
 };
 
 const shouldShowSummaryPreview = (item) =>
@@ -115,6 +119,13 @@ const getDatasetLabel = (item) => {
               @click="handleExportSession(item.id)"
             >
               导出
+            </button>
+            <button
+              type="button"
+              class="delete-btn"
+              @click="handleDeleteSession(item.id)"
+            >
+              删除
             </button>
           </div>
         </div>
@@ -315,7 +326,8 @@ const getDatasetLabel = (item) => {
 }
 
 .view-btn,
-.export-btn {
+.export-btn,
+.delete-btn {
   border: none;
   padding: 6px 12px;
   cursor: pointer;
@@ -332,6 +344,11 @@ const getDatasetLabel = (item) => {
 .export-btn {
   background: rgba(16, 35, 61, 0.08);
   color: var(--text-secondary);
+}
+
+.delete-btn {
+  background: rgba(185, 28, 28, 0.08);
+  color: #991b1b;
 }
 
 .skeleton-title,
