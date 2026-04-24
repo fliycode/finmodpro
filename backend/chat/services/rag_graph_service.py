@@ -325,30 +325,40 @@ def _best_relevance_score(item):
     return max(numeric_scores)
 
 
-def _select_relevant_results(results):
+def _select_relevant_results(results, *, limit=MAX_CHAT_CITATIONS):
     relevant = []
     for item in results:
         score = _best_relevance_score(item)
         if score is not None and score < MIN_CHAT_CITATION_SCORE:
             continue
         relevant.append(item)
-    return relevant[:MAX_CHAT_CITATIONS]
+    if limit is None:
+        return relevant
+    return relevant[:limit]
 
 
 def _retrieve_context(state: ChatRagState):
     rewritten_query = state.get("rewritten_query") or state["question"]
+    requested_top_k = int(state["top_k"])
+    retrieval_top_k = requested_top_k
+    candidate_limit = MAX_CHAT_CITATIONS
+    if state.get("route_guard") == "document_lookup_intent":
+        retrieval_top_k = max(requested_top_k * 4, 20)
+        candidate_limit = retrieval_top_k
     retrieval_results = _select_relevant_results(
         state["retrieve_fn"](
             query=rewritten_query,
             filters=state["resolved_filters"],
-            top_k=state["top_k"],
-        )
+            top_k=retrieval_top_k,
+        ),
+        limit=candidate_limit,
     )
     logger.info(
         "chat rag retrieve",
         extra={
             "question": state["question"],
             "rewritten_query": rewritten_query,
+            "top_k": retrieval_top_k,
             "retrieved_count": len(retrieval_results),
         },
     )
