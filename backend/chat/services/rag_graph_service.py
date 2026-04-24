@@ -32,6 +32,7 @@ _DIRECT_ASSISTANT_PATTERNS = (
 )
 
 _ROUTER_JSON_PATTERN = re.compile(r"\{.*\}", re.DOTALL)
+_JSON_PATTERN = re.compile(r"\{.*\}|\[.*\]", re.DOTALL)
 
 
 class ChatRagState(TypedDict, total=False):
@@ -45,6 +46,7 @@ class ChatRagState(TypedDict, total=False):
     route: str
     rewritten_query: str
     retrieval_results: list
+    graded_results: list
     citations: list
     answer_mode: str
     messages: list
@@ -85,6 +87,13 @@ def _parse_router_output(raw_text, question):
     return {"route": route, "rewritten_query": rewritten_query}
 
 
+def _parse_json_candidate(raw_text):
+    text = str(raw_text or "").strip()
+    match = _JSON_PATTERN.search(text)
+    candidate = match.group(0) if match else text
+    return json.loads(candidate)
+
+
 def _route_question(state: ChatRagState):
     question = state["question"]
     provider = state["provider"]
@@ -105,8 +114,51 @@ def _route_question(state: ChatRagState):
         raw_output = provider.chat(messages=prompt, options={"temperature": 0, "max_tokens": 64})
     except Exception:
         logger.exception("chat rag router failed; falling back to heuristic route")
-        return _fallback_route(question)
-    return _parse_router_output(raw_output, question)
+        decision = _fallback_route(question)
+    else:
+        decision = _parse_router_output(raw_output, question)
+    logger.info(
+        "chat rag router decision",
+        extra={
+            "question": question,
+            "route": decision["route"],
+            "rewritten_query": decision["rewritten_query"],
+        },
+    )
+    return decision
+
+
+def _rewrite_query(state: ChatRagState):
+    question = state["question"]
+    provider = state["provider"]
+    prompt = [
+        {
+            "role": "system",
+            "content": (
+                "你是 FinModPro 的检索查询重写器。"
+                "请把用户问题改写成更适合检索金融知识库的查询，保留关键实体、财务指标、时间范围和文档线索。"
+                "输出严格 JSON：{\"rewritten_query\":\"...\"}，不要输出额外文本。"
+            ),
+        },
+        {"role": "user", "content": question},
+    ]
+    try:
+        raw_output = provider.chat(messages=prompt, options={"temperature": 0, "max_tokens": 64})
+        parsed = _parse_json_candidate(raw_output)
+        if not isinstance(parsed, dict):
+            raise ValueError("rewrite response is not a JSON object")
+        rewritten_query = str(parsed.get("rewritten_query") or "").strip() or question
+    except Exception:
+        logger.exception("chat rag rewrite failed; falling back to original question")
+        rewritten_query = state.get("rewritten_query") or question
+    logger.info(
+        "chat rag rewrite",
+        extra={
+            "question": question,
+            "rewritten_query": rewritten_query,
+        },
+    )
+    return {"rewritten_query": rewritten_query}
 
 
 def _numeric_score(item, key):
@@ -148,13 +200,107 @@ def _retrieve_context(state: ChatRagState):
             top_k=state["top_k"],
         )
     )
+    logger.info(
+        "chat rag retrieve",
+        extra={
+            "question": state["question"],
+            "rewritten_query": rewritten_query,
+            "retrieved_count": len(retrieval_results),
+        },
+    )
+    return {"retrieval_results": retrieval_results}
+
+
+def _fallback_grade_results(results):
+    return _select_relevant_results(results)
+
+
+def _grade_retrieval(state: ChatRagState):
+    results = state.get("retrieval_results") or []
+    if not results:
+        logger.info(
+            "chat rag grade",
+            extra={
+                "question": state["question"],
+                "graded_count": 0,
+                "grading_mode": "empty",
+            },
+        )
+        return {"graded_results": []}
+
+    provider = state["provider"]
+    serialized_results = [
+        {
+            "index": index,
+            "document_title": item.get("document_title"),
+            "snippet": item.get("snippet"),
+            "score": item.get("score"),
+            "rerank_score": item.get("rerank_score"),
+        }
+        for index, item in enumerate(results, start=1)
+    ]
+    prompt = [
+        {
+            "role": "system",
+            "content": (
+                "你是 FinModPro 的检索相关性评估器。"
+                "从候选资料里挑选真正与问题直接相关、值得提供给回答模型的条目。"
+                "最多保留 3 条。输出严格 JSON：{\"relevant_indexes\":[1,2,...]}。"
+            ),
+        },
+        {
+            "role": "user",
+            "content": json.dumps(
+                {
+                    "question": state["question"],
+                    "candidates": serialized_results,
+                },
+                ensure_ascii=False,
+            ),
+        },
+    ]
+    try:
+        raw_output = provider.chat(messages=prompt, options={"temperature": 0, "max_tokens": 64})
+        parsed = _parse_json_candidate(raw_output)
+        if not isinstance(parsed, dict):
+            raise ValueError("grade response is not a JSON object")
+        raw_indexes = parsed.get("relevant_indexes")
+        if not isinstance(raw_indexes, list) or not raw_indexes:
+            raise ValueError("grade response missing relevant_indexes")
+        normalized_indexes = set()
+        for value in raw_indexes:
+            normalized_indexes.add(int(value))
+        selected = [
+            item
+            for index, item in enumerate(results, start=1)
+            if index in normalized_indexes
+        ]
+        graded_results = _select_relevant_results(selected)
+        grading_mode = "llm"
+    except Exception:
+        logger.exception("chat rag grading failed; falling back to score-based grading")
+        graded_results = _fallback_grade_results(results)
+        grading_mode = "fallback"
+    logger.info(
+        "chat rag grade",
+        extra={
+            "question": state["question"],
+            "graded_count": len(graded_results),
+            "grading_mode": grading_mode,
+        },
+    )
+    return {"graded_results": graded_results}
+
+
+def _build_retrieval_context(state: ChatRagState):
+    graded_results = state.get("graded_results") or []
     citations = build_retrieval_response(
         query=state["question"],
-        results=retrieval_results,
+        results=graded_results,
     )["citations"]
     answer_mode = "cited" if citations else "fallback"
     return {
-        "retrieval_results": retrieval_results,
+        "retrieval_results": graded_results,
         "citations": citations,
         "answer_mode": answer_mode,
         "messages": build_chat_messages(
@@ -181,24 +327,30 @@ def _direct_answer_context(state: ChatRagState):
 
 
 def _route_after_router(state: ChatRagState):
-    return "retrieve_context" if state.get("route") == "retrieve" else "direct_answer_context"
+    return "rewrite_query" if state.get("route") == "retrieve" else "direct_answer_context"
 
 
 def _build_rag_graph():
     graph = StateGraph(ChatRagState)
     graph.add_node("route_question", _route_question)
+    graph.add_node("rewrite_query", _rewrite_query)
     graph.add_node("retrieve_context", _retrieve_context)
+    graph.add_node("grade_retrieval", _grade_retrieval)
+    graph.add_node("build_retrieval_context", _build_retrieval_context)
     graph.add_node("direct_answer_context", _direct_answer_context)
     graph.add_edge(START, "route_question")
     graph.add_conditional_edges(
         "route_question",
         _route_after_router,
         {
-            "retrieve_context": "retrieve_context",
+            "rewrite_query": "rewrite_query",
             "direct_answer_context": "direct_answer_context",
         },
     )
-    graph.add_edge("retrieve_context", END)
+    graph.add_edge("rewrite_query", "retrieve_context")
+    graph.add_edge("retrieve_context", "grade_retrieval")
+    graph.add_edge("grade_retrieval", "build_retrieval_context")
+    graph.add_edge("build_retrieval_context", END)
     graph.add_edge("direct_answer_context", END)
     return graph.compile()
 

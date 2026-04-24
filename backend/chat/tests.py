@@ -15,6 +15,7 @@ from chat.models import ChatMessage, ChatSession
 from chat.serializers import ChatMessageSerializer, ChatSessionSerializer
 from chat.services.ask_service import stream_question
 from chat.services.context_service import build_chat_messages
+from chat.services.rag_graph_service import prepare_chat_payload
 from chat.services.memory_service import delete_memory_item, extract_session_memories, set_memory_pin_state
 from chat.services.session_service import dispatch_session_maintenance_tasks
 from chat.services.session_service import (
@@ -53,6 +54,18 @@ class FakeChatProvider:
         for chunk in [content[:12], content[12:]]:
             if chunk:
                 yield chunk
+
+
+class ScriptedChatProvider:
+    def __init__(self, responses):
+        self.responses = list(responses)
+        self.calls = []
+
+    def chat(self, *, messages, options=None):
+        self.calls.append({"messages": messages, "options": options})
+        if not self.responses:
+            raise AssertionError("No scripted responses left for chat call.")
+        return self.responses.pop(0)
 
 
 def fake_vector_search(*, query, filters=None, top_k=5):
@@ -214,6 +227,78 @@ class ChatAskApiTests(TestCase):
         self.assertEqual(retrieval_log.result_count, 1)
         self.assertEqual(retrieval_log.source, RetrievalLog.SOURCE_CHAT_ASK)
         self.assertIsNotNone(retrieval_log.duration_ms)
+
+    def test_prepare_chat_payload_rewrites_query_and_grades_results(self):
+        provider = ScriptedChatProvider([
+            '{"route":"retrieve","rewritten_query":"unused from router"}',
+            '{"rewritten_query":"capital adequacy stress test"}',
+            '{"relevant_indexes":[2]}',
+        ])
+        observed = {}
+
+        def fake_retrieve(*, query, filters=None, top_k=5):
+            observed["query"] = query
+            return [
+                {
+                    "document_title": "Doc 1",
+                    "doc_type": "pdf",
+                    "source_date": "2025-02-18",
+                    "page_label": "p.2",
+                    "snippet": "general introduction",
+                    "score": 0.8,
+                    "rerank_score": 0.8,
+                },
+                {
+                    "document_title": "Doc 2",
+                    "doc_type": "pdf",
+                    "source_date": "2025-02-18",
+                    "page_label": "p.3",
+                    "snippet": "capital adequacy stress test details",
+                    "score": 0.9,
+                    "rerank_score": 0.9,
+                },
+            ]
+
+        payload = prepare_chat_payload(
+            question="资本充足率压力测试结果是什么？",
+            provider=provider,
+            retrieve_fn=fake_retrieve,
+        )
+
+        self.assertEqual(observed["query"], "capital adequacy stress test")
+        self.assertEqual(payload["query"], "capital adequacy stress test")
+        self.assertEqual(len(payload["citations"]), 1)
+        self.assertEqual(payload["citations"][0]["document_title"], "Doc 2")
+        self.assertEqual(payload["answer_mode"], "cited")
+
+    def test_prepare_chat_payload_logs_router_rewrite_and_grade(self):
+        provider = ScriptedChatProvider([
+            '{"route":"retrieve","rewritten_query":"unused"}',
+            '{"rewritten_query":"cash flow forecast"}',
+            '{"relevant_indexes":[1]}',
+        ])
+
+        with self.assertLogs("chat.services.rag_graph_service", level="INFO") as captured:
+            prepare_chat_payload(
+                question="现金流预测怎么看？",
+                provider=provider,
+                retrieve_fn=lambda **kwargs: [
+                    {
+                        "document_title": "Cashflow memo",
+                        "doc_type": "txt",
+                        "source_date": "2025-02-18",
+                        "page_label": "chunk-1",
+                        "snippet": "cash flow forecast details",
+                        "score": 0.9,
+                        "rerank_score": 0.9,
+                    }
+                ],
+            )
+
+        joined = "\n".join(captured.output)
+        self.assertIn("chat rag router decision", joined)
+        self.assertIn("chat rag rewrite", joined)
+        self.assertIn("chat rag grade", joined)
 
     def test_chat_ask_accepts_query_alias_and_falls_back_to_model_answer_when_no_match(self):
         response = self.client.post(
