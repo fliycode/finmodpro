@@ -16,6 +16,7 @@ import {
 } from '../lib/workspace-qa.js';
 import ChatHistory from './ChatHistory.vue';
 import ChatMemoryDrawer from './ChatMemoryDrawer.vue';
+import AppIcon from './ui/AppIcon.vue';
 
 const props = defineProps({
   sessionId: {
@@ -454,10 +455,20 @@ const handleAsk = async () => {
         <div class="input-area">
           <textarea
             v-model="query"
+            rows="1"
             placeholder="输入您的金融分析问题，按 Enter 发送，Shift + Enter 换行"
             @keydown.enter.exact.prevent="handleAsk"
           />
-          <button :disabled="isAsking || !query.trim()" class="send-btn" @click="handleAsk">发送</button>
+          <button
+            :disabled="isAsking || !query.trim()"
+            class="send-btn"
+            type="button"
+            aria-label="发送"
+            title="发送"
+            @click="handleAsk"
+          >
+            <AppIcon name="send" />
+          </button>
         </div>
       </div>
     </div>
@@ -787,37 +798,61 @@ const handleAsk = async () => {
 
 .input-area {
   flex-shrink: 0;
-  padding: 10px clamp(22px, 3.2vw, 48px) 14px;
-  border-top: 1px solid rgba(20, 32, 51, 0.08);
+  width: min(900px, calc(100% - 44px));
+  margin: 10px auto 14px;
+  padding: 5px 6px 5px 18px;
+  border: 1px solid rgba(20, 32, 51, 0.12);
+  border-radius: 999px;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 76px;
-  gap: 10px;
-  background: rgba(255, 255, 255, 0.94);
+  grid-template-columns: minmax(0, 1fr) 36px;
+  gap: 8px;
+  align-items: center;
+  background: #fff;
   backdrop-filter: blur(14px);
+  box-shadow: 0 14px 32px -26px rgba(16, 24, 40, 0.38);
 }
 
 .input-area textarea {
-  min-height: 48px;
-  max-height: 18svh;
+  height: 24px;
+  min-height: 24px;
+  max-height: 24px;
   resize: none;
-  border-radius: 14px;
-  border: 1px solid rgba(20, 32, 51, 0.12);
-  background: #fff;
-  padding: 12px 14px;
+  overflow: hidden;
+  border: 0;
+  background: transparent;
+  padding: 1px 0 0;
   font: inherit;
   color: #142033;
-  line-height: 1.45;
+  line-height: 24px;
+  outline: none;
 }
 
 .send-btn {
   align-self: center;
-  height: 42px;
+  width: 34px;
+  height: 34px;
   border: none;
-  border-radius: 12px;
+  border-radius: 999px;
   background: #2457c5;
   color: #fff;
-  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   cursor: pointer;
+  transition:
+    opacity 0.16s ease,
+    transform 0.16s ease,
+    background-color 0.16s ease;
+}
+
+.send-btn:hover:not(:disabled) {
+  background: #1d49aa;
+  transform: translateY(-1px);
+}
+
+.send-btn :deep(.app-icon) {
+  width: 17px;
+  height: 17px;
 }
 
 .send-btn:disabled {
@@ -882,11 +917,11 @@ const handleAsk = async () => {
   }
 
   .input-area {
-    grid-template-columns: 1fr;
+    width: calc(100% - 28px);
   }
 
   .send-btn {
-    width: 100%;
+    width: 34px;
   }
 }
 </style>
