@@ -303,6 +303,108 @@ class ChatAskApiTests(TestCase):
         self.assertIn("chat rag rewrite", joined)
         self.assertIn("chat rag grade", joined)
 
+    def test_prepare_chat_payload_forces_retrieval_for_report_title_lookup(self):
+        provider = ScriptedChatProvider([
+            '{"route":"direct","rewritten_query":"查一下开题报告的题目是什么"}',
+            '{"rewritten_query":"开题报告 题目"}',
+            '{"relevant_indexes":[1]}',
+        ])
+        observed = {}
+
+        def fake_retrieve(*, query, filters=None, top_k=5):
+            observed["query"] = query
+            return [
+                {
+                    "document_title": "开题报告",
+                    "doc_type": "pdf",
+                    "source_date": "2026-04-20",
+                    "page_label": "p.1",
+                    "snippet": "开题报告题目：供应链金融风险管理研究",
+                    "score": 0.92,
+                    "rerank_score": 0.92,
+                }
+            ]
+
+        payload = prepare_chat_payload(
+            question="查一下开题报告的题目是什么",
+            provider=provider,
+            retrieve_fn=fake_retrieve,
+        )
+
+        self.assertEqual(observed["query"], "开题报告 题目")
+        self.assertEqual(payload["route"], "retrieve")
+        self.assertEqual(payload["route_guard"], "document_lookup_intent")
+        self.assertEqual(payload["answer_mode"], "cited")
+        self.assertEqual(payload["citations"][0]["document_title"], "开题报告")
+
+    def test_prepare_chat_payload_forces_direct_for_platform_question(self):
+        provider = ScriptedChatProvider([
+            '{"route":"retrieve","rewritten_query":"FinModPro 平台"}',
+        ])
+        with patch("chat.services.rag_graph_service.default_retrieve") as mocked_retrieve:
+            payload = prepare_chat_payload(
+                question="你好，这是什么平台？",
+                provider=provider,
+            )
+
+        self.assertEqual(payload["route"], "direct")
+        self.assertEqual(payload["route_guard"], "direct_assistant_intent")
+        self.assertEqual(payload["answer_mode"], "direct")
+        mocked_retrieve.assert_not_called()
+
+    def test_prepare_chat_payload_accepts_grader_index_list(self):
+        provider = ScriptedChatProvider([
+            '{"route":"retrieve","rewritten_query":"unused"}',
+            '{"rewritten_query":"capital adequacy"}',
+            "[1]",
+        ])
+
+        payload = prepare_chat_payload(
+            question="资本充足率是什么？",
+            provider=provider,
+            retrieve_fn=lambda **kwargs: [
+                {
+                    "document_title": "Capital memo",
+                    "doc_type": "txt",
+                    "source_date": "2026-04-20",
+                    "page_label": "chunk-1",
+                    "snippet": "capital adequacy details",
+                    "score": 0.9,
+                    "rerank_score": 0.9,
+                }
+            ],
+        )
+
+        self.assertEqual(payload["grading_mode"], "llm")
+        self.assertEqual(payload["citations"][0]["document_title"], "Capital memo")
+
+    def test_prepare_chat_payload_accepts_empty_grader_selection(self):
+        provider = ScriptedChatProvider([
+            '{"route":"retrieve","rewritten_query":"unused"}',
+            '{"rewritten_query":"capital adequacy"}',
+            '{"relevant_indexes":[]}',
+        ])
+
+        payload = prepare_chat_payload(
+            question="资本充足率是什么？",
+            provider=provider,
+            retrieve_fn=lambda **kwargs: [
+                {
+                    "document_title": "Unrelated memo",
+                    "doc_type": "txt",
+                    "source_date": "2026-04-20",
+                    "page_label": "chunk-1",
+                    "snippet": "unrelated content",
+                    "score": 0.9,
+                    "rerank_score": 0.9,
+                }
+            ],
+        )
+
+        self.assertEqual(payload["grading_mode"], "llm")
+        self.assertEqual(payload["answer_mode"], "fallback")
+        self.assertEqual(payload["citations"], [])
+
     def test_chat_ask_persists_router_metadata_in_retrieval_log(self):
         provider = ScriptedChatProvider([
             '{"route":"retrieve","rewritten_query":"unused"}',
@@ -337,6 +439,7 @@ class ChatAskApiTests(TestCase):
         self.assertEqual(response.status_code, 200)
         retrieval_log = RetrievalLog.objects.latest("id")
         self.assertEqual(retrieval_log.metadata["route"], "retrieve")
+        self.assertEqual(retrieval_log.metadata["route_guard"], "none")
         self.assertEqual(retrieval_log.metadata["rewritten_query"], "capital adequacy stress test")
         self.assertEqual(retrieval_log.metadata["grading_mode"], "llm")
         self.assertEqual(retrieval_log.metadata["retrieved_count"], 1)

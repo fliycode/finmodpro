@@ -30,9 +30,72 @@ _DIRECT_ASSISTANT_PATTERNS = (
     "who are you",
     "what are you",
 )
+_DOCUMENT_SOURCE_PATTERNS = (
+    "知识库",
+    "上传",
+    "文档",
+    "文件",
+    "资料",
+    "材料",
+    "报告",
+    "报表",
+    "财报",
+    "年报",
+    "审计报告",
+    "开题报告",
+    "论文",
+    "合同",
+    "制度",
+    "方案",
+    "计划书",
+    "手册",
+    "纪要",
+    "公告",
+    "通知",
+    "document",
+    "file",
+    "report",
+    "memo",
+)
+_DOCUMENT_LOOKUP_PATTERNS = (
+    "查",
+    "查询",
+    "找",
+    "检索",
+    "看一下",
+    "告诉我",
+    "是什么",
+    "有哪些",
+    "多少",
+    "题目",
+    "标题",
+    "名称",
+    "内容",
+    "摘要",
+    "结论",
+    "作者",
+    "日期",
+    "时间",
+    "title",
+    "what is",
+    "which",
+    "find",
+    "search",
+)
+_GENERATION_PATTERNS = (
+    "生成",
+    "写",
+    "撰写",
+    "起草",
+    "拟定",
+    "设计",
+    "建议",
+    "推荐",
+)
 
 _ROUTER_JSON_PATTERN = re.compile(r"\{.*\}", re.DOTALL)
-_JSON_PATTERN = re.compile(r"\{.*\}|\[.*\]", re.DOTALL)
+_JSON_OBJECT_PATTERN = re.compile(r"\{.*\}", re.DOTALL)
+_FENCED_JSON_PATTERN = re.compile(r"```(?:json)?\s*(.*?)\s*```", re.DOTALL | re.IGNORECASE)
 
 
 class ChatRagState(TypedDict, total=False):
@@ -44,6 +107,7 @@ class ChatRagState(TypedDict, total=False):
     retrieve_fn: object
     resolved_filters: dict
     route: str
+    route_guard: str
     rewritten_query: str
     retrieval_results: list
     graded_results: list
@@ -63,11 +127,43 @@ def _normalize_question_text(question):
     return " ".join(str(question or "").strip().lower().split())
 
 
-def _fallback_route(question):
+def _has_direct_assistant_intent(question):
+    normalized = _normalize_question_text(question)
+    return any(pattern in normalized for pattern in _DIRECT_ASSISTANT_PATTERNS)
+
+
+def _has_document_lookup_intent(question):
     normalized = _normalize_question_text(question)
     if not normalized:
+        return False
+    has_source_hint = any(pattern in normalized for pattern in _DOCUMENT_SOURCE_PATTERNS)
+    has_lookup_hint = any(pattern in normalized for pattern in _DOCUMENT_LOOKUP_PATTERNS)
+    asks_to_create = any(pattern in normalized for pattern in _GENERATION_PATTERNS)
+    if asks_to_create and not any(pattern in normalized for pattern in ("根据", "基于", "参考", "知识库", "上传")):
+        return False
+    return has_source_hint and has_lookup_hint
+
+
+def _guard_route_decision(decision, question):
+    if _has_direct_assistant_intent(question):
+        return {
+            "route": "direct",
+            "rewritten_query": question,
+            "route_guard": "direct_assistant_intent",
+        }
+    if _has_document_lookup_intent(question):
+        return {
+            **decision,
+            "route": "retrieve",
+            "route_guard": "document_lookup_intent",
+        }
+    return {**decision, "route_guard": "none"}
+
+
+def _fallback_route(question):
+    if not _normalize_question_text(question):
         return {"route": "direct", "rewritten_query": question}
-    if any(pattern in normalized for pattern in _DIRECT_ASSISTANT_PATTERNS):
+    if _has_direct_assistant_intent(question):
         return {"route": "direct", "rewritten_query": question}
     return {"route": "retrieve", "rewritten_query": question}
 
@@ -90,9 +186,45 @@ def _parse_router_output(raw_text, question):
 
 def _parse_json_candidate(raw_text):
     text = str(raw_text or "").strip()
-    match = _JSON_PATTERN.search(text)
-    candidate = match.group(0) if match else text
+    fenced_match = _FENCED_JSON_PATTERN.search(text)
+    if fenced_match:
+        text = fenced_match.group(1).strip()
+    if (text.startswith("{") and text.endswith("}")) or (text.startswith("[") and text.endswith("]")):
+        candidate = text
+    else:
+        match = _JSON_OBJECT_PATTERN.search(text)
+        candidate = match.group(0) if match else text
     return json.loads(candidate)
+
+
+def _extract_relevant_indexes(parsed):
+    if isinstance(parsed, list):
+        return parsed
+    if not isinstance(parsed, dict):
+        return None
+    for key in (
+        "relevant_indexes",
+        "relevantIndexes",
+        "indexes",
+        "indices",
+        "selected_indexes",
+        "selectedIndexes",
+        "selected",
+    ):
+        if key in parsed:
+            value = parsed.get(key)
+            if isinstance(value, list):
+                return value
+            if value in (None, ""):
+                return []
+            return [value]
+    return None
+
+
+def _coerce_relevant_index(value):
+    if isinstance(value, dict):
+        value = value.get("index") or value.get("idx") or value.get("id")
+    return int(str(value).strip())
 
 
 def _route_question(state: ChatRagState):
@@ -104,7 +236,8 @@ def _route_question(state: ChatRagState):
             "content": (
                 "你是 FinModPro 聊天问答系统的检索路由器。"
                 "判断当前问题应该直接由模型回答，还是先检索金融知识库后再回答。"
-                "只有当问题需要引用企业文档、财务资料、风险事件、知识库事实或数据证据时才选择 retrieve。"
+                "当问题需要引用企业文档、用户上传资料、报告、论文、制度、财务资料、风险事件、知识库事实或数据证据时选择 retrieve。"
+                "用户问某份报告/文档/资料的题目、标题、内容、摘要、结论、日期、作者或具体数值时必须选择 retrieve。"
                 "如果问题是在问平台身份、你是谁、平台是什么、你能做什么、寒暄问候、纯闲聊，则选择 direct。"
                 "输出严格 JSON：{\"route\":\"direct|retrieve\",\"rewritten_query\":\"...\"}，不要输出额外文本。"
             ),
@@ -118,12 +251,14 @@ def _route_question(state: ChatRagState):
         decision = _fallback_route(question)
     else:
         decision = _parse_router_output(raw_output, question)
+    decision = _guard_route_decision(decision, question)
     logger.info(
         "chat rag router decision",
         extra={
             "question": question,
             "route": decision["route"],
             "rewritten_query": decision["rewritten_query"],
+            "route_guard": decision["route_guard"],
         },
     )
     return decision
@@ -145,13 +280,21 @@ def _rewrite_query(state: ChatRagState):
     ]
     try:
         raw_output = provider.chat(messages=prompt, options={"temperature": 0, "max_tokens": 64})
-        parsed = _parse_json_candidate(raw_output)
-        if not isinstance(parsed, dict):
-            raise ValueError("rewrite response is not a JSON object")
-        rewritten_query = str(parsed.get("rewritten_query") or "").strip() or question
     except Exception:
-        logger.exception("chat rag rewrite failed; falling back to original question")
+        logger.exception("chat rag rewrite provider failed; falling back to original question")
         rewritten_query = state.get("rewritten_query") or question
+    else:
+        try:
+            parsed = _parse_json_candidate(raw_output)
+            if not isinstance(parsed, dict):
+                raise ValueError("rewrite response is not a JSON object")
+            rewritten_query = str(parsed.get("rewritten_query") or "").strip() or question
+        except (json.JSONDecodeError, TypeError, ValueError) as exc:
+            logger.warning(
+                "chat rag rewrite returned invalid JSON; falling back to original question",
+                extra={"error": str(exc)},
+            )
+            rewritten_query = state.get("rewritten_query") or question
     logger.info(
         "chat rag rewrite",
         extra={
@@ -246,7 +389,8 @@ def _grade_retrieval(state: ChatRagState):
             "content": (
                 "你是 FinModPro 的检索相关性评估器。"
                 "从候选资料里挑选真正与问题直接相关、值得提供给回答模型的条目。"
-                "最多保留 3 条。输出严格 JSON：{\"relevant_indexes\":[1,2,...]}。"
+                "最多保留 3 条。没有直接相关资料时输出空数组。"
+                "输出严格 JSON：{\"relevant_indexes\":[1,2,...]}。"
             ),
         },
         {
@@ -262,26 +406,33 @@ def _grade_retrieval(state: ChatRagState):
     ]
     try:
         raw_output = provider.chat(messages=prompt, options={"temperature": 0, "max_tokens": 64})
-        parsed = _parse_json_candidate(raw_output)
-        if not isinstance(parsed, dict):
-            raise ValueError("grade response is not a JSON object")
-        raw_indexes = parsed.get("relevant_indexes")
-        if not isinstance(raw_indexes, list) or not raw_indexes:
-            raise ValueError("grade response missing relevant_indexes")
-        normalized_indexes = set()
-        for value in raw_indexes:
-            normalized_indexes.add(int(value))
-        selected = [
-            item
-            for index, item in enumerate(results, start=1)
-            if index in normalized_indexes
-        ]
-        graded_results = _select_relevant_results(selected)
-        grading_mode = "llm"
     except Exception:
-        logger.exception("chat rag grading failed; falling back to score-based grading")
+        logger.exception("chat rag grading provider failed; falling back to score-based grading")
         graded_results = _fallback_grade_results(results)
         grading_mode = "fallback"
+    else:
+        try:
+            parsed = _parse_json_candidate(raw_output)
+            raw_indexes = _extract_relevant_indexes(parsed)
+            if raw_indexes is None:
+                raise ValueError("grade response missing relevant_indexes")
+            normalized_indexes = set()
+            for value in raw_indexes:
+                normalized_indexes.add(_coerce_relevant_index(value))
+            selected = [
+                item
+                for index, item in enumerate(results, start=1)
+                if index in normalized_indexes
+            ]
+            graded_results = _select_relevant_results(selected)
+            grading_mode = "llm"
+        except (json.JSONDecodeError, TypeError, ValueError) as exc:
+            logger.warning(
+                "chat rag grading returned invalid JSON; falling back to score-based grading",
+                extra={"error": str(exc)},
+            )
+            graded_results = _fallback_grade_results(results)
+            grading_mode = "fallback"
     logger.info(
         "chat rag grade",
         extra={
@@ -388,6 +539,7 @@ def prepare_chat_payload(*, question, filters=None, top_k=5, session=None, provi
         "duration_ms": duration_ms,
         "retrieval_results": result["retrieval_results"],
         "route": result.get("route") or "direct",
+        "route_guard": result.get("route_guard") or "none",
         "grading_mode": result.get("grading_mode") or "none",
         "retrieved_count": len(result.get("retrieval_results") or []),
         "citation_count": len(result.get("citations") or []),
