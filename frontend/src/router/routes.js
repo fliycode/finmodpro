@@ -47,6 +47,10 @@ export const appRoutes = [
         component: () => import('../views/workspace/WorkspaceHistoryView.vue'),
       },
       {
+        path: 'profile',
+        component: () => import('../views/workspace/WorkspaceProfileView.vue'),
+      },
+      {
         path: 'risk',
         component: () => import('../views/workspace/WorkspaceRiskView.vue'),
       },
