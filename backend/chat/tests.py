@@ -227,6 +227,9 @@ class ChatAskApiTests(TestCase):
         self.assertEqual(retrieval_log.result_count, 1)
         self.assertEqual(retrieval_log.source, RetrievalLog.SOURCE_CHAT_ASK)
         self.assertIsNotNone(retrieval_log.duration_ms)
+        self.assertEqual(retrieval_log.metadata["route"], "retrieve")
+        self.assertEqual(retrieval_log.metadata["rewritten_query"], "revenue and margin outlook")
+        self.assertEqual(retrieval_log.metadata["answer_mode"], "cited")
 
     def test_prepare_chat_payload_rewrites_query_and_grades_results(self):
         provider = ScriptedChatProvider([
@@ -299,6 +302,46 @@ class ChatAskApiTests(TestCase):
         self.assertIn("chat rag router decision", joined)
         self.assertIn("chat rag rewrite", joined)
         self.assertIn("chat rag grade", joined)
+
+    def test_chat_ask_persists_router_metadata_in_retrieval_log(self):
+        provider = ScriptedChatProvider([
+            '{"route":"retrieve","rewritten_query":"unused"}',
+            '{"rewritten_query":"capital adequacy stress test"}',
+            '{"relevant_indexes":[1]}',
+            "根据[1]，资本充足率保持稳定。",
+        ])
+        with (
+            patch("chat.services.ask_service.get_chat_provider", return_value=provider),
+            patch(
+                "chat.services.ask_service.retrieve",
+                return_value=[
+                    {
+                        "document_title": "Stress Test Report",
+                        "doc_type": "pdf",
+                        "source_date": "2025-02-18",
+                        "page_label": "p.3",
+                        "snippet": "capital adequacy stress test details",
+                        "score": 0.9,
+                        "rerank_score": 0.9,
+                    }
+                ],
+            ),
+        ):
+            response = self.client.post(
+                "/api/chat/ask",
+                data=json.dumps({"question": "资本充足率压力测试结果是什么？"}),
+                content_type="application/json",
+                HTTP_AUTHORIZATION=f"Bearer {self.access_token}",
+            )
+
+        self.assertEqual(response.status_code, 200)
+        retrieval_log = RetrievalLog.objects.latest("id")
+        self.assertEqual(retrieval_log.metadata["route"], "retrieve")
+        self.assertEqual(retrieval_log.metadata["rewritten_query"], "capital adequacy stress test")
+        self.assertEqual(retrieval_log.metadata["grading_mode"], "llm")
+        self.assertEqual(retrieval_log.metadata["retrieved_count"], 1)
+        self.assertEqual(retrieval_log.metadata["citation_count"], 1)
+        self.assertEqual(retrieval_log.metadata["answer_mode"], "cited")
 
     def test_chat_ask_accepts_query_alias_and_falls_back_to_model_answer_when_no_match(self):
         response = self.client.post(

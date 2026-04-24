@@ -47,6 +47,7 @@ class ChatRagState(TypedDict, total=False):
     rewritten_query: str
     retrieval_results: list
     graded_results: list
+    grading_mode: str
     citations: list
     answer_mode: str
     messages: list
@@ -226,7 +227,7 @@ def _grade_retrieval(state: ChatRagState):
                 "grading_mode": "empty",
             },
         )
-        return {"graded_results": []}
+        return {"graded_results": [], "grading_mode": "empty"}
 
     provider = state["provider"]
     serialized_results = [
@@ -289,7 +290,7 @@ def _grade_retrieval(state: ChatRagState):
             "grading_mode": grading_mode,
         },
     )
-    return {"graded_results": graded_results}
+    return {"graded_results": graded_results, "grading_mode": grading_mode}
 
 
 def _build_retrieval_context(state: ChatRagState):
@@ -386,6 +387,10 @@ def prepare_chat_payload(*, question, filters=None, top_k=5, session=None, provi
         "answer_notice": _build_answer_notice(result["answer_mode"]),
         "duration_ms": duration_ms,
         "retrieval_results": result["retrieval_results"],
+        "route": result.get("route") or "direct",
+        "grading_mode": result.get("grading_mode") or "none",
+        "retrieved_count": len(result.get("retrieval_results") or []),
+        "citation_count": len(result.get("citations") or []),
         "filters": resolved_filters,
         "top_k": top_k,
     }
