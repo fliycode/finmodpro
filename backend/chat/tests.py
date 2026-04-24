@@ -313,6 +313,7 @@ class ChatAskApiTests(TestCase):
 
         def fake_retrieve(*, query, filters=None, top_k=5):
             observed["query"] = query
+            observed["top_k"] = top_k
             return [
                 {
                     "document_title": "开题报告",
@@ -332,6 +333,7 @@ class ChatAskApiTests(TestCase):
         )
 
         self.assertEqual(observed["query"], "开题报告 题目")
+        self.assertEqual(observed["top_k"], 20)
         self.assertEqual(payload["route"], "retrieve")
         self.assertEqual(payload["route_guard"], "document_lookup_intent")
         self.assertEqual(payload["answer_mode"], "cited")
