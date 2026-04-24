@@ -3,7 +3,6 @@ import { computed, nextTick, onMounted, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 
 import { chatApi } from '../api/chat.js';
-import { kbApi } from '../api/knowledgebase.js';
 import { qaApi } from '../api/qa.js';
 import {
   getDefaultSessionFilters,
@@ -35,9 +34,7 @@ const messages = ref([{ role: 'system', content: DEFAULT_SYSTEM_MESSAGE, tone: '
 const isAsking = ref(false);
 const messagesContainer = ref(null);
 const sessionOptions = ref([]);
-const datasets = ref([]);
 const isLoadingSessions = ref(false);
-const isLoadingDatasets = ref(false);
 const isHydratingSession = ref(false);
 const activeSessionLoadFailed = ref(false);
 const historyDrawerOpen = ref(false);
@@ -74,25 +71,6 @@ const qaActionLabels = {
   new: '新对话',
 };
 
-const selectedDatasetId = computed({
-  get() {
-    return activeDatasetId.value === null || activeDatasetId.value === undefined
-      ? ''
-      : String(activeDatasetId.value);
-  },
-  async set(value) {
-    const normalized = normalizeDatasetId(value);
-    activeSessionFilters.value = normalized === null ? {} : { dataset_id: normalized };
-    const nextQuery = { ...router.currentRoute.value.query };
-    if (normalized === null) {
-      delete nextQuery.dataset;
-    } else {
-      nextQuery.dataset = String(normalized);
-    }
-    await router.replace({ query: nextQuery });
-  },
-});
-
 const getAvatarLabel = (role) => {
   if (role === 'user') return '我';
   if (role === 'assistant') return 'AI';
@@ -127,18 +105,6 @@ const scrollToBottom = async () => {
 
 const resetConversation = () => {
   messages.value = [{ role: 'system', content: DEFAULT_SYSTEM_MESSAGE, tone: 'info' }];
-};
-
-const refreshDatasets = async () => {
-  isLoadingDatasets.value = true;
-  try {
-    const result = await kbApi.listDatasets();
-    datasets.value = Array.isArray(result?.datasets) ? result.datasets : [];
-  } catch (error) {
-    console.error('加载数据集列表失败:', error);
-  } finally {
-    isLoadingDatasets.value = false;
-  }
 };
 
 const refreshSessionOptions = async () => {
@@ -293,7 +259,7 @@ watch(
 
 onMounted(async () => {
   activeSessionFilters.value = getDefaultSessionFilters(route.query.dataset);
-  await Promise.all([refreshSessionOptions(), refreshDatasets()]);
+  await refreshSessionOptions();
   if (currentSessionId.value) {
     await loadSession(currentSessionId.value);
   }
@@ -407,7 +373,7 @@ const handleAsk = async () => {
 
 <template>
   <div class="qa-page">
-    <div class="qa-shell ui-card">
+    <div class="qa-shell">
       <div class="qa-shell__toolbar">
         <div class="qa-shell__actions">
           <button
@@ -420,29 +386,11 @@ const handleAsk = async () => {
             {{ qaActionLabels[action] ?? action }}
           </button>
         </div>
-
-        <label class="qa-shell__dataset-picker qa-shell__dataset-picker--subtle">
-          <span>数据集</span>
-          <select v-model="selectedDatasetId" :disabled="isLoadingDatasets">
-            <option value="">全部数据集</option>
-            <option
-              v-for="dataset in datasets"
-              :key="dataset.id"
-              :value="String(dataset.id)"
-            >
-              {{ dataset.name }}
-            </option>
-          </select>
-        </label>
       </div>
 
       <div class="chat-window">
         <div v-if="sessionLoadFailureNotice" class="qa-inline-notice" role="status">
           {{ sessionLoadFailureNotice }}
-        </div>
-        <div v-if="showEmptyState" class="qa-empty-state">
-          <h2>开始新一轮分析</h2>
-          <p>从历史会话继续、查看记忆，或直接输入新的金融问题。</p>
         </div>
 
         <div
@@ -544,6 +492,7 @@ const handleAsk = async () => {
   display: flex;
   flex: 1;
   min-height: 0;
+  margin: -18px calc(var(--workspace-content-padding-inline) * -1) -28px;
 }
 
 .qa-page,
@@ -562,47 +511,21 @@ const handleAsk = async () => {
   flex-direction: column;
   padding: 0;
   overflow: hidden;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  background: var(--surface-2);
 }
 
 .qa-shell__toolbar {
   display: flex;
-  justify-content: space-between;
+  justify-content: flex-end;
   gap: 12px 16px;
-  align-items: flex-start;
+  align-items: center;
   flex-wrap: wrap;
-  padding: 14px 20px;
+  padding: 12px clamp(18px, 2.4vw, 32px);
   border-bottom: 1px solid rgba(20, 32, 51, 0.08);
   background: rgba(255, 255, 255, 0.94);
-}
-
-.qa-shell__dataset-picker {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--text-secondary);
-}
-
-.qa-shell__dataset-picker--subtle {
-  gap: 5px;
-  margin-left: auto;
-}
-
-.qa-shell__dataset-picker--subtle span {
-  font-size: 11px;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-
-.qa-shell__dataset-picker select {
-  min-height: 32px;
-  min-width: 196px;
-  padding: 0 11px;
-  border-radius: 10px;
-  border: 1px solid var(--line-strong);
-  background: #fff;
-  color: var(--text-primary);
 }
 
 .qa-shell__actions {
@@ -646,29 +569,10 @@ const handleAsk = async () => {
   line-height: 1.5;
 }
 
-.qa-empty-state {
-  margin: 20px 20px 0;
-  padding: 18px 20px;
-  border: 1px dashed var(--line-strong);
-  border-radius: 18px;
-  background: rgba(255, 255, 255, 0.78);
-}
-
-.qa-empty-state h2 {
-  margin: 0;
-  font-size: 20px;
-  color: var(--text-primary);
-}
-
-.qa-empty-state p {
-  margin: 8px 0 0;
-  color: var(--text-secondary);
-  line-height: 1.6;
-}
-
 .messages {
   flex: 1;
-  padding: 20px clamp(18px, 2.4vw, 32px) 14px;
+  min-height: 0;
+  padding: 24px clamp(22px, 3.2vw, 48px) 14px;
   overflow-y: auto;
   display: flex;
   flex-direction: column;
@@ -883,32 +787,33 @@ const handleAsk = async () => {
 
 .input-area {
   flex-shrink: 0;
-  padding: 14px clamp(18px, 2.2vw, 24px) 18px;
+  padding: 10px clamp(22px, 3.2vw, 48px) 14px;
   border-top: 1px solid rgba(20, 32, 51, 0.08);
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 88px;
-  gap: 12px;
+  grid-template-columns: minmax(0, 1fr) 76px;
+  gap: 10px;
   background: rgba(255, 255, 255, 0.94);
   backdrop-filter: blur(14px);
 }
 
 .input-area textarea {
-  min-height: 116px;
-  max-height: 30svh;
-  resize: vertical;
-  border-radius: 18px;
+  min-height: 48px;
+  max-height: 18svh;
+  resize: none;
+  border-radius: 14px;
   border: 1px solid rgba(20, 32, 51, 0.12);
   background: #fff;
-  padding: 16px 18px;
+  padding: 12px 14px;
   font: inherit;
   color: #142033;
+  line-height: 1.45;
 }
 
 .send-btn {
-  align-self: end;
-  height: 46px;
+  align-self: center;
+  height: 42px;
   border: none;
-  border-radius: 14px;
+  border-radius: 12px;
   background: #2457c5;
   color: #fff;
   font-weight: 700;
@@ -970,14 +875,6 @@ const handleAsk = async () => {
 @media (max-width: 900px) {
   .qa-shell__toolbar {
     padding-inline: 16px;
-  }
-
-  .qa-shell__dataset-picker--subtle {
-    margin-left: 0;
-  }
-
-  .qa-shell__dataset-picker select {
-    min-width: min(100%, 280px);
   }
 
   .message {
