@@ -49,6 +49,14 @@ def _record_retrieval_log(payload):
         results=payload["retrieval_results"],
         source=RetrievalLog.SOURCE_CHAT_ASK,
         duration_ms=payload["duration_ms"],
+        metadata={
+            "route": payload.get("route"),
+            "rewritten_query": payload.get("query"),
+            "grading_mode": payload.get("grading_mode"),
+            "retrieved_count": payload.get("retrieved_count"),
+            "citation_count": payload.get("citation_count"),
+            "answer_mode": payload.get("answer_mode"),
+        },
     )
 
 
