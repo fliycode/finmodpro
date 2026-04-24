@@ -100,6 +100,29 @@ const exportSession = async (sessionId) => {
   }
 };
 
+const deleteSession = async (sessionId) => {
+  const confirmed = typeof window === 'undefined'
+    ? true
+    : window.confirm('确定删除这条历史会话吗？删除后不可恢复。');
+  if (!confirmed) {
+    return;
+  }
+
+  try {
+    await chatApi.deleteSession(sessionId);
+    if (String(activeSessionId.value) === String(sessionId)) {
+      const nextQuery = { ...route.query };
+      delete nextQuery.session;
+      await router.replace({ query: nextQuery });
+    }
+    await refreshHistory();
+  } catch (error) {
+    console.error('删除会话失败:', error);
+    errorMessage.value = '删除会话失败，请稍后重试。';
+  }
+};
+
+
 watch(
   () => route.query.keyword,
   (value) => {
@@ -177,6 +200,7 @@ onMounted(async () => {
       @refresh="refreshHistory"
       @open-session="openSession"
       @export-session="exportSession"
+      @delete-session="deleteSession"
     />
   </div>
 </template>

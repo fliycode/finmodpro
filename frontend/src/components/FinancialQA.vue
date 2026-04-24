@@ -210,6 +210,36 @@ const openSession = async (id) => {
   historyDrawerOpen.value = false;
 };
 
+const deleteSession = async (id) => {
+  if (!id) {
+    return;
+  }
+  const confirmed = typeof window === 'undefined'
+    ? true
+    : window.confirm('确定删除这条历史会话吗？删除后不可恢复。');
+  if (!confirmed) {
+    return;
+  }
+
+  try {
+    await chatApi.deleteSession(id);
+    if (String(currentSessionId.value) === String(id)) {
+      currentSessionId.value = null;
+      activeSessionLoadFailed.value = false;
+      resetConversation();
+      await clearSessionRoute();
+    }
+    await refreshSessionOptions();
+  } catch (error) {
+    console.error('删除会话失败:', error);
+    messages.value.push({
+      role: 'system',
+      content: '删除会话失败，请稍后重试。',
+      tone: 'warning',
+    });
+  }
+};
+
 const startNewConversation = async () => {
   currentSessionId.value = null;
   activeSessionLoadFailed.value = false;
@@ -294,7 +324,7 @@ const handleAsk = async () => {
     if (!currentSessionId.value) {
       try {
         const session = await chatApi.createSession({
-          title: currentQuery.slice(0, 50),
+          title: '',
           contextFilters: activeSessionFilters.value,
         });
         if (session?.id) {
@@ -498,6 +528,7 @@ const handleAsk = async () => {
         :show-session-metadata="true"
         @refresh="refreshSessionOptions"
         @open-session="openSession"
+        @delete-session="deleteSession"
       />
     </el-drawer>
 

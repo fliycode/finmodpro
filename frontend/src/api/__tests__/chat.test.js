@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { normalizeSession } from '../chat.js';
+import { createChatApi, normalizeSession } from '../chat.js';
 
 test('normalizeSession maps persisted citations_json to message citations for rendering', () => {
   const session = normalizeSession({
@@ -34,6 +34,29 @@ test('normalizeSession maps persisted citations_json to message citations for re
       doc_type: 'pdf',
       page_label: 'p.3',
       snippet: '资本充足率压力测试结果。',
+    },
+  ]);
+});
+
+test('deleteSession sends a DELETE request to the session endpoint', async () => {
+  const requests = [];
+  const chatApi = createChatApi({
+    fetchJson: async (path, options) => {
+      requests.push({ path, options });
+      return { code: 0, data: { session_id: 12 } };
+    },
+  });
+
+  const payload = await chatApi.deleteSession(12);
+
+  assert.deepEqual(payload, { code: 0, data: { session_id: 12 } });
+  assert.deepEqual(requests, [
+    {
+      path: '/api/chat/sessions/12',
+      options: {
+        method: 'DELETE',
+        auth: true,
+      },
     },
   ]);
 });

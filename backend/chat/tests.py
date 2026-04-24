@@ -289,6 +289,22 @@ class ChatAskApiTests(TestCase):
         self.assertNotIn("另一个系统", payload["answer"])
         mocked_retrieve.assert_not_called()
 
+    def test_chat_ask_platform_question_skips_knowledgebase_retrieval(self):
+        with patch("chat.services.ask_service.retrieve", return_value=[]) as mocked_retrieve:
+            response = self.client.post(
+                "/api/chat/ask",
+                data=json.dumps({"question": "你好，这是什么平台？"}),
+                content_type="application/json",
+                HTTP_AUTHORIZATION=f"Bearer {self.access_token}",
+            )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["answer_mode"], "direct")
+        self.assertEqual(payload["citations"], [])
+        self.assertNotIn("参考上下文", payload["answer"])
+        mocked_retrieve.assert_not_called()
+
     def test_chat_ask_filters_weak_retrieval_matches(self):
         weak_match = {
             "document_title": "Unrelated memo",
@@ -924,6 +940,75 @@ class ChatSessionCreateApiTests(TestCase):
         self.assertEqual(session.title, "流动性分析")
         self.assertEqual(session.context_filters, {"doc_type": "pdf", "document_id": 9})
 
+    def test_generate_session_title_uses_model_summary_instead_of_raw_question(self):
+        class TitleProvider:
+            def chat(self, *, messages, options=None):
+                return "平台身份咨询"
+
+        session = create_chat_session(user=self.user)
+        create_session_message(
+            session=session,
+            role=ChatMessage.ROLE_USER,
+            content="你好，这是什么平台",
+        )
+        create_session_message(
+            session=session,
+            role=ChatMessage.ROLE_ASSISTANT,
+            content="我是 FinModPro 平台助手。",
+        )
+
+        with patch("chat.services.title_service.get_chat_provider", return_value=TitleProvider()):
+            title = generate_session_title(session_id=session.id)
+
+        session.refresh_from_db()
+        self.assertEqual(title, "平台身份咨询")
+        self.assertEqual(session.title, "平台身份咨询")
+        self.assertEqual(session.title_status, ChatSession.TITLE_STATUS_READY)
+        self.assertEqual(session.title_source, ChatSession.TITLE_SOURCE_AI)
+
+    def test_generate_session_title_does_not_regenerate_after_first_turn(self):
+        class TitleProvider:
+            def __init__(self):
+                self.calls = 0
+
+            def chat(self, *, messages, options=None):
+                self.calls += 1
+                return "首轮标题"
+
+        provider = TitleProvider()
+        session = create_chat_session(user=self.user)
+        create_session_message(
+            session=session,
+            role=ChatMessage.ROLE_USER,
+            content="第一问",
+        )
+        create_session_message(
+            session=session,
+            role=ChatMessage.ROLE_ASSISTANT,
+            content="第一答",
+        )
+
+        with patch("chat.services.title_service.get_chat_provider", return_value=provider):
+            first_title = generate_session_title(session_id=session.id)
+
+        create_session_message(
+            session=session,
+            role=ChatMessage.ROLE_USER,
+            content="第二问",
+        )
+        create_session_message(
+            session=session,
+            role=ChatMessage.ROLE_ASSISTANT,
+            content="第二答",
+        )
+
+        with patch("chat.services.title_service.get_chat_provider", return_value=provider):
+            second_title = generate_session_title(session_id=session.id)
+
+        self.assertEqual(first_title, "首轮标题")
+        self.assertEqual(second_title, "首轮标题")
+        self.assertEqual(provider.calls, 1)
+
     def test_create_session_requires_authentication(self):
         response = self.client.post(
             "/api/chat/sessions",
@@ -1286,6 +1371,28 @@ class ChatSessionDetailApiTests(TestCase):
             response.json(),
             {"code": 404, "message": "会话不存在。", "data": {}},
         )
+
+    def test_session_delete_removes_owned_session(self):
+        response = self.client.delete(
+            f"/api/chat/sessions/{self.session.id}",
+            HTTP_AUTHORIZATION=f"Bearer {self.access_token}",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["data"]["session_id"], self.session.id)
+        self.assertFalse(ChatSession.objects.filter(id=self.session.id).exists())
+        self.assertFalse(ChatMessage.objects.filter(session_id=self.session.id).exists())
+
+    def test_session_delete_rejects_access_to_other_users_session(self):
+        other_token = generate_access_token(self.other_user)
+
+        response = self.client.delete(
+            f"/api/chat/sessions/{self.session.id}",
+            HTTP_AUTHORIZATION=f"Bearer {other_token}",
+        )
+
+        self.assertEqual(response.status_code, 403)
+        self.assertTrue(ChatSession.objects.filter(id=self.session.id).exists())
 
     def test_session_export_returns_transcript_payload(self):
         response = self.client.get(

@@ -69,6 +69,13 @@ def get_chat_session_for_user(*, user, session_id):
     return session
 
 
+def delete_chat_session_for_user(*, user, session_id):
+    session = get_chat_session_for_user(user=user, session_id=session_id)
+    deleted_id = session.id
+    session.delete()
+    return deleted_id
+
+
 def list_chat_sessions_for_user(*, user, dataset_id=None, keyword=""):
     last_message_content = ChatMessage.objects.filter(session_id=OuterRef("pk")).order_by(
         "-sequence", "-id"

@@ -11,6 +11,7 @@ from chat.serializers import (
 from chat.services.session_service import (
     build_chat_session_export,
     create_chat_session,
+    delete_chat_session_for_user,
     get_chat_session_for_user,
     list_chat_sessions_for_user,
 )
@@ -80,6 +81,22 @@ class ChatSessionDetailView(APIView):
             return error_response(code=404, message="会话不存在。", status_code=404)
 
         return success_response(data={"session": ChatSessionDetailSerializer(session).data})
+
+    def delete(self, request, session_id):
+        user = get_authenticated_user(request)
+        if user is None:
+            return error_response(code=401, message="未认证。", status_code=401)
+        if not user_has_permission(user, "auth.ask_financial_qa"):
+            return error_response(code=403, message="无权限。", status_code=403)
+
+        try:
+            deleted_id = delete_chat_session_for_user(user=user, session_id=session_id)
+        except PermissionError as exc:
+            return error_response(code=403, message=str(exc), status_code=403)
+        except ChatSession.DoesNotExist:
+            return error_response(code=404, message="会话不存在。", status_code=404)
+
+        return success_response(data={"session_id": deleted_id})
 
 
 class ChatSessionExportView(APIView):

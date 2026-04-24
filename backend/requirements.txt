@@ -11,3 +11,4 @@ pypdf==6.9.2
 milvus-lite==2.5.1
 setuptools>=75
 langfuse
+langgraph>=1.0,<2
