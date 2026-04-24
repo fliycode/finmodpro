@@ -576,7 +576,7 @@ textarea {
 
 .app-sidebar__profile-copy {
   min-width: 0;
-  display: none;
+  display: flex;
   flex-direction: column;
   gap: 1px;
 }
@@ -593,15 +593,32 @@ textarea {
 
 .app-sidebar__profile-copy span,
 .app-sidebar__profile-summary span {
+  display: block;
+  max-width: 132px;
+  overflow: hidden;
   color: var(--text-muted);
   font-size: 11px;
   line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.app-sidebar__profile-summary em {
+  display: inline-flex;
+  margin-top: 4px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: var(--brand-soft);
+  color: var(--brand);
+  font-size: 11px;
+  font-style: normal;
+  font-weight: 700;
 }
 
 .app-sidebar__profile-menu {
   position: absolute;
   left: 0;
-  bottom: calc(100% + 10px);
+  bottom: calc(100% - 1px);
   z-index: 30;
   min-width: 186px;
   padding: 8px;
@@ -626,7 +643,7 @@ textarea {
 
 .app-sidebar__profile-summary {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 10px;
   padding: 6px 6px 10px;
   margin-bottom: 6px;
@@ -1085,7 +1102,7 @@ textarea {
     right: 0;
     left: auto;
     bottom: auto;
-    top: calc(100% + 10px);
+    top: calc(100% - 1px);
     transform: translateY(-6px);
   }
 

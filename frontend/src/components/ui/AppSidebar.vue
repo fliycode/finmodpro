@@ -20,9 +20,13 @@ const profile = computed(() => authStorage.getProfile());
 const items = computed(() => getNavItems(props.area, profile.value));
 const sidebarPresentation = computed(() => getSidebarPresentation(props.area));
 const profileName = computed(() => profile.value?.user?.username || '当前用户');
+const profileEmail = computed(() => profile.value?.user?.email || '未设置邮箱');
 const roleLabel = computed(() => (props.area === 'admin' ? '管理员端' : '用户端'));
 const profileInitial = computed(() => profileName.value.trim().slice(0, 1).toUpperCase() || 'U');
-const profileActions = computed(() => getTopbarActions(props.area, profile.value));
+const profileActions = computed(() => [
+  { id: 'profile', label: '个人信息', to: '/workspace/profile' },
+  ...getTopbarActions(props.area, profile.value),
+]);
 
 const areaMeta = computed(() => {
   if (props.area === 'admin') {
@@ -125,7 +129,7 @@ const handleLogout = async () => {
         <span class="app-sidebar__avatar">{{ profileInitial }}</span>
         <span class="app-sidebar__profile-copy">
           <strong>{{ profileName }}</strong>
-          <span>{{ roleLabel }}</span>
+          <span>{{ profileEmail }}</span>
         </span>
       </button>
 
@@ -134,7 +138,8 @@ const handleLogout = async () => {
           <span class="app-sidebar__avatar app-sidebar__avatar--menu">{{ profileInitial }}</span>
           <div>
             <strong>{{ profileName }}</strong>
-            <span>{{ roleLabel }}</span>
+            <span>{{ profileEmail }}</span>
+            <em>{{ roleLabel }}</em>
           </div>
         </div>
         <template v-for="action in profileActions" :key="action.id">
