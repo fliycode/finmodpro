@@ -20,7 +20,7 @@ def record_model_invocation(
     return ModelInvocationLog.objects.create(
         model_config=model_config,
         capability=capability,
-        provider=model_config.provider if model_config is not None else "litellm",
+        provider=model_config.provider,
         alias=alias,
         upstream_model=upstream_model,
         status=status,

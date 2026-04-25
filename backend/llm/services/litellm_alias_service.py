@@ -3,6 +3,7 @@ from pathlib import Path
 from django.conf import settings
 
 from llm.models import LiteLLMSyncEvent, ModelConfig
+from llm.services.litellm_config_render_service import try_build_rendered_litellm_config
 
 
 def _build_litellm_alias_config(*, alias, upstream_model_name, api_base):
@@ -83,6 +84,11 @@ def sync_litellm_route_for_config(model_config, *, triggered_by):
         triggered_by=triggered_by,
         message=message,
     )
+    try_build_rendered_litellm_config(
+        base_config_path=settings.LITELLM_BASE_CONFIG_PATH,
+        generated_root=str(settings.LITELLM_GENERATED_CONFIG_ROOT),
+        output_path=settings.LITELLM_RENDERED_CONFIG_PATH,
+    )
     return {"status": status, "sync_event_id": event.id, "route_count": 1}
 
 
@@ -116,5 +122,10 @@ def sync_litellm_routes(*, triggered_by):
         status=status,
         triggered_by=triggered_by,
         message=message,
+    )
+    try_build_rendered_litellm_config(
+        base_config_path=settings.LITELLM_BASE_CONFIG_PATH,
+        generated_root=str(settings.LITELLM_GENERATED_CONFIG_ROOT),
+        output_path=settings.LITELLM_RENDERED_CONFIG_PATH,
     )
     return {"status": status, "sync_event_id": event.id, "route_count": len(active_routes)}
