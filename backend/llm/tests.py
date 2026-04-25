@@ -2360,6 +2360,36 @@ class GatewayQueryServiceTests(TestCase):
         total_requests = sum(p["request_count"] for p in result["points"])
         self.assertEqual(total_requests, 1, "Only the LiteLLM log should be counted")
 
+    def test_1h_timeseries_distinct_minute_buckets(self):
+        """Two logs in the same hour but different minutes must produce
+        distinct time-series points when time=1h.
+
+        Regression: the old implementation used TruncHour for the 1h window,
+        collapsing all traffic within an hour into a single coarse bucket.
+        """
+        from datetime import datetime, timedelta, timezone as dt_tz
+        from llm.services.litellm_gateway_query_service import get_costs_timeseries
+
+        now = datetime.now(tz=dt_tz.utc)
+        t0 = now.replace(second=0, microsecond=0)
+        t1 = t0 - timedelta(minutes=10)  # 10 minutes earlier, still within the 1h window
+
+        log0 = self._make_log(request_tokens=100, response_tokens=50)
+        ModelInvocationLog.objects.filter(pk=log0.pk).update(created_at=t0)
+
+        log1 = self._make_log(request_tokens=200, response_tokens=100)
+        ModelInvocationLog.objects.filter(pk=log1.pk).update(created_at=t1)
+
+        result = get_costs_timeseries({"time": "1h"})
+
+        self.assertIn("points", result)
+        self.assertGreaterEqual(
+            len(result["points"]),
+            2,
+            "Two logs 10 minutes apart within the same hour must produce at "
+            "least 2 distinct 1h timeseries points (not collapse into one hourly bucket).",
+        )
+
 @override_settings(
     JWT_SECRET_KEY="test-jwt-secret",
     JWT_ACCESS_TOKEN_LIFETIME_SECONDS=3600,

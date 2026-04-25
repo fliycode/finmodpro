@@ -8,7 +8,7 @@ from collections import defaultdict
 from datetime import timedelta
 
 from django.db.models import Avg, Count, Q, Sum
-from django.db.models.functions import TruncDay, TruncHour
+from django.db.models.functions import TruncDay, TruncHour, TruncMinute
 from django.utils import timezone
 
 from llm.models import LiteLLMSyncEvent, ModelConfig, ModelInvocationLog
@@ -63,9 +63,9 @@ def _apply_filters(qs, filters: dict):
 
 
 def _pricing_map() -> dict:
-    """Return {model_config_id: (input_price_per_million, output_price_per_million)}."""
+    """Return {model_config_id: (input_price_per_million, output_price_per_million)} for LiteLLM configs only."""
     pricing = {}
-    for mc in ModelConfig.objects.only("id", "options"):
+    for mc in ModelConfig.objects.filter(provider=ModelConfig.PROVIDER_LITELLM).only("id", "options"):
         litellm_opts = (mc.options or {}).get("litellm", {})
         inp = litellm_opts.get("input_price_per_million", 0) or 0
         out = litellm_opts.get("output_price_per_million", 0) or 0
@@ -357,19 +357,28 @@ def get_costs_timeseries(filters: dict | None = None) -> dict:
     qs = _apply_filters(_litellm_qs(), filters)
 
     # Choose DB truncation function and display format based on time window.
+    # 1h uses per-minute bucketing so traffic within the hour stays observable.
     # For 7d we use hourly DB truncation then collapse to 6-hour buckets in
     # Python, which still scales by bucket/model pair rather than raw row count.
-    if time_preset in ("1h", "24h"):
+    if time_preset == "1h":
+        trunc_fn = TruncMinute("created_at")
+        bucket_minutes = 1
+        bucket_hours = 0  # sub-hour granularity
+        fmt = "%Y-%m-%dT%H:%M"
+    elif time_preset == "24h":
         trunc_fn = TruncHour("created_at")
         bucket_hours = 1
+        bucket_minutes = None
         fmt = "%Y-%m-%dT%H:00"
     elif time_preset == "7d":
         trunc_fn = TruncHour("created_at")
         bucket_hours = 6
+        bucket_minutes = None
         fmt = "%Y-%m-%dT%H:00"
     else:  # 30d
         trunc_fn = TruncDay("created_at")
         bucket_hours = 24
+        bucket_minutes = None
         fmt = "%Y-%m-%d"
 
     pricing = _pricing_map()
