@@ -7,11 +7,13 @@ from llm.services.litellm_config_render_service import try_build_rendered_litell
 
 
 def _build_litellm_alias_config(*, alias, upstream_model_name, api_base):
+    if "/" not in upstream_model_name:
+        upstream_model_name = f"openai/{upstream_model_name}"
     return (
         "model_list:\n"
         f"  - model_name: {alias}\n"
         "    litellm_params:\n"
-        f"      model: openai/{upstream_model_name}\n"
+        f"      model: {upstream_model_name}\n"
         f"      api_base: {api_base}\n"
     )
 
