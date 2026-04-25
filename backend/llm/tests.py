@@ -1628,6 +1628,40 @@ class LiteLLMGatewayAuditModelTests(TestCase):
         self.assertEqual(row["weight"], 1)
 
 
+class ModelInvocationLogIndexTests(TestCase):
+    """Pin the composite indexes declared on ModelInvocationLog.Meta."""
+
+    def _index_names(self):
+        return {idx.name for idx in ModelInvocationLog._meta.indexes}
+
+    def test_provider_created_at_composite_index_exists(self):
+        self.assertIn(
+            "llm_invoclog_provider_created_idx",
+            self._index_names(),
+            "Composite index (provider, -created_at) must be declared on ModelInvocationLog",
+        )
+
+    def test_provider_created_at_index_fields(self):
+        idx = next(
+            (i for i in ModelInvocationLog._meta.indexes if i.name == "llm_invoclog_provider_created_idx"),
+            None,
+        )
+        self.assertIsNotNone(idx, "Index llm_invoclog_provider_created_idx not found")
+        self.assertEqual(list(idx.fields), ["provider", "-created_at"])
+
+    def test_all_expected_indexes_present(self):
+        expected = {
+            "llm_invoclog_provider_created_idx",
+            "llm_invoclog_cfg_created_idx",
+            "llm_invoclog_trace_created_idx",
+            "llm_invoclog_reqid_created_idx",
+        }
+        self.assertTrue(
+            expected.issubset(self._index_names()),
+            f"Missing indexes: {expected - self._index_names()}",
+        )
+
+
 class LiteLLMGatewayCommandServiceTests(TestCase):
     def setUp(self):
         seed_roles_and_permissions()

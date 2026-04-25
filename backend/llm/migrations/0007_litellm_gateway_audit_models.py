@@ -90,6 +90,10 @@ class Migration(migrations.Migration):
         ),
         migrations.AddIndex(
             model_name="modelinvocationlog",
+            index=models.Index(fields=["provider", "-created_at"], name="llm_invoclog_provider_created_idx"),
+        ),
+        migrations.AddIndex(
+            model_name="modelinvocationlog",
             index=models.Index(fields=["model_config", "-created_at"], name="llm_invoclog_cfg_created_idx"),
         ),
         migrations.AddIndex(
