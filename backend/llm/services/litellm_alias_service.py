@@ -56,6 +56,36 @@ def ensure_litellm_route_from_model_config(model_config):
     return route
 
 
+def sync_litellm_route_for_config(model_config, *, triggered_by):
+    """Write a YAML snippet for a single model config and record a sync event."""
+    generated_root = Path(settings.LITELLM_GENERATED_CONFIG_ROOT)
+    try:
+        generated_root.mkdir(parents=True, exist_ok=True)
+        route_key = f"route-{model_config.capability}-{model_config.id}"
+        config_path = generated_root / f"{route_key}.yaml"
+        api_base = (model_config.options or {}).get("api_base") or model_config.endpoint
+        config_path.write_text(
+            _build_litellm_alias_config(
+                alias=model_config.model_name,
+                upstream_model_name=model_config.model_name,
+                api_base=api_base,
+            ),
+            encoding="utf-8",
+        )
+        status = LiteLLMSyncEvent.STATUS_SUCCESS
+        message = f"Synced model config {model_config.id} ({model_config.name})."
+    except Exception as exc:  # pragma: no cover
+        status = LiteLLMSyncEvent.STATUS_FAILED
+        message = str(exc)
+
+    event = LiteLLMSyncEvent.objects.create(
+        status=status,
+        triggered_by=triggered_by,
+        message=message,
+    )
+    return {"status": status, "sync_event_id": event.id, "route_count": 1}
+
+
 def sync_litellm_routes(*, triggered_by):
     """Write YAML snippets for all active LiteLLM routes and record a sync event."""
     active_routes = list(

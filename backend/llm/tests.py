@@ -334,6 +334,11 @@ class ModelConfigActivationApiTests(TestCase):
                 "is_active",
                 "created_at",
                 "updated_at",
+                "alias",
+                "upstream_provider",
+                "upstream_model",
+                "fallback_aliases",
+                "weight",
             },
         )
 
@@ -1663,3 +1668,30 @@ class LiteLLMGatewayCommandServiceTests(TestCase):
         self.assertEqual(log.request_tokens, 11)
         self.assertEqual(log.response_tokens, 7)
         self.assertEqual(log.status, "success")
+
+    @patch("urllib.request.urlopen")
+    def test_litellm_embedding_provider_records_successful_invocation(self, mock_urlopen):
+        mock_urlopen.return_value = _FakeHttpResponse({
+            "data": [{"embedding": [0.1, 0.2, 0.3]}],
+            "usage": {"prompt_tokens": 5, "total_tokens": 5},
+        })
+        model_config = ModelConfig.objects.create(
+            name="litellm-embed-test",
+            capability=ModelConfig.CAPABILITY_EMBEDDING,
+            provider=ModelConfig.PROVIDER_LITELLM,
+            model_name="embed-default",
+            endpoint="http://localhost:4000",
+            options={"api_key": "sk-test"},
+            is_active=True,
+        )
+        provider = get_embedding_provider()
+
+        provider.embed(texts=["hello world"], trace_id="embed-trace-1", request_id="embed-req-1")
+
+        log = ModelInvocationLog.objects.get(trace_id="embed-trace-1")
+        self.assertEqual(log.capability, "embedding")
+        self.assertEqual(log.request_tokens, 5)
+        self.assertEqual(log.response_tokens, 0)
+        self.assertEqual(log.status, "success")
+        self.assertEqual(log.request_id, "embed-req-1")
+        self.assertEqual(log.model_config, model_config)
