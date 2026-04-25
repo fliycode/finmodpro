@@ -251,6 +251,7 @@ class ModelInvocationLog(models.Model):
     class Meta:
         ordering = ["-created_at", "-id"]
         indexes = [
+            models.Index(fields=["provider", "-created_at"], name="llm_invoclog_provider_created_idx"),
             models.Index(fields=["model_config", "-created_at"], name="llm_invoclog_cfg_created_idx"),
             models.Index(fields=["trace_id", "-created_at"], name="llm_invoclog_trace_created_idx"),
             models.Index(fields=["request_id", "-created_at"], name="llm_invoclog_reqid_created_idx"),
