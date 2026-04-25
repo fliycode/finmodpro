@@ -1,17 +1,62 @@
-"""Lightweight Unstructured parse API — ``strategy=fast`` only.
+"""Lightweight document text extraction — strategy=fast only.
 
-镜像体积 ~300-500 MB（对比官方 ~10 GB），因为不打包 Detectron2、PyTorch、
-Tesseract OCR、LibreOffice 等重型 ML 依赖。只支持 ``fast`` 策略，适合
-文本型 PDF/DOCX 的结构化提取。
-
-Endpoint:  POST /general/v0/general  (兼容 Unstructured API 协议)
+Covers ``pdf`` (via pdfminer.six), ``docx`` (via python-docx), and
+``txt`` (raw read).  No ``unstructured``, Detectron2, PyTorch, Tesseract,
+or LibreOffice — total image ~200 MB.
 """
 
 from io import BytesIO
+from pathlib import Path
+from tempfile import NamedTemporaryFile
 
 from fastapi import FastAPI, File, HTTPException, Query, UploadFile
 
 app = FastAPI()
+
+# ── helpers ──────────────────────────────────────────────────────────────
+
+
+def _extract_pdf(file_bytes: bytes) -> list[dict]:
+    from pdfminer.high_level import extract_text  # noqa: E402
+
+    text = extract_text(BytesIO(file_bytes))
+    elements = []
+    for line in text.splitlines():
+        stripped = line.strip()
+        if stripped:
+            elements.append({"type": "Paragraph", "text": stripped, "metadata": {}})
+    if not elements:
+        # pdfminer returned nothing — basic fallback.
+        decoded = text.strip()
+        if decoded:
+            elements.append({"type": "Paragraph", "text": decoded, "metadata": {}})
+    return elements
+
+
+def _extract_docx(file_bytes: bytes) -> list[dict]:
+    from docx import Document  # noqa: E402
+
+    doc = Document(BytesIO(file_bytes))
+    elements = []
+    for para in doc.paragraphs:
+        text = para.text.strip()
+        if text:
+            style = para.style.name if para.style else ""
+            elem_type = "Title" if "heading" in style.lower() or "title" in style.lower() else "Paragraph"
+            elements.append({"type": elem_type, "text": text, "metadata": {}})
+
+    # Also extract tables.
+    for table in doc.tables:
+        for row in table.rows:
+            cells = [cell.text.strip() for cell in row.cells if cell.text.strip()]
+            if cells:
+                elements.append(
+                    {"type": "Table", "text": " | ".join(cells), "metadata": {}}
+                )
+    return elements
+
+
+# ── API ──────────────────────────────────────────────────────────────────
 
 
 @app.post("/general/v0/general")
@@ -22,24 +67,32 @@ def parse_file(
     if strategy not in ("fast", "auto"):
         raise HTTPException(
             status_code=400,
-            detail=f"不支持 strategy={strategy}。轻量服务只支持 fast/auto。",
+            detail=f"strategy={strategy} not supported (only fast/auto).",
         )
 
-    # Map auto to fast — we never run hi_res.
-    actual_strategy = "fast"
+    content_type = files.content_type or ""
+    filename = (files.filename or "").lower()
+
+    raw = files.file.read()
 
     try:
-        content = files.file.read()
-        from unstructured.partition.auto import partition  # noqa: E402
+        if "pdf" in content_type or filename.endswith(".pdf"):
+            elements = _extract_pdf(raw)
+        elif filename.endswith(".docx") or "wordprocessingml" in content_type:
+            elements = _extract_docx(raw)
+        elif filename.endswith(".txt") or "text/plain" in content_type:
+            text = raw.decode("utf-8", errors="replace")
+            elements = [
+                {"type": "Paragraph", "text": line.strip(), "metadata": {}}
+                for line in text.splitlines()
+                if line.strip()
+            ]
+        else:
+            raise HTTPException(status_code=400, detail=f"Unsupported type: {content_type}")
 
-        elements = partition(
-            file=BytesIO(content),
-            file_filename=files.filename or "unknown",
-            content_type=files.content_type or "application/octet-stream",
-            strategy=actual_strategy,
-            languages=["eng", "chi_sim"],
-        )
-        return [el.to_dict() for el in elements]
+        return elements
+    except HTTPException:
+        raise
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 

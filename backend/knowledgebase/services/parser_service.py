@@ -131,7 +131,7 @@ class ParserService:
         if element_types:
             chunk_defaults["element_types"] = sorted(element_types.keys())
 
-        return self._structured_result(
+        result = self._structured_result(
             parsed_text=parsed_text,
             source_parser="unstructured",
             source_strategy=strategy,
@@ -139,6 +139,9 @@ class ParserService:
             element_count=len(elements),
             chunk_metadata_defaults=chunk_defaults,
         )
+        # Pass raw elements so the chunker can respect boundaries.
+        result["elements"] = elements
+        return result
 
     def parse(self, document):
         file_path = Path(document.file.path)
