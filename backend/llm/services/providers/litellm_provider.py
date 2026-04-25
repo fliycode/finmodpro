@@ -276,8 +276,12 @@ class LiteLLMChatProvider(LiteLLMApiMixin, BaseChatProvider):
 
 
 class LiteLLMEmbeddingProvider(LiteLLMApiMixin, BaseEmbeddingProvider):
-    def embed(self, *, texts, options=None):
+    def embed(self, *, texts, options=None, trace_id="", request_id=""):
+        from llm.services.model_invocation_log_service import record_model_invocation
+
         vectors = []
+        total_request_tokens = 0
+        started_at = time.monotonic()
         for text in texts:
             payload = {"model": self.model_name, "input": text}
             response_payload = self._post_json(
@@ -286,6 +290,8 @@ class LiteLLMEmbeddingProvider(LiteLLMApiMixin, BaseEmbeddingProvider):
                 options=options,
                 capability="embedding",
             )
+            usage = response_payload.get("usage") or {}
+            total_request_tokens += usage.get("prompt_tokens", 0)
             data = response_payload.get("data") or []
             embedding = (data[0] or {}).get("embedding")
             if not isinstance(embedding, list) or not embedding:
@@ -296,4 +302,18 @@ class LiteLLMEmbeddingProvider(LiteLLMApiMixin, BaseEmbeddingProvider):
                     provider=self.provider_name,
                 )
             vectors.append(embedding)
+        latency_ms = int((time.monotonic() - started_at) * 1000)
+        if self.model_config is not None and self.model_config.pk:
+            record_model_invocation(
+                model_config=self.model_config,
+                capability="embedding",
+                alias=self.model_name,
+                upstream_model=self.model_name,
+                status="success",
+                latency_ms=latency_ms,
+                request_tokens=total_request_tokens,
+                response_tokens=0,
+                trace_id=trace_id,
+                request_id=request_id,
+            )
         return vectors
