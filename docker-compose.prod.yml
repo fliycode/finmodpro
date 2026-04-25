@@ -71,6 +71,8 @@ services:
         condition: service_started
       milvus:
         condition: service_started
+      unstructured-api:
+        condition: service_started
     healthcheck:
       test: ["CMD-SHELL", "python -c \"import sys, urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health/', timeout=5); sys.exit(0)\""]
       interval: 15s
@@ -136,6 +138,19 @@ services:
         condition: service_started
       milvus:
         condition: service_started
+      unstructured-api:
+        condition: service_started
+
+  unstructured-api:
+    image: downloads.unstructured.io/unstructured-io/unstructured-api:latest
+    environment:
+      UNSTRUCTURED_PARALLEL_MODE_ENABLED: "false"
+    mem_limit: 2g
+    mem_reservation: 512m
+    restart: unless-stopped
+    # No ports exposed — backend reaches it via Docker DNS over the internal
+    # network.  Memory bounded by mem_limit; strategy=fast (default in
+    # .env.example) avoids loading Detectron2 / CV models.
 
   mysql:
     image: mysql:8.4
