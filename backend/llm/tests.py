@@ -16,6 +16,7 @@ from common.exceptions import ServiceConfigurationError, UpstreamRateLimitError,
 from authentication.models import User
 from authentication.services.jwt_service import generate_access_token
 from llm.models import EvalRecord, FineTuneRun, LiteLLMSyncEvent, ModelConfig, ModelInvocationLog
+from llm.services import model_config_command_service
 from llm.services.model_config_command_service import migrate_active_configs_to_litellm
 from llm.services.model_config_service import get_active_model_config
 from llm.services.fine_tune_service import create_fine_tune_run
@@ -2079,9 +2080,6 @@ class ModelConfigMigrationApiTests(TestCase):
 
     def test_migrate_db_writes_are_atomic(self):
         """If one capability's route activation fails, no LiteLLM routes are activated."""
-        from unittest.mock import patch as _patch
-        from llm.services import model_config_command_service
-
         original_ensure = model_config_command_service.ensure_litellm_route_from_model_config
 
         def _fail_on_embedding(active):
@@ -2090,7 +2088,7 @@ class ModelConfigMigrationApiTests(TestCase):
             return original_ensure(active)
 
         before_count = ModelConfig.objects.filter(provider="litellm", is_active=True).count()
-        with _patch("llm.services.model_config_command_service.ensure_litellm_route_from_model_config", side_effect=_fail_on_embedding):
+        with patch("llm.services.model_config_command_service.ensure_litellm_route_from_model_config", side_effect=_fail_on_embedding):
             with self.assertRaises(ValueError):
                 migrate_active_configs_to_litellm(triggered_by=self.admin_user)
 
