@@ -27,9 +27,9 @@ class GatewaySummaryView(APIView):
     permission_classes = []
 
     def get(self, request):
-        _, err = _require_manage_permission(request)
-        if err:
-            return err
+        _, permission_error = _require_manage_permission(request)
+        if permission_error is not None:
+            return permission_error
         return success_response(data=get_gateway_summary())
 
 
@@ -38,9 +38,9 @@ class GatewayLogsView(APIView):
     permission_classes = []
 
     def get(self, request):
-        _, err = _require_manage_permission(request)
-        if err:
-            return err
+        _, permission_error = _require_manage_permission(request)
+        if permission_error is not None:
+            return permission_error
         filters = _parse_query_filters(request)
         try:
             page = max(1, int(request.query_params.get("page", 1)))
@@ -58,9 +58,9 @@ class GatewayLogsSummaryView(APIView):
     permission_classes = []
 
     def get(self, request):
-        _, err = _require_manage_permission(request)
-        if err:
-            return err
+        _, permission_error = _require_manage_permission(request)
+        if permission_error is not None:
+            return permission_error
         filters = _parse_query_filters(request)
         return success_response(data=get_logs_summary(filters))
 
@@ -70,9 +70,9 @@ class GatewayTraceView(APIView):
     permission_classes = []
 
     def get(self, request, trace_id):
-        _, err = _require_manage_permission(request)
-        if err:
-            return err
+        _, permission_error = _require_manage_permission(request)
+        if permission_error is not None:
+            return permission_error
         result = get_trace(trace_id)
         if result is None:
             return error_response(code=404, message="Trace not found.", status_code=404)
@@ -84,9 +84,9 @@ class GatewayErrorsView(APIView):
     permission_classes = []
 
     def get(self, request):
-        _, err = _require_manage_permission(request)
-        if err:
-            return err
+        _, permission_error = _require_manage_permission(request)
+        if permission_error is not None:
+            return permission_error
         time_preset = request.query_params.get("time") or "24h"
         return success_response(data=get_errors(time_preset=time_preset))
 
@@ -96,9 +96,9 @@ class GatewayCostsSummaryView(APIView):
     permission_classes = []
 
     def get(self, request):
-        _, err = _require_manage_permission(request)
-        if err:
-            return err
+        _, permission_error = _require_manage_permission(request)
+        if permission_error is not None:
+            return permission_error
         filters = _parse_query_filters(request)
         return success_response(data=get_costs_summary(filters))
 
@@ -108,9 +108,9 @@ class GatewayCostsTimeseriesView(APIView):
     permission_classes = []
 
     def get(self, request):
-        _, err = _require_manage_permission(request)
-        if err:
-            return err
+        _, permission_error = _require_manage_permission(request)
+        if permission_error is not None:
+            return permission_error
         filters = _parse_query_filters(request)
         return success_response(data=get_costs_timeseries(filters))
 
@@ -120,8 +120,8 @@ class GatewayCostsModelsView(APIView):
     permission_classes = []
 
     def get(self, request):
-        _, err = _require_manage_permission(request)
-        if err:
-            return err
+        _, permission_error = _require_manage_permission(request)
+        if permission_error is not None:
+            return permission_error
         filters = _parse_query_filters(request)
         return success_response(data=get_costs_models(filters))
