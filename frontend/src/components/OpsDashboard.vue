@@ -769,6 +769,24 @@ const handleBannerAction = async (action) => {
   color: var(--brand);
 }
 
+:global(:root[data-theme='dark']) .overview-banner,
+:global(:root[data-theme='dark']) .overview-banner.is-warning,
+:global(:root[data-theme='dark']) .overview-banner.is-risk,
+:global(:root[data-theme='dark']) .overview-banner.is-info,
+:global(:root[data-theme='dark']) .overview-banner.is-neutral {
+  border-color: var(--line-soft);
+  background: linear-gradient(180deg, rgba(26, 34, 45, 0.98), rgba(20, 26, 36, 0.96));
+}
+
+:global(:root[data-theme='dark']) .overview-banner__meta span,
+:global(:root[data-theme='dark']) .overview-metric,
+:global(:root[data-theme='dark']) .failure-item,
+:global(:root[data-theme='dark']) .audit-item,
+:global(:root[data-theme='dark']) .focus-item {
+  border-color: var(--line-soft);
+  background: var(--surface-2);
+}
+
 .activity-item__content {
   min-width: 0;
 }
