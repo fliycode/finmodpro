@@ -84,6 +84,7 @@ LITELLM_RENDERED_CONFIG_PATH = get_env(
     "LITELLM_RENDERED_CONFIG_PATH",
     str(BASE_DIR.parent / "deploy" / "litellm" / "litellm_config_rendered.yaml"),
 )
+LITELLM_GATEWAY_URL = get_env("LITELLM_GATEWAY_URL", "http://localhost:4000")
 
 CELERY_BROKER_URL = get_env("CELERY_BROKER_URL", "memory://")
 CELERY_RESULT_BACKEND = get_env("CELERY_RESULT_BACKEND", "cache+memory://")

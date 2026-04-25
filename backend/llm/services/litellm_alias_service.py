@@ -39,24 +39,6 @@ def provision_litellm_alias(*, fine_tune_run):
     }
 
 
-def ensure_litellm_route_from_model_config(model_config):
-    """Get or create a LiteLLM ModelConfig route for the given model config."""
-    litellm_name = f"litellm-{model_config.name}"
-    endpoint = getattr(settings, "LITELLM_GATEWAY_URL", "http://localhost:4000")
-    route, _ = ModelConfig.objects.get_or_create(
-        capability=model_config.capability,
-        name=litellm_name,
-        defaults={
-            "provider": ModelConfig.PROVIDER_LITELLM,
-            "model_name": model_config.model_name,
-            "endpoint": endpoint,
-            "options": {},
-            "is_active": False,
-        },
-    )
-    return route
-
-
 def sync_litellm_route_for_config(model_config, *, triggered_by):
     """Write a YAML snippet for a single model config and record a sync event."""
     generated_root = Path(settings.LITELLM_GENERATED_CONFIG_ROOT)
@@ -65,10 +47,14 @@ def sync_litellm_route_for_config(model_config, *, triggered_by):
         route_key = f"route-{model_config.capability}-{model_config.id}"
         config_path = generated_root / f"{route_key}.yaml"
         api_base = (model_config.options or {}).get("api_base") or model_config.endpoint
+        upstream_model_name = (
+            (model_config.options or {}).get("litellm", {}).get("upstream_model")
+            or model_config.model_name
+        )
         config_path.write_text(
             _build_litellm_alias_config(
                 alias=model_config.model_name,
-                upstream_model_name=model_config.model_name,
+                upstream_model_name=upstream_model_name,
                 api_base=api_base,
             ),
             encoding="utf-8",
@@ -84,11 +70,12 @@ def sync_litellm_route_for_config(model_config, *, triggered_by):
         triggered_by=triggered_by,
         message=message,
     )
-    try_build_rendered_litellm_config(
-        base_config_path=settings.LITELLM_BASE_CONFIG_PATH,
-        generated_root=str(settings.LITELLM_GENERATED_CONFIG_ROOT),
-        output_path=settings.LITELLM_RENDERED_CONFIG_PATH,
-    )
+    if status == LiteLLMSyncEvent.STATUS_SUCCESS:
+        try_build_rendered_litellm_config(
+            base_config_path=settings.LITELLM_BASE_CONFIG_PATH,
+            generated_root=str(settings.LITELLM_GENERATED_CONFIG_ROOT),
+            output_path=settings.LITELLM_RENDERED_CONFIG_PATH,
+        )
     return {"status": status, "sync_event_id": event.id, "route_count": 1}
 
 
@@ -104,10 +91,14 @@ def sync_litellm_routes(*, triggered_by):
             route_key = f"route-{route.capability}-{route.id}"
             config_path = generated_root / f"{route_key}.yaml"
             api_base = (route.options or {}).get("api_base") or route.endpoint
+            upstream_model_name = (
+                (route.options or {}).get("litellm", {}).get("upstream_model")
+                or route.model_name
+            )
             config_path.write_text(
                 _build_litellm_alias_config(
                     alias=route.model_name,
-                    upstream_model_name=route.model_name,
+                    upstream_model_name=upstream_model_name,
                     api_base=api_base,
                 ),
                 encoding="utf-8",
@@ -123,9 +114,10 @@ def sync_litellm_routes(*, triggered_by):
         triggered_by=triggered_by,
         message=message,
     )
-    try_build_rendered_litellm_config(
-        base_config_path=settings.LITELLM_BASE_CONFIG_PATH,
-        generated_root=str(settings.LITELLM_GENERATED_CONFIG_ROOT),
-        output_path=settings.LITELLM_RENDERED_CONFIG_PATH,
-    )
+    if status == LiteLLMSyncEvent.STATUS_SUCCESS:
+        try_build_rendered_litellm_config(
+            base_config_path=settings.LITELLM_BASE_CONFIG_PATH,
+            generated_root=str(settings.LITELLM_GENERATED_CONFIG_ROOT),
+            output_path=settings.LITELLM_RENDERED_CONFIG_PATH,
+        )
     return {"status": status, "sync_event_id": event.id, "route_count": len(active_routes)}

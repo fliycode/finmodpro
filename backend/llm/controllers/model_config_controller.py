@@ -8,6 +8,7 @@ from llm.serializers import (
     ModelConfigSummarySerializer,
     ModelConfigWriteSerializer,
 )
+from llm.services.litellm_alias_service import sync_litellm_route_for_config
 from llm.services.model_config_command_service import (
     create_model_config,
     migrate_active_configs_to_litellm,
@@ -147,6 +148,5 @@ class ModelConfigSyncLiteLLMView(APIView):
         model_config = get_model_config(model_config_id=model_config_id)
         if model_config is None:
             return error_response(code=404, message="模型配置不存在。", status_code=404)
-        from llm.services.litellm_alias_service import sync_litellm_route_for_config
         result = sync_litellm_route_for_config(model_config, triggered_by=user)
         return success_response(data=result)

@@ -1,9 +1,27 @@
+from django.conf import settings
 from django.db import transaction
 
 from llm.models import ModelConfig
-from llm.services.litellm_alias_service import ensure_litellm_route_from_model_config, sync_litellm_routes
+from llm.services.litellm_alias_service import sync_litellm_routes
 from llm.services.model_config_service import get_active_model_config
 from llm.services.runtime_service import _build_provider
+
+
+def ensure_litellm_route_from_model_config(model_config):
+    """Get or create a LiteLLM ModelConfig route for the given model config."""
+    litellm_name = f"litellm-{model_config.name}"
+    route, _ = ModelConfig.objects.get_or_create(
+        capability=model_config.capability,
+        name=litellm_name,
+        defaults={
+            "provider": ModelConfig.PROVIDER_LITELLM,
+            "model_name": model_config.model_name,
+            "endpoint": settings.LITELLM_GATEWAY_URL,
+            "options": {},
+            "is_active": False,
+        },
+    )
+    return route
 
 
 def set_model_config_active_state(*, model_config_id, is_active):

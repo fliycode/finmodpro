@@ -1772,6 +1772,153 @@ class LiteLLMGatewayCommandServiceTests(TestCase):
         self.assertEqual(log.status, "failed")
         self.assertEqual(log.model_config, model_config)
 
+    @patch("urllib.request.urlopen")
+    def test_litellm_chat_provider_records_distinct_alias_and_upstream_model(self, mock_urlopen):
+        """alias is the route name; upstream_model is resolved from options.litellm.upstream_model."""
+        mock_urlopen.return_value = _FakeHttpResponse({
+            "choices": [{"message": {"content": "hello"}}],
+            "usage": {"prompt_tokens": 5, "completion_tokens": 3},
+        })
+        model_config = ModelConfig.objects.create(
+            name="litellm-route-alias-test",
+            capability=ModelConfig.CAPABILITY_CHAT,
+            provider=ModelConfig.PROVIDER_LITELLM,
+            model_name="my-route-alias",
+            endpoint="http://localhost:4000",
+            options={
+                "api_key": "sk-test",
+                "litellm": {"upstream_model": "gpt-4o"},
+            },
+            is_active=True,
+        )
+        provider = LiteLLMChatProvider(
+            endpoint="http://localhost:4000",
+            model_name="my-route-alias",
+            options={"api_key": "sk-test", "litellm": {"upstream_model": "gpt-4o"}},
+            model_config=model_config,
+        )
+
+        provider.chat(messages=[{"role": "user", "content": "hi"}], trace_id="alias-trace", request_id="alias-req")
+
+        log = ModelInvocationLog.objects.get(trace_id="alias-trace")
+        self.assertEqual(log.alias, "my-route-alias")
+        self.assertEqual(log.upstream_model, "gpt-4o")
+        self.assertEqual(log.status, "success")
+
+    @patch("urllib.request.urlopen")
+    def test_litellm_chat_provider_does_not_break_on_logging_failure(self, mock_urlopen):
+        """A DB error during invocation logging must not break the successful response."""
+        mock_urlopen.return_value = _FakeHttpResponse({
+            "choices": [{"message": {"content": "fine"}}],
+            "usage": {"prompt_tokens": 2, "completion_tokens": 1},
+        })
+        model_config = ModelConfig.objects.create(
+            name="litellm-log-guard-test",
+            capability=ModelConfig.CAPABILITY_CHAT,
+            provider=ModelConfig.PROVIDER_LITELLM,
+            model_name="guard-route",
+            endpoint="http://localhost:4000",
+            options={"api_key": "sk-test"},
+            is_active=True,
+        )
+        provider = LiteLLMChatProvider(
+            endpoint="http://localhost:4000",
+            model_name="guard-route",
+            options={"api_key": "sk-test"},
+            model_config=model_config,
+        )
+
+        with patch("llm.services.providers.litellm_provider.record_model_invocation", side_effect=Exception("db error")):
+            result = provider.chat(messages=[{"role": "user", "content": "hi"}])
+
+        self.assertEqual(result, "fine")
+
+
+@override_settings(
+    JWT_SECRET_KEY="test-jwt-secret",
+    JWT_ACCESS_TOKEN_LIFETIME_SECONDS=3600,
+)
+class ModelConfigConnectionApiTests(TestCase):
+    def setUp(self):
+        self.client = Client()
+        seed_roles_and_permissions()
+
+        self.admin_user = User.objects.create_user(
+            username="conn-admin",
+            password="secret123",
+            email="conn-admin@example.com",
+        )
+        self.admin_user.groups.add(Group.objects.get(name=ROLE_ADMIN))
+        self.admin_access_token = generate_access_token(self.admin_user)
+
+        self.member_user = User.objects.create_user(
+            username="conn-member",
+            password="secret123",
+            email="conn-member@example.com",
+        )
+        self.member_user.groups.add(Group.objects.get(name=ROLE_MEMBER))
+        self.member_access_token = generate_access_token(self.member_user)
+
+    def test_connection_test_requires_authentication(self):
+        response = self.client.post(
+            "/api/ops/model-configs/test-connection/",
+            content_type="application/json",
+            data=json.dumps({}),
+        )
+        self.assertEqual(response.status_code, 401)
+
+    def test_connection_test_requires_manage_permission(self):
+        response = self.client.post(
+            "/api/ops/model-configs/test-connection/",
+            content_type="application/json",
+            data=json.dumps({}),
+            HTTP_AUTHORIZATION=f"Bearer {self.member_access_token}",
+        )
+        self.assertEqual(response.status_code, 403)
+
+    @patch("urllib.request.urlopen")
+    def test_connection_test_litellm_chat_success(self, mock_urlopen):
+        mock_urlopen.return_value = _FakeHttpResponse({
+            "choices": [{"message": {"content": "pong"}}],
+            "usage": {"prompt_tokens": 1, "completion_tokens": 1},
+        })
+        response = self.client.post(
+            "/api/ops/model-configs/test-connection/",
+            content_type="application/json",
+            data=json.dumps({
+                "capability": "chat",
+                "provider": "litellm",
+                "model_name": "test-route",
+                "endpoint": "http://localhost:4000",
+                "options": {"api_key": "sk-test"},
+            }),
+            HTTP_AUTHORIZATION=f"Bearer {self.admin_access_token}",
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["data"]["ok"], True)
+
+    @patch("urllib.request.urlopen")
+    def test_connection_test_does_not_write_invocation_log(self, mock_urlopen):
+        """Connection tests use an unsaved ModelConfig; no log should be written."""
+        mock_urlopen.return_value = _FakeHttpResponse({
+            "choices": [{"message": {"content": "pong"}}],
+            "usage": {"prompt_tokens": 1, "completion_tokens": 1},
+        })
+        before = ModelInvocationLog.objects.count()
+        self.client.post(
+            "/api/ops/model-configs/test-connection/",
+            content_type="application/json",
+            data=json.dumps({
+                "capability": "chat",
+                "provider": "litellm",
+                "model_name": "test-route",
+                "endpoint": "http://localhost:4000",
+                "options": {"api_key": "sk-test"},
+            }),
+            HTTP_AUTHORIZATION=f"Bearer {self.admin_access_token}",
+        )
+        self.assertEqual(ModelInvocationLog.objects.count(), before)
+
 
 @override_settings(
     JWT_SECRET_KEY="test-jwt-secret",
@@ -1916,9 +2063,9 @@ class ModelConfigMigrationApiTests(TestCase):
     def test_migrate_db_writes_are_atomic(self):
         """If one capability's route activation fails, no LiteLLM routes are activated."""
         from unittest.mock import patch as _patch
-        from llm.services import litellm_alias_service
+        from llm.services import model_config_command_service
 
-        original_ensure = litellm_alias_service.ensure_litellm_route_from_model_config
+        original_ensure = model_config_command_service.ensure_litellm_route_from_model_config
 
         def _fail_on_embedding(active):
             if active.capability == ModelConfig.CAPABILITY_EMBEDDING:
