@@ -128,6 +128,11 @@ export const createApiConfig = (overrides = {}) => {
           ...(options.headers || {}),
         };
 
+    // For FormData bodies, let the browser set Content-Type with boundary.
+    if (options.body instanceof FormData) {
+      delete requestHeaders['Content-Type'];
+    }
+
     return {
       ...options,
       headers: requestHeaders,
