@@ -45,7 +45,9 @@ class Migration(migrations.Migration):
                 (
                     "model_config",
                     models.ForeignKey(
-                        on_delete=django.db.models.deletion.CASCADE,
+                        blank=True,
+                        null=True,
+                        on_delete=django.db.models.deletion.SET_NULL,
                         related_name="invocation_logs",
                         to="llm.modelconfig",
                     ),

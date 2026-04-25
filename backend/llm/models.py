@@ -216,7 +216,9 @@ class ModelInvocationLog(models.Model):
     model_config = models.ForeignKey(
         ModelConfig,
         related_name="invocation_logs",
-        on_delete=models.CASCADE,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
     )
     capability = models.CharField(max_length=32, choices=ModelConfig.CAPABILITY_CHOICES)
     provider = models.CharField(max_length=32, choices=ModelConfig.PROVIDER_CHOICES, default=ModelConfig.PROVIDER_LITELLM)

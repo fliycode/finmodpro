@@ -67,6 +67,9 @@ class ModelConfigSummarySerializer(serializers.ModelSerializer):
         return (obj.options or {}).get("litellm", {})
 
     def get_alias(self, obj):
+        # Mirrors model_name as the LiteLLM route name. Exposed as a
+        # compatibility field for the admin surface so consumers reference
+        # routes by alias rather than raw model_name.
         return obj.model_name
 
     def get_upstream_provider(self, obj):
@@ -76,7 +79,10 @@ class ModelConfigSummarySerializer(serializers.ModelSerializer):
         return self._get_litellm_options(obj).get("upstream_model", "")
 
     def get_fallback_aliases(self, obj):
-        return self._get_litellm_options(obj).get("fallback_aliases", [])
+        value = self._get_litellm_options(obj).get("fallback_aliases", [])
+        if not isinstance(value, list):
+            return []
+        return value
 
     def get_weight(self, obj):
         return self._get_litellm_options(obj).get("weight", 1)
