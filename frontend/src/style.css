@@ -157,13 +157,13 @@ a {
 
 :root[data-theme='dark'] {
   color-scheme: dark;
-  --page-bg: #11161f;
-  --surface-1: rgba(18, 24, 34, 0.94);
-  --surface-2: #151c27;
-  --surface-3: #1c2532;
-  --text-primary: #eef2f7;
-  --text-secondary: #b5c0d1;
-  --text-muted: #8792a3;
+  --page-bg: #121720;
+  --surface-1: rgba(23, 29, 39, 0.95);
+  --surface-2: #181f2a;
+  --surface-3: #222b38;
+  --text-primary: #cbd3df;
+  --text-secondary: #9da7b6;
+  --text-muted: #788391;
   --line-soft: rgba(226, 232, 240, 0.08);
   --line-strong: rgba(226, 232, 240, 0.14);
   --brand-soft: rgba(36, 87, 197, 0.24);
@@ -176,6 +176,17 @@ a {
   --accent: #7fa7ff;
   --accent-bg: rgba(36, 87, 197, 0.24);
   --accent-border: rgba(127, 167, 255, 0.32);
+  --el-bg-color: var(--surface-2);
+  --el-bg-color-overlay: #1d2632;
+  --el-fill-color: var(--surface-3);
+  --el-fill-color-light: #26313f;
+  --el-fill-color-lighter: #2a3544;
+  --el-border-color: var(--line-strong);
+  --el-border-color-light: var(--line-soft);
+  --el-text-color-primary: var(--text-primary);
+  --el-text-color-regular: var(--text-secondary);
+  --el-text-color-secondary: var(--text-muted);
+  --el-disabled-bg-color: #202938;
 }
 
 html.theme-switching *,
@@ -227,6 +238,129 @@ textarea {
 .el-drawer__header,
 .el-dialog__header {
   margin-bottom: 0;
+}
+
+html[data-theme='dark'],
+html[data-theme='dark'] body {
+  background: var(--page-bg);
+}
+
+:root[data-theme='dark'] .ui-card,
+:root[data-theme='dark'] .page-hero,
+:root[data-theme='dark'] .admin-section-card,
+:root[data-theme='dark'] .el-card,
+:root[data-theme='dark'] .el-dialog,
+:root[data-theme='dark'] .el-drawer,
+:root[data-theme='dark'] .el-popper,
+:root[data-theme='dark'] [class*='card'],
+:root[data-theme='dark'] [class*='panel'],
+:root[data-theme='dark'] [class*='toolbar'],
+:root[data-theme='dark'] [class*='table'],
+:root[data-theme='dark'] [class*='filters'],
+:root[data-theme='dark'] .history-shell,
+:root[data-theme='dark'] .memory-shell,
+:root[data-theme='dark'] .kb-detail,
+:root[data-theme='dark'] .kb-overview,
+:root[data-theme='dark'] .kb-dataset-composer,
+:root[data-theme='dark'] .risk-summary-shell,
+:root[data-theme='dark'] .report-result {
+  border-color: var(--line-soft);
+  background: var(--surface-2);
+  color: var(--text-secondary);
+}
+
+:root[data-theme='dark'] .page-hero,
+:root[data-theme='dark'] [class$='__hero'],
+:root[data-theme='dark'] [class*='overview'],
+:root[data-theme='dark'] [class*='summary'] {
+  background: linear-gradient(180deg, rgba(26, 34, 45, 0.98), rgba(20, 26, 36, 0.96));
+}
+
+:root[data-theme='dark'] input:not([type='checkbox']):not([type='radio']),
+:root[data-theme='dark'] textarea,
+:root[data-theme='dark'] select,
+:root[data-theme='dark'] .el-input__wrapper,
+:root[data-theme='dark'] .el-select__wrapper,
+:root[data-theme='dark'] .el-textarea__inner {
+  border-color: var(--line-strong);
+  background: #111822;
+  color: var(--text-primary);
+  box-shadow: none;
+}
+
+:root[data-theme='dark'] input::placeholder,
+:root[data-theme='dark'] textarea::placeholder,
+:root[data-theme='dark'] .el-input__inner::placeholder {
+  color: #697585;
+}
+
+:root[data-theme='dark'] .el-table,
+:root[data-theme='dark'] .el-table tr,
+:root[data-theme='dark'] .el-table th.el-table__cell,
+:root[data-theme='dark'] .el-table td.el-table__cell {
+  background: var(--surface-2);
+  color: var(--text-secondary);
+}
+
+:root[data-theme='dark'] .el-table__header-wrapper,
+:root[data-theme='dark'] .el-table__fixed-header-wrapper {
+  background: var(--surface-3);
+}
+
+:root[data-theme='dark'] .app-sidebar {
+  box-shadow: inset -1px 0 0 rgba(255, 255, 255, 0.04);
+}
+
+:root[data-theme='dark'] .app-sidebar__brand-mark,
+:root[data-theme='dark'] .app-sidebar__item:hover,
+:root[data-theme='dark'] .app-sidebar__profile-trigger:hover,
+:root[data-theme='dark'] .app-sidebar__profile:focus-within .app-sidebar__profile-trigger,
+:root[data-theme='dark'] .app-sidebar__item.router-link-active {
+  background: var(--surface-3);
+}
+
+:root[data-theme='dark'] .chat-window,
+:root[data-theme='dark'] .qa-shell__toolbar,
+:root[data-theme='dark'] .input-area,
+:root[data-theme='dark'] .qa-history-drawer .el-drawer__body {
+  background: var(--surface-2);
+}
+
+:root[data-theme='dark'] .bubble,
+:root[data-theme='dark'] .message.system .bubble,
+:root[data-theme='dark'] .citations-container,
+:root[data-theme='dark'] .citation-card,
+:root[data-theme='dark'] .memory-card,
+:root[data-theme='dark'] .history-item {
+  border-color: var(--line-soft);
+  background: var(--surface-3);
+  color: var(--text-secondary);
+  box-shadow: none;
+}
+
+:root[data-theme='dark'] .message.user .bubble {
+  background: #20304a;
+  color: #cbd3df;
+}
+
+:root[data-theme='dark'] .avatar-assistant,
+:root[data-theme='dark'] .avatar-system {
+  background: #253142;
+  color: var(--text-secondary);
+}
+
+:root[data-theme='dark'] .cite-title,
+:root[data-theme='dark'] .cite-snippet,
+:root[data-theme='dark'] .bubble,
+:root[data-theme='dark'] .section-heading__title,
+:root[data-theme='dark'] .page-hero__title {
+  color: var(--text-primary);
+}
+
+:root[data-theme='dark'] .cite-meta,
+:root[data-theme='dark'] .citations-title,
+:root[data-theme='dark'] .duration-info {
+  color: var(--text-muted);
 }
 
 .admin-form-row {
