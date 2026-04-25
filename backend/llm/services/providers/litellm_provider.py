@@ -4,6 +4,7 @@ import time
 from urllib import error, request
 
 from common.exceptions import UpstreamRateLimitError, UpstreamServiceError
+from llm.services.model_invocation_log_service import record_model_invocation
 from llm.services.providers.base import BaseChatProvider, BaseEmbeddingProvider
 
 
@@ -133,8 +134,6 @@ class LiteLLMApiMixin:
 
 class LiteLLMChatProvider(LiteLLMApiMixin, BaseChatProvider):
     def chat(self, *, messages, options=None, trace_id="", request_id=""):
-        from llm.services.model_invocation_log_service import record_model_invocation
-
         merged_options = self._resolve_options(options)
         payload = {
             "model": self.model_name,
@@ -146,6 +145,11 @@ class LiteLLMChatProvider(LiteLLMApiMixin, BaseChatProvider):
         if merged_options.get("max_tokens") is not None:
             payload["max_tokens"] = merged_options["max_tokens"]
         started_at = time.monotonic()
+        upstream_model = (
+            (self.model_config.options or {}).get("litellm", {}).get("upstream_model")
+            if self.model_config is not None
+            else None
+        ) or self.model_name
         try:
             response_payload = self._post_json(
                 "/v1/chat/completions",
@@ -154,19 +158,22 @@ class LiteLLMChatProvider(LiteLLMApiMixin, BaseChatProvider):
                 capability="chat",
             )
         except (UpstreamServiceError, UpstreamRateLimitError) as exc:
-            if self.model_config is not None and self.model_config.pk:
-                record_model_invocation(
-                    model_config=self.model_config,
-                    capability="chat",
-                    alias=self.model_name,
-                    upstream_model=self.model_name,
-                    status="failed",
-                    latency_ms=int((time.monotonic() - started_at) * 1000),
-                    error_code=exc.code,
-                    error_message=exc.message,
-                    trace_id=trace_id,
-                    request_id=request_id,
-                )
+            if self.model_config is not None:
+                try:
+                    record_model_invocation(
+                        model_config=self.model_config,
+                        capability="chat",
+                        alias=self.model_name,
+                        upstream_model=upstream_model,
+                        status="failed",
+                        latency_ms=int((time.monotonic() - started_at) * 1000),
+                        error_code=exc.code,
+                        error_message=exc.message,
+                        trace_id=trace_id,
+                        request_id=request_id,
+                    )
+                except Exception:
+                    logger.exception("Failed to record failed chat invocation log")
             raise
         latency_ms = int((time.monotonic() - started_at) * 1000)
         usage = response_payload.get("usage") or {}
@@ -176,38 +183,44 @@ class LiteLLMChatProvider(LiteLLMApiMixin, BaseChatProvider):
         message = (choices[0] or {}).get("message") or {}
         content = message.get("content")
         if not content:
-            if self.model_config is not None and self.model_config.pk:
-                record_model_invocation(
-                    model_config=self.model_config,
-                    capability="chat",
-                    alias=self.model_name,
-                    upstream_model=self.model_name,
-                    status="failed",
-                    latency_ms=latency_ms,
-                    error_code="llm_empty_response",
-                    error_message="模型服务返回了空响应。",
-                    trace_id=trace_id,
-                    request_id=request_id,
-                )
+            if self.model_config is not None:
+                try:
+                    record_model_invocation(
+                        model_config=self.model_config,
+                        capability="chat",
+                        alias=self.model_name,
+                        upstream_model=upstream_model,
+                        status="failed",
+                        latency_ms=latency_ms,
+                        error_code="llm_empty_response",
+                        error_message="模型服务返回了空响应。",
+                        trace_id=trace_id,
+                        request_id=request_id,
+                    )
+                except Exception:
+                    logger.exception("Failed to record empty-response chat invocation log")
             raise UpstreamServiceError(
                 "模型服务返回了空响应。",
                 status_code=502,
                 code="llm_empty_response",
                 provider=self.provider_name,
             )
-        if self.model_config is not None and self.model_config.pk:
-            record_model_invocation(
-                model_config=self.model_config,
-                capability="chat",
-                alias=self.model_name,
-                upstream_model=self.model_name,
-                status="success",
-                latency_ms=latency_ms,
-                request_tokens=request_tokens,
-                response_tokens=response_tokens,
-                trace_id=trace_id,
-                request_id=request_id,
-            )
+        if self.model_config is not None:
+            try:
+                record_model_invocation(
+                    model_config=self.model_config,
+                    capability="chat",
+                    alias=self.model_name,
+                    upstream_model=upstream_model,
+                    status="success",
+                    latency_ms=latency_ms,
+                    request_tokens=request_tokens,
+                    response_tokens=response_tokens,
+                    trace_id=trace_id,
+                    request_id=request_id,
+                )
+            except Exception:
+                logger.exception("Failed to record successful chat invocation log")
         return content
 
     def generate(self, *, messages, trace_id="", request_id="", options=None):
@@ -280,11 +293,14 @@ class LiteLLMChatProvider(LiteLLMApiMixin, BaseChatProvider):
 
 class LiteLLMEmbeddingProvider(LiteLLMApiMixin, BaseEmbeddingProvider):
     def embed(self, *, texts, options=None, trace_id="", request_id=""):
-        from llm.services.model_invocation_log_service import record_model_invocation
-
         vectors = []
         total_request_tokens = 0
         started_at = time.monotonic()
+        upstream_model = (
+            (self.model_config.options or {}).get("litellm", {}).get("upstream_model")
+            if self.model_config is not None
+            else None
+        ) or self.model_name
         try:
             for text in texts:
                 payload = {"model": self.model_name, "input": text}
@@ -307,34 +323,40 @@ class LiteLLMEmbeddingProvider(LiteLLMApiMixin, BaseEmbeddingProvider):
                     )
                 vectors.append(embedding)
         except (UpstreamServiceError, UpstreamRateLimitError) as exc:
-            if self.model_config is not None and self.model_config.pk:
+            if self.model_config is not None:
+                try:
+                    record_model_invocation(
+                        model_config=self.model_config,
+                        capability="embedding",
+                        alias=self.model_name,
+                        upstream_model=upstream_model,
+                        status="failed",
+                        latency_ms=int((time.monotonic() - started_at) * 1000),
+                        request_tokens=total_request_tokens,
+                        response_tokens=0,
+                        error_code=exc.code,
+                        error_message=exc.message,
+                        trace_id=trace_id,
+                        request_id=request_id,
+                    )
+                except Exception:
+                    logger.exception("Failed to record failed embedding invocation log")
+            raise
+        latency_ms = int((time.monotonic() - started_at) * 1000)
+        if self.model_config is not None:
+            try:
                 record_model_invocation(
                     model_config=self.model_config,
                     capability="embedding",
                     alias=self.model_name,
-                    upstream_model=self.model_name,
-                    status="failed",
-                    latency_ms=int((time.monotonic() - started_at) * 1000),
+                    upstream_model=upstream_model,
+                    status="success",
+                    latency_ms=latency_ms,
                     request_tokens=total_request_tokens,
                     response_tokens=0,
-                    error_code=exc.code,
-                    error_message=exc.message,
                     trace_id=trace_id,
                     request_id=request_id,
                 )
-            raise
-        latency_ms = int((time.monotonic() - started_at) * 1000)
-        if self.model_config is not None and self.model_config.pk:
-            record_model_invocation(
-                model_config=self.model_config,
-                capability="embedding",
-                alias=self.model_name,
-                upstream_model=self.model_name,
-                status="success",
-                latency_ms=latency_ms,
-                request_tokens=total_request_tokens,
-                response_tokens=0,
-                trace_id=trace_id,
-                request_id=request_id,
-            )
+            except Exception:
+                logger.exception("Failed to record successful embedding invocation log")
         return vectors
