@@ -21,6 +21,7 @@ from llm.services.model_config_command_service import migrate_active_configs_to_
 from llm.services.model_config_service import get_active_model_config
 from llm.services.fine_tune_service import create_fine_tune_run
 from llm.services.prompt_service import load_prompt_template, render_prompt
+from llm.services.litellm_alias_service import sync_litellm_route_for_config
 from llm.services.providers.litellm_provider import LiteLLMChatProvider, LiteLLMEmbeddingProvider
 from llm.services.runtime_service import (
     get_chat_provider,
@@ -1807,6 +1808,40 @@ class LiteLLMGatewayCommandServiceTests(TestCase):
         self.assertEqual(log.status, "success")
 
     @patch("urllib.request.urlopen")
+    def test_litellm_embedding_provider_records_distinct_alias_and_upstream_model(self, mock_urlopen):
+        """alias is the route name; upstream_model is resolved from options.litellm.upstream_model for embeddings."""
+        mock_urlopen.return_value = _FakeHttpResponse({
+            "data": [{"embedding": [0.1, 0.2, 0.3]}],
+            "usage": {"prompt_tokens": 4, "total_tokens": 4},
+        })
+        model_config = ModelConfig.objects.create(
+            name="litellm-embed-alias-test",
+            capability=ModelConfig.CAPABILITY_EMBEDDING,
+            provider=ModelConfig.PROVIDER_LITELLM,
+            model_name="my-embed-alias",
+            endpoint="http://localhost:4000",
+            options={
+                "api_key": "sk-test",
+                "litellm": {"upstream_model": "text-embedding-3-small"},
+            },
+            is_active=True,
+        )
+        provider = LiteLLMEmbeddingProvider(
+            endpoint="http://localhost:4000",
+            model_name="my-embed-alias",
+            options={"api_key": "sk-test", "litellm": {"upstream_model": "text-embedding-3-small"}},
+            model_config=model_config,
+        )
+
+        provider.embed(texts=["hello"], trace_id="embed-alias-trace", request_id="embed-alias-req")
+
+        log = ModelInvocationLog.objects.get(trace_id="embed-alias-trace")
+        self.assertEqual(log.alias, "my-embed-alias")
+        self.assertEqual(log.upstream_model, "text-embedding-3-small")
+        self.assertEqual(log.capability, "embedding")
+        self.assertEqual(log.status, "success")
+
+    @patch("urllib.request.urlopen")
     def test_litellm_chat_provider_does_not_break_on_logging_failure(self, mock_urlopen):
         """A DB error during invocation logging must not break the successful response."""
         mock_urlopen.return_value = _FakeHttpResponse({
@@ -2128,7 +2163,6 @@ class LiteLLMAliasYamlRegressionTests(TestCase):
     """Regression tests for YAML generation in litellm_alias_service."""
 
     def setUp(self):
-        from llm.services.litellm_alias_service import sync_litellm_route_for_config
         seed_roles_and_permissions()
         self.sync_litellm_route_for_config = sync_litellm_route_for_config
         self.temp_dir = Path(tempfile.mkdtemp(dir=Path.cwd()))
