@@ -133,7 +133,10 @@ class ModelConfigMigrateToLiteLLMView(APIView):
         user, permission_error = _require_manage_permission(request)
         if permission_error is not None:
             return permission_error
-        result = migrate_active_configs_to_litellm(triggered_by=user)
+        try:
+            result = migrate_active_configs_to_litellm(triggered_by=user)
+        except ServiceConfigurationError as exc:
+            return error_response(code=503, message=exc.message, status_code=503, data={"error": exc.code})
         return success_response(data=result)
 
 

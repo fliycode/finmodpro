@@ -12,7 +12,7 @@ from django.contrib.auth.models import Group
 from django.test import TestCase
 from django.test import Client, override_settings
 
-from common.exceptions import UpstreamRateLimitError, UpstreamServiceError
+from common.exceptions import ServiceConfigurationError, UpstreamRateLimitError, UpstreamServiceError
 from authentication.models import User
 from authentication.services.jwt_service import generate_access_token
 from llm.models import EvalRecord, FineTuneRun, LiteLLMSyncEvent, ModelConfig, ModelInvocationLog
@@ -1994,6 +1994,23 @@ class ModelConfigMigrationApiTests(TestCase):
         self.assertIn("sync_event_id", sync_result)
         self.assertIn("route_count", sync_result)
         self.assertEqual(sync_result["status"], "success")
+
+    @patch("llm.controllers.model_config_controller.migrate_active_configs_to_litellm")
+    def test_migrate_returns_503_when_no_active_config(self, mock_migrate):
+        mock_migrate.side_effect = ServiceConfigurationError(
+            "未配置启用中的 chat 模型。", code="model_not_configured"
+        )
+
+        response = self.client.post(
+            "/api/ops/model-configs/migrate-to-litellm/",
+            HTTP_AUTHORIZATION=f"Bearer {self.admin_access_token}",
+        )
+
+        self.assertEqual(response.status_code, 503)
+        payload = response.json()
+        self.assertEqual(payload["code"], 503)
+        self.assertEqual(payload["message"], "未配置启用中的 chat 模型。")
+        self.assertEqual(payload["data"], {"error": "model_not_configured"})
 
     # --- POST /api/ops/model-configs/<id>/sync-litellm/ ---
 
