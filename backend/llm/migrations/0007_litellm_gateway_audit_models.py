@@ -66,7 +66,7 @@ class Migration(migrations.Migration):
                 ("provider", models.CharField(choices=[("ollama", "Ollama"), ("deepseek", "DeepSeek"), ("litellm", "LiteLLM"), ("dashscope", "DashScope")], default="litellm", max_length=32)),
                 ("alias", models.CharField(max_length=255)),
                 ("upstream_model", models.CharField(blank=True, default="", max_length=255)),
-                ("stage", models.CharField(blank=True, default="", max_length=32)),
+                ("stage", models.CharField(blank=True, choices=[("routing", "Routing"), ("fallback", "Fallback"), ("direct", "Direct")], default="", max_length=32)),
                 (
                     "status",
                     models.CharField(

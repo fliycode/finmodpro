@@ -1357,6 +1357,99 @@ class LiteLLMGatewayAuditModelTests(TestCase):
         self.assertEqual(row["fallback_aliases"], ["chat-backup"])
         self.assertEqual(row["weight"], 1)
 
+    def test_model_invocation_log_stage_constants_and_choices(self):
+        """STAGE_* constants must match their string values and STAGE_CHOICES must list all three."""
+        self.assertEqual(ModelInvocationLog.STAGE_ROUTING, "routing")
+        self.assertEqual(ModelInvocationLog.STAGE_FALLBACK, "fallback")
+        self.assertEqual(ModelInvocationLog.STAGE_DIRECT, "direct")
+
+        choice_values = [v for v, _ in ModelInvocationLog.STAGE_CHOICES]
+        self.assertIn("routing", choice_values)
+        self.assertIn("fallback", choice_values)
+        self.assertIn("direct", choice_values)
+        self.assertEqual(len(choice_values), 3)
+
+    def test_model_invocation_log_stage_stored_and_retrieved(self):
+        """A log created with a known stage constant round-trips correctly."""
+        model = ModelConfig.objects.create(
+            name="chat-stage-test",
+            capability=ModelConfig.CAPABILITY_CHAT,
+            provider=ModelConfig.PROVIDER_LITELLM,
+            model_name="gpt-4o",
+            endpoint="http://localhost:4000",
+        )
+        log = ModelInvocationLog.objects.create(
+            model_config=model,
+            capability=ModelConfig.CAPABILITY_CHAT,
+            provider=ModelConfig.PROVIDER_LITELLM,
+            alias="chat-stage-test",
+            stage=ModelInvocationLog.STAGE_FALLBACK,
+            status=ModelInvocationLog.STATUS_SUCCESS,
+            latency_ms=50,
+            request_tokens=5,
+            response_tokens=10,
+        )
+
+        fetched = ModelInvocationLog.objects.get(pk=log.pk)
+        self.assertEqual(fetched.stage, ModelInvocationLog.STAGE_FALLBACK)
+
+    def test_model_invocation_log_stage_defaults_to_blank(self):
+        """Omitting stage should produce an empty string (unclassified)."""
+        model = ModelConfig.objects.create(
+            name="chat-stage-blank",
+            capability=ModelConfig.CAPABILITY_CHAT,
+            provider=ModelConfig.PROVIDER_LITELLM,
+            model_name="gpt-4o",
+            endpoint="http://localhost:4000",
+        )
+        log = ModelInvocationLog.objects.create(
+            model_config=model,
+            capability=ModelConfig.CAPABILITY_CHAT,
+            provider=ModelConfig.PROVIDER_LITELLM,
+            alias="chat-stage-blank",
+            status=ModelInvocationLog.STATUS_SUCCESS,
+            latency_ms=10,
+            request_tokens=1,
+            response_tokens=2,
+        )
+        self.assertEqual(log.stage, "")
+
+    def test_model_invocation_log_ordering_most_recent_first(self):
+        """ModelInvocationLog Meta ordering must return newer records before older ones."""
+        model = ModelConfig.objects.create(
+            name="chat-order-test",
+            capability=ModelConfig.CAPABILITY_CHAT,
+            provider=ModelConfig.PROVIDER_LITELLM,
+            model_name="gpt-4o",
+            endpoint="http://localhost:4000",
+        )
+        first = ModelInvocationLog.objects.create(
+            model_config=model,
+            capability=ModelConfig.CAPABILITY_CHAT,
+            provider=ModelConfig.PROVIDER_LITELLM,
+            alias="order-a",
+            status=ModelInvocationLog.STATUS_SUCCESS,
+            latency_ms=10,
+            request_tokens=1,
+            response_tokens=1,
+        )
+        second = ModelInvocationLog.objects.create(
+            model_config=model,
+            capability=ModelConfig.CAPABILITY_CHAT,
+            provider=ModelConfig.PROVIDER_LITELLM,
+            alias="order-b",
+            status=ModelInvocationLog.STATUS_SUCCESS,
+            latency_ms=10,
+            request_tokens=1,
+            response_tokens=1,
+        )
+
+        ids = list(
+            ModelInvocationLog.objects.filter(pk__in=[first.pk, second.pk]).values_list("pk", flat=True)
+        )
+        self.assertEqual(ids[0], second.pk, "Most recent log should appear first")
+        self.assertEqual(ids[1], first.pk, "Oldest log should appear last")
+
     def test_model_invocation_log_persists_trace_and_tokens(self):
         model = ModelConfig.objects.create(
             name="chat-invocation-test",
