@@ -1834,6 +1834,34 @@ class LiteLLMGatewayCommandServiceTests(TestCase):
 
         self.assertEqual(result, "fine")
 
+    @patch("urllib.request.urlopen")
+    def test_unsaved_model_config_skips_invocation_logging_entirely(self, mock_urlopen):
+        """An unsaved ModelConfig (pk=None) must never call record_model_invocation."""
+        mock_urlopen.return_value = _FakeHttpResponse({
+            "choices": [{"message": {"content": "ok"}}],
+            "usage": {"prompt_tokens": 5, "completion_tokens": 3},
+        })
+        unsaved_config = ModelConfig(
+            name="connection-test-unsaved",
+            capability=ModelConfig.CAPABILITY_CHAT,
+            provider=ModelConfig.PROVIDER_LITELLM,
+            model_name="test-route",
+            endpoint="http://localhost:4000",
+            options={"api_key": "sk-test"},
+        )
+        self.assertIsNone(unsaved_config.pk, "ModelConfig must be unsaved (no pk)")
+        provider = LiteLLMChatProvider(
+            endpoint="http://localhost:4000",
+            model_name="test-route",
+            options={"api_key": "sk-test"},
+            model_config=unsaved_config,
+        )
+
+        with patch("llm.services.providers.litellm_provider.record_model_invocation") as mock_log:
+            provider.chat(messages=[{"role": "user", "content": "ping"}])
+
+        mock_log.assert_not_called()
+
 
 @override_settings(
     JWT_SECRET_KEY="test-jwt-secret",
@@ -2100,12 +2128,23 @@ class LiteLLMAliasYamlRegressionTests(TestCase):
     """Regression tests for YAML generation in litellm_alias_service."""
 
     def setUp(self):
+        from llm.services.litellm_alias_service import sync_litellm_route_for_config
+        seed_roles_and_permissions()
+        self.sync_litellm_route_for_config = sync_litellm_route_for_config
         self.temp_dir = Path(tempfile.mkdtemp(dir=Path.cwd()))
+        self.admin_user = User.objects.create_user(
+            username="alias-test-admin",
+            password="secret",
+            email="alias-test@example.com",
+        )
 
     def tearDown(self):
         shutil.rmtree(self.temp_dir, ignore_errors=True)
 
-    def _make_litellm_model_config(self, upstream_model, model_name="my-route"):
+    def _make_litellm_model_config(self, upstream_model=None, model_name="my-route"):
+        options = {"api_base": "http://localhost:8001"}
+        if upstream_model is not None:
+            options["litellm"] = {"upstream_model": upstream_model}
         return ModelConfig.objects.create(
             name="Test Route",
             model_name=model_name,
@@ -2113,34 +2152,24 @@ class LiteLLMAliasYamlRegressionTests(TestCase):
             capability=ModelConfig.CAPABILITY_CHAT,
             endpoint="http://localhost:8001",
             is_active=True,
-            options={
-                "api_base": "http://localhost:8001",
-                "litellm": {"upstream_model": upstream_model},
-            },
+            options=options,
         )
 
-    def test_prefixed_upstream_model_is_not_double_prefixed(self):
-        """options.litellm.upstream_model='openai/gpt-4o' must produce model: openai/gpt-4o."""
-        from llm.services.litellm_alias_service import sync_litellm_route_for_config
-        from rbac.services.rbac_service import seed_roles_and_permissions
-        seed_roles_and_permissions()
-        admin_user = User.objects.create_user(
-            username="alias-test-admin",
-            password="secret",
-            email="alias-test@example.com",
-        )
-
-        model_config = self._make_litellm_model_config(upstream_model="openai/gpt-4o")
+    def _sync_and_read_yaml(self, model_config):
         with override_settings(
             LITELLM_GENERATED_CONFIG_ROOT=str(self.temp_dir),
             LITELLM_BASE_CONFIG_PATH=str(self.temp_dir / "base.yaml"),
             LITELLM_RENDERED_CONFIG_PATH=str(self.temp_dir / "rendered.yaml"),
         ):
-            sync_litellm_route_for_config(model_config, triggered_by=admin_user)
-
+            self.sync_litellm_route_for_config(model_config, triggered_by=self.admin_user)
         route_key = f"route-{model_config.capability}-{model_config.id}"
         config_path = self.temp_dir / f"{route_key}.yaml"
-        yaml_text = config_path.read_text(encoding="utf-8")
+        return config_path.read_text(encoding="utf-8")
+
+    def test_prefixed_upstream_model_is_not_double_prefixed(self):
+        """options.litellm.upstream_model='openai/gpt-4o' must produce model: openai/gpt-4o."""
+        model_config = self._make_litellm_model_config(upstream_model="openai/gpt-4o")
+        yaml_text = self._sync_and_read_yaml(model_config)
 
         self.assertIn("model: openai/gpt-4o", yaml_text,
                       "Already-prefixed upstream model must appear exactly once")
@@ -2149,27 +2178,17 @@ class LiteLLMAliasYamlRegressionTests(TestCase):
 
     def test_bare_upstream_model_gets_openai_prefix(self):
         """options.litellm.upstream_model='gpt-4o' must produce model: openai/gpt-4o."""
-        from llm.services.litellm_alias_service import sync_litellm_route_for_config
-        from rbac.services.rbac_service import seed_roles_and_permissions
-        seed_roles_and_permissions()
-        admin_user = User.objects.create_user(
-            username="alias-test-admin2",
-            password="secret",
-            email="alias-test2@example.com",
-        )
-
         model_config = self._make_litellm_model_config(upstream_model="gpt-4o")
-        with override_settings(
-            LITELLM_GENERATED_CONFIG_ROOT=str(self.temp_dir),
-            LITELLM_BASE_CONFIG_PATH=str(self.temp_dir / "base.yaml"),
-            LITELLM_RENDERED_CONFIG_PATH=str(self.temp_dir / "rendered.yaml"),
-        ):
-            sync_litellm_route_for_config(model_config, triggered_by=admin_user)
-
-        route_key = f"route-{model_config.capability}-{model_config.id}"
-        config_path = self.temp_dir / f"{route_key}.yaml"
-        yaml_text = config_path.read_text(encoding="utf-8")
+        yaml_text = self._sync_and_read_yaml(model_config)
 
         self.assertIn("model: openai/gpt-4o", yaml_text,
                       "Bare model name must be prefixed with openai/")
+
+    def test_absent_upstream_model_falls_back_to_model_name(self):
+        """When options.litellm.upstream_model is absent, model_name is used as the upstream."""
+        model_config = self._make_litellm_model_config(upstream_model=None, model_name="my-fallback-route")
+        yaml_text = self._sync_and_read_yaml(model_config)
+
+        self.assertIn("model: openai/my-fallback-route", yaml_text,
+                      "Absent upstream_model must fall back to openai/<model_name>")
 
