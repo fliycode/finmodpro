@@ -15,7 +15,7 @@ from django.test import Client, override_settings
 from common.exceptions import UpstreamRateLimitError, UpstreamServiceError
 from authentication.models import User
 from authentication.services.jwt_service import generate_access_token
-from llm.models import EvalRecord, FineTuneRun, ModelConfig
+from llm.models import EvalRecord, FineTuneRun, ModelConfig, ModelInvocationLog
 from llm.services.model_config_service import get_active_model_config
 from llm.services.fine_tune_service import create_fine_tune_run
 from llm.services.prompt_service import load_prompt_template, render_prompt
@@ -137,6 +137,11 @@ class ModelConfigListApiTests(TestCase):
                 "is_active",
                 "created_at",
                 "updated_at",
+                "alias",
+                "upstream_provider",
+                "upstream_model",
+                "fallback_aliases",
+                "weight",
             },
         )
         self.assertEqual(first_row["id"], get_active_model_config(ModelConfig.CAPABILITY_CHAT).id)
@@ -1305,3 +1310,67 @@ class FineTuneRunCallbackApiTests(TestCase):
         )
 
 
+
+
+class LiteLLMGatewayAuditModelTests(TestCase):
+    def setUp(self):
+        self.client = Client()
+        seed_roles_and_permissions()
+
+        self.admin_user = User.objects.create_user(
+            username="audit-admin",
+            password="secret123",
+            email="audit-admin@example.com",
+        )
+        self.admin_user.groups.add(Group.objects.get(name=ROLE_ADMIN))
+        self.admin_access_token = generate_access_token(self.admin_user)
+
+    def test_model_config_list_includes_litellm_route_fields(self):
+        model = ModelConfig.objects.create(
+            name="chat-default",
+            capability=ModelConfig.CAPABILITY_CHAT,
+            provider=ModelConfig.PROVIDER_LITELLM,
+            model_name="chat-default",
+            endpoint="http://localhost:4000",
+            options={
+                "litellm": {
+                    "upstream_provider": "openai",
+                    "upstream_model": "gpt-4o",
+                    "fallback_aliases": ["chat-backup"],
+                    "weight": 1,
+                }
+            },
+            is_active=True,
+        )
+
+        response = self.client.get(
+            "/api/ops/model-configs/",
+            HTTP_AUTHORIZATION=f"Bearer {self.admin_access_token}",
+        )
+
+        row = next(item for item in response.json()["data"]["model_configs"] if item["id"] == model.id)
+        self.assertEqual(row["alias"], "chat-default")
+        self.assertEqual(row["upstream_provider"], "openai")
+        self.assertEqual(row["upstream_model"], "gpt-4o")
+        self.assertEqual(row["fallback_aliases"], ["chat-backup"])
+        self.assertEqual(row["weight"], 1)
+
+    def test_model_invocation_log_persists_trace_and_tokens(self):
+        model = get_active_model_config(ModelConfig.CAPABILITY_CHAT)
+        log = ModelInvocationLog.objects.create(
+            model_config=model,
+            capability=ModelConfig.CAPABILITY_CHAT,
+            provider=ModelConfig.PROVIDER_LITELLM,
+            alias="chat-default",
+            upstream_model="gpt-4o",
+            status="success",
+            latency_ms=420,
+            request_tokens=120,
+            response_tokens=220,
+            trace_id="trace-1",
+            request_id="request-1",
+        )
+
+        self.assertEqual(log.alias, "chat-default")
+        self.assertEqual(log.trace_id, "trace-1")
+        self.assertEqual(log.response_tokens, 220)

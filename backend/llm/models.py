@@ -1,3 +1,4 @@
+from django.conf import settings
 from django.db import models, transaction
 
 
@@ -179,3 +180,51 @@ class FineTuneRun(models.Model):
 
     class Meta:
         ordering = ["-created_at", "-id"]
+
+
+class LiteLLMSyncEvent(models.Model):
+    STATUS_SUCCESS = "success"
+    STATUS_FAILED = "failed"
+
+    status = models.CharField(max_length=32)
+    triggered_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+    )
+    message = models.TextField(blank=True, default="")
+    checksum = models.CharField(max_length=128, blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at", "-id"]
+
+
+class ModelInvocationLog(models.Model):
+    model_config = models.ForeignKey(
+        ModelConfig,
+        related_name="invocation_logs",
+        on_delete=models.CASCADE,
+    )
+    capability = models.CharField(max_length=32, choices=ModelConfig.CAPABILITY_CHOICES)
+    provider = models.CharField(max_length=32, default=ModelConfig.PROVIDER_LITELLM)
+    alias = models.CharField(max_length=255)
+    upstream_model = models.CharField(max_length=255, blank=True, default="")
+    stage = models.CharField(max_length=32, blank=True, default="")
+    status = models.CharField(max_length=32, default="success")
+    latency_ms = models.PositiveIntegerField(default=0)
+    request_tokens = models.PositiveIntegerField(default=0)
+    response_tokens = models.PositiveIntegerField(default=0)
+    error_code = models.CharField(max_length=64, blank=True, default="")
+    error_message = models.TextField(blank=True, default="")
+    trace_id = models.CharField(max_length=128, blank=True, default="", db_index=True)
+    request_id = models.CharField(max_length=128, blank=True, default="", db_index=True)
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        ordering = ["-created_at", "-id"]
+        indexes = [
+            models.Index(fields=["model_config", "-created_at"]),
+            models.Index(fields=["trace_id", "-created_at"]),
+        ]

@@ -19,6 +19,11 @@ class ModelConfigSummarySerializer(serializers.ModelSerializer):
     latest_fine_tune_dataset = serializers.SerializerMethodField()
     latest_fine_tune_status = serializers.SerializerMethodField()
     latest_fine_tune_artifact_path = serializers.SerializerMethodField()
+    alias = serializers.SerializerMethodField()
+    upstream_provider = serializers.SerializerMethodField()
+    upstream_model = serializers.SerializerMethodField()
+    fallback_aliases = serializers.SerializerMethodField()
+    weight = serializers.SerializerMethodField()
 
     def get_options(self, obj):
         options = dict(obj.options or {})
@@ -58,6 +63,24 @@ class ModelConfigSummarySerializer(serializers.ModelSerializer):
         latest_run = self._get_latest_fine_tune_run(obj)
         return latest_run.artifact_path if latest_run else ""
 
+    def _get_litellm_options(self, obj):
+        return (obj.options or {}).get("litellm", {})
+
+    def get_alias(self, obj):
+        return obj.model_name
+
+    def get_upstream_provider(self, obj):
+        return self._get_litellm_options(obj).get("upstream_provider", "")
+
+    def get_upstream_model(self, obj):
+        return self._get_litellm_options(obj).get("upstream_model", "")
+
+    def get_fallback_aliases(self, obj):
+        return self._get_litellm_options(obj).get("fallback_aliases", [])
+
+    def get_weight(self, obj):
+        return self._get_litellm_options(obj).get("weight", 1)
+
     class Meta:
         model = ModelConfig
         fields = (
@@ -77,6 +100,11 @@ class ModelConfigSummarySerializer(serializers.ModelSerializer):
             "is_active",
             "created_at",
             "updated_at",
+            "alias",
+            "upstream_provider",
+            "upstream_model",
+            "fallback_aliases",
+            "weight",
         )
 
 
