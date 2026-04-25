@@ -1368,7 +1368,7 @@ class LiteLLMGatewayAuditModelTests(TestCase):
             provider=ModelConfig.PROVIDER_LITELLM,
             alias="chat-default",
             upstream_model="gpt-4o",
-            status="success",
+            status=ModelInvocationLog.STATUS_SUCCESS,
             latency_ms=420,
             request_tokens=120,
             response_tokens=220,
@@ -1376,9 +1376,46 @@ class LiteLLMGatewayAuditModelTests(TestCase):
             request_id="request-1",
         )
 
-        self.assertEqual(log.alias, "chat-default")
-        self.assertEqual(log.trace_id, "trace-1")
-        self.assertEqual(log.response_tokens, 220)
+        fetched = ModelInvocationLog.objects.get(pk=log.pk)
+        self.assertEqual(fetched.alias, "chat-default")
+        self.assertEqual(fetched.trace_id, "trace-1")
+        self.assertEqual(fetched.request_id, "request-1")
+        self.assertEqual(fetched.request_tokens, 120)
+        self.assertEqual(fetched.response_tokens, 220)
+        self.assertEqual(fetched.latency_ms, 420)
+        self.assertEqual(fetched.status, ModelInvocationLog.STATUS_SUCCESS)
+        self.assertEqual(fetched.capability, ModelConfig.CAPABILITY_CHAT)
+        self.assertEqual(fetched.provider, ModelConfig.PROVIDER_LITELLM)
+        self.assertEqual(fetched.upstream_model, "gpt-4o")
+        self.assertIsNotNone(fetched.created_at)
+
+    def test_model_invocation_log_survives_model_config_deletion(self):
+        model = ModelConfig.objects.create(
+            name="chat-to-delete",
+            capability=ModelConfig.CAPABILITY_CHAT,
+            provider=ModelConfig.PROVIDER_LITELLM,
+            model_name="gpt-4o",
+            endpoint="http://localhost:4000",
+            is_active=False,
+        )
+        log = ModelInvocationLog.objects.create(
+            model_config=model,
+            capability=ModelConfig.CAPABILITY_CHAT,
+            provider=ModelConfig.PROVIDER_LITELLM,
+            alias="chat-to-delete",
+            status=ModelInvocationLog.STATUS_SUCCESS,
+            latency_ms=100,
+            request_tokens=10,
+            response_tokens=20,
+            trace_id="trace-del",
+        )
+
+        model.delete()
+
+        log.refresh_from_db()
+        self.assertIsNone(log.model_config)
+        self.assertEqual(log.trace_id, "trace-del")
+        self.assertEqual(log.alias, "chat-to-delete")
 
     def test_litellm_sync_event_status_constants(self):
         self.assertEqual(LiteLLMSyncEvent.STATUS_SUCCESS, "success")
@@ -1421,7 +1458,6 @@ class LiteLLMGatewayAuditModelTests(TestCase):
             password="secret",
             email="temp-sync@example.com",
         )
-        temp_user.groups.add(Group.objects.get(name=ROLE_ADMIN))
         event = LiteLLMSyncEvent.objects.create(
             status=LiteLLMSyncEvent.STATUS_SUCCESS,
             triggered_by=temp_user,
