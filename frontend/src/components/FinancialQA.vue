@@ -17,6 +17,7 @@ import {
 import ChatHistory from './ChatHistory.vue';
 import ChatMemoryDrawer from './ChatMemoryDrawer.vue';
 import AppIcon from './ui/AppIcon.vue';
+import ThemeToggle from './ui/ThemeToggle.vue';
 
 const props = defineProps({
   sessionId: {
@@ -377,6 +378,7 @@ const handleAsk = async () => {
     <div class="qa-shell">
       <div class="qa-shell__toolbar">
         <div class="qa-shell__actions">
+          <ThemeToggle />
           <button
             v-for="action in qaChromeState.actions"
             :key="action"
