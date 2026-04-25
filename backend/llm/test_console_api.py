@@ -249,6 +249,7 @@ class GatewayApiTests(TestCase):
         "/api/ops/llm/gateway/costs/summary/",
         "/api/ops/llm/gateway/costs/timeseries/",
         "/api/ops/llm/gateway/costs/models/",
+        "/api/ops/llm/gateway/traces/any-trace-id/",
     ]
 
     def setUp(self):

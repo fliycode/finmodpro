@@ -319,21 +319,19 @@ def get_costs_summary(filters: dict | None = None) -> dict:
     filters = _parse_filters(filters)
     qs = _apply_filters(_litellm_qs(), filters)
 
-    agg = qs.aggregate(
-        total_requests=Count("id"),
-        total_req_tokens=Sum("request_tokens"),
-        total_resp_tokens=Sum("response_tokens"),
-    )
-    total_requests = agg["total_requests"] or 0
-    total_request_tokens = agg["total_req_tokens"] or 0
-    total_response_tokens = agg["total_resp_tokens"] or 0
-
-    # Compute cost per model_config_id group
+    # Compute cost and totals from a single per-model_config_id grouped query.
     pricing = _pricing_map()
-    by_config = (
+    by_config = list(
         qs.values("model_config_id")
-        .annotate(req_tokens=Sum("request_tokens"), resp_tokens=Sum("response_tokens"))
+        .annotate(
+            count=Count("id"),
+            req_tokens=Sum("request_tokens"),
+            resp_tokens=Sum("response_tokens"),
+        )
     )
+    total_requests = sum(row["count"] for row in by_config)
+    total_request_tokens = sum(row["req_tokens"] or 0 for row in by_config)
+    total_response_tokens = sum(row["resp_tokens"] or 0 for row in by_config)
     estimated_input_cost = 0.0
     estimated_output_cost = 0.0
     for row in by_config:
