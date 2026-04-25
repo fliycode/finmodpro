@@ -224,6 +224,7 @@ class ModelInvocationLog(models.Model):
     provider = models.CharField(max_length=32, choices=ModelConfig.PROVIDER_CHOICES, default=ModelConfig.PROVIDER_LITELLM)
     alias = models.CharField(max_length=255)
     upstream_model = models.CharField(max_length=255, blank=True, default="")
+    # stage: optional pipeline step label (e.g. "routing", "fallback") for log filtering.
     stage = models.CharField(max_length=32, blank=True, default="")
     status = models.CharField(max_length=32, choices=STATUS_CHOICES, default=STATUS_SUCCESS)
     latency_ms = models.PositiveIntegerField(default=0)
@@ -232,7 +233,7 @@ class ModelInvocationLog(models.Model):
     error_code = models.CharField(max_length=64, blank=True, default="")
     error_message = models.TextField(blank=True, default="")
     trace_id = models.CharField(max_length=128, blank=True, default="")
-    request_id = models.CharField(max_length=128, blank=True, default="", db_index=True)
+    request_id = models.CharField(max_length=128, blank=True, default="")
     created_at = models.DateTimeField(auto_now_add=True, db_index=True)
 
     class Meta:
@@ -240,4 +241,5 @@ class ModelInvocationLog(models.Model):
         indexes = [
             models.Index(fields=["model_config", "-created_at"], name="llm_invoclog_cfg_created_idx"),
             models.Index(fields=["trace_id", "-created_at"], name="llm_invoclog_trace_created_idx"),
+            models.Index(fields=["request_id", "-created_at"], name="llm_invoclog_reqid_created_idx"),
         ]
