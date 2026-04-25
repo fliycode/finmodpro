@@ -2190,14 +2190,21 @@ class GatewayQueryServiceTests(TestCase):
     # ------------------------------------------------------------------
 
     def _make_non_litellm_log(self, **kwargs):
-        """Create an invocation log for a non-LiteLLM provider (e.g. Ollama)."""
-        ollama_config = ModelConfig.objects.create(
-            name="ollama-chat",
+        """Create an invocation log for a non-LiteLLM provider (e.g. Ollama).
+
+        Uses get_or_create for the ModelConfig so the helper is safe to call
+        multiple times within a single test without hitting the
+        (capability, name) unique constraint.
+        """
+        ollama_config, _ = ModelConfig.objects.get_or_create(
             capability=ModelConfig.CAPABILITY_CHAT,
-            provider=ModelConfig.PROVIDER_OLLAMA,
-            model_name="llama3",
-            endpoint="http://localhost:11434",
-            is_active=True,
+            name="ollama-chat",
+            defaults=dict(
+                provider=ModelConfig.PROVIDER_OLLAMA,
+                model_name="llama3",
+                endpoint="http://localhost:11434",
+                is_active=True,
+            ),
         )
         defaults = dict(
             model_config=ollama_config,
@@ -2287,6 +2294,37 @@ class GatewayQueryServiceTests(TestCase):
         result = get_gateway_summary()
 
         self.assertEqual(result["traffic"]["request_count"], 1)
+
+    def test_provider_scope_get_trace_excludes_non_litellm(self):
+        """A trace lookup must not return logs from non-LiteLLM providers."""
+        from llm.services.litellm_gateway_query_service import get_trace
+
+        tid = "shared-trace-001"
+        self._make_log(trace_id=tid, alias="gw-chat")
+        # Same trace_id, but belongs to a non-LiteLLM provider.
+        self._make_non_litellm_log(trace_id=tid)
+
+        result = get_trace(tid)
+
+        self.assertIsNotNone(result, "Trace must be found via its LiteLLM log")
+        aliases = [log["alias"] for log in result["logs"]]
+        self.assertIn("gw-chat", aliases)
+        self.assertNotIn("ollama-chat", aliases)
+        self.assertEqual(len(result["logs"]), 1)
+
+    def test_provider_scope_get_costs_timeseries_excludes_non_litellm(self):
+        """Non-LiteLLM logs must not appear in the costs time-series points."""
+        from llm.services.litellm_gateway_query_service import get_costs_timeseries
+
+        self._make_log(request_tokens=1_000, response_tokens=500)
+        # Non-LiteLLM log with huge token counts — must not pollute the series.
+        self._make_non_litellm_log(request_tokens=999_000_000, response_tokens=999_000_000)
+
+        result = get_costs_timeseries({"time": "24h"})
+
+        self.assertIn("points", result)
+        total_requests = sum(p["request_count"] for p in result["points"])
+        self.assertEqual(total_requests, 1, "Only the LiteLLM log should be counted")
 
 @override_settings(
     JWT_SECRET_KEY="test-jwt-secret",
