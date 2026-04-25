@@ -1346,7 +1346,11 @@ class LiteLLMGatewayAuditModelTests(TestCase):
             HTTP_AUTHORIZATION=f"Bearer {self.admin_access_token}",
         )
 
-        row = next(item for item in response.json()["data"]["model_configs"] if item["id"] == model.id)
+        row = next(
+            (item for item in response.json()["data"]["model_configs"] if item["id"] == model.id),
+            None,
+        )
+        self.assertIsNotNone(row, "Expected LiteLLM model config row not found in response")
         self.assertEqual(row["alias"], "chat-default")
         self.assertEqual(row["upstream_provider"], "openai")
         self.assertEqual(row["upstream_model"], "gpt-4o")
@@ -1467,3 +1471,57 @@ class LiteLLMGatewayAuditModelTests(TestCase):
 
         event.refresh_from_db()
         self.assertIsNone(event.triggered_by)
+
+    def test_fallback_aliases_non_list_stored_value_serializes_as_empty_list(self):
+        """A non-list value stored in options.litellm.fallback_aliases must be coerced to []."""
+        model = ModelConfig.objects.create(
+            name="chat-bad-aliases",
+            capability=ModelConfig.CAPABILITY_CHAT,
+            provider=ModelConfig.PROVIDER_LITELLM,
+            model_name="chat-bad-aliases",
+            endpoint="http://localhost:4000",
+            options={"litellm": {"fallback_aliases": "not-a-list"}},
+            is_active=False,
+        )
+
+        response = self.client.get(
+            "/api/ops/model-configs/",
+            HTTP_AUTHORIZATION=f"Bearer {self.admin_access_token}",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        row = next(
+            (item for item in response.json()["data"]["model_configs"] if item["id"] == model.id),
+            None,
+        )
+        self.assertIsNotNone(row, "Expected model config row not found in response")
+        self.assertEqual(row["fallback_aliases"], [])
+
+    def test_non_litellm_model_serializer_compat_fields_have_defaults(self):
+        """Non-LiteLLM configs expose empty/default values for the LiteLLM compat fields."""
+        model = ModelConfig.objects.create(
+            name="ollama-compat-defaults",
+            capability=ModelConfig.CAPABILITY_CHAT,
+            provider=ModelConfig.PROVIDER_OLLAMA,
+            model_name="qwen2.5:7b",
+            endpoint="http://localhost:11434",
+            options={},
+            is_active=False,
+        )
+
+        response = self.client.get(
+            "/api/ops/model-configs/",
+            HTTP_AUTHORIZATION=f"Bearer {self.admin_access_token}",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        row = next(
+            (item for item in response.json()["data"]["model_configs"] if item["id"] == model.id),
+            None,
+        )
+        self.assertIsNotNone(row, "Expected model config row not found in response")
+        self.assertEqual(row["alias"], "qwen2.5:7b")
+        self.assertEqual(row["upstream_provider"], "")
+        self.assertEqual(row["upstream_model"], "")
+        self.assertEqual(row["fallback_aliases"], [])
+        self.assertEqual(row["weight"], 1)
