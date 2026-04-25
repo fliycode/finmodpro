@@ -13,8 +13,14 @@ class Migration(migrations.Migration):
         migrations.CreateModel(
             name="LiteLLMSyncEvent",
             fields=[
-                ("id", models.AutoField(auto_created=True, primary_key=True, serialize=False, verbose_name="ID")),
-                ("status", models.CharField(max_length=32)),
+                ("id", models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name="ID")),
+                (
+                    "status",
+                    models.CharField(
+                        choices=[("success", "Success"), ("failed", "Failed")],
+                        max_length=32,
+                    ),
+                ),
                 (
                     "triggered_by",
                     models.ForeignKey(
@@ -35,7 +41,7 @@ class Migration(migrations.Migration):
         migrations.CreateModel(
             name="ModelInvocationLog",
             fields=[
-                ("id", models.AutoField(auto_created=True, primary_key=True, serialize=False, verbose_name="ID")),
+                ("id", models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name="ID")),
                 (
                     "model_config",
                     models.ForeignKey(
@@ -59,13 +65,20 @@ class Migration(migrations.Migration):
                 ("alias", models.CharField(max_length=255)),
                 ("upstream_model", models.CharField(blank=True, default="", max_length=255)),
                 ("stage", models.CharField(blank=True, default="", max_length=32)),
-                ("status", models.CharField(default="success", max_length=32)),
+                (
+                    "status",
+                    models.CharField(
+                        choices=[("success", "Success"), ("failed", "Failed")],
+                        default="success",
+                        max_length=32,
+                    ),
+                ),
                 ("latency_ms", models.PositiveIntegerField(default=0)),
                 ("request_tokens", models.PositiveIntegerField(default=0)),
                 ("response_tokens", models.PositiveIntegerField(default=0)),
                 ("error_code", models.CharField(blank=True, default="", max_length=64)),
                 ("error_message", models.TextField(blank=True, default="")),
-                ("trace_id", models.CharField(blank=True, db_index=True, default="", max_length=128)),
+                ("trace_id", models.CharField(blank=True, default="", max_length=128)),
                 ("request_id", models.CharField(blank=True, db_index=True, default="", max_length=128)),
                 ("created_at", models.DateTimeField(auto_now_add=True, db_index=True)),
             ],

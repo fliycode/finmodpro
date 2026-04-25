@@ -1310,8 +1310,6 @@ class FineTuneRunCallbackApiTests(TestCase):
         )
 
 
-
-
 class LiteLLMGatewayAuditModelTests(TestCase):
     def setUp(self):
         self.client = Client()
@@ -1356,7 +1354,14 @@ class LiteLLMGatewayAuditModelTests(TestCase):
         self.assertEqual(row["weight"], 1)
 
     def test_model_invocation_log_persists_trace_and_tokens(self):
-        model = get_active_model_config(ModelConfig.CAPABILITY_CHAT)
+        model = ModelConfig.objects.create(
+            name="chat-invocation-test",
+            capability=ModelConfig.CAPABILITY_CHAT,
+            provider=ModelConfig.PROVIDER_LITELLM,
+            model_name="gpt-4o",
+            endpoint="http://localhost:4000",
+            is_active=True,
+        )
         log = ModelInvocationLog.objects.create(
             model_config=model,
             capability=ModelConfig.CAPABILITY_CHAT,
@@ -1411,13 +1416,12 @@ class LiteLLMGatewayAuditModelTests(TestCase):
         self.assertEqual(ids[1], first.pk)
 
     def test_litellm_sync_event_triggered_by_null_on_user_delete(self):
-        from django.contrib.auth.models import Group as DjangoGroup
         temp_user = User.objects.create_user(
             username="temp-sync-user",
             password="secret",
             email="temp-sync@example.com",
         )
-        temp_user.groups.add(DjangoGroup.objects.get(name=ROLE_ADMIN))
+        temp_user.groups.add(Group.objects.get(name=ROLE_ADMIN))
         event = LiteLLMSyncEvent.objects.create(
             status=LiteLLMSyncEvent.STATUS_SUCCESS,
             triggered_by=temp_user,
