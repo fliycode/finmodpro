@@ -213,6 +213,15 @@ class ModelInvocationLog(models.Model):
         (STATUS_FAILED, "Failed"),
     )
 
+    STAGE_ROUTING = "routing"
+    STAGE_FALLBACK = "fallback"
+    STAGE_DIRECT = "direct"
+    STAGE_CHOICES = (
+        (STAGE_ROUTING, "Routing"),
+        (STAGE_FALLBACK, "Fallback"),
+        (STAGE_DIRECT, "Direct"),
+    )
+
     model_config = models.ForeignKey(
         ModelConfig,
         related_name="invocation_logs",
@@ -224,8 +233,8 @@ class ModelInvocationLog(models.Model):
     provider = models.CharField(max_length=32, choices=ModelConfig.PROVIDER_CHOICES, default=ModelConfig.PROVIDER_LITELLM)
     alias = models.CharField(max_length=255)
     upstream_model = models.CharField(max_length=255, blank=True, default="")
-    # stage: optional pipeline step label (e.g. "routing", "fallback") for log filtering.
-    stage = models.CharField(max_length=32, blank=True, default="")
+    # stage: optional pipeline step label; blank means unclassified (e.g. direct SDK calls outside the gateway).
+    stage = models.CharField(max_length=32, choices=STAGE_CHOICES, blank=True, default="")
     status = models.CharField(max_length=32, choices=STATUS_CHOICES, default=STATUS_SUCCESS)
     latency_ms = models.PositiveIntegerField(default=0)
     request_tokens = models.PositiveIntegerField(default=0)
@@ -234,6 +243,9 @@ class ModelInvocationLog(models.Model):
     error_message = models.TextField(blank=True, default="")
     trace_id = models.CharField(max_length=128, blank=True, default="")
     request_id = models.CharField(max_length=128, blank=True, default="")
+    # db_index=True on created_at supports the default ordering sort (ORDER BY -created_at)
+    # and point-in-time range queries (e.g. recent logs feed) that don't include the
+    # composite-index prefix columns (model_config, trace_id, request_id).
     created_at = models.DateTimeField(auto_now_add=True, db_index=True)
 
     class Meta:
