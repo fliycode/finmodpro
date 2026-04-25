@@ -13,6 +13,16 @@ from llm.controllers.fine_tune_controller import (
     FineTuneRunRunnerSpecView,
 )
 from llm.controllers.evaluation_controller import EvalRecordListCreateView
+from llm.controllers.gateway_controller import (
+    GatewayCostsModelsView,
+    GatewayCostsSummaryView,
+    GatewayCostsTimeseriesView,
+    GatewayErrorsView,
+    GatewayLogsSummaryView,
+    GatewayLogsView,
+    GatewaySummaryView,
+    GatewayTraceView,
+)
 from llm.controllers.model_config_controller import (
     ModelConfigActivationView,
     ModelConfigConnectionTestView,
@@ -25,6 +35,24 @@ from llm.controllers.prompt_config_controller import PromptConfigListView, Promp
 
 
 urlpatterns = [
+    # Gateway analytics
+    path("llm/gateway/summary", GatewaySummaryView.as_view(), name="gateway-summary-legacy"),
+    path("llm/gateway/summary/", GatewaySummaryView.as_view(), name="gateway-summary"),
+    path("llm/gateway/logs/summary", GatewayLogsSummaryView.as_view(), name="gateway-logs-summary-legacy"),
+    path("llm/gateway/logs/summary/", GatewayLogsSummaryView.as_view(), name="gateway-logs-summary"),
+    path("llm/gateway/logs", GatewayLogsView.as_view(), name="gateway-logs-legacy"),
+    path("llm/gateway/logs/", GatewayLogsView.as_view(), name="gateway-logs"),
+    path("llm/gateway/traces/<str:trace_id>", GatewayTraceView.as_view(), name="gateway-trace-legacy"),
+    path("llm/gateway/traces/<str:trace_id>/", GatewayTraceView.as_view(), name="gateway-trace"),
+    path("llm/gateway/errors", GatewayErrorsView.as_view(), name="gateway-errors-legacy"),
+    path("llm/gateway/errors/", GatewayErrorsView.as_view(), name="gateway-errors"),
+    path("llm/gateway/costs/summary", GatewayCostsSummaryView.as_view(), name="gateway-costs-summary-legacy"),
+    path("llm/gateway/costs/summary/", GatewayCostsSummaryView.as_view(), name="gateway-costs-summary"),
+    path("llm/gateway/costs/timeseries", GatewayCostsTimeseriesView.as_view(), name="gateway-costs-timeseries-legacy"),
+    path("llm/gateway/costs/timeseries/", GatewayCostsTimeseriesView.as_view(), name="gateway-costs-timeseries"),
+    path("llm/gateway/costs/models", GatewayCostsModelsView.as_view(), name="gateway-costs-models-legacy"),
+    path("llm/gateway/costs/models/", GatewayCostsModelsView.as_view(), name="gateway-costs-models"),
+    # Console
     path("llm/summary", LlmConsoleSummaryView.as_view(), name="llm-console-summary-legacy"),
     path("llm/summary/", LlmConsoleSummaryView.as_view(), name="llm-console-summary"),
     path(

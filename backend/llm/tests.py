@@ -1898,6 +1898,293 @@ class LiteLLMGatewayCommandServiceTests(TestCase):
         mock_log.assert_not_called()
 
 
+# ---------------------------------------------------------------------------
+# LiteLLM Gateway Query Service Tests
+# ---------------------------------------------------------------------------
+
+class GatewayQueryServiceTests(TestCase):
+    """Service-level tests for litellm_gateway_query_service."""
+
+    def setUp(self):
+        self.model_config = ModelConfig.objects.create(
+            name="gw-chat",
+            capability=ModelConfig.CAPABILITY_CHAT,
+            provider=ModelConfig.PROVIDER_LITELLM,
+            model_name="gw-chat",
+            endpoint="http://localhost:4000",
+            is_active=True,
+            options={
+                "api_key": "sk-test",
+                "litellm": {
+                    "upstream_provider": "openai",
+                    "upstream_model": "gpt-4o",
+                    "input_price_per_million": 5.0,
+                    "output_price_per_million": 15.0,
+                },
+            },
+        )
+
+    def _make_log(self, **kwargs):
+        defaults = dict(
+            model_config=self.model_config,
+            capability="chat",
+            alias="gw-chat",
+            upstream_model="gpt-4o",
+            status=ModelInvocationLog.STATUS_SUCCESS,
+            latency_ms=200,
+            request_tokens=10,
+            response_tokens=5,
+        )
+        defaults.update(kwargs)
+        return ModelInvocationLog.objects.create(**defaults)
+
+    def test_summary_returns_gateway_health_and_traffic(self):
+        from llm.services.litellm_gateway_query_service import get_gateway_summary
+
+        self._make_log()
+        self._make_log(status=ModelInvocationLog.STATUS_FAILED, error_code="500")
+
+        result = get_gateway_summary()
+
+        self.assertIn("gateway", result)
+        self.assertIn("status", result["gateway"])
+        self.assertIn("recent_sync", result)
+        self.assertIn("traffic", result)
+        self.assertGreaterEqual(result["traffic"]["request_count"], 2)
+        self.assertGreaterEqual(result["traffic"]["failed_count"], 1)
+        self.assertIn("error_rate_pct", result["traffic"])
+        self.assertIn("top_models", result)
+        self.assertIn("recent_errors", result)
+
+    def test_summary_includes_recent_sync_info(self):
+        from llm.services.litellm_gateway_query_service import get_gateway_summary
+
+        LiteLLMSyncEvent.objects.create(status=LiteLLMSyncEvent.STATUS_SUCCESS, message="ok")
+
+        result = get_gateway_summary()
+
+        self.assertIsNotNone(result["recent_sync"])
+        self.assertEqual(result["recent_sync"]["status"], "success")
+
+    def test_summary_recent_sync_is_none_when_no_events(self):
+        from llm.services.litellm_gateway_query_service import get_gateway_summary
+
+        result = get_gateway_summary()
+
+        self.assertIsNone(result["recent_sync"])
+
+    def test_summary_top_models_ordered_by_count(self):
+        from llm.services.litellm_gateway_query_service import get_gateway_summary
+
+        for _ in range(3):
+            self._make_log(alias="model-a")
+        self._make_log(alias="model-b")
+
+        result = get_gateway_summary()
+
+        aliases = [m["alias"] for m in result["top_models"]]
+        self.assertEqual(aliases[0], "model-a")
+
+    def test_get_logs_returns_filtered_rows(self):
+        from llm.services.litellm_gateway_query_service import get_logs
+
+        self._make_log(alias="chat-model", status=ModelInvocationLog.STATUS_SUCCESS)
+        self._make_log(alias="embed-model", status=ModelInvocationLog.STATUS_FAILED, error_code="503")
+
+        result = get_logs({"model": "chat-model", "status": None, "time": "24h"})
+
+        self.assertEqual(result["total"], 1)
+        self.assertEqual(result["logs"][0]["alias"], "chat-model")
+        # No raw prompt/response data
+        for log in result["logs"]:
+            self.assertNotIn("prompt", log)
+            self.assertNotIn("response", log)
+
+    def test_get_logs_status_filter(self):
+        from llm.services.litellm_gateway_query_service import get_logs
+
+        self._make_log(status=ModelInvocationLog.STATUS_SUCCESS)
+        self._make_log(status=ModelInvocationLog.STATUS_FAILED, error_code="503")
+
+        result = get_logs({"model": None, "status": "failed", "time": "24h"})
+
+        self.assertEqual(result["total"], 1)
+        self.assertEqual(result["logs"][0]["status"], "failed")
+
+    def test_get_logs_includes_required_fields(self):
+        from llm.services.litellm_gateway_query_service import get_logs
+
+        self._make_log(
+            alias="gw-chat",
+            upstream_model="gpt-4o",
+            stage=ModelInvocationLog.STAGE_ROUTING,
+            latency_ms=250,
+            request_tokens=20,
+            response_tokens=10,
+            trace_id="trace-123",
+            request_id="req-abc",
+        )
+
+        result = get_logs({"model": None, "status": None, "time": "24h"})
+
+        log = result["logs"][0]
+        for field in ("time", "alias", "upstream_model", "capability", "stage",
+                      "latency_ms", "request_tokens", "response_tokens",
+                      "status", "error_code", "trace_id", "request_id"):
+            self.assertIn(field, log, f"Missing field: {field}")
+
+    def test_get_logs_summary_aggregates_correctly(self):
+        from llm.services.litellm_gateway_query_service import get_logs_summary
+
+        self._make_log(latency_ms=100, status=ModelInvocationLog.STATUS_SUCCESS)
+        self._make_log(latency_ms=300, status=ModelInvocationLog.STATUS_FAILED, error_code="500")
+
+        result = get_logs_summary({"model": None, "status": None, "time": "24h"})
+
+        self.assertEqual(result["total_requests"], 2)
+        self.assertAlmostEqual(result["avg_latency_ms"], 200.0, delta=1.0)
+        self.assertAlmostEqual(result["error_rate_pct"], 50.0, delta=0.1)
+        self.assertIn("error_breakdown", result)
+        self.assertIn("latency_buckets", result)
+
+    def test_get_logs_summary_latency_buckets_structure(self):
+        from llm.services.litellm_gateway_query_service import get_logs_summary
+
+        for ms in [50, 150, 600, 1500]:
+            self._make_log(latency_ms=ms)
+
+        result = get_logs_summary({"model": None, "status": None, "time": "24h"})
+
+        buckets = result["latency_buckets"]
+        self.assertIsInstance(buckets, list)
+        self.assertTrue(len(buckets) > 0)
+        for bucket in buckets:
+            self.assertIn("label", bucket)
+            self.assertIn("count", bucket)
+
+    def test_get_trace_returns_ordered_logs(self):
+        from llm.services.litellm_gateway_query_service import get_trace
+
+        tid = "trace-xyz"
+        self._make_log(trace_id=tid, alias="first-model")
+        self._make_log(trace_id=tid, alias="second-model")
+
+        result = get_trace(tid)
+
+        self.assertEqual(result["trace_id"], tid)
+        self.assertIsNotNone(result["started_at"])
+        self.assertIsNotNone(result["ended_at"])
+        self.assertEqual(len(result["logs"]), 2)
+
+    def test_get_trace_returns_none_for_unknown_trace(self):
+        from llm.services.litellm_gateway_query_service import get_trace
+
+        result = get_trace("does-not-exist")
+
+        self.assertIsNone(result)
+
+    def test_get_errors_returns_aggregated_types(self):
+        from llm.services.litellm_gateway_query_service import get_errors
+
+        self._make_log(status=ModelInvocationLog.STATUS_FAILED, error_code="500")
+        self._make_log(status=ModelInvocationLog.STATUS_FAILED, error_code="500")
+        self._make_log(status=ModelInvocationLog.STATUS_FAILED, error_code="503")
+
+        result = get_errors()
+
+        self.assertEqual(result["total_failed_requests"], 3)
+        self.assertIn("error_types", result)
+        codes = {e["error_code"] for e in result["error_types"]}
+        self.assertIn("500", codes)
+        self.assertIn("503", codes)
+        self.assertIn("recent_errors", result)
+
+    def test_get_costs_summary_uses_model_pricing(self):
+        from llm.services.litellm_gateway_query_service import get_costs_summary
+
+        self._make_log(request_tokens=1_000_000, response_tokens=500_000)
+
+        result = get_costs_summary({"time": "24h"})
+
+        self.assertIn("total_requests", result)
+        self.assertIn("total_request_tokens", result)
+        self.assertIn("total_response_tokens", result)
+        self.assertIn("estimated_input_cost", result)
+        self.assertIn("estimated_output_cost", result)
+        self.assertIn("estimated_total_cost", result)
+        # 1M input tokens × $5/M = $5.00; 0.5M output × $15/M = $7.50
+        self.assertAlmostEqual(result["estimated_input_cost"], 5.0, delta=0.01)
+        self.assertAlmostEqual(result["estimated_output_cost"], 7.5, delta=0.01)
+
+    def test_get_costs_summary_no_pricing_yields_zero_cost(self):
+        from llm.services.litellm_gateway_query_service import get_costs_summary
+
+        model_no_price = ModelConfig.objects.create(
+            name="no-price",
+            capability=ModelConfig.CAPABILITY_CHAT,
+            provider=ModelConfig.PROVIDER_LITELLM,
+            model_name="no-price",
+            endpoint="http://localhost:4000",
+            options={},
+        )
+        ModelInvocationLog.objects.create(
+            model_config=model_no_price,
+            capability="chat",
+            alias="no-price",
+            upstream_model="cheap-model",
+            request_tokens=1_000,
+            response_tokens=500,
+        )
+
+        result = get_costs_summary({"time": "24h"})
+
+        self.assertEqual(result["estimated_total_cost"], 0.0)
+
+    def test_get_costs_timeseries_returns_points(self):
+        from llm.services.litellm_gateway_query_service import get_costs_timeseries
+
+        self._make_log(request_tokens=100, response_tokens=50)
+
+        result = get_costs_timeseries({"time": "24h"})
+
+        self.assertIn("points", result)
+        self.assertIsInstance(result["points"], list)
+        if result["points"]:
+            point = result["points"][0]
+            self.assertIn("bucket", point)
+            self.assertIn("request_count", point)
+            self.assertIn("estimated_cost", point)
+
+    def test_get_costs_models_returns_per_model_breakdown(self):
+        from llm.services.litellm_gateway_query_service import get_costs_models
+
+        self._make_log(request_tokens=500_000, response_tokens=250_000)
+        other_config = ModelConfig.objects.create(
+            name="gw-embed",
+            capability=ModelConfig.CAPABILITY_EMBEDDING,
+            provider=ModelConfig.PROVIDER_LITELLM,
+            model_name="gw-embed",
+            endpoint="http://localhost:4000",
+            options={"api_key": "sk-test"},
+        )
+        ModelInvocationLog.objects.create(
+            model_config=other_config,
+            capability="embedding",
+            alias="gw-embed",
+            upstream_model="text-ada-002",
+            request_tokens=100_000,
+            response_tokens=0,
+        )
+
+        result = get_costs_models({"time": "24h"})
+
+        self.assertIn("models", result)
+        aliases = [m["alias"] for m in result["models"]]
+        self.assertIn("gw-chat", aliases)
+        for m in result["models"]:
+            self.assertIn("request_share_pct", m)
+            self.assertIn("estimated_total_cost", m)
+
 @override_settings(
     JWT_SECRET_KEY="test-jwt-secret",
     JWT_ACCESS_TOKEN_LIFETIME_SECONDS=3600,

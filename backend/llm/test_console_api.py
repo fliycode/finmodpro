@@ -5,7 +5,7 @@ from django.test import Client, TestCase, override_settings
 from authentication.models import User
 from authentication.services.jwt_service import generate_access_token
 from knowledgebase.models import Document, IngestionTask
-from llm.models import ModelConfig
+from llm.models import LiteLLMSyncEvent, ModelConfig, ModelInvocationLog
 from rag.models import RetrievalLog
 from rbac.services.rbac_service import ROLE_ADMIN, ROLE_MEMBER, seed_roles_and_permissions
 
@@ -232,3 +232,235 @@ class LlmConsoleApiTests(TestCase):
             },
         )
         self.assertEqual(payload["recent_failures"][0]["document_title"], "年报")
+
+
+@override_settings(
+    JWT_SECRET_KEY="test-jwt-secret",
+    JWT_ACCESS_TOKEN_LIFETIME_SECONDS=3600,
+)
+class GatewayApiTests(TestCase):
+    """Endpoint / auth tests for /api/ops/llm/gateway/* routes."""
+
+    GATEWAY_ENDPOINTS = [
+        "/api/ops/llm/gateway/summary/",
+        "/api/ops/llm/gateway/logs/",
+        "/api/ops/llm/gateway/logs/summary/",
+        "/api/ops/llm/gateway/errors/",
+        "/api/ops/llm/gateway/costs/summary/",
+        "/api/ops/llm/gateway/costs/timeseries/",
+        "/api/ops/llm/gateway/costs/models/",
+    ]
+
+    def setUp(self):
+        self.client = Client()
+        seed_roles_and_permissions()
+
+        self.admin = User.objects.create_user(
+            username="gw-admin",
+            password="secret123",
+            email="gw-admin@example.com",
+        )
+        self.admin.groups.add(Group.objects.get(name=ROLE_ADMIN))
+        self.access_token = generate_access_token(self.admin)
+
+        self.member = User.objects.create_user(
+            username="gw-member",
+            password="secret123",
+            email="gw-member@example.com",
+        )
+        self.member.groups.add(Group.objects.get(name=ROLE_MEMBER))
+        self.member_token = generate_access_token(self.member)
+
+        self.model_config = ModelConfig.objects.create(
+            name="gw-chat",
+            capability=ModelConfig.CAPABILITY_CHAT,
+            provider=ModelConfig.PROVIDER_LITELLM,
+            model_name="gw-chat",
+            endpoint="http://localhost:4000",
+            is_active=True,
+            options={
+                "api_key": "sk-test",
+                "litellm": {
+                    "upstream_provider": "openai",
+                    "upstream_model": "gpt-4o",
+                    "input_price_per_million": 5.0,
+                    "output_price_per_million": 15.0,
+                },
+            },
+        )
+
+    def _make_log(self, **kwargs):
+        defaults = dict(
+            model_config=self.model_config,
+            capability="chat",
+            alias="gw-chat",
+            upstream_model="gpt-4o",
+            status=ModelInvocationLog.STATUS_SUCCESS,
+            latency_ms=200,
+            request_tokens=10,
+            response_tokens=5,
+        )
+        defaults.update(kwargs)
+        return ModelInvocationLog.objects.create(**defaults)
+
+    def test_gateway_endpoints_require_authentication(self):
+        for endpoint in self.GATEWAY_ENDPOINTS:
+            response = self.client.get(endpoint)
+            self.assertEqual(response.status_code, 401, f"Expected 401 for {endpoint}")
+            self.assertEqual(response.json()["code"], 401)
+
+    def test_gateway_endpoints_require_manage_permission(self):
+        for endpoint in self.GATEWAY_ENDPOINTS:
+            response = self.client.get(
+                endpoint,
+                HTTP_AUTHORIZATION=f"Bearer {self.member_token}",
+            )
+            self.assertEqual(response.status_code, 403, f"Expected 403 for {endpoint}")
+            self.assertEqual(response.json()["code"], 403)
+
+    def test_gateway_summary_returns_expected_keys(self):
+        LiteLLMSyncEvent.objects.create(status=LiteLLMSyncEvent.STATUS_SUCCESS, message="ok")
+        self._make_log()
+
+        response = self.client.get(
+            "/api/ops/llm/gateway/summary/",
+            HTTP_AUTHORIZATION=f"Bearer {self.access_token}",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        data = response.json()["data"]
+        for key in ("gateway", "recent_sync", "traffic", "top_models", "recent_errors"):
+            self.assertIn(key, data, f"Missing key: {key}")
+
+    def test_gateway_logs_returns_rows(self):
+        self._make_log()
+
+        response = self.client.get(
+            "/api/ops/llm/gateway/logs/",
+            HTTP_AUTHORIZATION=f"Bearer {self.access_token}",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        data = response.json()["data"]
+        self.assertIn("logs", data)
+        self.assertIn("total", data)
+        self.assertGreater(data["total"], 0)
+
+    def test_gateway_logs_supports_model_filter(self):
+        self._make_log(alias="model-a")
+        self._make_log(alias="model-b")
+
+        response = self.client.get(
+            "/api/ops/llm/gateway/logs/?model=model-a",
+            HTTP_AUTHORIZATION=f"Bearer {self.access_token}",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        data = response.json()["data"]
+        self.assertEqual(data["total"], 1)
+        self.assertEqual(data["logs"][0]["alias"], "model-a")
+
+    def test_gateway_logs_summary_returns_aggregates(self):
+        self._make_log(latency_ms=100)
+        self._make_log(latency_ms=300, status=ModelInvocationLog.STATUS_FAILED, error_code="500")
+
+        response = self.client.get(
+            "/api/ops/llm/gateway/logs/summary/",
+            HTTP_AUTHORIZATION=f"Bearer {self.access_token}",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        data = response.json()["data"]
+        self.assertEqual(data["total_requests"], 2)
+        self.assertIn("error_rate_pct", data)
+        self.assertIn("avg_latency_ms", data)
+        self.assertIn("error_breakdown", data)
+        self.assertIn("latency_buckets", data)
+
+    def test_gateway_trace_returns_trace_view(self):
+        tid = "trace-api-test"
+        self._make_log(trace_id=tid)
+
+        response = self.client.get(
+            f"/api/ops/llm/gateway/traces/{tid}/",
+            HTTP_AUTHORIZATION=f"Bearer {self.access_token}",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        data = response.json()["data"]
+        self.assertEqual(data["trace_id"], tid)
+        self.assertEqual(len(data["logs"]), 1)
+
+    def test_gateway_trace_returns_404_for_unknown(self):
+        response = self.client.get(
+            "/api/ops/llm/gateway/traces/no-such-trace/",
+            HTTP_AUTHORIZATION=f"Bearer {self.access_token}",
+        )
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_gateway_errors_returns_aggregated_types(self):
+        self._make_log(status=ModelInvocationLog.STATUS_FAILED, error_code="500")
+        self._make_log(status=ModelInvocationLog.STATUS_FAILED, error_code="503")
+
+        response = self.client.get(
+            "/api/ops/llm/gateway/errors/",
+            HTTP_AUTHORIZATION=f"Bearer {self.access_token}",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        data = response.json()["data"]
+        self.assertIn("total_failed_requests", data)
+        self.assertIn("error_types", data)
+        self.assertIn("recent_errors", data)
+
+    def test_gateway_costs_summary_returns_cost_fields(self):
+        self._make_log(request_tokens=1_000, response_tokens=500)
+
+        response = self.client.get(
+            "/api/ops/llm/gateway/costs/summary/",
+            HTTP_AUTHORIZATION=f"Bearer {self.access_token}",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        data = response.json()["data"]
+        for key in ("total_requests", "total_request_tokens", "total_response_tokens",
+                    "estimated_input_cost", "estimated_output_cost", "estimated_total_cost"):
+            self.assertIn(key, data, f"Missing key: {key}")
+
+    def test_gateway_costs_timeseries_returns_points(self):
+        self._make_log()
+
+        response = self.client.get(
+            "/api/ops/llm/gateway/costs/timeseries/",
+            HTTP_AUTHORIZATION=f"Bearer {self.access_token}",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        data = response.json()["data"]
+        self.assertIn("points", data)
+
+    def test_gateway_costs_models_returns_model_breakdown(self):
+        self._make_log(request_tokens=1_000, response_tokens=500)
+
+        response = self.client.get(
+            "/api/ops/llm/gateway/costs/models/",
+            HTTP_AUTHORIZATION=f"Bearer {self.access_token}",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        data = response.json()["data"]
+        self.assertIn("models", data)
+        self.assertTrue(len(data["models"]) > 0)
+        for m in data["models"]:
+            self.assertIn("alias", m)
+            self.assertIn("request_share_pct", m)
+            self.assertIn("estimated_total_cost", m)
+
+    def test_gateway_legacy_urls_also_work(self):
+        """Non-trailing-slash variants must resolve (APPEND_SLASH behavior)."""
+        # We just check that they're registered (status != 404) for the auth guard.
+        no_slash_endpoints = [e.rstrip("/") for e in self.GATEWAY_ENDPOINTS]
+        for endpoint in no_slash_endpoints:
+            response = self.client.get(endpoint)
+            self.assertNotEqual(response.status_code, 404, f"Route not found: {endpoint}")
