@@ -2095,3 +2095,81 @@ class ModelConfigMigrationApiTests(TestCase):
         after_count = ModelConfig.objects.filter(provider="litellm", is_active=True).count()
         self.assertEqual(after_count, before_count, "Atomic transaction must roll back on failure")
 
+
+class LiteLLMAliasYamlRegressionTests(TestCase):
+    """Regression tests for YAML generation in litellm_alias_service."""
+
+    def setUp(self):
+        self.temp_dir = Path(tempfile.mkdtemp(dir=Path.cwd()))
+
+    def tearDown(self):
+        shutil.rmtree(self.temp_dir, ignore_errors=True)
+
+    def _make_litellm_model_config(self, upstream_model, model_name="my-route"):
+        return ModelConfig.objects.create(
+            name="Test Route",
+            model_name=model_name,
+            provider=ModelConfig.PROVIDER_LITELLM,
+            capability=ModelConfig.CAPABILITY_CHAT,
+            endpoint="http://localhost:8001",
+            is_active=True,
+            options={
+                "api_base": "http://localhost:8001",
+                "litellm": {"upstream_model": upstream_model},
+            },
+        )
+
+    def test_prefixed_upstream_model_is_not_double_prefixed(self):
+        """options.litellm.upstream_model='openai/gpt-4o' must produce model: openai/gpt-4o."""
+        from llm.services.litellm_alias_service import sync_litellm_route_for_config
+        from rbac.services.rbac_service import seed_roles_and_permissions
+        seed_roles_and_permissions()
+        admin_user = User.objects.create_user(
+            username="alias-test-admin",
+            password="secret",
+            email="alias-test@example.com",
+        )
+
+        model_config = self._make_litellm_model_config(upstream_model="openai/gpt-4o")
+        with override_settings(
+            LITELLM_GENERATED_CONFIG_ROOT=str(self.temp_dir),
+            LITELLM_BASE_CONFIG_PATH=str(self.temp_dir / "base.yaml"),
+            LITELLM_RENDERED_CONFIG_PATH=str(self.temp_dir / "rendered.yaml"),
+        ):
+            sync_litellm_route_for_config(model_config, triggered_by=admin_user)
+
+        route_key = f"route-{model_config.capability}-{model_config.id}"
+        config_path = self.temp_dir / f"{route_key}.yaml"
+        yaml_text = config_path.read_text(encoding="utf-8")
+
+        self.assertIn("model: openai/gpt-4o", yaml_text,
+                      "Already-prefixed upstream model must appear exactly once")
+        self.assertNotIn("model: openai/openai/", yaml_text,
+                         "Double prefix openai/openai/ must not appear in YAML")
+
+    def test_bare_upstream_model_gets_openai_prefix(self):
+        """options.litellm.upstream_model='gpt-4o' must produce model: openai/gpt-4o."""
+        from llm.services.litellm_alias_service import sync_litellm_route_for_config
+        from rbac.services.rbac_service import seed_roles_and_permissions
+        seed_roles_and_permissions()
+        admin_user = User.objects.create_user(
+            username="alias-test-admin2",
+            password="secret",
+            email="alias-test2@example.com",
+        )
+
+        model_config = self._make_litellm_model_config(upstream_model="gpt-4o")
+        with override_settings(
+            LITELLM_GENERATED_CONFIG_ROOT=str(self.temp_dir),
+            LITELLM_BASE_CONFIG_PATH=str(self.temp_dir / "base.yaml"),
+            LITELLM_RENDERED_CONFIG_PATH=str(self.temp_dir / "rendered.yaml"),
+        ):
+            sync_litellm_route_for_config(model_config, triggered_by=admin_user)
+
+        route_key = f"route-{model_config.capability}-{model_config.id}"
+        config_path = self.temp_dir / f"{route_key}.yaml"
+        yaml_text = config_path.read_text(encoding="utf-8")
+
+        self.assertIn("model: openai/gpt-4o", yaml_text,
+                      "Bare model name must be prefixed with openai/")
+
