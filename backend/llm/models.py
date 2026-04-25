@@ -185,8 +185,12 @@ class FineTuneRun(models.Model):
 class LiteLLMSyncEvent(models.Model):
     STATUS_SUCCESS = "success"
     STATUS_FAILED = "failed"
+    STATUS_CHOICES = (
+        (STATUS_SUCCESS, "Success"),
+        (STATUS_FAILED, "Failed"),
+    )
 
-    status = models.CharField(max_length=32)
+    status = models.CharField(max_length=32, choices=STATUS_CHOICES)
     triggered_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         null=True,
@@ -202,6 +206,13 @@ class LiteLLMSyncEvent(models.Model):
 
 
 class ModelInvocationLog(models.Model):
+    STATUS_SUCCESS = "success"
+    STATUS_FAILED = "failed"
+    STATUS_CHOICES = (
+        (STATUS_SUCCESS, "Success"),
+        (STATUS_FAILED, "Failed"),
+    )
+
     model_config = models.ForeignKey(
         ModelConfig,
         related_name="invocation_logs",
@@ -212,13 +223,13 @@ class ModelInvocationLog(models.Model):
     alias = models.CharField(max_length=255)
     upstream_model = models.CharField(max_length=255, blank=True, default="")
     stage = models.CharField(max_length=32, blank=True, default="")
-    status = models.CharField(max_length=32, default="success")
+    status = models.CharField(max_length=32, choices=STATUS_CHOICES, default=STATUS_SUCCESS)
     latency_ms = models.PositiveIntegerField(default=0)
     request_tokens = models.PositiveIntegerField(default=0)
     response_tokens = models.PositiveIntegerField(default=0)
     error_code = models.CharField(max_length=64, blank=True, default="")
     error_message = models.TextField(blank=True, default="")
-    trace_id = models.CharField(max_length=128, blank=True, default="", db_index=True)
+    trace_id = models.CharField(max_length=128, blank=True, default="")
     request_id = models.CharField(max_length=128, blank=True, default="", db_index=True)
     created_at = models.DateTimeField(auto_now_add=True, db_index=True)
 
