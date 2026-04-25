@@ -61,7 +61,7 @@ class Migration(migrations.Migration):
                         max_length=32,
                     ),
                 ),
-                ("provider", models.CharField(default="litellm", max_length=32)),
+                ("provider", models.CharField(choices=[("ollama", "Ollama"), ("deepseek", "DeepSeek"), ("litellm", "LiteLLM"), ("dashscope", "DashScope")], default="litellm", max_length=32)),
                 ("alias", models.CharField(max_length=255)),
                 ("upstream_model", models.CharField(blank=True, default="", max_length=255)),
                 ("stage", models.CharField(blank=True, default="", max_length=32)),
@@ -88,10 +88,10 @@ class Migration(migrations.Migration):
         ),
         migrations.AddIndex(
             model_name="modelinvocationlog",
-            index=models.Index(fields=["model_config", "-created_at"], name="llm_modelinvocationlog_model_config_created_at_idx"),
+            index=models.Index(fields=["model_config", "-created_at"], name="llm_invoclog_cfg_created_idx"),
         ),
         migrations.AddIndex(
             model_name="modelinvocationlog",
-            index=models.Index(fields=["trace_id", "-created_at"], name="llm_modelinvocationlog_trace_id_created_at_idx"),
+            index=models.Index(fields=["trace_id", "-created_at"], name="llm_invoclog_trace_created_idx"),
         ),
     ]
