@@ -219,7 +219,7 @@ class ModelInvocationLog(models.Model):
         on_delete=models.CASCADE,
     )
     capability = models.CharField(max_length=32, choices=ModelConfig.CAPABILITY_CHOICES)
-    provider = models.CharField(max_length=32, default=ModelConfig.PROVIDER_LITELLM)
+    provider = models.CharField(max_length=32, choices=ModelConfig.PROVIDER_CHOICES, default=ModelConfig.PROVIDER_LITELLM)
     alias = models.CharField(max_length=255)
     upstream_model = models.CharField(max_length=255, blank=True, default="")
     stage = models.CharField(max_length=32, blank=True, default="")
@@ -236,6 +236,6 @@ class ModelInvocationLog(models.Model):
     class Meta:
         ordering = ["-created_at", "-id"]
         indexes = [
-            models.Index(fields=["model_config", "-created_at"]),
-            models.Index(fields=["trace_id", "-created_at"]),
+            models.Index(fields=["model_config", "-created_at"], name="llm_invoclog_cfg_created_idx"),
+            models.Index(fields=["trace_id", "-created_at"], name="llm_invoclog_trace_created_idx"),
         ]
