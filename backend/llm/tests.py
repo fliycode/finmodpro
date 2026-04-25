@@ -16,6 +16,7 @@ from common.exceptions import UpstreamRateLimitError, UpstreamServiceError
 from authentication.models import User
 from authentication.services.jwt_service import generate_access_token
 from llm.models import EvalRecord, FineTuneRun, LiteLLMSyncEvent, ModelConfig, ModelInvocationLog
+from llm.services.model_config_command_service import migrate_active_configs_to_litellm
 from llm.services.model_config_service import get_active_model_config
 from llm.services.fine_tune_service import create_fine_tune_run
 from llm.services.prompt_service import load_prompt_template, render_prompt
@@ -1618,3 +1619,47 @@ class LiteLLMGatewayAuditModelTests(TestCase):
         self.assertEqual(row["upstream_model"], "")
         self.assertEqual(row["fallback_aliases"], [])
         self.assertEqual(row["weight"], 1)
+
+
+class LiteLLMGatewayCommandServiceTests(TestCase):
+    def setUp(self):
+        seed_roles_and_permissions()
+        self.admin_user = User.objects.create_user(
+            username="cmd-admin",
+            password="secret123",
+            email="cmd-admin@example.com",
+        )
+        self.admin_user.groups.add(Group.objects.get(name=ROLE_ADMIN))
+
+    def test_migrate_to_litellm_creates_active_chat_and_embedding_routes(self):
+        # Seed data (from migration 0001) provides default-chat (Ollama, active)
+        # and default-embedding (Ollama, active).
+        result = migrate_active_configs_to_litellm(triggered_by=self.admin_user)
+
+        self.assertEqual(result["migrated_capabilities"], ["chat", "embedding"])
+        self.assertTrue(ModelConfig.objects.filter(provider="litellm", capability="chat", is_active=True).exists())
+        self.assertTrue(LiteLLMSyncEvent.objects.filter(status="success").exists())
+
+    @patch("urllib.request.urlopen")
+    def test_litellm_provider_records_successful_chat_invocation(self, mock_urlopen):
+        mock_urlopen.return_value = _FakeHttpResponse({
+            "choices": [{"message": {"content": "ok"}}],
+            "usage": {"prompt_tokens": 11, "completion_tokens": 7},
+        })
+        ModelConfig.objects.create(
+            name="litellm-chat-test",
+            capability=ModelConfig.CAPABILITY_CHAT,
+            provider=ModelConfig.PROVIDER_LITELLM,
+            model_name="chat-default",
+            endpoint="http://localhost:4000",
+            options={"api_key": "sk-test"},
+            is_active=True,
+        )
+        provider = get_chat_provider()
+
+        provider.generate(messages=[{"role": "user", "content": "hi"}], trace_id="trace-1", request_id="request-1")
+
+        log = ModelInvocationLog.objects.get(trace_id="trace-1")
+        self.assertEqual(log.request_tokens, 11)
+        self.assertEqual(log.response_tokens, 7)
+        self.assertEqual(log.status, "success")

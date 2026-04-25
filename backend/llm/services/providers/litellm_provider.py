@@ -13,10 +13,11 @@ logger = logging.getLogger(__name__)
 class LiteLLMApiMixin:
     provider_name = "litellm"
 
-    def __init__(self, *, endpoint, model_name, options=None):
+    def __init__(self, *, endpoint, model_name, options=None, model_config=None):
         self.endpoint = endpoint.rstrip("/")
         self.model_name = model_name
         self.options = options or {}
+        self.model_config = model_config
 
     def _resolve_options(self, options=None):
         return {**self.options, **(options or {})}
@@ -157,6 +158,56 @@ class LiteLLMChatProvider(LiteLLMApiMixin, BaseChatProvider):
                 status_code=502,
                 code="llm_empty_response",
                 provider=self.provider_name,
+            )
+        return content
+
+    def generate(self, *, messages, trace_id="", request_id="", options=None):
+        """Like chat() but records a ModelInvocationLog with token counts."""
+        from llm.services.model_invocation_log_service import record_model_invocation
+
+        merged_options = self._resolve_options(options)
+        payload = {
+            "model": self.model_name,
+            "messages": messages,
+            "stream": False,
+        }
+        if merged_options.get("temperature") is not None:
+            payload["temperature"] = merged_options["temperature"]
+        if merged_options.get("max_tokens") is not None:
+            payload["max_tokens"] = merged_options["max_tokens"]
+        started_at = time.monotonic()
+        response_payload = self._post_json(
+            "/v1/chat/completions",
+            payload,
+            options=options,
+            capability="chat",
+        )
+        latency_ms = int((time.monotonic() - started_at) * 1000)
+        usage = response_payload.get("usage") or {}
+        request_tokens = usage.get("prompt_tokens", 0)
+        response_tokens = usage.get("completion_tokens", 0)
+        choices = response_payload.get("choices") or []
+        message = (choices[0] or {}).get("message") or {}
+        content = message.get("content")
+        if not content:
+            raise UpstreamServiceError(
+                "模型服务返回了空响应。",
+                status_code=502,
+                code="llm_empty_response",
+                provider=self.provider_name,
+            )
+        if self.model_config is not None and self.model_config.pk:
+            record_model_invocation(
+                model_config=self.model_config,
+                capability="chat",
+                alias=self.model_name,
+                upstream_model=self.model_name,
+                status="success",
+                latency_ms=latency_ms,
+                request_tokens=request_tokens,
+                response_tokens=response_tokens,
+                trace_id=trace_id,
+                request_id=request_id,
             )
         return content
 

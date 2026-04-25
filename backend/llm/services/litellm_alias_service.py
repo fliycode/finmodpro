@@ -2,6 +2,8 @@ from pathlib import Path
 
 from django.conf import settings
 
+from llm.models import LiteLLMSyncEvent, ModelConfig
+
 
 def _build_litellm_alias_config(*, alias, upstream_model_name, api_base):
     return (
@@ -34,3 +36,55 @@ def provision_litellm_alias(*, fine_tune_run):
         "litellm_alias": alias,
         "litellm_config_path": str(config_path),
     }
+
+
+def ensure_litellm_route_from_model_config(model_config):
+    """Get or create a LiteLLM ModelConfig route for the given model config."""
+    litellm_name = f"litellm-{model_config.name}"
+    endpoint = getattr(settings, "LITELLM_GATEWAY_URL", "http://localhost:4000")
+    route, _ = ModelConfig.objects.get_or_create(
+        capability=model_config.capability,
+        name=litellm_name,
+        defaults={
+            "provider": ModelConfig.PROVIDER_LITELLM,
+            "model_name": model_config.model_name,
+            "endpoint": endpoint,
+            "options": {},
+            "is_active": False,
+        },
+    )
+    return route
+
+
+def sync_litellm_routes(*, triggered_by):
+    """Write YAML snippets for all active LiteLLM routes and record a sync event."""
+    active_routes = list(
+        ModelConfig.objects.filter(provider=ModelConfig.PROVIDER_LITELLM, is_active=True)
+    )
+    generated_root = Path(settings.LITELLM_GENERATED_CONFIG_ROOT)
+    try:
+        generated_root.mkdir(parents=True, exist_ok=True)
+        for route in active_routes:
+            route_key = f"route-{route.capability}-{route.id}"
+            config_path = generated_root / f"{route_key}.yaml"
+            api_base = (route.options or {}).get("api_base") or route.endpoint
+            config_path.write_text(
+                _build_litellm_alias_config(
+                    alias=route.model_name,
+                    upstream_model_name=route.model_name,
+                    api_base=api_base,
+                ),
+                encoding="utf-8",
+            )
+        status = LiteLLMSyncEvent.STATUS_SUCCESS
+        message = f"Synced {len(active_routes)} active LiteLLM route(s)."
+    except Exception as exc:  # pragma: no cover
+        status = LiteLLMSyncEvent.STATUS_FAILED
+        message = str(exc)
+
+    event = LiteLLMSyncEvent.objects.create(
+        status=status,
+        triggered_by=triggered_by,
+        message=message,
+    )
+    return {"status": status, "sync_event_id": event.id, "route_count": len(active_routes)}

@@ -45,6 +45,7 @@ def _build_provider(model_config):
                 endpoint=_normalize_litellm_endpoint(model_config.endpoint),
                 model_name=model_config.model_name,
                 options=model_config.options,
+                model_config=model_config if model_config.pk else None,
             )
 
         if model_config.capability == ModelConfig.CAPABILITY_EMBEDDING:
@@ -52,6 +53,7 @@ def _build_provider(model_config):
                 endpoint=_normalize_litellm_endpoint(model_config.endpoint),
                 model_name=model_config.model_name,
                 options=model_config.options,
+                model_config=model_config if model_config.pk else None,
             )
 
         raise ProviderConfigurationError(

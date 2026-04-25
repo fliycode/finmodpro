@@ -53,3 +53,14 @@ def build_rendered_litellm_config(*, base_config_path, generated_root, output_pa
         "output_path": str(rendered_path),
         "generated_count": len(generated_snippets),
     }
+
+
+def try_build_rendered_litellm_config(*, base_config_path, generated_root, output_path):
+    """Like build_rendered_litellm_config but returns None if the base config file is absent."""
+    if not Path(base_config_path).exists():
+        return None
+    return build_rendered_litellm_config(
+        base_config_path=base_config_path,
+        generated_root=generated_root,
+        output_path=output_path,
+    )
