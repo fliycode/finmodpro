@@ -4,10 +4,11 @@ LiteLLM gateway analytics query service.
 All functions return plain dicts suitable for JSON serialization.
 No raw prompt or response data is ever exposed.
 """
-from collections import Counter, defaultdict
+from collections import defaultdict
 from datetime import timedelta
 
 from django.db.models import Avg, Count, Sum
+from django.db.models.functions import TruncDay, TruncHour
 from django.utils import timezone
 
 from llm.models import LiteLLMSyncEvent, ModelConfig, ModelInvocationLog
@@ -67,16 +68,17 @@ def _pricing_map() -> dict:
     return pricing
 
 
-def _estimate_cost(log_rows, pricing: dict) -> float:
-    total = 0.0
-    for row in log_rows:
-        mc_id = row.model_config_id
-        if mc_id not in pricing:
-            continue
-        inp_price, out_price = pricing[mc_id]
-        total += (row.request_tokens / 1_000_000) * inp_price
-        total += (row.response_tokens / 1_000_000) * out_price
-    return total
+def _apply_pricing(row: dict, pricing: dict) -> tuple[float, float]:
+    """Return (input_cost, output_cost) for a DB-aggregate row.
+
+    *row* must contain ``model_config_id``, ``req_tokens``, and
+    ``resp_tokens`` keys (the names produced by the ORM annotations used
+    throughout this module).
+    """
+    inp_price, out_price = pricing.get(row.get("model_config_id"), (0.0, 0.0))
+    req_tokens = row.get("req_tokens") or 0
+    resp_tokens = row.get("resp_tokens") or 0
+    return (req_tokens / 1_000_000) * inp_price, (resp_tokens / 1_000_000) * out_price
 
 
 def _serialize_log(log) -> dict:
@@ -316,10 +318,9 @@ def get_costs_summary(filters: dict | None = None) -> dict:
     estimated_input_cost = 0.0
     estimated_output_cost = 0.0
     for row in by_config:
-        mc_id = row["model_config_id"]
-        inp_price, out_price = pricing.get(mc_id, (0.0, 0.0))
-        estimated_input_cost += ((row["req_tokens"] or 0) / 1_000_000) * inp_price
-        estimated_output_cost += ((row["resp_tokens"] or 0) / 1_000_000) * out_price
+        inp, out = _apply_pricing(row, pricing)
+        estimated_input_cost += inp
+        estimated_output_cost += out
 
     return {
         "filters": filters,
@@ -338,36 +339,48 @@ def get_costs_timeseries(filters: dict | None = None) -> dict:
     time_preset = filters.get("time", "24h")
     qs = _apply_filters(ModelInvocationLog.objects.all(), filters)
 
-    # Choose bucket granularity based on time window
+    # Choose DB truncation function and display format based on time window.
+    # For 7d we use hourly DB truncation then collapse to 6-hour buckets in
+    # Python, which still scales by bucket/model pair rather than raw row count.
     if time_preset in ("1h", "24h"):
+        trunc_fn = TruncHour("created_at")
         bucket_hours = 1
         fmt = "%Y-%m-%dT%H:00"
     elif time_preset == "7d":
+        trunc_fn = TruncHour("created_at")
         bucket_hours = 6
         fmt = "%Y-%m-%dT%H:00"
     else:  # 30d
+        trunc_fn = TruncDay("created_at")
         bucket_hours = 24
         fmt = "%Y-%m-%d"
 
     pricing = _pricing_map()
 
-    # Group logs by bucket
-    buckets: dict = defaultdict(lambda: {"request_count": 0, "estimated_cost": 0.0})
-    for log in qs.only(
-        "created_at", "model_config_id", "request_tokens", "response_tokens"
-    ):
-        # Floor to bucket
-        ts = log.created_at
-        floored_hour = (ts.hour // bucket_hours) * bucket_hours
-        bucket_key = ts.replace(hour=floored_hour, minute=0, second=0, microsecond=0).strftime(fmt)
-
-        inp_price, out_price = pricing.get(log.model_config_id, (0.0, 0.0))
-        cost = (
-            (log.request_tokens / 1_000_000) * inp_price
-            + (log.response_tokens / 1_000_000) * out_price
+    # Aggregate in the DB by (time_bucket, model_config_id) — O(buckets × models)
+    db_rows = (
+        qs.annotate(time_bucket=trunc_fn)
+        .values("time_bucket", "model_config_id")
+        .annotate(
+            request_count=Count("id"),
+            req_tokens=Sum("request_tokens"),
+            resp_tokens=Sum("response_tokens"),
         )
-        buckets[bucket_key]["request_count"] += 1
-        buckets[bucket_key]["estimated_cost"] += cost
+        .order_by("time_bucket")
+    )
+
+    # Python post-pass: apply pricing and collapse to the desired granularity.
+    buckets: dict = defaultdict(lambda: {"request_count": 0, "estimated_cost": 0.0})
+    for row in db_rows:
+        ts = row["time_bucket"]
+        if bucket_hours == 6:
+            floored_hour = (ts.hour // 6) * 6
+            ts = ts.replace(hour=floored_hour, minute=0, second=0, microsecond=0)
+        bucket_key = ts.strftime(fmt)
+
+        inp_cost, out_cost = _apply_pricing(row, pricing)
+        buckets[bucket_key]["request_count"] += row["request_count"]
+        buckets[bucket_key]["estimated_cost"] += inp_cost + out_cost
 
     points = sorted(
         [
@@ -404,13 +417,8 @@ def get_costs_models(filters: dict | None = None) -> dict:
 
     models = []
     for row in by_alias:
-        mc_id = row["model_config_id"]
-        inp_price, out_price = pricing.get(mc_id, (0.0, 0.0))
-        req_tokens = row["req_tokens"] or 0
-        resp_tokens = row["resp_tokens"] or 0
-        input_cost = (req_tokens / 1_000_000) * inp_price
-        output_cost = (resp_tokens / 1_000_000) * out_price
-        total_cost = input_cost + output_cost
+        inp_cost, out_cost = _apply_pricing(row, pricing)
+        total_cost = inp_cost + out_cost
         request_count = row["request_count"]
         share = round((request_count / total_requests * 100) if total_requests else 0.0, 2)
         models.append(
@@ -418,10 +426,10 @@ def get_costs_models(filters: dict | None = None) -> dict:
                 "alias": row["alias"],
                 "request_count": request_count,
                 "request_share_pct": share,
-                "total_request_tokens": req_tokens,
-                "total_response_tokens": resp_tokens,
-                "estimated_input_cost": round(input_cost, 6),
-                "estimated_output_cost": round(output_cost, 6),
+                "total_request_tokens": row["req_tokens"] or 0,
+                "total_response_tokens": row["resp_tokens"] or 0,
+                "estimated_input_cost": round(inp_cost, 6),
+                "estimated_output_cost": round(out_cost, 6),
                 "estimated_total_cost": round(total_cost, 6),
             }
         )
