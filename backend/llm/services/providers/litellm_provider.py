@@ -158,7 +158,7 @@ class LiteLLMChatProvider(LiteLLMApiMixin, BaseChatProvider):
                 capability="chat",
             )
         except (UpstreamServiceError, UpstreamRateLimitError) as exc:
-            if self.model_config is not None:
+            if self.model_config is not None and self.model_config.pk is not None:
                 try:
                     record_model_invocation(
                         model_config=self.model_config,
@@ -183,7 +183,7 @@ class LiteLLMChatProvider(LiteLLMApiMixin, BaseChatProvider):
         message = (choices[0] or {}).get("message") or {}
         content = message.get("content")
         if not content:
-            if self.model_config is not None:
+            if self.model_config is not None and self.model_config.pk is not None:
                 try:
                     record_model_invocation(
                         model_config=self.model_config,
@@ -205,7 +205,7 @@ class LiteLLMChatProvider(LiteLLMApiMixin, BaseChatProvider):
                 code="llm_empty_response",
                 provider=self.provider_name,
             )
-        if self.model_config is not None:
+        if self.model_config is not None and self.model_config.pk is not None:
             try:
                 record_model_invocation(
                     model_config=self.model_config,
@@ -323,7 +323,7 @@ class LiteLLMEmbeddingProvider(LiteLLMApiMixin, BaseEmbeddingProvider):
                     )
                 vectors.append(embedding)
         except (UpstreamServiceError, UpstreamRateLimitError) as exc:
-            if self.model_config is not None:
+            if self.model_config is not None and self.model_config.pk is not None:
                 try:
                     record_model_invocation(
                         model_config=self.model_config,
@@ -343,7 +343,7 @@ class LiteLLMEmbeddingProvider(LiteLLMApiMixin, BaseEmbeddingProvider):
                     logger.exception("Failed to record failed embedding invocation log")
             raise
         latency_ms = int((time.monotonic() - started_at) * 1000)
-        if self.model_config is not None:
+        if self.model_config is not None and self.model_config.pk is not None:
             try:
                 record_model_invocation(
                     model_config=self.model_config,
