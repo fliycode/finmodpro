@@ -2185,6 +2185,109 @@ class GatewayQueryServiceTests(TestCase):
             self.assertIn("request_share_pct", m)
             self.assertIn("estimated_total_cost", m)
 
+    # ------------------------------------------------------------------
+    # Provider-scope regression: non-LiteLLM logs must be excluded
+    # ------------------------------------------------------------------
+
+    def _make_non_litellm_log(self, **kwargs):
+        """Create an invocation log for a non-LiteLLM provider (e.g. Ollama)."""
+        ollama_config = ModelConfig.objects.create(
+            name="ollama-chat",
+            capability=ModelConfig.CAPABILITY_CHAT,
+            provider=ModelConfig.PROVIDER_OLLAMA,
+            model_name="llama3",
+            endpoint="http://localhost:11434",
+            is_active=True,
+        )
+        defaults = dict(
+            model_config=ollama_config,
+            provider=ModelConfig.PROVIDER_OLLAMA,
+            capability="chat",
+            alias="ollama-chat",
+            upstream_model="llama3",
+            status=ModelInvocationLog.STATUS_SUCCESS,
+            latency_ms=50,
+            request_tokens=5,
+            response_tokens=3,
+        )
+        defaults.update(kwargs)
+        return ModelInvocationLog.objects.create(**defaults)
+
+    def test_provider_scope_get_logs_excludes_non_litellm(self):
+        """Non-LiteLLM invocation logs must not appear in gateway log results."""
+        from llm.services.litellm_gateway_query_service import get_logs
+
+        self._make_log(alias="gw-chat")
+        self._make_non_litellm_log()
+
+        result = get_logs({"model": None, "status": None, "time": "24h"})
+
+        aliases = [log["alias"] for log in result["logs"]]
+        self.assertNotIn("ollama-chat", aliases)
+        self.assertEqual(result["total"], 1)
+
+    def test_provider_scope_get_logs_summary_excludes_non_litellm(self):
+        """Non-LiteLLM logs must not inflate gateway aggregate metrics."""
+        from llm.services.litellm_gateway_query_service import get_logs_summary
+
+        self._make_log(latency_ms=100)
+        self._make_non_litellm_log(latency_ms=9000)
+
+        result = get_logs_summary({"model": None, "status": None, "time": "24h"})
+
+        self.assertEqual(result["total_requests"], 1)
+        # avg latency should reflect only the LiteLLM log
+        self.assertAlmostEqual(result["avg_latency_ms"], 100.0, delta=1.0)
+
+    def test_provider_scope_get_errors_excludes_non_litellm(self):
+        """Non-LiteLLM failed logs must not appear in gateway error totals."""
+        from llm.services.litellm_gateway_query_service import get_errors
+
+        self._make_log(status=ModelInvocationLog.STATUS_FAILED, error_code="500")
+        self._make_non_litellm_log(status=ModelInvocationLog.STATUS_FAILED, error_code="503")
+
+        result = get_errors()
+
+        self.assertEqual(result["total_failed_requests"], 1)
+        codes = {e["error_code"] for e in result["error_types"]}
+        self.assertNotIn("503", codes)
+
+    def test_provider_scope_get_costs_summary_excludes_non_litellm(self):
+        """Non-LiteLLM logs must not contribute to gateway cost summaries."""
+        from llm.services.litellm_gateway_query_service import get_costs_summary
+
+        self._make_log(request_tokens=1_000_000, response_tokens=0)
+        self._make_non_litellm_log(request_tokens=999_000_000, response_tokens=999_000_000)
+
+        result = get_costs_summary({"time": "24h"})
+
+        self.assertEqual(result["total_requests"], 1)
+        self.assertEqual(result["total_request_tokens"], 1_000_000)
+
+    def test_provider_scope_get_costs_models_excludes_non_litellm(self):
+        """Non-LiteLLM logs must not appear in the per-model cost breakdown."""
+        from llm.services.litellm_gateway_query_service import get_costs_models
+
+        self._make_log()
+        self._make_non_litellm_log()
+
+        result = get_costs_models({"time": "24h"})
+
+        aliases = [m["alias"] for m in result["models"]]
+        self.assertNotIn("ollama-chat", aliases)
+        self.assertEqual(result["total_requests"], 1)
+
+    def test_provider_scope_get_gateway_summary_excludes_non_litellm(self):
+        """Non-LiteLLM logs must not inflate gateway dashboard traffic counts."""
+        from llm.services.litellm_gateway_query_service import get_gateway_summary
+
+        self._make_log()
+        self._make_non_litellm_log()
+
+        result = get_gateway_summary()
+
+        self.assertEqual(result["traffic"]["request_count"], 1)
+
 @override_settings(
     JWT_SECRET_KEY="test-jwt-secret",
     JWT_ACCESS_TOKEN_LIFETIME_SECONDS=3600,

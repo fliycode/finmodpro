@@ -7,7 +7,7 @@ No raw prompt or response data is ever exposed.
 from collections import defaultdict
 from datetime import timedelta
 
-from django.db.models import Avg, Count, Sum
+from django.db.models import Avg, Count, Q, Sum
 from django.db.models.functions import TruncDay, TruncHour
 from django.utils import timezone
 
@@ -45,6 +45,11 @@ def _parse_filters(filters: dict | None):
         "status": filters.get("status") or None,
         "time": filters.get("time") or "24h",
     }
+
+
+def _litellm_qs():
+    """Base queryset scoped to LiteLLM invocation logs only."""
+    return ModelInvocationLog.objects.filter(provider=ModelConfig.PROVIDER_LITELLM)
 
 
 def _apply_filters(qs, filters: dict):
@@ -134,7 +139,7 @@ def get_gateway_summary() -> dict:
         }
 
     # Traffic in last 24h
-    recent_logs = ModelInvocationLog.objects.filter(created_at__gte=window_start)
+    recent_logs = _litellm_qs().filter(created_at__gte=window_start)
     total = recent_logs.count()
     failed = recent_logs.filter(status=ModelInvocationLog.STATUS_FAILED).count()
     error_rate = round((failed / total * 100) if total else 0.0, 2)
@@ -179,7 +184,7 @@ def get_gateway_summary() -> dict:
 def get_logs(filters: dict | None = None, page: int = 1, page_size: int = 50) -> dict:
     """Return filtered request-level log rows. No raw prompt/response."""
     filters = _parse_filters(filters)
-    qs = _apply_filters(ModelInvocationLog.objects.all(), filters)
+    qs = _apply_filters(_litellm_qs(), filters)
     total = qs.count()
     offset = (page - 1) * page_size
     rows = qs.order_by("-created_at")[offset : offset + page_size]
@@ -195,12 +200,29 @@ def get_logs(filters: dict | None = None, page: int = 1, page_size: int = 50) ->
 def get_logs_summary(filters: dict | None = None) -> dict:
     """Return aggregate metrics honoring the same filters as get_logs."""
     filters = _parse_filters(filters)
-    qs = _apply_filters(ModelInvocationLog.objects.all(), filters)
+    qs = _apply_filters(_litellm_qs(), filters)
 
-    total = qs.count()
-    failed = qs.filter(status=ModelInvocationLog.STATUS_FAILED).count()
+    agg = qs.aggregate(
+        total=Count("id"),
+        failed=Count("id", filter=Q(status=ModelInvocationLog.STATUS_FAILED)),
+        avg_latency=Avg("latency_ms"),
+        **{
+            f"bucket_{i}": Count(
+                "id",
+                filter=(
+                    Q(latency_ms__gte=lo, latency_ms__lt=hi)
+                    if hi is not None
+                    else Q(latency_ms__gte=lo)
+                ),
+            )
+            for i, (label, lo, hi) in enumerate(_LATENCY_BUCKETS)
+        },
+    )
+
+    total = agg["total"] or 0
+    failed = agg["failed"] or 0
     error_rate = round((failed / total * 100) if total else 0.0, 2)
-    avg_latency = qs.aggregate(v=Avg("latency_ms"))["v"] or 0.0
+    avg_latency = agg["avg_latency"] or 0.0
 
     # Error breakdown by error_code
     error_qs = (
@@ -214,13 +236,10 @@ def get_logs_summary(filters: dict | None = None) -> dict:
         for row in error_qs
     ]
 
-    # Latency distribution buckets
-    latency_buckets = []
-    for label, lo, hi in _LATENCY_BUCKETS:
-        bucket_qs = qs.filter(latency_ms__gte=lo)
-        if hi is not None:
-            bucket_qs = bucket_qs.filter(latency_ms__lt=hi)
-        latency_buckets.append({"label": label, "count": bucket_qs.count()})
+    latency_buckets = [
+        {"label": label, "count": agg[f"bucket_{i}"]}
+        for i, (label, lo, hi) in enumerate(_LATENCY_BUCKETS)
+    ]
 
     return {
         "filters": filters,
@@ -239,7 +258,7 @@ def get_logs_summary(filters: dict | None = None) -> dict:
 def get_trace(trace_id: str) -> dict | None:
     """Return a trace-level view of all log rows for trace_id, or None."""
     logs = list(
-        ModelInvocationLog.objects.filter(trace_id=trace_id).order_by("created_at", "id")
+        _litellm_qs().filter(trace_id=trace_id).order_by("created_at", "id")
     )
     if not logs:
         return None
@@ -266,7 +285,7 @@ def get_trace(trace_id: str) -> dict | None:
 def get_errors(time_preset: str = "24h") -> dict:
     """Return aggregated error types plus recent error samples."""
     window_start = _window_start(time_preset)
-    failed_qs = ModelInvocationLog.objects.filter(
+    failed_qs = _litellm_qs().filter(
         status=ModelInvocationLog.STATUS_FAILED,
         created_at__gte=window_start,
     )
@@ -298,7 +317,7 @@ def get_errors(time_preset: str = "24h") -> dict:
 def get_costs_summary(filters: dict | None = None) -> dict:
     """Return token usage and estimated cost summary."""
     filters = _parse_filters(filters)
-    qs = _apply_filters(ModelInvocationLog.objects.all(), filters)
+    qs = _apply_filters(_litellm_qs(), filters)
 
     agg = qs.aggregate(
         total_requests=Count("id"),
@@ -337,7 +356,7 @@ def get_costs_timeseries(filters: dict | None = None) -> dict:
     """Return usage/cost aggregated over time buckets."""
     filters = _parse_filters(filters)
     time_preset = filters.get("time", "24h")
-    qs = _apply_filters(ModelInvocationLog.objects.all(), filters)
+    qs = _apply_filters(_litellm_qs(), filters)
 
     # Choose DB truncation function and display format based on time window.
     # For 7d we use hourly DB truncation then collapse to 6-hour buckets in
@@ -400,10 +419,10 @@ def get_costs_timeseries(filters: dict | None = None) -> dict:
 def get_costs_models(filters: dict | None = None) -> dict:
     """Return per-model usage/cost breakdown with request share."""
     filters = _parse_filters(filters)
-    qs = _apply_filters(ModelInvocationLog.objects.all(), filters)
+    qs = _apply_filters(_litellm_qs(), filters)
 
     # Aggregate by alias + model_config_id
-    by_alias = (
+    by_alias = list(
         qs.values("alias", "model_config_id")
         .annotate(
             request_count=Count("id"),
@@ -412,7 +431,7 @@ def get_costs_models(filters: dict | None = None) -> dict:
         )
         .order_by("-request_count")
     )
-    total_requests = qs.count()
+    total_requests = sum(row["request_count"] for row in by_alias)
     pricing = _pricing_map()
 
     models = []
