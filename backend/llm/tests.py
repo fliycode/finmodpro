@@ -1695,3 +1695,135 @@ class LiteLLMGatewayCommandServiceTests(TestCase):
         self.assertEqual(log.status, "success")
         self.assertEqual(log.request_id, "embed-req-1")
         self.assertEqual(log.model_config, model_config)
+
+
+@override_settings(
+    JWT_SECRET_KEY="test-jwt-secret",
+    JWT_ACCESS_TOKEN_LIFETIME_SECONDS=3600,
+)
+class ModelConfigMigrationApiTests(TestCase):
+    def setUp(self):
+        self.client = Client()
+        seed_roles_and_permissions()
+        self.temp_dir = Path(tempfile.mkdtemp(dir=Path.cwd()))
+        self.litellm_root_patch = override_settings(LITELLM_GENERATED_CONFIG_ROOT=self.temp_dir)
+        self.litellm_root_patch.enable()
+
+        self.admin_user = User.objects.create_user(
+            username="migration-admin",
+            password="secret123",
+            email="migration-admin@example.com",
+        )
+        self.admin_user.groups.add(Group.objects.get(name=ROLE_ADMIN))
+        self.admin_access_token = generate_access_token(self.admin_user)
+
+        self.member_user = User.objects.create_user(
+            username="migration-member",
+            password="secret123",
+            email="migration-member@example.com",
+        )
+        self.member_user.groups.add(Group.objects.get(name=ROLE_MEMBER))
+        self.member_access_token = generate_access_token(self.member_user)
+
+    def tearDown(self):
+        self.litellm_root_patch.disable()
+        shutil.rmtree(self.temp_dir, ignore_errors=True)
+
+    # --- POST /api/ops/model-configs/migrate-to-litellm/ ---
+
+    def test_migrate_requires_authentication(self):
+        response = self.client.post("/api/ops/model-configs/migrate-to-litellm/")
+
+        self.assertEqual(response.status_code, 401)
+        self.assertEqual(
+            response.json(),
+            {"code": 401, "message": "未认证。", "data": {}},
+        )
+
+    def test_migrate_requires_manage_model_config_permission(self):
+        response = self.client.post(
+            "/api/ops/model-configs/migrate-to-litellm/",
+            HTTP_AUTHORIZATION=f"Bearer {self.member_access_token}",
+        )
+
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(
+            response.json(),
+            {"code": 403, "message": "无权限。", "data": {}},
+        )
+
+    def test_migrate_success_response_shape(self):
+        response = self.client.post(
+            "/api/ops/model-configs/migrate-to-litellm/",
+            HTTP_AUTHORIZATION=f"Bearer {self.admin_access_token}",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["code"], 0)
+        self.assertEqual(payload["message"], "ok")
+        data = payload["data"]
+        self.assertIn("migrated_capabilities", data)
+        self.assertIn("chat", data["migrated_capabilities"])
+        self.assertIn("embedding", data["migrated_capabilities"])
+        sync_result = data["sync_result"]
+        self.assertIn("status", sync_result)
+        self.assertIn("sync_event_id", sync_result)
+        self.assertIn("route_count", sync_result)
+        self.assertEqual(sync_result["status"], "success")
+
+    # --- POST /api/ops/model-configs/<id>/sync-litellm/ ---
+
+    def test_sync_requires_authentication(self):
+        model_config = get_active_model_config(ModelConfig.CAPABILITY_CHAT)
+        response = self.client.post(f"/api/ops/model-configs/{model_config.id}/sync-litellm/")
+
+        self.assertEqual(response.status_code, 401)
+        self.assertEqual(
+            response.json(),
+            {"code": 401, "message": "未认证。", "data": {}},
+        )
+
+    def test_sync_requires_manage_model_config_permission(self):
+        model_config = get_active_model_config(ModelConfig.CAPABILITY_CHAT)
+        response = self.client.post(
+            f"/api/ops/model-configs/{model_config.id}/sync-litellm/",
+            HTTP_AUTHORIZATION=f"Bearer {self.member_access_token}",
+        )
+
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(
+            response.json(),
+            {"code": 403, "message": "无权限。", "data": {}},
+        )
+
+    def test_sync_returns_404_for_unknown_model_config(self):
+        response = self.client.post(
+            "/api/ops/model-configs/999999/sync-litellm/",
+            HTTP_AUTHORIZATION=f"Bearer {self.admin_access_token}",
+        )
+
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(
+            response.json(),
+            {"code": 404, "message": "模型配置不存在。", "data": {}},
+        )
+
+    def test_sync_success_response_shape(self):
+        model_config = get_active_model_config(ModelConfig.CAPABILITY_CHAT)
+        response = self.client.post(
+            f"/api/ops/model-configs/{model_config.id}/sync-litellm/",
+            HTTP_AUTHORIZATION=f"Bearer {self.admin_access_token}",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["code"], 0)
+        self.assertEqual(payload["message"], "ok")
+        data = payload["data"]
+        self.assertIn("status", data)
+        self.assertIn("sync_event_id", data)
+        self.assertIn("route_count", data)
+        self.assertEqual(data["status"], "success")
+        self.assertEqual(data["route_count"], 1)
+        self.assertIsInstance(data["sync_event_id"], int)
