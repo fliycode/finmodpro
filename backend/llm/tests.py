@@ -15,7 +15,7 @@ from django.test import Client, override_settings
 from common.exceptions import UpstreamRateLimitError, UpstreamServiceError
 from authentication.models import User
 from authentication.services.jwt_service import generate_access_token
-from llm.models import EvalRecord, FineTuneRun, ModelConfig, ModelInvocationLog
+from llm.models import EvalRecord, FineTuneRun, LiteLLMSyncEvent, ModelConfig, ModelInvocationLog
 from llm.services.model_config_service import get_active_model_config
 from llm.services.fine_tune_service import create_fine_tune_run
 from llm.services.prompt_service import load_prompt_template, render_prompt
@@ -1374,3 +1374,56 @@ class LiteLLMGatewayAuditModelTests(TestCase):
         self.assertEqual(log.alias, "chat-default")
         self.assertEqual(log.trace_id, "trace-1")
         self.assertEqual(log.response_tokens, 220)
+
+    def test_litellm_sync_event_status_constants(self):
+        self.assertEqual(LiteLLMSyncEvent.STATUS_SUCCESS, "success")
+        self.assertEqual(LiteLLMSyncEvent.STATUS_FAILED, "failed")
+
+    def test_litellm_sync_event_creates_with_defaults(self):
+        event = LiteLLMSyncEvent.objects.create(status=LiteLLMSyncEvent.STATUS_SUCCESS)
+
+        self.assertEqual(event.status, "success")
+        self.assertEqual(event.message, "")
+        self.assertEqual(event.checksum, "")
+        self.assertIsNone(event.triggered_by)
+        self.assertIsNotNone(event.created_at)
+
+    def test_litellm_sync_event_persists_all_fields(self):
+        event = LiteLLMSyncEvent.objects.create(
+            status=LiteLLMSyncEvent.STATUS_FAILED,
+            triggered_by=self.admin_user,
+            message="upstream timeout",
+            checksum="abc123def456",
+        )
+
+        fetched = LiteLLMSyncEvent.objects.get(pk=event.pk)
+        self.assertEqual(fetched.status, "failed")
+        self.assertEqual(fetched.triggered_by, self.admin_user)
+        self.assertEqual(fetched.message, "upstream timeout")
+        self.assertEqual(fetched.checksum, "abc123def456")
+
+    def test_litellm_sync_event_ordering_most_recent_first(self):
+        first = LiteLLMSyncEvent.objects.create(status=LiteLLMSyncEvent.STATUS_SUCCESS)
+        second = LiteLLMSyncEvent.objects.create(status=LiteLLMSyncEvent.STATUS_FAILED)
+
+        ids = list(LiteLLMSyncEvent.objects.filter(pk__in=[first.pk, second.pk]).values_list("pk", flat=True))
+        self.assertEqual(ids[0], second.pk)
+        self.assertEqual(ids[1], first.pk)
+
+    def test_litellm_sync_event_triggered_by_null_on_user_delete(self):
+        from django.contrib.auth.models import Group as DjangoGroup
+        temp_user = User.objects.create_user(
+            username="temp-sync-user",
+            password="secret",
+            email="temp-sync@example.com",
+        )
+        temp_user.groups.add(DjangoGroup.objects.get(name=ROLE_ADMIN))
+        event = LiteLLMSyncEvent.objects.create(
+            status=LiteLLMSyncEvent.STATUS_SUCCESS,
+            triggered_by=temp_user,
+        )
+
+        temp_user.delete()
+
+        event.refresh_from_db()
+        self.assertIsNone(event.triggered_by)
