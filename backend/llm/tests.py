@@ -20,7 +20,7 @@ from llm.services.model_config_command_service import migrate_active_configs_to_
 from llm.services.model_config_service import get_active_model_config
 from llm.services.fine_tune_service import create_fine_tune_run
 from llm.services.prompt_service import load_prompt_template, render_prompt
-from llm.services.providers.deepseek_provider import DeepSeekChatProvider
+from llm.services.providers.litellm_provider import LiteLLMChatProvider, LiteLLMEmbeddingProvider
 from llm.services.runtime_service import (
     get_chat_provider,
     get_embedding_provider,
@@ -1651,7 +1651,7 @@ class LiteLLMGatewayCommandServiceTests(TestCase):
             "choices": [{"message": {"content": "ok"}}],
             "usage": {"prompt_tokens": 11, "completion_tokens": 7},
         })
-        ModelConfig.objects.create(
+        model_config = ModelConfig.objects.create(
             name="litellm-chat-test",
             capability=ModelConfig.CAPABILITY_CHAT,
             provider=ModelConfig.PROVIDER_LITELLM,
@@ -1660,14 +1660,53 @@ class LiteLLMGatewayCommandServiceTests(TestCase):
             options={"api_key": "sk-test"},
             is_active=True,
         )
-        provider = get_chat_provider()
+        provider = LiteLLMChatProvider(
+            endpoint="http://localhost:4000",
+            model_name="chat-default",
+            options={"api_key": "sk-test"},
+            model_config=model_config,
+        )
 
-        provider.generate(messages=[{"role": "user", "content": "hi"}], trace_id="trace-1", request_id="request-1")
+        provider.chat(messages=[{"role": "user", "content": "hi"}], trace_id="trace-1", request_id="request-1")
 
         log = ModelInvocationLog.objects.get(trace_id="trace-1")
         self.assertEqual(log.request_tokens, 11)
         self.assertEqual(log.response_tokens, 7)
         self.assertEqual(log.status, "success")
+        self.assertEqual(log.request_id, "request-1")
+        self.assertEqual(log.model_config, model_config)
+
+    @patch("urllib.request.urlopen")
+    def test_litellm_provider_records_failed_chat_invocation(self, mock_urlopen):
+        mock_urlopen.side_effect = HTTPError(
+            url="http://localhost:4000/v1/chat/completions",
+            code=500,
+            msg="Internal Server Error",
+            hdrs={},
+            fp=BytesIO(b"server error"),
+        )
+        model_config = ModelConfig.objects.create(
+            name="litellm-chat-fail-test",
+            capability=ModelConfig.CAPABILITY_CHAT,
+            provider=ModelConfig.PROVIDER_LITELLM,
+            model_name="chat-fail",
+            endpoint="http://localhost:4000",
+            options={"api_key": "sk-test"},
+            is_active=False,
+        )
+        provider = LiteLLMChatProvider(
+            endpoint="http://localhost:4000",
+            model_name="chat-fail",
+            options={"api_key": "sk-test"},
+            model_config=model_config,
+        )
+
+        with self.assertRaises(Exception):
+            provider.chat(messages=[{"role": "user", "content": "hi"}], trace_id="trace-fail", request_id="req-fail")
+
+        log = ModelInvocationLog.objects.get(trace_id="trace-fail")
+        self.assertEqual(log.status, "failed")
+        self.assertEqual(log.model_config, model_config)
 
     @patch("urllib.request.urlopen")
     def test_litellm_embedding_provider_records_successful_invocation(self, mock_urlopen):
@@ -1684,7 +1723,12 @@ class LiteLLMGatewayCommandServiceTests(TestCase):
             options={"api_key": "sk-test"},
             is_active=True,
         )
-        provider = get_embedding_provider()
+        provider = LiteLLMEmbeddingProvider(
+            endpoint="http://localhost:4000",
+            model_name="embed-default",
+            options={"api_key": "sk-test"},
+            model_config=model_config,
+        )
 
         provider.embed(texts=["hello world"], trace_id="embed-trace-1", request_id="embed-req-1")
 
@@ -1694,6 +1738,38 @@ class LiteLLMGatewayCommandServiceTests(TestCase):
         self.assertEqual(log.response_tokens, 0)
         self.assertEqual(log.status, "success")
         self.assertEqual(log.request_id, "embed-req-1")
+        self.assertEqual(log.model_config, model_config)
+
+    @patch("urllib.request.urlopen")
+    def test_litellm_embedding_provider_records_failed_invocation(self, mock_urlopen):
+        mock_urlopen.side_effect = HTTPError(
+            url="http://localhost:4000/v1/embeddings",
+            code=429,
+            msg="Too Many Requests",
+            hdrs={"Retry-After": "5"},
+            fp=BytesIO(b"rate limited"),
+        )
+        model_config = ModelConfig.objects.create(
+            name="litellm-embed-fail-test",
+            capability=ModelConfig.CAPABILITY_EMBEDDING,
+            provider=ModelConfig.PROVIDER_LITELLM,
+            model_name="embed-fail",
+            endpoint="http://localhost:4000",
+            options={"api_key": "sk-test"},
+            is_active=False,
+        )
+        provider = LiteLLMEmbeddingProvider(
+            endpoint="http://localhost:4000",
+            model_name="embed-fail",
+            options={"api_key": "sk-test"},
+            model_config=model_config,
+        )
+
+        with self.assertRaises(Exception):
+            provider.embed(texts=["hi"], trace_id="embed-fail-trace", request_id="embed-fail-req")
+
+        log = ModelInvocationLog.objects.get(trace_id="embed-fail-trace")
+        self.assertEqual(log.status, "failed")
         self.assertEqual(log.model_config, model_config)
 
 
@@ -1809,21 +1885,51 @@ class ModelConfigMigrationApiTests(TestCase):
             {"code": 404, "message": "模型配置不存在。", "data": {}},
         )
 
-    def test_sync_success_response_shape(self):
+    def test_sync_writes_rendered_config_when_base_config_exists(self):
+        """sync_litellm_route_for_config rebuilds the rendered config when the base exists."""
         model_config = get_active_model_config(ModelConfig.CAPABILITY_CHAT)
-        response = self.client.post(
-            f"/api/ops/model-configs/{model_config.id}/sync-litellm/",
-            HTTP_AUTHORIZATION=f"Bearer {self.admin_access_token}",
+        base_config_path = self.temp_dir / "litellm_config.yaml"
+        rendered_config_path = self.temp_dir / "litellm_config_rendered.yaml"
+        base_config_path.write_text(
+            "model_list:\n"
+            "  - model_name: placeholder\n"
+            "    litellm_params:\n"
+            "      model: openai/placeholder\n"
+            "      api_base: http://placeholder\n"
+            "litellm_settings:\n"
+            "  drop_params: true\n",
+            encoding="utf-8",
         )
 
+        with override_settings(
+            LITELLM_BASE_CONFIG_PATH=str(base_config_path),
+            LITELLM_RENDERED_CONFIG_PATH=str(rendered_config_path),
+        ):
+            response = self.client.post(
+                f"/api/ops/model-configs/{model_config.id}/sync-litellm/",
+                HTTP_AUTHORIZATION=f"Bearer {self.admin_access_token}",
+            )
+
         self.assertEqual(response.status_code, 200)
-        payload = response.json()
-        self.assertEqual(payload["code"], 0)
-        self.assertEqual(payload["message"], "ok")
-        data = payload["data"]
-        self.assertIn("status", data)
-        self.assertIn("sync_event_id", data)
-        self.assertIn("route_count", data)
-        self.assertEqual(data["status"], "success")
-        self.assertEqual(data["route_count"], 1)
-        self.assertIsInstance(data["sync_event_id"], int)
+        self.assertTrue(rendered_config_path.exists(), "Rendered config should have been written")
+
+    def test_migrate_db_writes_are_atomic(self):
+        """If one capability's route activation fails, no LiteLLM routes are activated."""
+        from unittest.mock import patch as _patch
+        from llm.services import litellm_alias_service
+
+        original_ensure = litellm_alias_service.ensure_litellm_route_from_model_config
+
+        def _fail_on_embedding(active):
+            if active.capability == ModelConfig.CAPABILITY_EMBEDDING:
+                raise ValueError("boom")
+            return original_ensure(active)
+
+        before_count = ModelConfig.objects.filter(provider="litellm", is_active=True).count()
+        with _patch("llm.services.model_config_command_service.ensure_litellm_route_from_model_config", side_effect=_fail_on_embedding):
+            with self.assertRaises(ValueError):
+                migrate_active_configs_to_litellm(triggered_by=self.admin_user)
+
+        after_count = ModelConfig.objects.filter(provider="litellm", is_active=True).count()
+        self.assertEqual(after_count, before_count, "Atomic transaction must roll back on failure")
+

@@ -132,37 +132,7 @@ class LiteLLMApiMixin:
 
 
 class LiteLLMChatProvider(LiteLLMApiMixin, BaseChatProvider):
-    def chat(self, *, messages, options=None):
-        merged_options = self._resolve_options(options)
-        payload = {
-            "model": self.model_name,
-            "messages": messages,
-            "stream": False,
-        }
-        if merged_options.get("temperature") is not None:
-            payload["temperature"] = merged_options["temperature"]
-        if merged_options.get("max_tokens") is not None:
-            payload["max_tokens"] = merged_options["max_tokens"]
-        response_payload = self._post_json(
-            "/v1/chat/completions",
-            payload,
-            options=options,
-            capability="chat",
-        )
-        choices = response_payload.get("choices") or []
-        message = (choices[0] or {}).get("message") or {}
-        content = message.get("content")
-        if not content:
-            raise UpstreamServiceError(
-                "模型服务返回了空响应。",
-                status_code=502,
-                code="llm_empty_response",
-                provider=self.provider_name,
-            )
-        return content
-
-    def generate(self, *, messages, trace_id="", request_id="", options=None):
-        """Like chat() but records a ModelInvocationLog with token counts."""
+    def chat(self, *, messages, options=None, trace_id="", request_id=""):
         from llm.services.model_invocation_log_service import record_model_invocation
 
         merged_options = self._resolve_options(options)
@@ -176,12 +146,28 @@ class LiteLLMChatProvider(LiteLLMApiMixin, BaseChatProvider):
         if merged_options.get("max_tokens") is not None:
             payload["max_tokens"] = merged_options["max_tokens"]
         started_at = time.monotonic()
-        response_payload = self._post_json(
-            "/v1/chat/completions",
-            payload,
-            options=options,
-            capability="chat",
-        )
+        try:
+            response_payload = self._post_json(
+                "/v1/chat/completions",
+                payload,
+                options=options,
+                capability="chat",
+            )
+        except (UpstreamServiceError, UpstreamRateLimitError) as exc:
+            if self.model_config is not None and self.model_config.pk:
+                record_model_invocation(
+                    model_config=self.model_config,
+                    capability="chat",
+                    alias=self.model_name,
+                    upstream_model=self.model_name,
+                    status="failed",
+                    latency_ms=int((time.monotonic() - started_at) * 1000),
+                    error_code=exc.code,
+                    error_message=exc.message,
+                    trace_id=trace_id,
+                    request_id=request_id,
+                )
+            raise
         latency_ms = int((time.monotonic() - started_at) * 1000)
         usage = response_payload.get("usage") or {}
         request_tokens = usage.get("prompt_tokens", 0)
@@ -190,6 +176,19 @@ class LiteLLMChatProvider(LiteLLMApiMixin, BaseChatProvider):
         message = (choices[0] or {}).get("message") or {}
         content = message.get("content")
         if not content:
+            if self.model_config is not None and self.model_config.pk:
+                record_model_invocation(
+                    model_config=self.model_config,
+                    capability="chat",
+                    alias=self.model_name,
+                    upstream_model=self.model_name,
+                    status="failed",
+                    latency_ms=latency_ms,
+                    error_code="llm_empty_response",
+                    error_message="模型服务返回了空响应。",
+                    trace_id=trace_id,
+                    request_id=request_id,
+                )
             raise UpstreamServiceError(
                 "模型服务返回了空响应。",
                 status_code=502,
@@ -210,6 +209,10 @@ class LiteLLMChatProvider(LiteLLMApiMixin, BaseChatProvider):
                 request_id=request_id,
             )
         return content
+
+    def generate(self, *, messages, trace_id="", request_id="", options=None):
+        """Backward-compatible alias for chat() that passes trace/request IDs."""
+        return self.chat(messages=messages, options=options, trace_id=trace_id, request_id=request_id)
 
     def stream(self, *, messages, options=None):
         merged_options = self._resolve_options(options)
@@ -282,26 +285,44 @@ class LiteLLMEmbeddingProvider(LiteLLMApiMixin, BaseEmbeddingProvider):
         vectors = []
         total_request_tokens = 0
         started_at = time.monotonic()
-        for text in texts:
-            payload = {"model": self.model_name, "input": text}
-            response_payload = self._post_json(
-                "/v1/embeddings",
-                payload,
-                options=options,
-                capability="embedding",
-            )
-            usage = response_payload.get("usage") or {}
-            total_request_tokens += usage.get("prompt_tokens", 0)
-            data = response_payload.get("data") or []
-            embedding = (data[0] or {}).get("embedding")
-            if not isinstance(embedding, list) or not embedding:
-                raise UpstreamServiceError(
-                    "模型服务返回了空向量。",
-                    status_code=502,
-                    code="llm_empty_embedding",
-                    provider=self.provider_name,
+        try:
+            for text in texts:
+                payload = {"model": self.model_name, "input": text}
+                response_payload = self._post_json(
+                    "/v1/embeddings",
+                    payload,
+                    options=options,
+                    capability="embedding",
                 )
-            vectors.append(embedding)
+                usage = response_payload.get("usage") or {}
+                total_request_tokens += usage.get("prompt_tokens", 0)
+                data = response_payload.get("data") or []
+                embedding = (data[0] or {}).get("embedding")
+                if not isinstance(embedding, list) or not embedding:
+                    raise UpstreamServiceError(
+                        "模型服务返回了空向量。",
+                        status_code=502,
+                        code="llm_empty_embedding",
+                        provider=self.provider_name,
+                    )
+                vectors.append(embedding)
+        except (UpstreamServiceError, UpstreamRateLimitError) as exc:
+            if self.model_config is not None and self.model_config.pk:
+                record_model_invocation(
+                    model_config=self.model_config,
+                    capability="embedding",
+                    alias=self.model_name,
+                    upstream_model=self.model_name,
+                    status="failed",
+                    latency_ms=int((time.monotonic() - started_at) * 1000),
+                    request_tokens=total_request_tokens,
+                    response_tokens=0,
+                    error_code=exc.code,
+                    error_message=exc.message,
+                    trace_id=trace_id,
+                    request_id=request_id,
+                )
+            raise
         latency_ms = int((time.monotonic() - started_at) * 1000)
         if self.model_config is not None and self.model_config.pk:
             record_model_invocation(

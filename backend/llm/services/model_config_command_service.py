@@ -53,11 +53,12 @@ def test_model_config_connection(*, payload):
 def migrate_active_configs_to_litellm(*, triggered_by):
     """For each active chat/embedding config, ensure a LiteLLM route exists and is active."""
     migrated = []
-    for capability in (ModelConfig.CAPABILITY_CHAT, ModelConfig.CAPABILITY_EMBEDDING):
-        active = get_active_model_config(capability)
-        route = ensure_litellm_route_from_model_config(active)
-        route.is_active = True
-        route.save(update_fields=["is_active", "updated_at"])
-        migrated.append(capability)
+    with transaction.atomic():
+        for capability in (ModelConfig.CAPABILITY_CHAT, ModelConfig.CAPABILITY_EMBEDDING):
+            active = get_active_model_config(capability)
+            route = ensure_litellm_route_from_model_config(active)
+            route.is_active = True
+            route.save(update_fields=["is_active", "updated_at"])
+            migrated.append(capability)
     sync_result = sync_litellm_routes(triggered_by=triggered_by)
     return {"migrated_capabilities": migrated, "sync_result": sync_result}
