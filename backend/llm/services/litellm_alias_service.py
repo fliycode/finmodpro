@@ -6,15 +6,17 @@ from llm.models import LiteLLMSyncEvent, ModelConfig
 from llm.services.litellm_config_render_service import try_build_rendered_litellm_config
 
 
-def _build_litellm_alias_config(*, alias, upstream_model_name, api_base):
+def _build_litellm_alias_config(*, alias, upstream_model_name, api_base, api_key=""):
     if "/" not in upstream_model_name:
         upstream_model_name = f"openai/{upstream_model_name}"
+    api_key_line = f"      api_key: {api_key}\n" if api_key else ""
     return (
         "model_list:\n"
         f"  - model_name: {alias}\n"
         "    litellm_params:\n"
         f"      model: {upstream_model_name}\n"
         f"      api_base: {api_base}\n"
+        f"{api_key_line}"
     )
 
 
@@ -49,6 +51,7 @@ def sync_litellm_route_for_config(model_config, *, triggered_by):
         route_key = f"route-{model_config.capability}-{model_config.id}"
         config_path = generated_root / f"{route_key}.yaml"
         api_base = (model_config.options or {}).get("api_base") or model_config.endpoint
+        api_key = (model_config.options or {}).get("api_key") or ""
         upstream_model_name = (
             (model_config.options or {}).get("litellm", {}).get("upstream_model")
             or model_config.model_name
@@ -58,6 +61,7 @@ def sync_litellm_route_for_config(model_config, *, triggered_by):
                 alias=model_config.model_name,
                 upstream_model_name=upstream_model_name,
                 api_base=api_base,
+                api_key=api_key,
             ),
             encoding="utf-8",
         )
@@ -93,6 +97,7 @@ def sync_litellm_routes(*, triggered_by):
             route_key = f"route-{route.capability}-{route.id}"
             config_path = generated_root / f"{route_key}.yaml"
             api_base = (route.options or {}).get("api_base") or route.endpoint
+            api_key = (route.options or {}).get("api_key") or ""
             upstream_model_name = (
                 (route.options or {}).get("litellm", {}).get("upstream_model")
                 or route.model_name
@@ -102,6 +107,7 @@ def sync_litellm_routes(*, triggered_by):
                     alias=route.model_name,
                     upstream_model_name=upstream_model_name,
                     api_base=api_base,
+                    api_key=api_key,
                 ),
                 encoding="utf-8",
             )

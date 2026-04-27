@@ -1803,6 +1803,24 @@ class LiteLLMGatewayCommandServiceTests(TestCase):
         self.assertEqual(log.model_config, model_config)
 
     @patch("urllib.request.urlopen")
+    @override_settings(LITELLM_MASTER_KEY="master-key")
+    def test_litellm_provider_uses_configured_gateway_master_key(self, mock_urlopen):
+        mock_urlopen.return_value = _FakeHttpResponse({
+            "choices": [{"message": {"content": "ok"}}],
+            "usage": {"prompt_tokens": 1, "completion_tokens": 1},
+        })
+        provider = LiteLLMChatProvider(
+            endpoint="http://localhost:4000",
+            model_name="chat-default",
+            options={"api_key": "upstream-key"},
+        )
+
+        provider.chat(messages=[{"role": "user", "content": "hi"}])
+
+        request_obj = mock_urlopen.call_args.args[0]
+        self.assertEqual(request_obj.headers["Authorization"], "Bearer master-key")
+
+    @patch("urllib.request.urlopen")
     def test_litellm_provider_records_failed_chat_invocation(self, mock_urlopen):
         mock_urlopen.side_effect = HTTPError(
             url="http://localhost:4000/v1/chat/completions",
@@ -2825,3 +2843,18 @@ class LiteLLMAliasYamlRegressionTests(TestCase):
 
         self.assertIn("model: openai/my-fallback-route", yaml_text,
                       "Absent upstream_model must fall back to openai/<model_name>")
+
+    def test_yaml_includes_api_key_when_present(self):
+        model_config = self._make_litellm_model_config(upstream_model="deepseek/deepseek-chat")
+        model_config.options["api_key"] = "sk-upstream"
+        model_config.save(update_fields=["options", "updated_at"])
+
+        yaml_text = self._sync_and_read_yaml(model_config)
+
+        self.assertIn("api_key: sk-upstream", yaml_text)
+
+
+class LiteLLMGatewaySettingsTests(TestCase):
+    def test_litellm_render_defaults_match_deploy_paths(self):
+        self.assertTrue(str(settings.LITELLM_BASE_CONFIG_PATH).endswith("deploy/litellm/config.yaml"))
+        self.assertTrue(str(settings.LITELLM_RENDERED_CONFIG_PATH).endswith("deploy/litellm/rendered.config.yaml"))

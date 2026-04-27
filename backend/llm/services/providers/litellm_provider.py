@@ -3,6 +3,8 @@ import logging
 import time
 from urllib import error, request
 
+from django.conf import settings
+
 from common.exceptions import UpstreamRateLimitError, UpstreamServiceError
 from llm.services.model_invocation_log_service import record_model_invocation
 from llm.services.providers.base import BaseChatProvider, BaseEmbeddingProvider
@@ -24,7 +26,7 @@ class LiteLLMApiMixin:
         return {**self.options, **(options or {})}
 
     def _resolve_api_key(self, options=None):
-        api_key = self._resolve_options(options).get("api_key")
+        api_key = settings.LITELLM_MASTER_KEY or self._resolve_options(options).get("api_key")
         if not api_key:
             raise UpstreamServiceError(
                 "LiteLLM API Key 未配置。",
