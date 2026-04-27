@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { createLlmGatewayApi } from '../llm-gateway.js';
+import { getRouteDeleteBlockReason } from '../../lib/llm-gateway.js';
 
 test('createLlmGatewayApi normalizes summary payload', async () => {
   const api = createLlmGatewayApi({
@@ -99,4 +100,12 @@ test('createLlmGatewayApi normalizes logs summary and timeseries granularity', a
   assert.equal(timeseries.granularity_minutes, 1);
   assert.equal(timeseries.granularity_hours, null);
   assert.equal(timeseries.points[0].bucket, '2026-04-25T08:10');
+});
+
+test('getRouteDeleteBlockReason explains why active routes cannot be deleted', () => {
+  assert.equal(
+    getRouteDeleteBlockReason({ is_active: true }),
+    '当前默认路由不能直接删除，请先切换默认链路或在编辑抽屉里取消默认状态。',
+  );
+  assert.equal(getRouteDeleteBlockReason({ is_active: false }), '');
 });
