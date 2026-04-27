@@ -19,7 +19,10 @@ def _build_upstream_model_name(*, provider, model_name):
         return ""
     if "/" in model_name:
         return model_name
-    prefix = provider or "openai"
+    if provider == ModelConfig.PROVIDER_DASHSCOPE:
+        prefix = "openai"
+    else:
+        prefix = provider or "openai"
     return f"{prefix}/{model_name}"
 
 

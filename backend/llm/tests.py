@@ -1771,6 +1771,21 @@ class LiteLLMGatewayCommandServiceTests(TestCase):
             ).exists()
         )
 
+    def test_migrate_to_litellm_maps_dashscope_embedding_to_openai_compatible_upstream(self):
+        active_embedding = get_active_model_config(ModelConfig.CAPABILITY_EMBEDDING)
+        active_embedding.provider = ModelConfig.PROVIDER_DASHSCOPE
+        active_embedding.name = "dashscope-embed"
+        active_embedding.model_name = "text-embedding-v4"
+        active_embedding.endpoint = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+        active_embedding.options = {"api_key": "sk-dashscope"}
+        active_embedding.save()
+
+        migrate_active_configs_to_litellm(triggered_by=self.admin_user)
+
+        route = ModelConfig.objects.get(provider="litellm", capability="embedding", is_active=True)
+        self.assertEqual(route.options["litellm"]["upstream_provider"], "dashscope")
+        self.assertEqual(route.options["litellm"]["upstream_model"], "openai/text-embedding-v4")
+
     @patch("urllib.request.urlopen")
     def test_litellm_provider_records_successful_chat_invocation(self, mock_urlopen):
         mock_urlopen.return_value = _FakeHttpResponse({
