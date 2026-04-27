@@ -104,6 +104,45 @@ class ParserService:
             element_count=0,
         )
 
+    def _elements_to_result(self, elements, strategy):
+        """Convert an Unstructured elements list into a structured result dict."""
+        texts = []
+        page_numbers = set()
+        element_types = {}
+
+        for elem in elements:
+            text = (elem.get("text") or "").strip()
+            if text:
+                texts.append(text)
+            meta = elem.get("metadata") or {}
+            if meta.get("page_number") is not None:
+                page_numbers.add(meta["page_number"])
+            elem_type = elem.get("type")
+            if elem_type:
+                element_types[elem_type] = element_types.get(elem_type, 0) + 1
+
+        parsed_text = "\n\n".join(texts)
+        if not parsed_text:
+            raise ValueError("Unstructured 返回空文本。")
+
+        chunk_defaults = {}
+        if page_numbers:
+            chunk_defaults["page_number"] = min(page_numbers)
+        if element_types:
+            chunk_defaults["element_types"] = sorted(element_types.keys())
+
+        result = self._structured_result(
+            parsed_text=parsed_text,
+            source_parser="unstructured",
+            source_strategy=strategy,
+            fallback_used=False,
+            element_count=len(elements),
+            chunk_metadata_defaults=chunk_defaults,
+        )
+        # Pass raw elements so the chunker can respect boundaries.
+        result["elements"] = elements
+        return result
+
     def parse(self, document):
         file_path = Path(document.file.path)
         if document.doc_type == "txt":
@@ -111,23 +150,15 @@ class ParserService:
 
         if document.doc_type == "pdf":
             try:
-                result = parse_via_unstructured(
+                elements = parse_via_unstructured(
                     file_path=file_path,
                     filename=document.filename,
                     content_type="application/pdf",
                     strategy=settings.UNSTRUCTURED_PDF_STRATEGY,
                 )
-                parsed_text = self.clean_text((result or {}).get("parsed_text", ""))
-                if not parsed_text:
-                    raise ValueError("Unstructured 返回空文本。")
-                return self._structured_result(
-                    parsed_text=parsed_text,
-                    source_parser="unstructured",
-                    source_strategy=settings.UNSTRUCTURED_PDF_STRATEGY,
-                    fallback_used=False,
-                    element_count=((result or {}).get("document_metadata") or {}).get("element_count", 0),
-                    chunk_metadata_defaults=((result or {}).get("chunk_metadata_defaults") or {}),
-                    document_metadata=((result or {}).get("document_metadata") or {}),
+                return self._elements_to_result(
+                    elements=elements or [],
+                    strategy=settings.UNSTRUCTURED_PDF_STRATEGY,
                 )
             except ValueError:
                 if not settings.UNSTRUCTURED_PDF_FALLBACK_ENABLED:
@@ -135,23 +166,15 @@ class ParserService:
                 return self._pdf_fallback_result(self._parse_pdf(file_path))
 
         if document.doc_type == "docx":
-            result = parse_via_unstructured(
+            elements = parse_via_unstructured(
                 file_path=file_path,
                 filename=document.filename,
                 content_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
                 strategy=settings.UNSTRUCTURED_DOCX_STRATEGY,
             )
-            parsed_text = self.clean_text((result or {}).get("parsed_text", ""))
-            if not parsed_text:
-                raise ValueError("Unstructured 返回空文本。")
-            return self._structured_result(
-                parsed_text=parsed_text,
-                source_parser="unstructured",
-                source_strategy=settings.UNSTRUCTURED_DOCX_STRATEGY,
-                fallback_used=False,
-                element_count=((result or {}).get("document_metadata") or {}).get("element_count", 0),
-                chunk_metadata_defaults=((result or {}).get("chunk_metadata_defaults") or {}),
-                document_metadata=((result or {}).get("document_metadata") or {}),
+            return self._elements_to_result(
+                elements=elements or [],
+                strategy=settings.UNSTRUCTURED_DOCX_STRATEGY,
             )
 
         raise ValueError("不支持的文档类型。")

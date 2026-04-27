@@ -12,7 +12,7 @@ from django.utils import timezone
 
 from common.observability import trace_span
 from knowledgebase.models import Dataset, Document, DocumentChunk, DocumentVersion, IngestionTask
-from knowledgebase.services.chunk_service import build_document_chunks
+from knowledgebase.services.chunk_service import build_document_chunks, build_document_chunks_from_elements
 from knowledgebase.services.parser_service import parse_document_file
 from knowledgebase.services.vector_service import VectorService, index_document_chunks
 
@@ -547,13 +547,22 @@ def parse_document(document):
 
 
 def chunk_document(document, parser_result):
-    parsed_text = (parser_result or {}).get("parsed_text", "")
-    parser_defaults = (parser_result or {}).get("chunk_metadata_defaults") or {}
+    parser_result = parser_result or {}
+    parser_defaults = parser_result.get("chunk_metadata_defaults") or {}
+    elements = parser_result.get("elements")
     DocumentChunk.objects.filter(document=document).delete()
-    chunks = build_document_chunks(
-        parsed_text,
-        metadata_builder=lambda index: _build_chunk_metadata(document, index, parser_defaults),
-    )
+
+    if elements:
+        chunks = build_document_chunks_from_elements(
+            elements,
+            metadata_builder=lambda index: _build_chunk_metadata(document, index, parser_defaults),
+        )
+    else:
+        parsed_text = parser_result.get("parsed_text", "")
+        chunks = build_document_chunks(
+            parsed_text,
+            metadata_builder=lambda index: _build_chunk_metadata(document, index, parser_defaults),
+        )
     DocumentChunk.objects.bulk_create(
         [
             DocumentChunk(
