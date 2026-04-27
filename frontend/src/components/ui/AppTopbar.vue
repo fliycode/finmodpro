@@ -7,6 +7,7 @@ import { getTopbarActions } from '../../config/navigation.js';
 import { authSession } from '../../lib/auth-session.js';
 import { AUTH_EXPIRED_MESSAGE, authStorage } from '../../lib/auth-storage.js';
 import { useFlash } from '../../lib/flash.js';
+import ThemeToggle from './ThemeToggle.vue';
 
 const props = defineProps({
   title: {
@@ -82,6 +83,7 @@ onBeforeUnmount(() => {
     </div>
 
     <div class="app-topbar__actions">
+      <ThemeToggle />
       <div class="app-topbar__identity">
         <span class="app-topbar__role">{{ roleLabel }}</span>
         <span class="app-topbar__user">{{ profileName }}</span>

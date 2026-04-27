@@ -1,17 +1,17 @@
 # FinModPro 依赖服务启动说明
 
-本文档面向新机器或本地演示环境，说明 `MySQL / Redis / Milvus / Ollama` 在当前仓库里的真实作用、推荐默认值、启动方式和最小验证。
+本文档面向新机器或本地演示环境，说明 `MySQL / Redis / Milvus / LiteLLM` 在当前仓库里的真实作用、推荐默认值、启动方式和最小验证。
 
 ## 适用范围
 
 当前仓库的默认本地方案是：
 
-- 数据库：SQLite
+- 数据库：MySQL
 - 缓存：Django `LocMemCache`
 - Celery：内存 broker / result backend
 - Chat maintenance：标题、摘要、长期记忆任务默认随请求内联执行
 - 向量存储：Milvus Lite（通过 `MILVUS_URI=milvus.db` 文件模式）
-- 模型服务：Ollama，可选；只有在你需要真实聊天/embedding 能力时才需要
+- 模型服务：LiteLLM，可选；只有在你需要统一模型网关或 Langfuse 联调时才需要
 
 这意味着：
 
@@ -35,14 +35,15 @@
 
 ### 推荐默认值
 
-- 本地最小启动：继续使用 `DB_ENGINE=sqlite`
-- 需要演示 MySQL 时：本地 Docker 单机即可
+- 本地最小启动：使用 `DB_ENGINE=mysql`
+- 直接用本地 Docker 单机 MySQL 即可
 
 ### 启动命令
 
 ```bash
 docker run -d \
   --name finmodpro-mysql \
+  --command='mysqld --default-authentication-plugin=mysql_native_password' \
   -e MYSQL_ROOT_PASSWORD=change-this-local-root-pw \
   -e MYSQL_DATABASE=finmodpro \
   -e MYSQL_USER=finmodpro \
@@ -59,6 +60,11 @@ docker exec -it finmodpro-mysql \
 ```
 
 能看到 `finmodpro` 即可。
+
+补充：
+
+- 这里显式使用 `mysql_native_password`
+- 原因是当前本地 `.venv` 走 `PyMySQL`，不额外安装 `cryptography` 时，对 MySQL 8 默认认证方式支持不稳定
 
 ### 后端切换示例
 
@@ -168,55 +174,12 @@ export MILVUS_URI=http://127.0.0.1:19530
 
 但这一点不是当前仓库的默认演示路径；当前代码和默认文档优先覆盖 `milvus.db` 的 Lite 模式。
 
-## 四、Ollama
-
-### 当前作用
-
-- 当前聊天和 embedding provider 走 `ollama`
-- 默认的 `ModelConfig` 种子记录会指向：
-  - endpoint：`http://localhost:11434`
-- **注意**：Ollama endpoint / model name 当前不是通过环境变量配置，而是存放在数据库的 `ModelConfig` 记录里
-
-### 推荐默认值
-
-- 如果你只想跑通基础页面和大部分非模型测试，可以先不启动 Ollama
-- 如果你要演示真实问答、embedding、风险抽取等链路，建议本机启动 Ollama
-
-### 安装与启动（Linux）
-
-```bash
-curl -fsSL https://ollama.com/install.sh | sh
-ollama serve
-```
-
-另开一个终端拉取当前仓库最接近默认值的模型：
-
-```bash
-ollama pull llama3.2
-ollama pull mxbai-embed-large
-```
-
-### 最小验证
-
-```bash
-ollama -v
-curl http://127.0.0.1:11434/api/tags
-ollama list
-```
-
-### 与 FinModPro 的衔接
-
-- 默认聊天模型和 embedding 模型记录由 `llm` app 的 `ModelConfig` 管理
-- 如果你修改了实际可用模型名或 endpoint，请同步：
-  - 通过 `/api/ops/model-configs`
-  - 或直接调整数据库里的 `ModelConfig` 记录
-
-## 五、LiteLLM
+## 四、LiteLLM
 
 ### 当前作用
 
 - 第一阶段作为统一 LLM gateway
-- Django 通过 `provider=litellm` 配置访问 LiteLLM，再由 LiteLLM 转发到 DeepSeek / Ollama / 未来外部模型
+- Django 通过 `provider=litellm` 配置访问 LiteLLM，再由 LiteLLM 转发到 DeepSeek / 未来外部模型
 
 ### 推荐默认值
 
@@ -234,7 +197,7 @@ ollama list
 - 管理台里保存的 LiteLLM endpoint 推荐使用 `http://localhost:4000`
 - 生产环境运行时会由后端自动重写到容器内地址 `http://litellm:4000`
 
-## 六、Langfuse
+## 五、Langfuse
 
 ### 当前作用
 
@@ -253,36 +216,57 @@ ollama list
 - 本地开发默认可留空
 - 接入 Cloud 后再填
 
-## 七、Unstructured Parser Service
+## 六、Unstructured Parser Service
 
 ### 当前作用
 
-- 为 `pdf/docx` 提供第一阶段结构化解析能力
-- backend / celery 通过 `UNSTRUCTURED_API_URL` 访问内部 HTTP 服务
+- 为 `pdf/docx` 提供结构化文档解析能力
+- backend / celery 通过 `UNSTRUCTURED_API_URL` 访问解析服务
+- 采用标准 Unstructured API 协议（`POST /general/v0/general`，multipart 文件上传）
 - 解析层与 chunk / embedding / retrieval 主链路解耦
 
 ### 推荐默认值
 
-- 本地或容器开发环境：`UNSTRUCTURED_API_URL=http://unstructured-api:8000`
+- 生产环境：通过 `docker-compose.prod.yml` 中的 `unstructured-api` 服务自建
+- 本地开发：可使用同一个容器，或直接用 `docker compose up unstructured-api` 单独启动
 - `pdf` 允许回退到 `pypdf`
-- `docx` 不做本地回退，解析失败应直接暴露给上游
+- `docx` 不做本地回退，解析失败直接暴露给上游
 
 ### 关键变量
 
-- `UNSTRUCTURED_API_URL`
-- `UNSTRUCTURED_API_KEY`
-- `UNSTRUCTURED_TIMEOUT_SECONDS`
-- `UNSTRUCTURED_PDF_STRATEGY`
-- `UNSTRUCTURED_DOCX_STRATEGY`
-- `UNSTRUCTURED_PDF_FALLBACK_ENABLED`
+- `UNSTRUCTURED_API_URL` — 解析服务地址（默认 `http://unstructured-api:8000`）
+- `UNSTRUCTURED_API_KEY` — API Key（自建容器不需要）
+- `UNSTRUCTURED_TIMEOUT_SECONDS` — 请求超时（默认 30s）
+- `UNSTRUCTURED_PDF_STRATEGY` — PDF 解析策略（默认 `fast`，可选 `auto`/`hi_res`）
+- `UNSTRUCTURED_DOCX_STRATEGY` — DOCX 解析策略（默认 `fast`）
+- `UNSTRUCTURED_PDF_FALLBACK_ENABLED` — PDF 解析失败时是否回退到 pypdf（默认 `true`）
+
+### 资源与内存说明
+
+- 官方 `unstructured-api` 镜像约 2-3 GB
+- **`fast` 策略**（默认）：只做文本级提取，无需加载 CV 模型，内存占用 ~200-500 MB
+- **`hi_res` 策略**：会加载 Detectron2 版面分析模型，额外占用 ~500 MB+ 内存
+- 容器已配置 `mem_limit: 2g` 和 `UNSTRUCTURED_PARALLEL_MODE_ENABLED=false`
+- 建议对当前生产机（7G 内存）始终使用 `fast` 策略
+
+### 启动命令
+
+```bash
+# 随项目一起启动
+docker compose -f docker-compose.prod.yml up -d unstructured-api
+
+# 验证
+curl -s http://127.0.0.1:8000/healthcheck | head -c 200
+```
 
 ### 说明
 
 - 当前仓库只把 Unstructured 作为解析边界，不改变 chunk / embedding / retrieval / API 语义
-- 生产部署时应把该服务保留在内部网络，不对公网暴露
-- 当 Unstructured 不可用时，只有 `pdf` 会退回到 `pypdf`
+- 解析服务仅限内部网络，不对公网暴露
+- `unstructured-api` 容器无需暴露端口，backend 通过 Docker DNS 访问
+- 当 Unstructured 不可用时，只有 `pdf` 会回退到 `pypdf`
 
-## 八、推荐组合
+## 七、推荐组合
 
 ## 八、LLaMA-Factory Runner
 
@@ -369,14 +353,14 @@ python3 scripts/llamafactory_runner.py \
 
 适合先把前后端跑起来：
 
-- SQLite
+- MySQL Docker
 - LocMemCache
 - Celery memory backend
 - `CHAT_CONTEXT_RECENT_MESSAGES=8`
 - `CHAT_MEMORY_RESULT_LIMIT=5`
 - `CHAT_SUMMARY_TRIGGER_MESSAGES=6`
 - Milvus Lite（`milvus.db`）
-- Ollama 可不启
+- LiteLLM 可不启
 
 说明：
 
@@ -392,7 +376,8 @@ python3 scripts/llamafactory_runner.py \
 - Redis Docker
 - Redis 作为 Celery broker / backend（或其他真实 broker）
 - Milvus Lite（当前仓库默认推荐）或你自己的远程 Milvus URI
-- Ollama 本机启动
+- LiteLLM
+- Unstructured Parser Service
 
 补充：
 

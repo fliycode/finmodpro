@@ -1,10 +1,10 @@
 <script setup>
 import { computed } from 'vue';
-import { RouterLink } from 'vue-router';
+import { RouterLink, useRouter } from 'vue-router';
 
 import AppIcon from './AppIcon.vue';
 import finmodproMark from '../../assets/finmodpro-mark.svg';
-import { getNavItems } from '../../config/navigation.js';
+import { getNavItems, getTopbarActions } from '../../config/navigation.js';
 import { authStorage } from '../../lib/auth-storage.js';
 import { getSidebarPresentation } from '../../lib/workspace-shell.js';
 
@@ -15,9 +15,18 @@ const props = defineProps({
   },
 });
 
+const router = useRouter();
 const profile = computed(() => authStorage.getProfile());
 const items = computed(() => getNavItems(props.area, profile.value));
 const sidebarPresentation = computed(() => getSidebarPresentation(props.area));
+const profileName = computed(() => profile.value?.user?.username || '当前用户');
+const profileEmail = computed(() => profile.value?.user?.email || '未设置邮箱');
+const roleLabel = computed(() => (props.area === 'admin' ? '管理员端' : '用户端'));
+const profileInitial = computed(() => profileName.value.trim().slice(0, 1).toUpperCase() || 'U');
+const profileActions = computed(() => [
+  { id: 'profile', label: '个人信息', to: '/workspace/profile' },
+  ...getTopbarActions(props.area, profile.value),
+]);
 
 const areaMeta = computed(() => {
   if (props.area === 'admin') {
@@ -67,6 +76,11 @@ const navGroups = computed(() => {
     },
   ].filter((group) => group.items.length > 0);
 });
+
+const handleLogout = async () => {
+  authStorage.clear();
+  await router.replace('/login');
+};
 </script>
 
 <template>
@@ -109,5 +123,45 @@ const navGroups = computed(() => {
         </div>
       </section>
     </nav>
+
+    <div v-if="props.area === 'workspace'" class="app-sidebar__profile">
+      <button class="app-sidebar__profile-trigger" type="button" :aria-label="`账号菜单：${profileName}`">
+        <span class="app-sidebar__avatar">{{ profileInitial }}</span>
+        <span class="app-sidebar__profile-copy">
+          <strong>{{ profileName }}</strong>
+          <span>{{ profileEmail }}</span>
+        </span>
+      </button>
+
+      <div class="app-sidebar__profile-menu" role="menu">
+        <div class="app-sidebar__profile-summary">
+          <span class="app-sidebar__avatar app-sidebar__avatar--menu">{{ profileInitial }}</span>
+          <div>
+            <strong>{{ profileName }}</strong>
+            <span>{{ profileEmail }}</span>
+            <em>{{ roleLabel }}</em>
+          </div>
+        </div>
+        <template v-for="action in profileActions" :key="action.id">
+          <button
+            v-if="action.id === 'logout'"
+            type="button"
+            class="app-sidebar__profile-action"
+            role="menuitem"
+            @click="handleLogout"
+          >
+            {{ action.label }}
+          </button>
+          <RouterLink
+            v-else
+            :to="action.to"
+            class="app-sidebar__profile-action"
+            role="menuitem"
+          >
+            {{ action.label }}
+          </RouterLink>
+        </template>
+      </div>
+    </div>
   </aside>
 </template>

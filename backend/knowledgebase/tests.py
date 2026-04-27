@@ -30,7 +30,7 @@ from knowledgebase.services.document_service import (
 )
 from knowledgebase.services.vector_service import VectorService
 from rag.services.vector_store_service import index_document
-from knowledgebase.services.parser_service import ParserService
+from knowledgebase.services.parser_service import ParserService, parse_document_file
 from knowledgebase.tasks import ingest_document_task
 from rag.services.vector_store_service import _VECTOR_STORE, clear_store
 from rbac.services.rbac_service import ROLE_ADMIN, seed_roles_and_permissions
@@ -1046,3 +1046,220 @@ class KnowledgebaseApiTests(TestCase):
         )
 
 
+class ParserServiceTests(TestCase):
+    """ParserService unit tests — element conversion and dispatch paths."""
+
+    # ── _elements_to_result conversion ──────────────────────────────────
+
+    def test_elements_to_result_joins_texts_and_counts_elements(self):
+        elements = [
+            {"type": "Title", "text": "Report", "metadata": {"page_number": 1}},
+            {"type": "Paragraph", "text": "Body text.", "metadata": {"page_number": 1}},
+        ]
+        result = ParserService()._elements_to_result(elements, strategy="fast")
+
+        self.assertIn("Report", result["parsed_text"])
+        self.assertIn("Body text.", result["parsed_text"])
+        self.assertEqual(result["document_metadata"]["source_parser"], "unstructured")
+        self.assertEqual(result["document_metadata"]["source_strategy"], "fast")
+        self.assertEqual(result["document_metadata"]["element_count"], 2)
+        self.assertFalse(result["document_metadata"]["fallback_used"])
+        self.assertEqual(result["chunk_metadata_defaults"]["page_number"], 1)
+        self.assertEqual(
+            sorted(result["chunk_metadata_defaults"]["element_types"]),
+            ["Paragraph", "Title"],
+        )
+
+    def test_elements_to_result_excludes_empty_text_entries(self):
+        elements = [
+            {"type": "Paragraph", "text": "Real content", "metadata": {}},
+            {"type": "Figure", "text": "", "metadata": {}},
+        ]
+        result = ParserService()._elements_to_result(elements, strategy="auto")
+        self.assertEqual(result["parsed_text"], "Real content")
+
+    def test_elements_to_result_handles_multiple_pages(self):
+        elements = [
+            {"type": "Title", "text": "P1", "metadata": {"page_number": 1}},
+            {"type": "Title", "text": "P2", "metadata": {"page_number": 2}},
+            {"type": "Title", "text": "P3", "metadata": {"page_number": 3}},
+        ]
+        result = ParserService()._elements_to_result(elements, strategy="fast")
+        self.assertEqual(result["chunk_metadata_defaults"]["page_number"], 1)
+
+    def test_elements_to_result_raises_on_empty_elements(self):
+        with self.assertRaises(ValueError):
+            ParserService()._elements_to_result([], strategy="fast")
+
+    def test_elements_to_result_raises_if_all_text_empty(self):
+        elements = [
+            {"type": "Figure", "text": "   ", "metadata": {}},
+            {"type": "Table", "text": "", "metadata": {}},
+        ]
+        with self.assertRaises(ValueError):
+            ParserService()._elements_to_result(elements, strategy="fast")
+
+    def test_clean_text_normalizes_whitespace(self):
+        service = ParserService()
+        self.assertEqual(service.clean_text("hello   world"), "hello world")
+        self.assertEqual(service.clean_text("line-\nbreak"), "linebreak")
+        self.assertEqual(service.clean_text("a\r\nb\r\nc"), "a\nb\nc")
+
+    # ── txt path ────────────────────────────────────────────────────────
+
+    def test_txt_parses_locally(self):
+        with tempfile.NamedTemporaryFile(suffix=".txt", mode="w", delete=False) as f:
+            f.write("plain text content")
+            path = f.name
+        try:
+            doc = SimpleNamespace(doc_type="txt", file=SimpleNamespace(path=path))
+            result = ParserService().parse(doc)
+            self.assertEqual(result["document_metadata"]["source_parser"], "txt")
+            self.assertEqual(result["parsed_text"], "plain text content")
+        finally:
+            os.unlink(path)
+
+    # ── pdf path ────────────────────────────────────────────────────────
+
+    @patch("knowledgebase.services.parser_service.parse_via_unstructured")
+    def test_pdf_calls_unstructured_and_returns_elements(self, mock_parse):
+        mock_parse.return_value = [
+            {"type": "Paragraph", "text": "PDF content", "metadata": {"page_number": 1}},
+        ]
+        doc = SimpleNamespace(
+            doc_type="pdf",
+            file=SimpleNamespace(path="/fake/test.pdf"),
+            filename="test.pdf",
+        )
+        result = ParserService().parse(doc)
+        self.assertEqual(result["document_metadata"]["source_parser"], "unstructured")
+        self.assertIn("PDF content", result["parsed_text"])
+
+    @patch("knowledgebase.services.parser_service.parse_via_unstructured")
+    def test_pdf_falls_back_to_pypdf_when_unstructured_fails(self, mock_parse):
+        """When unstructured raises and PDF_FALLBACK_ENABLED, pypdf is used."""
+        mock_parse.side_effect = ValueError("Service unreachable")
+
+        with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as f:
+            pdf_path = f.name
+        try:
+            from pypdf import PdfWriter
+
+            writer = PdfWriter()
+            writer.add_blank_page(612, 792)
+            with open(pdf_path, "wb") as fw:
+                writer.write(fw)
+
+            doc = SimpleNamespace(
+                doc_type="pdf",
+                file=SimpleNamespace(path=pdf_path),
+                filename="fallback.pdf",
+            )
+            with override_settings(UNSTRUCTURED_PDF_FALLBACK_ENABLED=True):
+                result = ParserService().parse(doc)
+
+            self.assertEqual(result["document_metadata"]["source_parser"], "pypdf")
+            self.assertEqual(result["document_metadata"]["source_strategy"], "fallback")
+            self.assertTrue(result["document_metadata"]["fallback_used"])
+        finally:
+            os.unlink(pdf_path)
+
+    @patch("knowledgebase.services.parser_service.parse_via_unstructured")
+    def test_pdf_no_fallback_when_disabled(self, mock_parse):
+        mock_parse.side_effect = ValueError("Service unreachable")
+        doc = SimpleNamespace(
+            doc_type="pdf",
+            file=SimpleNamespace(path="/fake/test.pdf"),
+            filename="test.pdf",
+        )
+        with override_settings(UNSTRUCTURED_PDF_FALLBACK_ENABLED=False):
+            with self.assertRaises(ValueError):
+                ParserService().parse(doc)
+
+    @patch("knowledgebase.services.parser_service.parse_via_unstructured")
+    def test_pdf_empty_elements_falls_back_when_enabled(self, mock_parse):
+        """Empty elements list triggers fallback to pypdf when fallback enabled."""
+        mock_parse.return_value = []
+        with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as f:
+            pdf_path = f.name
+        try:
+            from pypdf import PdfWriter
+            writer = PdfWriter()
+            writer.add_blank_page(612, 792)
+            with open(pdf_path, "wb") as fw:
+                writer.write(fw)
+
+            doc = SimpleNamespace(
+                doc_type="pdf",
+                file=SimpleNamespace(path=pdf_path),
+                filename="empty.pdf",
+            )
+            with override_settings(UNSTRUCTURED_PDF_FALLBACK_ENABLED=True):
+                result = ParserService().parse(doc)
+
+            self.assertEqual(result["document_metadata"]["source_parser"], "pypdf")
+            self.assertTrue(result["document_metadata"]["fallback_used"])
+        finally:
+            os.unlink(pdf_path)
+
+    @patch("knowledgebase.services.parser_service.parse_via_unstructured")
+    def test_pdf_empty_elements_raises_when_fallback_disabled(self, mock_parse):
+        mock_parse.return_value = []
+        doc = SimpleNamespace(
+            doc_type="pdf",
+            file=SimpleNamespace(path="/fake/test.pdf"),
+            filename="test.pdf",
+        )
+        with override_settings(UNSTRUCTURED_PDF_FALLBACK_ENABLED=False):
+            with self.assertRaises(ValueError):
+                ParserService().parse(doc)
+
+    # ── docx path ───────────────────────────────────────────────────────
+
+    @patch("knowledgebase.services.parser_service.parse_via_unstructured")
+    def test_docx_calls_unstructured_and_returns_elements(self, mock_parse):
+        mock_parse.return_value = [
+            {"type": "Title", "text": "DOCX Title", "metadata": {}},
+            {"type": "Paragraph", "text": "Word content.", "metadata": {}},
+        ]
+        doc = SimpleNamespace(
+            doc_type="docx",
+            file=SimpleNamespace(path="/fake/test.docx"),
+            filename="test.docx",
+        )
+        result = ParserService().parse(doc)
+        self.assertEqual(result["document_metadata"]["source_parser"], "unstructured")
+        self.assertIn("DOCX Title", result["parsed_text"])
+
+    @patch("knowledgebase.services.parser_service.parse_via_unstructured")
+    def test_docx_raises_when_unstructured_fails(self, mock_parse):
+        """docx has no fallback — failure propagates."""
+        mock_parse.side_effect = ValueError("Service unreachable")
+        doc = SimpleNamespace(
+            doc_type="docx",
+            file=SimpleNamespace(path="/fake/test.docx"),
+            filename="test.docx",
+        )
+        with self.assertRaises(ValueError):
+            ParserService().parse(doc)
+
+    @patch("knowledgebase.services.parser_service.parse_via_unstructured")
+    def test_docx_empty_elements_raises(self, mock_parse):
+        mock_parse.return_value = []
+        doc = SimpleNamespace(
+            doc_type="docx",
+            file=SimpleNamespace(path="/fake/test.docx"),
+            filename="test.docx",
+        )
+        with self.assertRaises(ValueError):
+            ParserService().parse(doc)
+
+    # ── unsupported type ────────────────────────────────────────────────
+
+    def test_unsupported_doc_type_raises(self):
+        doc = SimpleNamespace(
+            doc_type="xls",
+            file=SimpleNamespace(path="/fake/test.xls"),
+        )
+        with self.assertRaisesRegex(ValueError, "不支持的文档类型"):
+            ParserService().parse(doc)
