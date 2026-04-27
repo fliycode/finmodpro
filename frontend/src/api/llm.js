@@ -74,7 +74,6 @@ export const normalizeModelConfigPayload = (payload = {}) => {
     latest_fine_tune_dataset: item.latest_fine_tune_dataset ?? "",
     latest_fine_tune_status: item.latest_fine_tune_status ?? "",
     latest_fine_tune_artifact_path: item.latest_fine_tune_artifact_path ?? "",
-    raw: item,
   }));
 };
 
@@ -97,7 +96,7 @@ export const normalizeEvaluationRecord = (item, index = 0) => ({
   run_notes: item?.run_notes ?? '',
   metadata: item?.metadata ?? {},
   created_at: item?.created_at ?? item?.createdAt ?? item?.started_at ?? item?.updated_at ?? '',
-  raw: item ?? {},
+  metadata: item?.metadata ?? {},
 });
 
 export const normalizeEvaluationGroup = (group, index = 0) => {
@@ -116,7 +115,6 @@ export const normalizeEvaluationGroup = (group, index = 0) => {
       average_latency_ms: summary.average_latency_ms ?? null,
     },
     records,
-    raw: group ?? {},
   };
 };
 
@@ -162,7 +160,6 @@ export const normalizeFineTuneRun = (item, index = 0) => ({
   notes: item?.notes ?? '',
   created_at: item?.created_at ?? '',
   updated_at: item?.updated_at ?? '',
-  raw: item ?? {},
 });
 
 export const normalizeFineTunePayload = (payload = {}) => {
