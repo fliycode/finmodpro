@@ -16,7 +16,7 @@ from chat.serializers import ChatMessageSerializer, ChatSessionSerializer
 from chat.services.ask_service import stream_question
 from chat.services.context_service import build_chat_messages
 from chat.services.rag_graph_service import prepare_chat_payload
-from chat.services.memory_service import delete_memory_item, extract_session_memories, set_memory_pin_state
+from chat.services.memory_service import delete_memory_item, set_memory_pin_state
 from chat.services.session_service import dispatch_session_maintenance_tasks
 from chat.services.session_service import (
     create_chat_session,
@@ -107,6 +107,270 @@ def fake_vector_search(*, query, filters=None, top_k=5):
         )
     results.sort(key=lambda item: (item["score"], item["chunk_id"]), reverse=True)
     return results[: int(top_k)]
+class DjangoMemoryStoreTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username="store-test-user",
+            password="pw",
+            email="store@example.com",
+        )
+        from chat.services.store import DjangoMemoryStore
+        self.store = DjangoMemoryStore()
+        self.ns = ("memories", str(self.user.id))
+
+    def _sample_value(self, title="T", content="C", memory_type="confirmed_fact"):
+        return {
+            "title": title,
+            "content": content,
+            "memory_type": memory_type,
+            "confidence_score": 0.9,
+            "pinned": False,
+            "source_kind": "auto",
+        }
+
+    def test_put_then_get_returns_item(self):
+        self.store.put(self.ns, "key1", self._sample_value(content="C"))
+        item = self.store.get(self.ns, "key1")
+        self.assertIsNotNone(item)
+        self.assertEqual(item.value["content"], "C")
+        self.assertEqual(item.key, "key1")
+        self.assertEqual(item.namespace, self.ns)
+
+    def test_put_none_soft_deletes(self):
+        self.store.put(self.ns, "key2", self._sample_value())
+        self.store.put(self.ns, "key2", None)
+        item = self.store.get(self.ns, "key2")
+        self.assertIsNone(item)
+
+    def test_search_returns_matching_items(self):
+        self.store.put(self.ns, "k1", self._sample_value(title="偏好", content="用户喜欢深色模式", memory_type="user_preference"))
+        self.store.put(self.ns, "k2", self._sample_value(title="规则", content="每次输出中文", memory_type="work_rule"))
+        results = self.store.search(self.ns, query="深色")
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0].value["title"], "偏好")
+
+    def test_search_with_no_query_returns_all(self):
+        self.store.put(self.ns, "ka", self._sample_value(content="alpha"))
+        self.store.put(self.ns, "kb", self._sample_value(content="beta"))
+        results = self.store.search(self.ns)
+        self.assertGreaterEqual(len(results), 2)
+
+    def test_dataset_namespace_isolated_from_user_global(self):
+        ds_ns = ("memories", str(self.user.id), "dataset", "99")
+        self.store.put(self.ns, "global-key", self._sample_value(content="全局内容"))
+        self.store.put(ds_ns, "ds-key", self._sample_value(content="数据集内容", memory_type="work_rule"))
+        global_keys = {r.key for r in self.store.search(self.ns)}
+        ds_keys = {r.key for r in self.store.search(ds_ns)}
+        self.assertIn("global-key", global_keys)
+        self.assertNotIn("ds-key", global_keys)
+        self.assertIn("ds-key", ds_keys)
+        self.assertNotIn("global-key", ds_keys)
+
+    def test_put_updates_existing_item(self):
+        self.store.put(self.ns, "upd", self._sample_value(title="旧标题", content="旧内容"))
+        self.store.put(self.ns, "upd", self._sample_value(title="新标题", content="新内容"))
+        item = self.store.get(self.ns, "upd")
+        self.assertEqual(item.value["title"], "新标题")
+        self.assertEqual(item.value["content"], "新内容")
+
+
+class ContextServiceMemoryInjectionTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username="ctx-mem-user",
+            password="pw",
+            email="ctx@example.com",
+        )
+        from chat.services.store import DjangoMemoryStore
+        store = DjangoMemoryStore()
+        ns = ("memories", str(self.user.id))
+        store.put(ns, "pref-key", {
+            "title": "语言偏好",
+            "content": "用户希望所有回答用英文输出",
+            "memory_type": "user_preference",
+            "confidence_score": 0.95,
+            "pinned": False,
+            "source_kind": "auto",
+        })
+
+    def test_build_chat_messages_injects_memory_into_prompt(self):
+        session = ChatSession.objects.create(
+            user=self.user,
+            title="ctx测试",
+            context_filters={},
+        )
+        messages = build_chat_messages(
+            session=session,
+            question="请问有什么偏好设置？",
+            citations=[],
+            filters={},
+        )
+        full_text = " ".join(m["content"] for m in messages)
+        self.assertIn("英文", full_text, "Memory content must appear in the assembled prompt")
+
+
+class LlmMemoryExtractionTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username="llm-mem-user",
+            password="pw",
+            email="llmem@example.com",
+        )
+        self.session = ChatSession.objects.create(
+            user=self.user,
+            title="抽取测试",
+            context_filters={},
+        )
+        ChatMessage.objects.create(
+            session=self.session,
+            role=ChatMessage.ROLE_USER,
+            content="我是一名基金经理，请记住我偏好英文输出。",
+            status=ChatMessage.STATUS_COMPLETE,
+            sequence=1,
+        )
+        ChatMessage.objects.create(
+            session=self.session,
+            role=ChatMessage.ROLE_ASSISTANT,
+            content="好的，我记住了。",
+            status=ChatMessage.STATUS_COMPLETE,
+            sequence=2,
+        )
+
+    @patch("chat.services.memory_service.get_chat_provider")
+    def test_extract_saves_memories_to_store(self, mocked_provider):
+        import json as _json
+        from chat.services.memory_service import extract_memories_with_llm
+        from chat.services.store import DjangoMemoryStore
+
+        llm_response = _json.dumps([
+            {"title": "用户身份", "content": "用户是基金经理", "memory_type": "confirmed_fact", "confidence_score": 0.9},
+            {"title": "输出语言偏好", "content": "用户偏好英文输出", "memory_type": "user_preference", "confidence_score": 0.95},
+        ])
+
+        class FixedProvider:
+            def chat(self, *, messages, options=None):
+                return llm_response
+
+        mocked_provider.return_value = FixedProvider()
+
+        count = extract_memories_with_llm(session_id=self.session.id)
+
+        self.assertEqual(count, 2)
+        store = DjangoMemoryStore()
+        ns = ("memories", str(self.user.id))
+        items = store.search(ns)
+        contents = [i.value["content"] for i in items]
+        self.assertTrue(
+            any("基金经理" in c for c in contents),
+            f"Expected '基金经理' in memory contents, got: {contents}",
+        )
+
+    @patch("chat.services.memory_service.get_chat_provider")
+    def test_extract_skips_low_confidence(self, mocked_provider):
+        import json as _json
+        from chat.services.memory_service import extract_memories_with_llm
+        from chat.services.store import DjangoMemoryStore
+
+        llm_response = _json.dumps([
+            {"title": "低置信度", "content": "这条信息不确定", "memory_type": "confirmed_fact", "confidence_score": 0.5},
+        ])
+
+        class FixedProvider:
+            def chat(self, *, messages, options=None):
+                return llm_response
+
+        mocked_provider.return_value = FixedProvider()
+
+        count = extract_memories_with_llm(session_id=self.session.id)
+
+        self.assertEqual(count, 0)
+        store = DjangoMemoryStore()
+        ns = ("memories", str(self.user.id))
+        self.assertEqual(len(store.search(ns)), 0)
+
+    @patch("chat.services.memory_service.get_chat_provider")
+    def test_extract_returns_zero_on_empty_session(self, mocked_provider):
+        from chat.services.memory_service import extract_memories_with_llm
+
+        count = extract_memories_with_llm(session_id=999999)
+        self.assertEqual(count, 0)
+        mocked_provider.assert_not_called()
+
+    @patch("chat.services.memory_service.get_chat_provider")
+    def test_extract_handles_malformed_llm_output_gracefully(self, mocked_provider):
+        from chat.services.memory_service import extract_memories_with_llm
+
+        class BrokenProvider:
+            def chat(self, *, messages, options=None):
+                return "这不是JSON格式的输出"
+
+        mocked_provider.return_value = BrokenProvider()
+
+        count = extract_memories_with_llm(session_id=self.session.id)
+        self.assertEqual(count, 0)
+
+
+class MemoryIntegrationTests(TestCase):
+    """End-to-end: LLM extraction → store → memory surfaces in next-turn prompt."""
+
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username="mem-integration-user",
+            password="pw",
+            email="memint@example.com",
+        )
+        self.session = ChatSession.objects.create(
+            user=self.user,
+            title="集成测试",
+            context_filters={},
+        )
+
+    @patch("chat.services.memory_service.get_chat_provider")
+    def test_extracted_memory_appears_in_next_turn_context(self, mocked_llm):
+        import json as _json
+        from chat.services.memory_service import extract_memories_with_llm
+
+        ChatMessage.objects.create(
+            session=self.session,
+            role=ChatMessage.ROLE_USER,
+            content="我在华夏基金担任首席风控官。",
+            status=ChatMessage.STATUS_COMPLETE,
+            sequence=1,
+        )
+        ChatMessage.objects.create(
+            session=self.session,
+            role=ChatMessage.ROLE_ASSISTANT,
+            content="明白了，您是风控官。",
+            status=ChatMessage.STATUS_COMPLETE,
+            sequence=2,
+        )
+
+        llm_resp = _json.dumps([{
+            "title": "用户职位",
+            "content": "用户在华夏基金担任首席风控官",
+            "memory_type": "confirmed_fact",
+            "confidence_score": 0.95,
+        }])
+
+        class OneShot:
+            def chat(self, *, messages, options=None):
+                return llm_resp
+
+        mocked_llm.return_value = OneShot()
+
+        saved = extract_memories_with_llm(session_id=self.session.id)
+        self.assertEqual(saved, 1)
+
+        messages = build_chat_messages(
+            session=self.session,
+            question="帮我分析一下流动性风险",
+            citations=[],
+            filters={},
+        )
+        full_prompt = " ".join(m["content"] for m in messages)
+        self.assertIn("华夏基金", full_prompt, "Extracted memory must appear in follow-up prompt")
+
+
 @override_settings(
     JWT_SECRET_KEY="test-jwt-secret",
     JWT_ACCESS_TOKEN_LIFETIME_SECONDS=3600,
