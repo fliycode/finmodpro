@@ -1636,22 +1636,22 @@ class ModelInvocationLogIndexTests(TestCase):
 
     def test_provider_created_at_composite_index_exists(self):
         self.assertIn(
-            "llm_invoclog_provider_created_idx",
+            "llm_invlog_prov_created_idx",
             self._index_names(),
             "Composite index (provider, -created_at) must be declared on ModelInvocationLog",
         )
 
     def test_provider_created_at_index_fields(self):
         idx = next(
-            (i for i in ModelInvocationLog._meta.indexes if i.name == "llm_invoclog_provider_created_idx"),
+            (i for i in ModelInvocationLog._meta.indexes if i.name == "llm_invlog_prov_created_idx"),
             None,
         )
-        self.assertIsNotNone(idx, "Index llm_invoclog_provider_created_idx not found")
+        self.assertIsNotNone(idx, "Index llm_invlog_prov_created_idx not found")
         self.assertEqual(list(idx.fields), ["provider", "-created_at"])
 
     def test_all_expected_indexes_present(self):
         expected = {
-            "llm_invoclog_provider_created_idx",
+            "llm_invlog_prov_created_idx",
             "llm_invoclog_cfg_created_idx",
             "llm_invoclog_trace_created_idx",
             "llm_invoclog_reqid_created_idx",
@@ -2237,7 +2237,7 @@ class GatewayQueryServiceTests(TestCase):
                 provider=ModelConfig.PROVIDER_OLLAMA,
                 model_name="llama3",
                 endpoint="http://localhost:11434",
-                is_active=True,
+                is_active=False,
             ),
         )
         defaults = dict(
@@ -2389,6 +2389,24 @@ class GatewayQueryServiceTests(TestCase):
             "Two logs 10 minutes apart within the same hour must produce at "
             "least 2 distinct 1h timeseries points (not collapse into one hourly bucket).",
         )
+
+    def test_1h_timeseries_reports_minute_granularity_metadata(self):
+        from llm.services.litellm_gateway_query_service import get_costs_timeseries
+
+        self._make_log(request_tokens=100, response_tokens=50)
+
+        result = get_costs_timeseries({"time": "1h"})
+
+        self.assertEqual(result["granularity_minutes"], 1)
+        self.assertIsNone(result["granularity_hours"])
+
+    def test_non_litellm_helper_does_not_deactivate_active_litellm_config(self):
+        self.assertTrue(self.model_config.is_active)
+
+        self._make_non_litellm_log()
+        self.model_config.refresh_from_db()
+
+        self.assertTrue(self.model_config.is_active)
 
 @override_settings(
     JWT_SECRET_KEY="test-jwt-secret",
@@ -2717,4 +2735,3 @@ class LiteLLMAliasYamlRegressionTests(TestCase):
 
         self.assertIn("model: openai/my-fallback-route", yaml_text,
                       "Absent upstream_model must fall back to openai/<model_name>")
-

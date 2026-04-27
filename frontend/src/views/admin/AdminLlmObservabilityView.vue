@@ -1,7 +1,7 @@
 <script setup>
-import LlmConsoleObservability from '../../components/LlmConsoleObservability.vue';
+import LlmGatewayObservability from '../../components/LlmGatewayObservability.vue';
 </script>
 
 <template>
-  <LlmConsoleObservability />
+  <LlmGatewayObservability />
 </template>

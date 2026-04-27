@@ -89,6 +89,10 @@ export const appRoutes = [
         component: () => import('../views/admin/AdminLlmObservabilityView.vue'),
       },
       {
+        path: 'llm/costs',
+        component: () => import('../views/admin/AdminLlmCostsView.vue'),
+      },
+      {
         path: 'llm/knowledge',
         component: () => import('../views/admin/AdminLlmKnowledgeView.vue'),
       },

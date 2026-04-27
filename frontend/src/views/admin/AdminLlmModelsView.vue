@@ -1,7 +1,7 @@
 <script setup>
-import ModelConfig from '../../components/ModelConfig.vue';
+import LlmGatewayRouting from '../../components/LlmGatewayRouting.vue';
 </script>
 
 <template>
-  <ModelConfig mode="models" />
+  <LlmGatewayRouting />
 </template>

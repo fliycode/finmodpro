@@ -1,7 +1,7 @@
 <script setup>
-import LlmConsoleOverview from '../../components/LlmConsoleOverview.vue';
+import LlmGatewayDashboard from '../../components/LlmGatewayDashboard.vue';
 </script>
 
 <template>
-  <LlmConsoleOverview />
+  <LlmGatewayDashboard />
 </template>

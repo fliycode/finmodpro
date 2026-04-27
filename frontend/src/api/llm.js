@@ -26,7 +26,7 @@ const getArray = (payload, keys) => {
   return [];
 };
 
-const buildQueryPath = (path, params = {}) => {
+export const buildQueryPath = (path, params = {}) => {
   const query = new URLSearchParams();
   Object.entries(params).forEach(([key, value]) => {
     if (value === undefined || value === null || value === '') {
@@ -63,6 +63,11 @@ export const normalizeModelConfigPayload = (payload = {}) => {
     options: item.options ?? {},
     has_api_key: item.has_api_key ?? false,
     api_key_masked: item.api_key_masked ?? "",
+    alias: item.alias ?? item.model_name ?? item.model ?? item.name ?? "",
+    upstream_provider: item.upstream_provider ?? item.provider ?? "",
+    upstream_model: item.upstream_model ?? item.model_name ?? item.model ?? "",
+    fallback_aliases: Array.isArray(item.fallback_aliases) ? item.fallback_aliases : [],
+    weight: toNumber(item.weight, 0),
     fine_tune_run_count: Number(item.fine_tune_run_count ?? 0),
     latest_fine_tune_dataset: item.latest_fine_tune_dataset ?? "",
     latest_fine_tune_status: item.latest_fine_tune_status ?? "",
@@ -167,97 +172,118 @@ export const normalizeFineTunePayload = (payload = {}) => {
   };
 };
 
-export const llmApi = {
-  async getModelConfigs() {
-    return unwrap(await apiConfig.fetchJson('/api/ops/model-configs/', {
-      method: 'GET',
-      auth: true,
-    }));
-  },
+export const createLlmApi = (overrides = {}) => {
+  const resolvedApiConfig = createApiConfig(overrides);
+  const fetchJson = overrides.fetchJson || resolvedApiConfig.fetchJson;
 
-  async activateModelConfig(id, isActive) {
-    return unwrap(await apiConfig.fetchJson(`/api/ops/model-configs/${id}/activation/`, {
-      method: 'PATCH',
-      auth: true,
-      body: JSON.stringify({ is_active: isActive }),
-    }));
-  },
+  return {
+    async getModelConfigs() {
+      return unwrap(await fetchJson('/api/ops/model-configs/', {
+        method: 'GET',
+        auth: true,
+      }));
+    },
 
-  async createModelConfig(payload) {
-    return unwrap(await apiConfig.fetchJson('/api/ops/model-configs/', {
-      method: 'POST',
-      auth: true,
-      body: JSON.stringify(payload),
-    }));
-  },
+    async activateModelConfig(id, isActive) {
+      return unwrap(await fetchJson(`/api/ops/model-configs/${id}/activation/`, {
+        method: 'PATCH',
+        auth: true,
+        body: JSON.stringify({ is_active: isActive }),
+      }));
+    },
 
-  async updateModelConfig(id, payload) {
-    return unwrap(await apiConfig.fetchJson(`/api/ops/model-configs/${id}/`, {
-      method: 'PATCH',
-      auth: true,
-      body: JSON.stringify(payload),
-    }));
-  },
+    async createModelConfig(payload) {
+      return unwrap(await fetchJson('/api/ops/model-configs/', {
+        method: 'POST',
+        auth: true,
+        body: JSON.stringify(payload),
+      }));
+    },
 
-  async testModelConfigConnection(payload) {
-    return unwrap(await apiConfig.fetchJson('/api/ops/model-configs/test-connection/', {
-      method: 'POST',
-      auth: true,
-      body: JSON.stringify(payload),
-    }));
-  },
+    async updateModelConfig(id, payload) {
+      return unwrap(await fetchJson(`/api/ops/model-configs/${id}/`, {
+        method: 'PATCH',
+        auth: true,
+        body: JSON.stringify(payload),
+      }));
+    },
 
-  async getEvaluations() {
-    return normalizeEvaluationPayload(unwrap(await apiConfig.fetchJson('/api/ops/evaluations', {
-      method: 'GET',
-      auth: true,
-    })));
-  },
+    async testModelConfigConnection(payload) {
+      return unwrap(await fetchJson('/api/ops/model-configs/test-connection/', {
+        method: 'POST',
+        auth: true,
+        body: JSON.stringify(payload),
+      }));
+    },
 
-  async triggerEvaluation(data) {
-    const payload = unwrap(await apiConfig.fetchJson('/api/ops/evaluations', {
-      method: 'POST',
-      auth: true,
-      body: JSON.stringify(data),
-    }));
-    return {
-      eval_record: normalizeEvaluationRecord(payload.eval_record || payload),
-    };
-  },
+    async syncModelConfigToLiteLLM(id) {
+      return unwrap(await fetchJson(`/api/ops/model-configs/${id}/sync-litellm/`, {
+        method: 'POST',
+        auth: true,
+      }));
+    },
 
-  async getFineTuneRuns(params = {}) {
-    return normalizeFineTunePayload(unwrap(await apiConfig.fetchJson(buildQueryPath('/api/ops/fine-tunes/', params), {
-      method: 'GET',
-      auth: true,
-    })));
-  },
+    async migrateToLiteLLM() {
+      return unwrap(await fetchJson('/api/ops/model-configs/migrate-to-litellm/', {
+        method: 'POST',
+        auth: true,
+      }));
+    },
 
-  async createFineTuneRun(payload) {
-    const data = unwrap(await apiConfig.fetchJson('/api/ops/fine-tunes/', {
-      method: 'POST',
-      auth: true,
-      body: JSON.stringify(payload),
-    }));
-    return {
-      fine_tune_run: normalizeFineTuneRun(data.fine_tune_run || data),
-    };
-  },
+    async getEvaluations() {
+      return normalizeEvaluationPayload(unwrap(await fetchJson('/api/ops/evaluations', {
+        method: 'GET',
+        auth: true,
+      })));
+    },
 
-  async getFineTuneExportDetail(id) {
-    return unwrap(await apiConfig.fetchJson(`/api/ops/fine-tunes/${id}/export/`, {
-      method: 'GET',
-      auth: true,
-    }));
-  },
+    async triggerEvaluation(data) {
+      const payload = unwrap(await fetchJson('/api/ops/evaluations', {
+        method: 'POST',
+        auth: true,
+        body: JSON.stringify(data),
+      }));
+      return {
+        eval_record: normalizeEvaluationRecord(payload.eval_record || payload),
+      };
+    },
 
-  async updateFineTuneRun(id, payload) {
-    const data = unwrap(await apiConfig.fetchJson(`/api/ops/fine-tunes/${id}/`, {
-      method: 'PATCH',
-      auth: true,
-      body: JSON.stringify(payload),
-    }));
-    return {
-      fine_tune_run: normalizeFineTuneRun(data.fine_tune_run || data),
-    };
-  },
+    async getFineTuneRuns(params = {}) {
+      return normalizeFineTunePayload(unwrap(await fetchJson(buildQueryPath('/api/ops/fine-tunes/', params), {
+        method: 'GET',
+        auth: true,
+      })));
+    },
+
+    async createFineTuneRun(payload) {
+      const data = unwrap(await fetchJson('/api/ops/fine-tunes/', {
+        method: 'POST',
+        auth: true,
+        body: JSON.stringify(payload),
+      }));
+      return {
+        fine_tune_run: normalizeFineTuneRun(data.fine_tune_run || data),
+      };
+    },
+
+    async getFineTuneExportDetail(id) {
+      return unwrap(await fetchJson(`/api/ops/fine-tunes/${id}/export/`, {
+        method: 'GET',
+        auth: true,
+      }));
+    },
+
+    async updateFineTuneRun(id, payload) {
+      const data = unwrap(await fetchJson(`/api/ops/fine-tunes/${id}/`, {
+        method: 'PATCH',
+        auth: true,
+        body: JSON.stringify(payload),
+      }));
+      return {
+        fine_tune_run: normalizeFineTuneRun(data.fine_tune_run || data),
+      };
+    },
+  };
 };
+
+export const llmApi = createLlmApi();
