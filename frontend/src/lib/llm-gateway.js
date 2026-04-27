@@ -192,3 +192,9 @@ export const normalizeGatewayCostsModels = (payload = {}) => {
     raw: data,
   };
 };
+
+export const getRouteDeleteBlockReason = (route = {}) => (
+  route?.is_active
+    ? '当前默认路由不能直接删除，请先切换默认链路或在编辑抽屉里取消默认状态。'
+    : ''
+);

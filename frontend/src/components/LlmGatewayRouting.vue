@@ -3,6 +3,7 @@ import { computed, onMounted, reactive, ref } from 'vue';
 
 import { llmApi, normalizeModelConfigPayload } from '../api/llm.js';
 import { useFlash } from '../lib/flash.js';
+import { getRouteDeleteBlockReason } from '../lib/llm-gateway.js';
 import AppSectionCard from './ui/AppSectionCard.vue';
 
 const flash = useFlash();
@@ -251,6 +252,11 @@ const testConnection = async () => {
 };
 
 const deleteRoute = async (config) => {
+  const deleteBlockReason = getRouteDeleteBlockReason(config);
+  if (deleteBlockReason) {
+    flash.error(deleteBlockReason);
+    return;
+  }
   const alias = config.alias || config.model_name || config.name || '未命名路由';
   if (!window.confirm(`确定删除路由“${alias}”吗？删除后需要重新同步或重新创建才能恢复。`)) {
     return;
@@ -372,15 +378,15 @@ onMounted(fetchConfigs);
             {{ formatUpdatedAt(row.updated_at) }}
           </template>
         </el-table-column>
-          <el-table-column label="操作" min-width="220" fixed="right">
+          <el-table-column label="操作" width="320">
             <template #default="{ row }">
-              <div class="inline-actions">
+              <div class="route-actions">
                 <el-button size="small" @click="openEdit(row)">编辑</el-button>
                 <el-button size="small" @click="syncRoute(row)">同步</el-button>
                 <el-button size="small" type="primary" plain :disabled="row.is_active" @click="activateRoute(row)">
                   设为默认
                 </el-button>
-                <el-button size="small" type="danger" plain :disabled="row.is_active" @click="deleteRoute(row)">
+                <el-button size="small" type="danger" plain @click="deleteRoute(row)">
                   删除
                 </el-button>
               </div>
@@ -525,6 +531,13 @@ onMounted(fetchConfigs);
 .table-stack {
   display: grid;
   gap: 4px;
+}
+
+.route-actions {
+  display: grid;
+  grid-template-columns: repeat(2, max-content);
+  gap: 8px;
+  justify-content: start;
 }
 
 .gateway-form-grid {
