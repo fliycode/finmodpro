@@ -8,6 +8,7 @@ from langgraph.graph import END, START, StateGraph
 
 from chat.services.context_service import build_chat_messages
 from chat.services.session_service import normalize_context_filters
+from chat.services.store import django_memory_store
 from rag.services.retrieval_service import build_retrieval_response, retrieve as default_retrieve
 
 logger = logging.getLogger(__name__)
@@ -480,10 +481,10 @@ def _direct_answer_context(state: ChatRagState):
         "citations": [],
         "answer_mode": "direct",
         "messages": build_chat_messages(
-            session=None,
+            session=state.get("session"),
             question=state["question"],
             citations=[],
-            filters={},
+            filters=state.get("resolved_filters", {}),
         ),
     }
 
@@ -514,7 +515,7 @@ def _build_rag_graph():
     graph.add_edge("grade_retrieval", "build_retrieval_context")
     graph.add_edge("build_retrieval_context", END)
     graph.add_edge("direct_answer_context", END)
-    return graph.compile()
+    return graph.compile(store=django_memory_store)
 
 
 _RAG_GRAPH = _build_rag_graph()

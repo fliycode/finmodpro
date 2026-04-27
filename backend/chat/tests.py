@@ -761,12 +761,12 @@ class ChatAskApiTests(TestCase):
         session = ChatSession.objects.create(
             user=self.user,
             title="旧会话",
-            rolling_summary="参考上下文描述的是另一个系统。",
+            rolling_summary="这是一个测试会话。",
         )
         create_session_message(
             session=session,
             role=ChatMessage.ROLE_USER,
-            content="另一个系统是谁？",
+            content="用户上一轮的问题",
             status=ChatMessage.STATUS_COMPLETE,
         )
 
@@ -782,8 +782,6 @@ class ChatAskApiTests(TestCase):
         payload = response.json()
         self.assertEqual(payload["answer_mode"], "direct")
         self.assertEqual(payload["citations"], [])
-        self.assertNotIn("参考上下文", payload["answer"])
-        self.assertNotIn("另一个系统", payload["answer"])
         mocked_retrieve.assert_not_called()
 
     def test_chat_ask_platform_question_skips_knowledgebase_retrieval(self):
@@ -1366,6 +1364,57 @@ class ChatAskApiTests(TestCase):
                 },
             },
         )
+
+
+    @patch("chat.services.ask_service.get_chat_provider")
+    @patch("chat.services.ask_service.retrieve", return_value=[])
+    def test_direct_route_answer_includes_session_context(self, mocked_retrieve, mocked_provider):
+        """Direct-route answers (e.g. 'you are who') must inject session history into the prompt."""
+        captured_calls = []
+
+        class CapturingProvider:
+            def chat(self, *, messages, options=None):
+                captured_calls.append(messages)
+                return "ok"
+
+            def stream(self, *, messages, options=None):
+                captured_calls.append(messages)
+                yield "ok"
+
+        mocked_provider.return_value = CapturingProvider()
+
+        session = ChatSession.objects.create(
+            user=self.user,
+            title="记忆测试会话",
+            context_filters={},
+        )
+        ChatMessage.objects.create(
+            session=session,
+            role=ChatMessage.ROLE_USER,
+            content="我叫张三",
+            status=ChatMessage.STATUS_COMPLETE,
+            sequence=1,
+        )
+        ChatMessage.objects.create(
+            session=session,
+            role=ChatMessage.ROLE_ASSISTANT,
+            content="您好，张三。",
+            status=ChatMessage.STATUS_COMPLETE,
+            sequence=2,
+        )
+
+        # "你是谁" hits _DIRECT_ASSISTANT_PATTERNS → direct_answer_context node
+        response = self.client.post(
+            "/api/chat/ask",
+            data=json.dumps({"question": "你是谁", "session_id": session.id}),
+            content_type="application/json",
+            HTTP_AUTHORIZATION=f"Bearer {self.access_token}",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(len(captured_calls) > 0, "Provider must have been called")
+        user_message_content = captured_calls[-1][-1]["content"]
+        self.assertIn("张三", user_message_content, "Session history must appear in the prompt sent to the LLM")
 
 
 class ChatSessionCreateApiTests(TestCase):
