@@ -140,8 +140,12 @@ def get_gateway_summary() -> dict:
 
     # Traffic in last 24h
     recent_logs = _litellm_qs().filter(created_at__gte=window_start)
-    total = recent_logs.count()
-    failed = recent_logs.filter(status=ModelInvocationLog.STATUS_FAILED).count()
+    traffic_agg = recent_logs.aggregate(
+        total=Count("id"),
+        failed=Count("id", filter=Q(status=ModelInvocationLog.STATUS_FAILED)),
+    )
+    total = traffic_agg["total"] or 0
+    failed = traffic_agg["failed"] or 0
     error_rate = round((failed / total * 100) if total else 0.0, 2)
     traffic = {
         "request_count": total,
@@ -363,7 +367,7 @@ def get_costs_timeseries(filters: dict | None = None) -> dict:
     if time_preset == "1h":
         trunc_fn = TruncMinute("created_at")
         bucket_minutes = 1
-        bucket_hours = 0  # sub-hour granularity
+        bucket_hours = None
         fmt = "%Y-%m-%dT%H:%M"
     elif time_preset == "24h":
         trunc_fn = TruncHour("created_at")
@@ -420,7 +424,12 @@ def get_costs_timeseries(filters: dict | None = None) -> dict:
         key=lambda p: p["bucket"],
     )
 
-    return {"filters": filters, "granularity_hours": bucket_hours, "points": points}
+    return {
+        "filters": filters,
+        "granularity_hours": bucket_hours,
+        "granularity_minutes": bucket_minutes,
+        "points": points,
+    }
 
 
 def get_costs_models(filters: dict | None = None) -> dict:

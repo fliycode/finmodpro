@@ -11,11 +11,10 @@ export const navigationMap = {
   admin: [
     { id: 'admin-overview', label: '仪表盘', to: '/admin/overview', icon: 'dashboard', group: 'admin-overview' },
     { id: 'admin-users', label: '用户管理', to: '/admin/users', icon: 'users', group: 'admin-governance' },
-    { id: 'admin-llm-overview', label: '总览', to: '/admin/llm', icon: 'dashboard', group: 'admin-llm' },
-    { id: 'admin-llm-models', label: '模型配置', to: '/admin/llm/models', icon: 'sliders', group: 'admin-llm' },
-    { id: 'admin-llm-observability', label: '观测', to: '/admin/llm/observability', icon: 'eye', group: 'admin-llm' },
-    { id: 'admin-llm-knowledge', label: '知识库接入', to: '/admin/llm/knowledge', icon: 'database', group: 'admin-llm' },
-    { id: 'admin-llm-fine-tunes', label: 'LLaMA-Factory', to: '/admin/llm/fine-tunes', icon: 'spark', group: 'admin-llm' },
+    { id: 'admin-llm-overview', label: 'Gateway', to: '/admin/llm', icon: 'dashboard', group: 'admin-llm' },
+    { id: 'admin-llm-models', label: 'Models / Routing', to: '/admin/llm/models', icon: 'sliders', group: 'admin-llm' },
+    { id: 'admin-llm-observability', label: 'Logs / Observability', to: '/admin/llm/observability', icon: 'eye', group: 'admin-llm' },
+    { id: 'admin-llm-costs', label: 'Cost / Usage', to: '/admin/llm/costs', icon: 'beaker', group: 'admin-llm' },
     { id: 'admin-evaluation', label: '评测结果', to: '/admin/evaluation', icon: 'beaker', group: 'admin-governance' },
   ],
 };
