@@ -1,3 +1,5 @@
+import { toRaw } from 'vue';
+
 const toNumber = (value, fallback = 0) => {
   const numeric = Number(value ?? fallback);
   return Number.isFinite(numeric) ? numeric : fallback;
@@ -198,3 +200,5 @@ export const getRouteDeleteBlockReason = (route = {}) => (
     ? '当前默认路由不能直接删除，请先切换默认链路或在编辑抽屉里取消默认状态。'
     : ''
 );
+
+export const cloneRouteOptions = (options = {}) => structuredClone(toRaw(options));
