@@ -78,12 +78,13 @@ LITELLM_GENERATED_CONFIG_ROOT = Path(
 )
 LITELLM_BASE_CONFIG_PATH = get_env(
     "LITELLM_BASE_CONFIG_PATH",
-    str(BASE_DIR.parent / "deploy" / "litellm" / "litellm_config.yaml"),
+    str(BASE_DIR.parent / "deploy" / "litellm" / "config.yaml"),
 )
 LITELLM_RENDERED_CONFIG_PATH = get_env(
     "LITELLM_RENDERED_CONFIG_PATH",
-    str(BASE_DIR.parent / "deploy" / "litellm" / "litellm_config_rendered.yaml"),
+    str(BASE_DIR.parent / "deploy" / "litellm" / "rendered.config.yaml"),
 )
+LITELLM_MASTER_KEY = get_env("LITELLM_MASTER_KEY", "")
 LITELLM_GATEWAY_URL = get_env("LITELLM_GATEWAY_URL", "http://localhost:4000")
 
 CELERY_BROKER_URL = get_env("CELERY_BROKER_URL", "memory://")
