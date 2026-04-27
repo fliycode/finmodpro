@@ -21,6 +21,8 @@ test('normalizeModelConfigPayload exposes LiteLLM routing fields', () => {
         upstream_model: 'gpt-4o',
         fallback_aliases: ['chat-backup'],
         weight: 2,
+        input_price_per_million: 0.5,
+        output_price_per_million: 2,
         has_api_key: true,
         api_key_masked: 'sk-tes******3456',
       },
@@ -33,6 +35,8 @@ test('normalizeModelConfigPayload exposes LiteLLM routing fields', () => {
   assert.equal(rows[0].upstream_model, 'gpt-4o');
   assert.deepEqual(rows[0].fallback_aliases, ['chat-backup']);
   assert.equal(rows[0].weight, 2);
+  assert.equal(rows[0].input_price_per_million, 0.5);
+  assert.equal(rows[0].output_price_per_million, 2);
 });
 
 test('createLlmApi calls LiteLLM sync and migrate endpoints', async () => {
@@ -58,4 +62,26 @@ test('createLlmApi calls LiteLLM sync and migrate endpoints', async () => {
     calls.map((call) => call.options.method),
     ['POST', 'POST'],
   );
+});
+
+test('createLlmApi deletes model configs', async () => {
+  const calls = [];
+  const api = createLlmApi({
+    fetchJson: async (path, options) => {
+      calls.push({ path, options });
+      return { code: 0, data: { ok: true } };
+    },
+  });
+
+  await api.deleteModelConfig(18);
+
+  assert.deepEqual(calls, [
+    {
+      path: '/api/ops/model-configs/18/',
+      options: {
+        method: 'DELETE',
+        auth: true,
+      },
+    },
+  ]);
 });

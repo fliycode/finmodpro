@@ -11,6 +11,7 @@ from llm.serializers import (
 from llm.services.litellm_alias_service import sync_litellm_route_for_config
 from llm.services.model_config_command_service import (
     create_model_config,
+    delete_model_config,
     migrate_active_configs_to_litellm,
     set_model_config_active_state,
     test_model_config_connection,
@@ -74,6 +75,21 @@ class ModelConfigDetailView(APIView):
         serializer.is_valid(raise_exception=True)
         updated = update_model_config(model_config=model_config, payload=serializer.validated_data)
         return success_response(data={"model_config": ModelConfigSummarySerializer(updated).data})
+
+    def delete(self, request, model_config_id):
+        _, permission_error = _require_manage_permission(request)
+        if permission_error is not None:
+            return permission_error
+
+        model_config = get_model_config(model_config_id=model_config_id)
+        if model_config is None:
+            return error_response(code=404, message="模型配置不存在。", status_code=404)
+
+        try:
+            delete_model_config(model_config=model_config)
+        except ValueError as exc:
+            return error_response(code=400, message=str(exc), status_code=400)
+        return success_response(data={"deleted": True})
 
 
 class ModelConfigActivationView(APIView):

@@ -68,6 +68,8 @@ export const normalizeModelConfigPayload = (payload = {}) => {
     upstream_model: item.upstream_model ?? item.model_name ?? item.model ?? "",
     fallback_aliases: Array.isArray(item.fallback_aliases) ? item.fallback_aliases : [],
     weight: toNumber(item.weight, 0),
+    input_price_per_million: toNumber(item.input_price_per_million, 0),
+    output_price_per_million: toNumber(item.output_price_per_million, 0),
     fine_tune_run_count: Number(item.fine_tune_run_count ?? 0),
     latest_fine_tune_dataset: item.latest_fine_tune_dataset ?? "",
     latest_fine_tune_status: item.latest_fine_tune_status ?? "",
@@ -205,6 +207,13 @@ export const createLlmApi = (overrides = {}) => {
         method: 'PATCH',
         auth: true,
         body: JSON.stringify(payload),
+      }));
+    },
+
+    async deleteModelConfig(id) {
+      return unwrap(await fetchJson(`/api/ops/model-configs/${id}/`, {
+        method: 'DELETE',
+        auth: true,
       }));
     },
 

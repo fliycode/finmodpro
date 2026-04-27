@@ -75,6 +75,17 @@ def _find_original_source_model_config(model_config):
     return candidates.filter(model_name=model_config.model_name).order_by("-is_active", "-id").first()
 
 
+def _prune_stale_nested_litellm_routes(route):
+    if route.provider != ModelConfig.PROVIDER_LITELLM:
+        return
+    ModelConfig.objects.filter(
+        capability=route.capability,
+        provider=ModelConfig.PROVIDER_LITELLM,
+        model_name=route.model_name,
+        name__startswith="litellm-litellm-",
+    ).exclude(id=route.id).delete()
+
+
 def _resolve_migration_source_model_config(model_config):
     if model_config.provider != ModelConfig.PROVIDER_LITELLM:
         return model_config
@@ -111,6 +122,7 @@ def ensure_litellm_route_from_model_config(model_config):
     route.endpoint = settings.LITELLM_GATEWAY_URL
     route.options = _build_litellm_route_options(source_model_config)
     route.save()
+    _prune_stale_nested_litellm_routes(route)
     route.refresh_from_db()
     return route
 
@@ -148,6 +160,12 @@ def update_model_config(*, model_config, payload):
     model_config.save()
     model_config.refresh_from_db()
     return model_config
+
+
+def delete_model_config(*, model_config):
+    if model_config.is_active:
+        raise ValueError("启用中的模型配置不能删除。")
+    model_config.delete()
 
 
 def test_model_config_connection(*, payload):

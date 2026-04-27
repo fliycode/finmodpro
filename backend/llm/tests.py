@@ -146,6 +146,8 @@ class ModelConfigListApiTests(TestCase):
                 "upstream_model",
                 "fallback_aliases",
                 "weight",
+                "input_price_per_million",
+                "output_price_per_million",
             },
         )
         self.assertEqual(first_row["id"], get_active_model_config(ModelConfig.CAPABILITY_CHAT).id)
@@ -342,8 +344,60 @@ class ModelConfigActivationApiTests(TestCase):
                 "upstream_model",
                 "fallback_aliases",
                 "weight",
+                "input_price_per_million",
+                "output_price_per_million",
             },
         )
+
+    def test_delete_requires_authentication(self):
+        model_config = ModelConfig.objects.create(
+            name="litellm-delete-unauth",
+            capability=ModelConfig.CAPABILITY_CHAT,
+            provider=ModelConfig.PROVIDER_LITELLM,
+            model_name="chat-delete-unauth",
+            endpoint="http://localhost:4000",
+            options={},
+            is_active=False,
+        )
+
+        response = self.client.delete(f"/api/ops/model-configs/{model_config.id}/")
+
+        self.assertEqual(response.status_code, 401)
+        self.assertEqual(
+            response.json(),
+            {"code": 401, "message": "未认证。", "data": {}},
+        )
+
+    def test_delete_rejects_active_model_config(self):
+        active_model = get_active_model_config(ModelConfig.CAPABILITY_CHAT)
+
+        response = self.client.delete(
+            f"/api/ops/model-configs/{active_model.id}/",
+            HTTP_AUTHORIZATION=f"Bearer {self.admin_access_token}",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["message"], "启用中的模型配置不能删除。")
+
+    def test_delete_removes_inactive_model_config(self):
+        model_config = ModelConfig.objects.create(
+            name="litellm-delete-inactive",
+            capability=ModelConfig.CAPABILITY_CHAT,
+            provider=ModelConfig.PROVIDER_LITELLM,
+            model_name="chat-delete-inactive",
+            endpoint="http://localhost:4000",
+            options={"litellm": {"upstream_provider": "openai", "upstream_model": "gpt-4o"}},
+            is_active=False,
+        )
+
+        response = self.client.delete(
+            f"/api/ops/model-configs/{model_config.id}/",
+            HTTP_AUTHORIZATION=f"Bearer {self.admin_access_token}",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), {"code": 0, "message": "ok", "data": {"deleted": True}})
+        self.assertFalse(ModelConfig.objects.filter(id=model_config.id).exists())
 
     def test_admin_can_create_deepseek_model_config(self):
         response = self.client.post(
@@ -1365,6 +1419,39 @@ class LiteLLMGatewayAuditModelTests(TestCase):
         self.assertEqual(row["upstream_model"], "gpt-4o")
         self.assertEqual(row["fallback_aliases"], ["chat-backup"])
         self.assertEqual(row["weight"], 1)
+        self.assertEqual(row["input_price_per_million"], 0)
+        self.assertEqual(row["output_price_per_million"], 0)
+
+    def test_model_config_list_includes_litellm_pricing_fields(self):
+        model = ModelConfig.objects.create(
+            name="chat-priced",
+            capability=ModelConfig.CAPABILITY_CHAT,
+            provider=ModelConfig.PROVIDER_LITELLM,
+            model_name="chat-priced",
+            endpoint="http://localhost:4000",
+            options={
+                "litellm": {
+                    "upstream_provider": "openai",
+                    "upstream_model": "gpt-4o-mini",
+                    "input_price_per_million": 0.15,
+                    "output_price_per_million": 0.6,
+                }
+            },
+            is_active=False,
+        )
+
+        response = self.client.get(
+            "/api/ops/model-configs/",
+            HTTP_AUTHORIZATION=f"Bearer {self.admin_access_token}",
+        )
+
+        row = next(
+            (item for item in response.json()["data"]["model_configs"] if item["id"] == model.id),
+            None,
+        )
+        self.assertIsNotNone(row, "Expected LiteLLM model config row not found in response")
+        self.assertEqual(row["input_price_per_million"], 0.15)
+        self.assertEqual(row["output_price_per_million"], 0.6)
 
     def test_model_invocation_log_stage_constants_and_choices(self):
         """STAGE_* constants must match their string values and STAGE_CHOICES must list all three."""
@@ -1785,6 +1872,47 @@ class LiteLLMGatewayCommandServiceTests(TestCase):
         route = ModelConfig.objects.get(provider="litellm", capability="embedding", is_active=True)
         self.assertEqual(route.options["litellm"]["upstream_provider"], "dashscope")
         self.assertEqual(route.options["litellm"]["upstream_model"], "openai/text-embedding-v4")
+
+    def test_migrate_to_litellm_prunes_stale_nested_routes_when_canonical_route_exists(self):
+        active_embedding = get_active_model_config(ModelConfig.CAPABILITY_EMBEDDING)
+        active_embedding.provider = ModelConfig.PROVIDER_DASHSCOPE
+        active_embedding.name = "dashscope-embed-primary"
+        active_embedding.model_name = "text-embedding-v4"
+        active_embedding.endpoint = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+        active_embedding.options = {"api_key": "sk-dashscope"}
+        active_embedding.save()
+
+        canonical_route = ModelConfig.objects.create(
+            name="litellm-dashscope-embed-primary",
+            capability=ModelConfig.CAPABILITY_EMBEDDING,
+            provider=ModelConfig.PROVIDER_LITELLM,
+            model_name="text-embedding-v4",
+            endpoint=settings.LITELLM_GATEWAY_URL,
+            options={
+                "api_key": "sk-dashscope",
+                "api_base": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+                "litellm": {
+                    "upstream_provider": "dashscope",
+                    "upstream_model": "openai/text-embedding-v4",
+                },
+            },
+            is_active=True,
+        )
+        stale_nested_route = ModelConfig.objects.create(
+            name="litellm-litellm-dashscope-embed-primary",
+            capability=ModelConfig.CAPABILITY_EMBEDDING,
+            provider=ModelConfig.PROVIDER_LITELLM,
+            model_name="text-embedding-v4",
+            endpoint=settings.LITELLM_GATEWAY_URL,
+            options={},
+            is_active=False,
+        )
+
+        migrate_active_configs_to_litellm(triggered_by=self.admin_user)
+
+        canonical_route.refresh_from_db()
+        self.assertTrue(canonical_route.is_active)
+        self.assertFalse(ModelConfig.objects.filter(id=stale_nested_route.id).exists())
 
     @patch("urllib.request.urlopen")
     def test_litellm_provider_records_successful_chat_invocation(self, mock_urlopen):
