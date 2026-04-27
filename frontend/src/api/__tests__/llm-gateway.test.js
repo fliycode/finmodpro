@@ -1,8 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { reactive } from 'vue';
+import { reactive, ref } from 'vue';
 
 import { createLlmGatewayApi } from '../llm-gateway.js';
+import * as llmGatewayLib from '../../lib/llm-gateway.js';
 import {
   cloneRouteOptions,
   getRouteDeleteBlockReason,
@@ -133,4 +134,55 @@ test('cloneRouteOptions clones reactive route options without throwing', () => {
     },
   });
   assert.notEqual(cloned, options);
+});
+
+test('buildRoutePayload clones ref-backed original options when editing a route', () => {
+  assert.equal(typeof llmGatewayLib.buildRoutePayload, 'function');
+
+  const originalOptions = ref({
+    api_key: 'sk-existing',
+    litellm: {
+      request_timeout: 30,
+    },
+  });
+
+  const payload = llmGatewayLib.buildRoutePayload({
+    originalOptions: originalOptions.value,
+    editingId: 42,
+    form: {
+      name: 'DeepSeek 主路由',
+      capability: 'chat',
+      alias: 'chat-default',
+      endpoint: 'http://localhost:4000',
+      upstream_provider: 'deepseek',
+      upstream_model: 'deepseek/deepseek-chat',
+      fallback_aliases_text: 'chat-backup, chat-dr',
+      weight: 2,
+      input_price_per_million: 0.5,
+      output_price_per_million: 2,
+      api_key: '',
+      is_active: true,
+    },
+  });
+
+  assert.deepEqual(payload, {
+    name: 'DeepSeek 主路由',
+    capability: 'chat',
+    provider: 'litellm',
+    model_name: 'chat-default',
+    endpoint: 'http://localhost:4000',
+    options: {
+      api_key: 'sk-existing',
+      litellm: {
+        request_timeout: 30,
+        upstream_provider: 'deepseek',
+        upstream_model: 'deepseek/deepseek-chat',
+        fallback_aliases: ['chat-backup', 'chat-dr'],
+        weight: 2,
+        input_price_per_million: 0.5,
+        output_price_per_million: 2,
+      },
+    },
+    is_active: true,
+  });
 });

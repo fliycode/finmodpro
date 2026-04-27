@@ -4,6 +4,7 @@ import { computed, onMounted, reactive, ref } from 'vue';
 import { llmApi, normalizeModelConfigPayload } from '../api/llm.js';
 import { useFlash } from '../lib/flash.js';
 import {
+  buildRoutePayload,
   cloneRouteOptions,
   getRouteDeleteBlockReason,
 } from '../lib/llm-gateway.js';
@@ -147,40 +148,12 @@ const openEdit = (config) => {
   drawerVisible.value = true;
 };
 
-const parseFallbackAliases = (value) => String(value || '')
-  .split(',')
-  .map((item) => item.trim())
-  .filter(Boolean);
-
 const buildPayload = () => {
-  const options = structuredClone(originalOptions.value || {});
-  if (form.api_key.trim()) {
-    options.api_key = form.api_key.trim();
-  } else if (!editingId.value) {
-    delete options.api_key;
-  }
-
-  const litellmOptions = {
-    ...(options.litellm || {}),
-    upstream_provider: form.upstream_provider.trim(),
-    upstream_model: form.upstream_model.trim(),
-    fallback_aliases: parseFallbackAliases(form.fallback_aliases_text),
-    weight: Number(form.weight) || 1,
-    input_price_per_million: Number(form.input_price_per_million) || 0,
-    output_price_per_million: Number(form.output_price_per_million) || 0,
-  };
-
-  options.litellm = litellmOptions;
-
-  return {
-    name: form.name.trim(),
-    capability: form.capability,
-    provider: 'litellm',
-    model_name: form.alias.trim(),
-    endpoint: form.endpoint.trim(),
-    options,
-    is_active: Boolean(form.is_active),
-  };
+  return buildRoutePayload({
+    originalOptions: originalOptions.value,
+    editingId: editingId.value,
+    form,
+  });
 };
 
 const saveRoute = async () => {

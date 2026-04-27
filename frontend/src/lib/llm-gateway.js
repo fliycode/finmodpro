@@ -202,3 +202,37 @@ export const getRouteDeleteBlockReason = (route = {}) => (
 );
 
 export const cloneRouteOptions = (options = {}) => structuredClone(toRaw(options));
+
+const parseFallbackAliases = (value) => String(value || '')
+  .split(',')
+  .map((item) => item.trim())
+  .filter(Boolean);
+
+export const buildRoutePayload = ({ originalOptions = {}, editingId = null, form = {} } = {}) => {
+  const options = cloneRouteOptions(originalOptions);
+  if (String(form.api_key || '').trim()) {
+    options.api_key = String(form.api_key).trim();
+  } else if (!editingId) {
+    delete options.api_key;
+  }
+
+  options.litellm = {
+    ...(options.litellm || {}),
+    upstream_provider: String(form.upstream_provider || '').trim(),
+    upstream_model: String(form.upstream_model || '').trim(),
+    fallback_aliases: parseFallbackAliases(form.fallback_aliases_text),
+    weight: Number(form.weight) || 1,
+    input_price_per_million: Number(form.input_price_per_million) || 0,
+    output_price_per_million: Number(form.output_price_per_million) || 0,
+  };
+
+  return {
+    name: String(form.name || '').trim(),
+    capability: form.capability,
+    provider: 'litellm',
+    model_name: String(form.alias || '').trim(),
+    endpoint: String(form.endpoint || '').trim(),
+    options,
+    is_active: Boolean(form.is_active),
+  };
+};
