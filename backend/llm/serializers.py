@@ -24,6 +24,8 @@ class ModelConfigSummarySerializer(serializers.ModelSerializer):
     upstream_model = serializers.SerializerMethodField()
     fallback_aliases = serializers.SerializerMethodField()
     weight = serializers.SerializerMethodField()
+    input_price_per_million = serializers.SerializerMethodField()
+    output_price_per_million = serializers.SerializerMethodField()
 
     def get_options(self, obj):
         options = dict(obj.options or {})
@@ -87,6 +89,12 @@ class ModelConfigSummarySerializer(serializers.ModelSerializer):
     def get_weight(self, obj):
         return self._get_litellm_options(obj).get("weight", 1)
 
+    def get_input_price_per_million(self, obj):
+        return self._get_litellm_options(obj).get("input_price_per_million", 0)
+
+    def get_output_price_per_million(self, obj):
+        return self._get_litellm_options(obj).get("output_price_per_million", 0)
+
     class Meta:
         model = ModelConfig
         fields = (
@@ -111,6 +119,8 @@ class ModelConfigSummarySerializer(serializers.ModelSerializer):
             "upstream_model",
             "fallback_aliases",
             "weight",
+            "input_price_per_million",
+            "output_price_per_million",
         )
 
 

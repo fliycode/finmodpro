@@ -25,9 +25,17 @@ const refreshedAt = ref('');
 
 const fetchModelOptions = async () => {
   const data = await llmApi.getModelConfigs();
-  modelOptions.value = normalizeModelConfigPayload(data)
+  const uniqueOptions = new Map();
+  normalizeModelConfigPayload(data)
     .filter((item) => item.provider === 'litellm')
-    .map((item) => ({ label: item.alias || item.model_name, value: item.alias || item.model_name }));
+    .forEach((item) => {
+      const alias = item.alias || item.model_name;
+      if (!alias || uniqueOptions.has(alias)) {
+        return;
+      }
+      uniqueOptions.set(alias, { label: alias, value: alias });
+    });
+  modelOptions.value = Array.from(uniqueOptions.values());
 };
 
 const fetchCosts = async () => {
@@ -97,6 +105,15 @@ const granularityLabel = computed(() => {
 });
 
 const topCostModel = computed(() => models.value.models[0] || null);
+const pricingGapNotice = computed(() => {
+  if (summary.value.total_requests === 0 || summary.value.estimated_total_cost > 0) {
+    return '';
+  }
+  if (summary.value.total_request_tokens === 0 && summary.value.total_response_tokens === 0) {
+    return '';
+  }
+  return '当前窗口已经统计到 token，但对应路由还没有配置 input/output price per million，因此估算成本仍显示为 0。请到 Models / Routing 编辑路由补齐定价。';
+});
 
 onMounted(async () => {
   await fetchModelOptions();
@@ -130,6 +147,7 @@ onMounted(async () => {
     </section>
 
     <el-alert v-if="errorMsg" :title="errorMsg" type="error" show-icon :closable="false" />
+    <el-alert v-else-if="pricingGapNotice" :title="pricingGapNotice" type="warning" show-icon :closable="false" />
 
     <section class="gateway-metric-strip">
       <article v-for="metric in metricCards" :key="metric.key" class="gateway-metric-card">

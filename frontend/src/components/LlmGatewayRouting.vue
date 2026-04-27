@@ -25,6 +25,8 @@ const defaultFormState = () => ({
   upstream_model: '',
   fallback_aliases_text: '',
   weight: 1,
+  input_price_per_million: 0,
+  output_price_per_million: 0,
   api_key: '',
   has_api_key: false,
   api_key_masked: '',
@@ -133,6 +135,8 @@ const openEdit = (config) => {
     ? config.fallback_aliases.join(', ')
     : '';
   form.weight = Number(config.weight ?? 1);
+  form.input_price_per_million = Number(config.input_price_per_million ?? 0);
+  form.output_price_per_million = Number(config.output_price_per_million ?? 0);
   form.has_api_key = Boolean(config.has_api_key);
   form.api_key_masked = config.api_key_masked || '';
   form.is_active = Boolean(config.is_active);
@@ -158,6 +162,8 @@ const buildPayload = () => {
     upstream_model: form.upstream_model.trim(),
     fallback_aliases: parseFallbackAliases(form.fallback_aliases_text),
     weight: Number(form.weight) || 1,
+    input_price_per_million: Number(form.input_price_per_million) || 0,
+    output_price_per_million: Number(form.output_price_per_million) || 0,
   };
 
   options.litellm = litellmOptions;
@@ -244,6 +250,20 @@ const testConnection = async () => {
   }
 };
 
+const deleteRoute = async (config) => {
+  const alias = config.alias || config.model_name || config.name || '未命名路由';
+  if (!window.confirm(`确定删除路由“${alias}”吗？删除后需要重新同步或重新创建才能恢复。`)) {
+    return;
+  }
+  try {
+    await llmApi.deleteModelConfig(config.id);
+    flash.success(`已删除路由：${alias}`);
+    await fetchConfigs();
+  } catch (error) {
+    flash.error(error.message || '删除 LiteLLM 路由失败');
+  }
+};
+
 const formatCapability = (value) => {
   if (value === 'embedding') {
     return '向量';
@@ -313,7 +333,7 @@ onMounted(fetchConfigs);
         </div>
       </template>
 
-      <el-table :data="litellmConfigs" stripe>
+      <el-table :data="litellmConfigs" row-key="id" stripe>
         <el-table-column prop="alias" label="Alias" min-width="160" />
         <el-table-column label="上游映射" min-width="220">
           <template #default="{ row }">
@@ -352,18 +372,21 @@ onMounted(fetchConfigs);
             {{ formatUpdatedAt(row.updated_at) }}
           </template>
         </el-table-column>
-        <el-table-column label="操作" min-width="220" fixed="right">
-          <template #default="{ row }">
-            <div class="inline-actions">
-              <el-button size="small" @click="openEdit(row)">编辑</el-button>
-              <el-button size="small" @click="syncRoute(row)">同步</el-button>
-              <el-button size="small" type="primary" plain :disabled="row.is_active" @click="activateRoute(row)">
-                设为默认
-              </el-button>
-            </div>
-          </template>
-        </el-table-column>
-      </el-table>
+          <el-table-column label="操作" min-width="220" fixed="right">
+            <template #default="{ row }">
+              <div class="inline-actions">
+                <el-button size="small" @click="openEdit(row)">编辑</el-button>
+                <el-button size="small" @click="syncRoute(row)">同步</el-button>
+                <el-button size="small" type="primary" plain :disabled="row.is_active" @click="activateRoute(row)">
+                  设为默认
+                </el-button>
+                <el-button size="small" type="danger" plain :disabled="row.is_active" @click="deleteRoute(row)">
+                  删除
+                </el-button>
+              </div>
+            </template>
+          </el-table-column>
+        </el-table>
     </AppSectionCard>
 
     <AppSectionCard v-if="legacyConfigs.length" title="兼容保留项" desc="这些配置继续保留用于兼容或回退，但不再作为统一网关主治理入口。" admin>
@@ -411,6 +434,12 @@ onMounted(fetchConfigs);
           </el-form-item>
           <el-form-item label="权重">
             <el-input-number v-model="form.weight" :min="1" :step="1" />
+          </el-form-item>
+          <el-form-item label="输入定价 / 百万 tokens（USD）">
+            <el-input-number v-model="form.input_price_per_million" :min="0" :step="0.01" :precision="4" />
+          </el-form-item>
+          <el-form-item label="输出定价 / 百万 tokens（USD）">
+            <el-input-number v-model="form.output_price_per_million" :min="0" :step="0.01" :precision="4" />
           </el-form-item>
           <el-form-item label="API Key">
             <el-input v-model="form.api_key" type="password" show-password placeholder="留空表示保留当前 key" />
