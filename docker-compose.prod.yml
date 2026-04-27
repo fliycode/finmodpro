@@ -62,6 +62,7 @@ services:
       - "8000:8000"
     volumes:
       - backend_media:/app/media
+      - ./deploy/litellm:/deploy/litellm
     restart: unless-stopped
     depends_on:
       mysql:
