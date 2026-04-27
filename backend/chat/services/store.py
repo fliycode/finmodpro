@@ -128,13 +128,9 @@ class DjangoMemoryStore(BaseStore):
         else:
             queryset = queryset.filter(scope_type=MemoryItem.SCOPE_USER_GLOBAL)
 
-        if op.query:
-            from django.db.models import Q
-            for token in op.query.split():
-                queryset = queryset.filter(
-                    Q(title__icontains=token) | Q(content__icontains=token)
-                )
-
+        # No vector/semantic search available — return pinned items first, then by recency.
+        # Callers may pass a `query` for future semantic ranking; we intentionally ignore it
+        # here to avoid dropping memories that don't lexically match the current question.
         limit = op.limit or 10
         offset = op.offset or 0
         memories = list(queryset.order_by("-pinned", "-updated_at")[offset : offset + limit])

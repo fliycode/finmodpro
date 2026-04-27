@@ -1,7 +1,7 @@
 from django.conf import settings
 
 from chat.models import ChatMessage
-from chat.services.memory_service import search_memories
+from chat.services.store import django_memory_store
 from llm.services.prompt_service import render_prompt
 
 FINMODPRO_SYSTEM_PROMPT = (
@@ -88,6 +88,28 @@ def _build_context_sections(*, rolling_summary="", recent_messages=None, memorie
     return "\n\n".join(sections)
 
 
+def _get_store():
+    """Return the active store: graph-injected store when inside a graph node, module singleton otherwise."""
+    try:
+        from langgraph.config import get_store
+        return get_store()
+    except Exception:
+        return django_memory_store
+
+
+def _load_memories(*, user, question, dataset_id=None, limit=5):
+    """Retrieve memories for a user via LangGraph store."""
+    store = _get_store()
+    user_ns = ("memories", str(user.id))
+    items = store.search(user_ns, query=question, limit=limit)
+
+    if dataset_id not in (None, ""):
+        ds_ns = ("memories", str(user.id), "dataset", str(dataset_id))
+        items = items + store.search(ds_ns, query=question, limit=limit)
+
+    return [item.value for item in items]
+
+
 def build_chat_messages(*, question, session=None, citations=None, filters=None):
     citations = citations or []
 
@@ -106,9 +128,9 @@ def build_chat_messages(*, question, session=None, citations=None, filters=None)
         )
         dataset_id = (filters or {}).get("dataset_id")
         memory_limit = _get_positive_int_setting("CHAT_MEMORY_RESULT_LIMIT", 5)
-        memories = search_memories(
+        memories = _load_memories(
             user=session.user,
-            query=question,
+            question=question,
             dataset_id=dataset_id,
             limit=memory_limit,
         )

@@ -142,12 +142,15 @@ class DjangoMemoryStoreTests(TestCase):
         item = self.store.get(self.ns, "key2")
         self.assertIsNone(item)
 
-    def test_search_returns_matching_items(self):
+    def test_search_returns_all_active_items(self):
         self.store.put(self.ns, "k1", self._sample_value(title="偏好", content="用户喜欢深色模式", memory_type="user_preference"))
         self.store.put(self.ns, "k2", self._sample_value(title="规则", content="每次输出中文", memory_type="work_rule"))
+        # query is ignored (no vector search); both active items are returned
         results = self.store.search(self.ns, query="深色")
-        self.assertEqual(len(results), 1)
-        self.assertEqual(results[0].value["title"], "偏好")
+        self.assertEqual(len(results), 2)
+        keys = {r.key for r in results}
+        self.assertIn("k1", keys)
+        self.assertIn("k2", keys)
 
     def test_search_with_no_query_returns_all(self):
         self.store.put(self.ns, "ka", self._sample_value(content="alpha"))
