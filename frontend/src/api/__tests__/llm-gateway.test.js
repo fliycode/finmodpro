@@ -1,8 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { reactive } from 'vue';
 
 import { createLlmGatewayApi } from '../llm-gateway.js';
-import { getRouteDeleteBlockReason } from '../../lib/llm-gateway.js';
+import {
+  cloneRouteOptions,
+  getRouteDeleteBlockReason,
+} from '../../lib/llm-gateway.js';
 
 test('createLlmGatewayApi normalizes summary payload', async () => {
   const api = createLlmGatewayApi({
@@ -108,4 +112,25 @@ test('getRouteDeleteBlockReason explains why active routes cannot be deleted', (
     '当前默认路由不能直接删除，请先切换默认链路或在编辑抽屉里取消默认状态。',
   );
   assert.equal(getRouteDeleteBlockReason({ is_active: false }), '');
+});
+
+test('cloneRouteOptions clones reactive route options without throwing', () => {
+  const options = reactive({
+    api_key: 'sk-test',
+    litellm: {
+      upstream_provider: 'deepseek',
+      upstream_model: 'deepseek/deepseek-chat',
+    },
+  });
+
+  const cloned = cloneRouteOptions(options);
+
+  assert.deepEqual(cloned, {
+    api_key: 'sk-test',
+    litellm: {
+      upstream_provider: 'deepseek',
+      upstream_model: 'deepseek/deepseek-chat',
+    },
+  });
+  assert.notEqual(cloned, options);
 });

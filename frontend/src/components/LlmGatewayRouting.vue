@@ -3,7 +3,10 @@ import { computed, onMounted, reactive, ref } from 'vue';
 
 import { llmApi, normalizeModelConfigPayload } from '../api/llm.js';
 import { useFlash } from '../lib/flash.js';
-import { getRouteDeleteBlockReason } from '../lib/llm-gateway.js';
+import {
+  cloneRouteOptions,
+  getRouteDeleteBlockReason,
+} from '../lib/llm-gateway.js';
 import AppSectionCard from './ui/AppSectionCard.vue';
 
 const flash = useFlash();
@@ -125,7 +128,7 @@ const openCreate = (capability = 'chat') => {
 const openEdit = (config) => {
   resetForm();
   editingId.value = config.id;
-  originalOptions.value = structuredClone(config.options || {});
+  originalOptions.value = cloneRouteOptions(config.options || {});
   form.name = config.name;
   form.capability = config.capability;
   form.alias = config.alias || config.model_name;
