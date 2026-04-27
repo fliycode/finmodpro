@@ -8,6 +8,7 @@ from pathlib import Path
 from unittest.mock import patch
 from urllib.error import HTTPError, URLError
 
+from django.conf import settings
 from django.contrib.auth.models import Group
 from django.test import TestCase
 from django.test import Client, override_settings
@@ -1680,6 +1681,95 @@ class LiteLLMGatewayCommandServiceTests(TestCase):
         self.assertEqual(result["migrated_capabilities"], ["chat", "embedding"])
         self.assertTrue(ModelConfig.objects.filter(provider="litellm", capability="chat", is_active=True).exists())
         self.assertTrue(LiteLLMSyncEvent.objects.filter(status="success").exists())
+
+    def test_migrate_to_litellm_copies_source_chat_options_and_upstream_metadata(self):
+        active_chat = get_active_model_config(ModelConfig.CAPABILITY_CHAT)
+        active_chat.provider = ModelConfig.PROVIDER_DEEPSEEK
+        active_chat.name = "deepseek-primary"
+        active_chat.model_name = "deepseek-chat"
+        active_chat.endpoint = "https://api.deepseek.com/v1"
+        active_chat.options = {
+            "api_key": "sk-deepseek",
+            "temperature": 0.2,
+            "max_tokens": 512,
+        }
+        active_chat.save()
+
+        migrate_active_configs_to_litellm(triggered_by=self.admin_user)
+
+        route = ModelConfig.objects.get(provider="litellm", capability="chat", is_active=True)
+        self.assertEqual(route.endpoint, settings.LITELLM_GATEWAY_URL)
+        self.assertEqual(route.options["api_key"], "sk-deepseek")
+        self.assertEqual(route.options["temperature"], 0.2)
+        self.assertEqual(route.options["max_tokens"], 512)
+        self.assertEqual(route.options["api_base"], "https://api.deepseek.com/v1")
+        self.assertEqual(route.options["litellm"]["upstream_provider"], "deepseek")
+        self.assertEqual(route.options["litellm"]["upstream_model"], "deepseek/deepseek-chat")
+
+    def test_migrate_to_litellm_reuses_existing_active_litellm_route_without_double_wrapping(self):
+        route = ModelConfig.objects.create(
+            name="litellm-existing-chat",
+            capability=ModelConfig.CAPABILITY_CHAT,
+            provider=ModelConfig.PROVIDER_LITELLM,
+            model_name="deepseek-chat",
+            endpoint=settings.LITELLM_GATEWAY_URL,
+            options={
+                "api_key": "sk-deepseek",
+                "api_base": "https://api.deepseek.com/v1",
+                "litellm": {
+                    "upstream_provider": "deepseek",
+                    "upstream_model": "deepseek/deepseek-chat",
+                },
+            },
+            is_active=True,
+        )
+
+        migrate_active_configs_to_litellm(triggered_by=self.admin_user)
+
+        route.refresh_from_db()
+        self.assertTrue(route.is_active)
+        self.assertFalse(
+            ModelConfig.objects.filter(
+                capability=ModelConfig.CAPABILITY_CHAT,
+                provider=ModelConfig.PROVIDER_LITELLM,
+                name="litellm-litellm-existing-chat",
+            ).exists()
+        )
+
+    def test_migrate_to_litellm_repairs_incomplete_active_litellm_route_from_original_source(self):
+        source_chat = get_active_model_config(ModelConfig.CAPABILITY_CHAT)
+        source_chat.provider = ModelConfig.PROVIDER_DEEPSEEK
+        source_chat.name = "deepseek-primary"
+        source_chat.model_name = "deepseek-chat"
+        source_chat.endpoint = "https://api.deepseek.com/v1"
+        source_chat.options = {
+            "api_key": "sk-deepseek",
+            "temperature": 0.2,
+        }
+        source_chat.save()
+
+        broken_route = ModelConfig.objects.create(
+            name="litellm-deepseek-primary",
+            capability=ModelConfig.CAPABILITY_CHAT,
+            provider=ModelConfig.PROVIDER_LITELLM,
+            model_name="deepseek-chat",
+            endpoint=settings.LITELLM_GATEWAY_URL,
+            options={},
+            is_active=True,
+        )
+
+        migrate_active_configs_to_litellm(triggered_by=self.admin_user)
+
+        broken_route.refresh_from_db()
+        self.assertTrue(broken_route.is_active)
+        self.assertEqual(broken_route.options["api_key"], "sk-deepseek")
+        self.assertFalse(
+            ModelConfig.objects.filter(
+                capability=ModelConfig.CAPABILITY_CHAT,
+                provider=ModelConfig.PROVIDER_LITELLM,
+                name="litellm-litellm-deepseek-primary",
+            ).exists()
+        )
 
     @patch("urllib.request.urlopen")
     def test_litellm_provider_records_successful_chat_invocation(self, mock_urlopen):
