@@ -157,7 +157,7 @@ Internally, add:
 
 - `section_chunk_id`
 - `section_title` / `section_path`
-- optional parent context summary
+- `section_context_summary` as a nullable field reserved for later use; phase 1 may leave it empty but the response contract should define it explicitly
 
 This keeps downstream consumers stable while allowing hierarchical ranking.
 
@@ -197,7 +197,7 @@ Recommended progress fields:
 
 - `total_section_count`
 - `indexed_section_count`
-- optional `failed_section_count`
+- `failed_section_count`
 - indexing strategy marker
 
 The first implementation should support resume-from-next-unindexed-section. It should not silently skip permanently failing sections yet, because partial invisible holes would make debugging and trust worse.
@@ -325,7 +325,7 @@ Compare one ordinary document and one large document:
 
 - Improve local child selection
 - Add better admin observability
-- Evaluate whether selected child chunks need optional vector indexing
+- Decide whether selected child chunks need secondary vector indexing as a later enhancement
 
 ### Phase 3
 
