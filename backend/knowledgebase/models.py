@@ -138,6 +138,12 @@ class IngestionTask(models.Model):
         (STEP_COMPLETED, "Completed"),
         (STEP_FAILED, "Failed"),
     )
+    STRATEGY_FLAT = "flat"
+    STRATEGY_HIERARCHICAL = "hierarchical"
+    STRATEGY_CHOICES = (
+        (STRATEGY_FLAT, "Flat"),
+        (STRATEGY_HIERARCHICAL, "Hierarchical"),
+    )
 
     document = models.ForeignKey(
         Document,
@@ -155,6 +161,14 @@ class IngestionTask(models.Model):
         choices=STEP_CHOICES,
         default=STEP_QUEUED,
     )
+    strategy = models.CharField(
+        max_length=32,
+        choices=STRATEGY_CHOICES,
+        default=STRATEGY_FLAT,
+    )
+    total_section_count = models.PositiveIntegerField(default=0)
+    indexed_section_count = models.PositiveIntegerField(default=0)
+    failed_section_count = models.PositiveIntegerField(default=0)
     error_message = models.TextField(blank=True)
     started_at = models.DateTimeField(blank=True, null=True)
     finished_at = models.DateTimeField(blank=True, null=True)
@@ -172,6 +186,13 @@ class DocumentChunk(models.Model):
         related_name="chunks",
         on_delete=models.CASCADE,
     )
+    section_chunk = models.ForeignKey(
+        "DocumentSectionChunk",
+        related_name="child_chunks",
+        on_delete=models.CASCADE,
+        blank=True,
+        null=True,
+    )
     chunk_index = models.PositiveIntegerField()
     content = models.TextField()
     vector_id = models.CharField(max_length=64, blank=True, db_index=True)
@@ -181,3 +202,25 @@ class DocumentChunk(models.Model):
     class Meta:
         ordering = ["chunk_index"]
         unique_together = ("document", "chunk_index")
+
+
+class DocumentSectionChunk(models.Model):
+    document = models.ForeignKey(
+        Document,
+        related_name="section_chunks",
+        on_delete=models.CASCADE,
+    )
+    section_index = models.PositiveIntegerField()
+    section_label = models.CharField(max_length=255, blank=True, default="")
+    section_path = models.CharField(max_length=512, blank=True, default="")
+    content = models.TextField()
+    vector_id = models.CharField(max_length=64, blank=True, db_index=True)
+    is_indexed = models.BooleanField(default=False)
+    metadata = models.JSONField(default=dict, blank=True)
+    start_offset = models.PositiveIntegerField(default=0)
+    end_offset = models.PositiveIntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["section_index"]
+        unique_together = ("document", "section_index")

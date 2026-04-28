@@ -1,3 +1,4 @@
+import importlib
 import json
 import os
 import shutil
@@ -6,6 +7,7 @@ from datetime import timedelta
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
+from django.apps import apps
 from django.contrib.auth.models import Group
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.db import ProgrammingError, transaction
@@ -14,7 +16,7 @@ from django.utils import timezone
 
 from authentication.models import User
 from authentication.services.jwt_service import generate_access_token
-from knowledgebase.models import Document, DocumentChunk, IngestionTask
+from knowledgebase.models import Document, DocumentChunk, DocumentSectionChunk, IngestionTask
 from knowledgebase.services.chunk_service import build_document_chunks
 from knowledgebase.services.document_service import (
     batch_enqueue_document_ingestion,
@@ -32,7 +34,7 @@ from knowledgebase.services.vector_service import VectorService
 from rag.services.vector_store_service import index_document
 from knowledgebase.services.parser_service import ParserService, parse_document_file
 from knowledgebase.tasks import ingest_document_task
-from rag.services.vector_store_service import _VECTOR_STORE, clear_store
+from rag.services.vector_store_service import _VECTOR_STORE, clear_store, query_store
 from rbac.services.rbac_service import ROLE_ADMIN, seed_roles_and_permissions
 
 
@@ -447,6 +449,39 @@ class KnowledgebaseApiTests(TestCase):
         self.assertGreaterEqual(item["vector_count"], 1)
         self.assertEqual(item["latest_ingestion_task"]["status"], "succeeded")
         self.assertEqual(item["latest_ingestion_task"]["current_step"], "completed")
+
+    def test_document_list_serializes_hierarchical_ingestion_progress(self):
+        document = create_document_from_upload(
+            uploaded_file=SimpleUploadedFile(
+                "hierarchical-status.txt",
+                b"hierarchical status",
+                content_type="text/plain",
+            ),
+            title="Hierarchical status",
+            source_date="2025-04-01",
+            uploaded_by=self.user,
+        )
+        IngestionTask.objects.create(
+            document=document,
+            status=IngestionTask.STATUS_RUNNING,
+            current_step=IngestionTask.STEP_INDEXING,
+            strategy=IngestionTask.STRATEGY_HIERARCHICAL,
+            total_section_count=12,
+            indexed_section_count=5,
+            failed_section_count=0,
+        )
+
+        response = self.client.get(
+            "/api/knowledgebase/documents",
+            HTTP_AUTHORIZATION=f"Bearer {self.access_token}",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        item = response.json()["documents"][0]
+        self.assertEqual(item["latest_ingestion_task"]["strategy"], "hierarchical")
+        self.assertEqual(item["latest_ingestion_task"]["total_section_count"], 12)
+        self.assertEqual(item["latest_ingestion_task"]["indexed_section_count"], 5)
+        self.assertEqual(item["latest_ingestion_task"]["failed_section_count"], 0)
 
     def test_document_list_without_pagination_params_returns_all_visible_documents(self):
         for index in range(12):
@@ -1361,3 +1396,298 @@ class VectorServiceBatchingTests(TestCase):
         self.assertEqual([len(batch) for batch in provider.calls], [10, 1])
         self.assertEqual(len(fake_client.insert_calls[0][1]), 11)
         mock_index_document.assert_called_once_with(document)
+
+    @patch("rag.services.vector_store_service.index_document")
+    @patch.object(VectorService, "_delete_existing_document_vectors")
+    @patch.object(VectorService, "ensure_collection")
+    def test_index_hierarchical_document_embeds_only_unindexed_sections(self, mock_ensure_collection, _mock_delete_existing_vectors, mock_index_document):
+        provider = RecordingEmbeddingProvider()
+        fake_client = _FakeMilvusClient()
+        mock_ensure_collection.return_value = fake_client
+        document = Document.objects.create(
+            title="Hierarchical batch me",
+            file=SimpleUploadedFile("hierarchical.txt", b"hierarchical", content_type="text/plain"),
+            filename="hierarchical.txt",
+            doc_type="txt",
+            status=Document.STATUS_CHUNKED,
+            visibility=Document.VISIBILITY_INTERNAL,
+            parsed_text="section one child one child two section two child three",
+        )
+        section_one = DocumentSectionChunk.objects.create(
+            document=document,
+            section_index=0,
+            content="section one",
+            metadata={"page_label": "section-1"},
+            is_indexed=False,
+        )
+        DocumentSectionChunk.objects.create(
+            document=document,
+            section_index=1,
+            content="section two",
+            metadata={"page_label": "section-2"},
+            is_indexed=True,
+            vector_id="2",
+        )
+        DocumentChunk.objects.create(document=document, section_chunk=section_one, chunk_index=0, content="child one")
+        DocumentChunk.objects.create(document=document, section_chunk=section_one, chunk_index=1, content="child two")
+        IngestionTask.objects.create(
+            document=document,
+            strategy=IngestionTask.STRATEGY_HIERARCHICAL,
+            total_section_count=2,
+            indexed_section_count=1,
+        )
+
+        with patch(
+            "knowledgebase.services.embedding_service.get_embedding_provider",
+            return_value=provider,
+        ):
+            VectorService().index(document)
+
+        self.assertEqual(provider.calls, [["section one"]])
+        self.assertEqual(len(fake_client.insert_calls[0][1]), 1)
+        mock_index_document.assert_called_once_with(document)
+
+    @patch("rag.services.vector_store_service.index_document")
+    @patch.object(VectorService, "_delete_existing_document_vectors")
+    @patch.object(VectorService, "ensure_collection")
+    def test_index_hierarchical_document_updates_section_progress(self, mock_ensure_collection, _mock_delete_existing_vectors, mock_index_document):
+        provider = RecordingEmbeddingProvider()
+        fake_client = _FakeMilvusClient()
+        mock_ensure_collection.return_value = fake_client
+        document = Document.objects.create(
+            title="Hierarchical progress",
+            file=SimpleUploadedFile("hierarchical-progress.txt", b"hierarchical", content_type="text/plain"),
+            filename="hierarchical-progress.txt",
+            doc_type="txt",
+            status=Document.STATUS_CHUNKED,
+            visibility=Document.VISIBILITY_INTERNAL,
+            parsed_text="section one child one",
+        )
+        section = DocumentSectionChunk.objects.create(
+            document=document,
+            section_index=0,
+            content="section one",
+            metadata={"page_label": "section-1"},
+            is_indexed=False,
+        )
+        DocumentChunk.objects.create(document=document, section_chunk=section, chunk_index=0, content="child one")
+        task = IngestionTask.objects.create(
+            document=document,
+            strategy=IngestionTask.STRATEGY_HIERARCHICAL,
+            total_section_count=1,
+            indexed_section_count=0,
+        )
+
+        with patch(
+            "knowledgebase.services.embedding_service.get_embedding_provider",
+            return_value=provider,
+        ):
+            VectorService().index(document)
+
+        section.refresh_from_db()
+        task.refresh_from_db()
+        self.assertTrue(section.is_indexed)
+        self.assertTrue(section.vector_id)
+        self.assertEqual(task.indexed_section_count, 1)
+        mock_index_document.assert_called_once_with(document)
+
+
+@override_settings(
+    KB_SECTION_CHUNK_SIZE=2000,
+    KB_SECTION_CHUNK_OVERLAP=200,
+    KB_HIERARCHICAL_TEXT_THRESHOLD=500000,
+    KB_HIERARCHICAL_CHUNK_THRESHOLD=3000,
+)
+class KnowledgebaseChunkServiceTests(TestCase):
+    def test_build_hierarchical_chunks_from_plain_text_uses_large_sections(self):
+        module = None
+        try:
+            module = importlib.import_module("knowledgebase.services.hierarchical_chunk_service")
+        except ModuleNotFoundError:
+            module = None
+
+        builder = getattr(module, "build_hierarchical_document_chunks", None) if module else None
+        self.assertIsNotNone(builder)
+
+        result = builder(
+            text="Section A\n\n" + ("A" * 3000) + "\n\nSection B\n\n" + ("B" * 3000),
+            elements=None,
+            section_metadata_builder=lambda index: {"section_index": index},
+            child_metadata_builder=lambda section, index: {
+                "section_index": section["chunk_index"],
+                "chunk_index": index,
+            },
+        )
+
+        self.assertGreaterEqual(len(result["sections"]), 2)
+        self.assertGreater(len(result["child_chunks"]), len(result["sections"]))
+
+    def test_large_document_trigger_switches_to_hierarchical_strategy(self):
+        chooser = getattr(
+            importlib.import_module("knowledgebase.services.chunk_service"),
+            "choose_chunking_strategy",
+            None,
+        )
+        self.assertIsNotNone(chooser)
+
+        strategy = chooser(
+            parsed_text_length=600_000,
+            estimated_flat_chunk_count=3200,
+        )
+
+        self.assertEqual(strategy, "hierarchical")
+
+
+class KnowledgebaseHierarchicalModelTests(TestCase):
+    def test_large_document_can_store_section_and_child_chunks(self):
+        section_model = None
+        try:
+            section_model = apps.get_model("knowledgebase", "DocumentSectionChunk")
+        except LookupError:
+            section_model = None
+
+        self.assertIsNotNone(section_model)
+
+    def test_child_chunks_can_reference_parent_section(self):
+        section_chunk_field = next(
+            (
+                field
+                for field in DocumentChunk._meta.get_fields()
+                if getattr(field, "name", "") == "section_chunk"
+            ),
+            None,
+        )
+
+        self.assertIsNotNone(section_chunk_field)
+        self.assertEqual(section_chunk_field.related_model.__name__, "DocumentSectionChunk")
+
+    def test_ingestion_task_can_track_section_index_progress(self):
+        field_names = {field.name for field in IngestionTask._meta.get_fields()}
+
+        self.assertIn("strategy", field_names)
+        self.assertIn("indexed_section_count", field_names)
+        self.assertIn("total_section_count", field_names)
+        self.assertIn("failed_section_count", field_names)
+
+
+@override_settings(
+    KB_HIERARCHICAL_TEXT_THRESHOLD=1000,
+    KB_SECTION_CHUNK_SIZE=1200,
+    KB_SECTION_CHUNK_OVERLAP=100,
+)
+class KnowledgebaseDocumentServiceTests(TestCase):
+    def setUp(self):
+        self.media_root = tempfile.mkdtemp()
+        self.override = override_settings(MEDIA_ROOT=self.media_root)
+        self.override.enable()
+        self.user = User.objects.create_user(
+            username="kb-document-service",
+            password="secret123",
+            email="docsvc@example.com",
+        )
+
+    def tearDown(self):
+        self.override.disable()
+        shutil.rmtree(self.media_root, ignore_errors=True)
+
+    def test_chunk_document_persists_sections_and_children_for_large_document(self):
+        document = create_document_from_upload(
+            uploaded_file=SimpleUploadedFile(
+                "large.txt",
+                b"large document placeholder",
+                content_type="text/plain",
+            ),
+            title="Large document",
+            source_date="2026-04-28",
+            uploaded_by=self.user,
+        )
+
+        chunks = chunk_document(
+            document,
+            {
+                "parsed_text": "Section A\n\n" + ("A" * 1800) + "\n\nSection B\n\n" + ("B" * 1800),
+                "elements": None,
+                "chunk_metadata_defaults": {},
+            },
+        )
+
+        self.assertGreater(DocumentSectionChunk.objects.filter(document=document).count(), 0)
+        self.assertGreater(DocumentChunk.objects.filter(document=document).count(), 0)
+        self.assertEqual(
+            DocumentChunk.objects.filter(document=document, section_chunk__isnull=True).count(),
+            0,
+        )
+        self.assertEqual(document.status, Document.STATUS_CHUNKED)
+        self.assertIn("sections", chunks)
+
+
+class RagHierarchicalRetrievalTests(TestCase):
+    def setUp(self):
+        self.media_root = tempfile.mkdtemp()
+        self.override = override_settings(MEDIA_ROOT=self.media_root)
+        self.override.enable()
+        clear_store()
+
+    def tearDown(self):
+        self.override.disable()
+        shutil.rmtree(self.media_root, ignore_errors=True)
+        clear_store()
+
+    @patch("knowledgebase.services.vector_service.VectorService.search")
+    def test_query_store_returns_child_snippet_from_matched_section(self, mock_search):
+        document = Document.objects.create(
+            title="Annual report",
+            file=SimpleUploadedFile("report.txt", b"report", content_type="text/plain"),
+            filename="report.txt",
+            doc_type="txt",
+            status=Document.STATUS_INDEXED,
+            visibility=Document.VISIBILITY_INTERNAL,
+            parsed_text="revenue and liquidity",
+        )
+        section = DocumentSectionChunk.objects.create(
+            document=document,
+            section_index=0,
+            content="Revenue overview and liquidity summary",
+            metadata={"page_label": "section-1"},
+            is_indexed=True,
+            vector_id="-1",
+        )
+        DocumentChunk.objects.create(
+            document=document,
+            section_chunk=section,
+            chunk_index=0,
+            content="Liquidity remained strong throughout the year.",
+            metadata={"page_label": "chunk-1"},
+        )
+        matching_child = DocumentChunk.objects.create(
+            document=document,
+            section_chunk=section,
+            chunk_index=1,
+            content="Revenue grew 10 percent year over year.",
+            metadata={"page_label": "chunk-2"},
+        )
+        mock_search.return_value = [
+            {
+                "document_id": document.id,
+                "section_chunk_id": section.id,
+                "document_title": document.title,
+                "doc_type": document.doc_type,
+                "source_date": None,
+                "page_label": "section-1",
+                "content": section.content,
+                "metadata": {"page_label": "section-1"},
+                "score": 0.9,
+                "vector_score": 0.9,
+                "keyword_score": 0.0,
+            }
+        ]
+
+        try:
+            results = query_store("revenue growth", top_k=1)
+        except Exception:
+            results = []
+
+        self.assertGreater(len(results), 0)
+        self.assertEqual(results[0]["chunk_id"], matching_child.id)
+        self.assertEqual(results[0]["section_chunk_id"], section.id)
+        self.assertEqual(results[0]["snippet"], matching_child.content)

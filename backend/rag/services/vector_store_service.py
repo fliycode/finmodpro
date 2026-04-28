@@ -72,6 +72,7 @@ def _serialize_chunk_result(chunk, score, *, keyword_score=0.0):
     return {
         "document_id": chunk.document_id,
         "chunk_id": chunk.id,
+        "section_chunk_id": chunk.section_chunk_id,
         "document_title": metadata.get("document_title") or chunk.document.title,
         "doc_type": metadata.get("doc_type") or chunk.document.doc_type,
         "source_date": metadata.get("source_date")
@@ -79,6 +80,7 @@ def _serialize_chunk_result(chunk, score, *, keyword_score=0.0):
         "page_label": metadata.get("page_label", f"chunk-{chunk.chunk_index + 1}"),
         "snippet": chunk.content,
         "metadata": metadata,
+        "section_context_summary": None,
         "score": score,
         "vector_score": 0.0,
         "keyword_score": keyword_score,
@@ -126,6 +128,36 @@ def _keyword_search(query, filters=None, limit=5):
     return results[: int(limit)]
 
 
+def _expand_section_vector_results(query, vector_results):
+    expanded_results = []
+    for result in vector_results:
+        section_chunk_id = result.get("section_chunk_id")
+        if not section_chunk_id:
+            expanded_results.append(result)
+            continue
+
+        child_chunks = list(
+            DocumentChunk.objects.select_related("document")
+            .filter(section_chunk_id=section_chunk_id)
+            .order_by("chunk_index")
+        )
+        if not child_chunks:
+            continue
+
+        ranked_children = sorted(
+            child_chunks,
+            key=lambda chunk: (_keyword_match_score(query, chunk), -chunk.chunk_index),
+            reverse=True,
+        )
+        best_child = ranked_children[0]
+        expanded = _serialize_chunk_result(best_child, result.get("score", 0.0))
+        expanded["vector_score"] = result.get("vector_score", result.get("score", 0.0))
+        expanded["score"] = result.get("score", 0.0)
+        expanded["section_chunk_id"] = section_chunk_id
+        expanded_results.append(expanded)
+    return expanded_results
+
+
 def _merge_scored_results(vector_results, keyword_results):
     merged = {}
     for result in vector_results + keyword_results:
@@ -160,5 +192,6 @@ def _merge_scored_results(vector_results, keyword_results):
 def query_store(query, filters=None, top_k=5):
     candidate_limit = max(int(top_k), 1) * 2
     vector_results = VectorService().search(query=query, filters=filters, top_k=candidate_limit)
+    vector_results = _expand_section_vector_results(query, vector_results)
     keyword_results = _keyword_search(query, filters=filters, limit=candidate_limit)
     return _merge_scored_results(vector_results, keyword_results)[: int(top_k)]
