@@ -2,7 +2,7 @@ import os
 
 from django.conf import settings
 
-from knowledgebase.models import DocumentChunk
+from knowledgebase.models import DocumentChunk, DocumentSectionChunk, IngestionTask
 from knowledgebase.services.embedding_service import build_dense_embedding, build_dense_embeddings
 
 EMBEDDING_PROVIDER_BATCH_LIMIT = 10
@@ -110,7 +110,7 @@ class VectorService:
         except Exception:
             return
 
-    def _build_rows(self, document):
+    def _build_chunk_rows(self, document):
         rows = []
         chunks_to_update = []
         chunks = list(DocumentChunk.objects.filter(document=document).order_by("chunk_index"))
@@ -142,14 +142,72 @@ class VectorService:
                 chunks_to_update.append(chunk)
         return rows, chunks_to_update
 
+    def _build_section_rows(self, document):
+        rows = []
+        sections_to_update = []
+        sections = list(
+            DocumentSectionChunk.objects.filter(document=document, is_indexed=False).order_by("section_index")
+        )
+        batch_size = max(int(getattr(settings, "KB_EMBEDDING_BATCH_SIZE", 1) or 1), 1)
+        batch_size = min(batch_size, EMBEDDING_PROVIDER_BATCH_LIMIT)
+
+        for start in range(0, len(sections), batch_size):
+            section_batch = sections[start:start + batch_size]
+            vectors = build_dense_embeddings([section.content for section in section_batch])
+            for section, vector in zip(section_batch, vectors):
+                vector_id = -int(section.id)
+                rows.append(
+                    {
+                        "id": vector_id,
+                        "vector": vector,
+                        "document_id": document.id,
+                        "section_chunk_id": section.id,
+                        "document_title": document.title,
+                        "doc_type": document.doc_type,
+                        "source_date": document.source_date.isoformat()
+                        if document.source_date
+                        else "",
+                        "chunk_index": section.section_index,
+                        "page_label": section.metadata.get("page_label", ""),
+                        "content": section.content,
+                    }
+                )
+                section.vector_id = str(vector_id)
+                section.is_indexed = True
+                sections_to_update.append(section)
+        return rows, sections_to_update
+
+    def _get_latest_ingestion_task(self, document):
+        return IngestionTask.objects.filter(document=document).order_by("-id").first()
+
     def index(self, document):
-        rows, chunks_to_update = self._build_rows(document)
+        use_hierarchical_sections = DocumentSectionChunk.objects.filter(document=document).exists()
+        if use_hierarchical_sections:
+            rows, sections_to_update = self._build_section_rows(document)
+        else:
+            rows, chunks_to_update = self._build_chunk_rows(document)
         dimension = len(rows[0]["vector"]) if rows else settings.KB_EMBEDDING_DIMENSION
         client = self.ensure_collection(dimension=dimension)
-        self._delete_existing_document_vectors(client, document)
+        if not use_hierarchical_sections:
+            self._delete_existing_document_vectors(client, document)
         if rows:
             client.insert(settings.MILVUS_COLLECTION_NAME, rows)
-            DocumentChunk.objects.bulk_update(chunks_to_update, ["vector_id"])
+            if use_hierarchical_sections:
+                DocumentSectionChunk.objects.bulk_update(sections_to_update, ["vector_id", "is_indexed"])
+                ingestion_task = self._get_latest_ingestion_task(document)
+                if ingestion_task and ingestion_task.strategy == IngestionTask.STRATEGY_HIERARCHICAL:
+                    total_section_count = DocumentSectionChunk.objects.filter(document=document).count()
+                    ingestion_task.total_section_count = max(
+                        ingestion_task.total_section_count,
+                        total_section_count,
+                    )
+                    ingestion_task.indexed_section_count = DocumentSectionChunk.objects.filter(
+                        document=document,
+                        is_indexed=True,
+                    ).count()
+                    ingestion_task.save(update_fields=["total_section_count", "indexed_section_count", "updated_at"])
+            else:
+                DocumentChunk.objects.bulk_update(chunks_to_update, ["vector_id"])
         from rag.services.vector_store_service import index_document
 
         index_document(document)
@@ -167,6 +225,7 @@ class VectorService:
             output_fields=[
                 "document_id",
                 "chunk_id",
+                "section_chunk_id",
                 "document_title",
                 "doc_type",
                 "source_date",
@@ -180,14 +239,47 @@ class VectorService:
             for hit in hits
             if hit.get("entity", {}).get("chunk_id") is not None
         ]
+        section_chunk_ids = [
+            hit.get("entity", {}).get("section_chunk_id")
+            for hit in hits
+            if hit.get("entity", {}).get("section_chunk_id") is not None
+        ]
         chunks_by_id = {
             chunk.id: chunk
             for chunk in DocumentChunk.objects.select_related("document").filter(id__in=chunk_ids)
+        }
+        sections_by_id = {
+            section.id: section
+            for section in DocumentSectionChunk.objects.select_related("document").filter(id__in=section_chunk_ids)
         }
         results = []
         for hit in hits:
             entity = hit.get("entity", {})
             chunk_id = entity.get("chunk_id")
+            section_chunk_id = entity.get("section_chunk_id")
+            if section_chunk_id is not None:
+                section = sections_by_id.get(section_chunk_id)
+                if section is None:
+                    continue
+                metadata = section.metadata or {}
+                results.append(
+                    {
+                        "document_id": section.document_id,
+                        "section_chunk_id": section.id,
+                        "document_title": metadata.get("document_title") or section.document.title,
+                        "doc_type": metadata.get("doc_type") or section.document.doc_type,
+                        "source_date": metadata.get("source_date")
+                        or (section.document.source_date.isoformat() if section.document.source_date else None),
+                        "page_label": metadata.get("page_label", f"section-{section.section_index + 1}"),
+                        "snippet": section.content,
+                        "content": section.content,
+                        "metadata": metadata,
+                        "score": hit.get("distance", 0.0),
+                        "vector_score": hit.get("distance", 0.0),
+                        "keyword_score": 0.0,
+                    }
+                )
+                continue
             chunk = chunks_by_id.get(chunk_id)
             if chunk is None:
                 continue

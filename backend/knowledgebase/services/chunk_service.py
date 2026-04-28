@@ -145,6 +145,30 @@ class ChunkService:
         ]
 
 
+def estimate_flat_chunk_count(text, chunk_size=None, overlap=None):
+    chunk_size = chunk_size or settings.KB_CHUNK_SIZE
+    overlap = settings.KB_CHUNK_OVERLAP if overlap is None else overlap
+    if chunk_size <= 0:
+        raise ValueError("chunk_size 必须大于 0。")
+    if overlap < 0 or overlap >= chunk_size:
+        raise ValueError("overlap 必须大于等于 0 且小于 chunk_size。")
+
+    cleaned_text = (text or "").strip()
+    if not cleaned_text:
+        return 0
+
+    step = chunk_size - overlap
+    return max(1, ((len(cleaned_text) - chunk_size + step - 1) // step) + 1)
+
+
+def choose_chunking_strategy(*, parsed_text_length, estimated_flat_chunk_count):
+    if parsed_text_length >= settings.KB_HIERARCHICAL_TEXT_THRESHOLD:
+        return "hierarchical"
+    if estimated_flat_chunk_count >= settings.KB_HIERARCHICAL_CHUNK_THRESHOLD:
+        return "hierarchical"
+    return "flat"
+
+
 def build_document_chunks(text, metadata_builder, chunk_size=None, overlap=None):
     return ChunkService().build_chunks(
         text,

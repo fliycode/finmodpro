@@ -11,8 +11,14 @@ from django.db.models import Q
 from django.utils import timezone
 
 from common.observability import trace_span
-from knowledgebase.models import Dataset, Document, DocumentChunk, DocumentVersion, IngestionTask
-from knowledgebase.services.chunk_service import build_document_chunks, build_document_chunks_from_elements
+from knowledgebase.models import Dataset, Document, DocumentChunk, DocumentSectionChunk, DocumentVersion, IngestionTask
+from knowledgebase.services.chunk_service import (
+    build_document_chunks,
+    build_document_chunks_from_elements,
+    choose_chunking_strategy,
+    estimate_flat_chunk_count,
+)
+from knowledgebase.services.hierarchical_chunk_service import build_hierarchical_document_chunks
 from knowledgebase.services.parser_service import parse_document_file
 from knowledgebase.services.vector_service import VectorService, index_document_chunks
 
@@ -188,6 +194,10 @@ def _serialize_ingestion_task(ingestion_task):
         "celery_task_id": ingestion_task.celery_task_id or None,
         "status": ingestion_task.status,
         "current_step": ingestion_task.current_step,
+        "strategy": ingestion_task.strategy,
+        "total_section_count": ingestion_task.total_section_count,
+        "indexed_section_count": ingestion_task.indexed_section_count,
+        "failed_section_count": ingestion_task.failed_section_count,
         "error_message": ingestion_task.error_message or None,
         "retry_count": ingestion_task.retry_count,
         "started_at": ingestion_task.started_at.isoformat() if ingestion_task.started_at else None,
@@ -536,6 +546,21 @@ def _build_chunk_metadata(document, index, parser_defaults=None):
     }
 
 
+def _build_section_chunk_metadata(document, index, parser_defaults=None):
+    metadata = _build_chunk_metadata(document, index, parser_defaults)
+    return {
+        **metadata,
+        "section_index": index,
+        "page_label": f"section-{index + 1}",
+    }
+
+
+def _count_chunk_result_items(chunks):
+    if isinstance(chunks, dict):
+        return len(chunks.get("child_chunks") or [])
+    return len(chunks)
+
+
 def parse_document(document):
     parser_result = parse_document_file(document)
     document.parsed_text = parser_result["parsed_text"]
@@ -550,7 +575,57 @@ def chunk_document(document, parser_result):
     parser_result = parser_result or {}
     parser_defaults = parser_result.get("chunk_metadata_defaults") or {}
     elements = parser_result.get("elements")
+    parsed_text = parser_result.get("parsed_text", "")
+    DocumentSectionChunk.objects.filter(document=document).delete()
     DocumentChunk.objects.filter(document=document).delete()
+
+    estimated_flat_chunk_count = estimate_flat_chunk_count(parsed_text)
+    strategy = choose_chunking_strategy(
+        parsed_text_length=len((parsed_text or "").strip()),
+        estimated_flat_chunk_count=estimated_flat_chunk_count,
+    )
+
+    if strategy == IngestionTask.STRATEGY_HIERARCHICAL:
+        hierarchical = build_hierarchical_document_chunks(
+            text=parsed_text,
+            elements=elements,
+            section_metadata_builder=lambda index: _build_section_chunk_metadata(document, index, parser_defaults),
+            child_metadata_builder=lambda section, index: _build_chunk_metadata(document, index, parser_defaults),
+        )
+        DocumentSectionChunk.objects.bulk_create(
+            [
+                DocumentSectionChunk(
+                    document=document,
+                    section_index=section["chunk_index"],
+                    section_label=section["metadata"].get("page_label", ""),
+                    section_path="",
+                    content=section["content"],
+                    vector_id="",
+                    metadata=section["metadata"],
+                )
+                for section in hierarchical["sections"]
+            ]
+        )
+        created_sections = DocumentSectionChunk.objects.filter(document=document).order_by("section_index")
+        section_by_index = {
+            section.section_index: section
+            for section in created_sections
+        }
+        DocumentChunk.objects.bulk_create(
+            [
+                DocumentChunk(
+                    document=document,
+                    section_chunk=section_by_index[child["section_index"]],
+                    chunk_index=child["chunk_index"],
+                    content=child["content"],
+                    vector_id="",
+                    metadata=child["metadata"],
+                )
+                for child in hierarchical["child_chunks"]
+            ]
+        )
+        _update_document_status(document, status=Document.STATUS_CHUNKED)
+        return hierarchical
 
     if elements:
         chunks = build_document_chunks_from_elements(
@@ -558,7 +633,6 @@ def chunk_document(document, parser_result):
             metadata_builder=lambda index: _build_chunk_metadata(document, index, parser_defaults),
         )
     else:
-        parsed_text = parser_result.get("parsed_text", "")
         chunks = build_document_chunks(
             parsed_text,
             metadata_builder=lambda index: _build_chunk_metadata(document, index, parser_defaults),
@@ -649,10 +723,11 @@ def ingest_document(document, ingestion_task=None):
                     status=IngestionTask.STATUS_SUCCEEDED,
                 )
             observation.update(
-                output={"status": "succeeded", "chunk_count": len(chunks)}
+                output={"status": "succeeded", "chunk_count": _count_chunk_result_items(chunks)}
             )
             return document
         except Exception as exc:
+            DocumentSectionChunk.objects.filter(document=document).delete()
             DocumentChunk.objects.filter(document=document).delete()
             error_message = str(exc) or "文档摄取失败。"
             _update_document_status(
