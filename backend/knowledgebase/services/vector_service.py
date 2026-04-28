@@ -5,6 +5,8 @@ from django.conf import settings
 from knowledgebase.models import DocumentChunk
 from knowledgebase.services.embedding_service import build_dense_embedding, build_dense_embeddings
 
+EMBEDDING_PROVIDER_BATCH_LIMIT = 10
+
 
 class VectorService:
     _client = None
@@ -113,6 +115,7 @@ class VectorService:
         chunks_to_update = []
         chunks = list(DocumentChunk.objects.filter(document=document).order_by("chunk_index"))
         batch_size = max(int(getattr(settings, "KB_EMBEDDING_BATCH_SIZE", 1) or 1), 1)
+        batch_size = min(batch_size, EMBEDDING_PROVIDER_BATCH_LIMIT)
 
         for start in range(0, len(chunks), batch_size):
             chunk_batch = chunks[start:start + batch_size]

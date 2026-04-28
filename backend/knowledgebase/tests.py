@@ -1327,3 +1327,37 @@ class VectorServiceBatchingTests(TestCase):
         inserted_rows = fake_client.insert_calls[0][1]
         self.assertEqual(len(inserted_rows), 3)
         mock_index_document.assert_called_once_with(document)
+
+    @override_settings(KB_EMBEDDING_BATCH_SIZE=32)
+    @patch("rag.services.vector_store_service.index_document")
+    @patch.object(VectorService, "_delete_existing_document_vectors")
+    @patch.object(VectorService, "ensure_collection")
+    def test_index_caps_embedding_batch_size_at_provider_limit(self, mock_ensure_collection, _mock_delete_existing_vectors, mock_index_document):
+        provider = RecordingEmbeddingProvider()
+        fake_client = _FakeMilvusClient()
+        mock_ensure_collection.return_value = fake_client
+        document = Document.objects.create(
+            title="Cap batch size",
+            file=SimpleUploadedFile("cap.txt", b"cap", content_type="text/plain"),
+            filename="cap.txt",
+            doc_type="txt",
+            status=Document.STATUS_CHUNKED,
+            visibility=Document.VISIBILITY_INTERNAL,
+            parsed_text=" ".join(f"chunk {index}" for index in range(11)),
+        )
+        for index in range(11):
+            DocumentChunk.objects.create(
+                document=document,
+                chunk_index=index,
+                content=f"chunk {index}",
+            )
+
+        with patch(
+            "knowledgebase.services.embedding_service.get_embedding_provider",
+            return_value=provider,
+        ):
+            VectorService().index(document)
+
+        self.assertEqual([len(batch) for batch in provider.calls], [10, 1])
+        self.assertEqual(len(fake_client.insert_calls[0][1]), 11)
+        mock_index_document.assert_called_once_with(document)
