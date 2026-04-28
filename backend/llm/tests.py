@@ -2225,6 +2225,29 @@ class LiteLLMGatewayCommandServiceTests(TestCase):
         self.assertEqual(payload["encoding_format"], "float")
 
     @patch("urllib.request.urlopen")
+    def test_litellm_embedding_provider_posts_multiple_texts_in_single_request(self, mock_urlopen):
+        mock_urlopen.return_value = _FakeHttpResponse({
+            "data": [
+                {"embedding": [0.1, 0.2, 0.3]},
+                {"embedding": [0.4, 0.5, 0.6]},
+            ],
+            "usage": {"prompt_tokens": 8, "total_tokens": 8},
+        })
+        provider = LiteLLMEmbeddingProvider(
+            endpoint="http://localhost:4000",
+            model_name="embed-default",
+            options={"api_key": "sk-test"},
+        )
+
+        vectors = provider.embed(texts=["hello", "world"])
+
+        self.assertEqual(mock_urlopen.call_count, 1)
+        request_obj = mock_urlopen.call_args.args[0]
+        payload = json.loads(request_obj.data.decode("utf-8"))
+        self.assertEqual(payload["input"], ["hello", "world"])
+        self.assertEqual(vectors, [[0.1, 0.2, 0.3], [0.4, 0.5, 0.6]])
+
+    @patch("urllib.request.urlopen")
     def test_litellm_embedding_provider_records_failed_invocation(self, mock_urlopen):
         mock_urlopen.side_effect = HTTPError(
             url="http://localhost:4000/v1/embeddings",
