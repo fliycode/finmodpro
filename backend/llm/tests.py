@@ -2268,6 +2268,27 @@ class LiteLLMGatewayCommandServiceTests(TestCase):
         self.assertEqual(mock_urlopen.call_count, 2)
 
     @patch("urllib.request.urlopen")
+    def test_litellm_embedding_provider_retries_double_transient_timeout(self, mock_urlopen):
+        mock_urlopen.side_effect = [
+            TimeoutError("timed out"),
+            TimeoutError("timed out again"),
+            _FakeHttpResponse({
+                "data": [{"embedding": [0.1, 0.2, 0.3]}],
+                "usage": {"prompt_tokens": 5, "total_tokens": 5},
+            }),
+        ]
+        provider = LiteLLMEmbeddingProvider(
+            endpoint="http://localhost:4000",
+            model_name="embed-default",
+            options={"api_key": "sk-test"},
+        )
+
+        vectors = provider.embed(texts=["hello"])
+
+        self.assertEqual(vectors, [[0.1, 0.2, 0.3]])
+        self.assertEqual(mock_urlopen.call_count, 3)
+
+    @patch("urllib.request.urlopen")
     def test_litellm_embedding_provider_records_failed_invocation(self, mock_urlopen):
         mock_urlopen.side_effect = HTTPError(
             url="http://localhost:4000/v1/embeddings",
