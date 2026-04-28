@@ -25,6 +25,7 @@ git pull --ff-only origin main
 python3 "$APP_DIR/scripts/render_litellm_config.py"
 
 docker compose -f "$COMPOSE_FILE" up -d --build
+docker compose -f "$COMPOSE_FILE" exec -T backend python manage.py migrate
 docker compose -f "$COMPOSE_FILE" up -d --force-recreate litellm
 
 "$APP_DIR/scripts/smoke-check.sh"
