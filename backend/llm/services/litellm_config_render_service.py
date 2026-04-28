@@ -1,5 +1,7 @@
 from pathlib import Path
 
+from llm.services.litellm_route_utils import normalize_upstream_model_name
+
 
 def _extract_model_entries(snippet_text):
     lines = snippet_text.splitlines()
@@ -7,7 +9,21 @@ def _extract_model_entries(snippet_text):
         return []
     if lines[0].strip() != "model_list:":
         raise ValueError("Generated LiteLLM snippet must start with 'model_list:'.")
-    return [line for line in lines[1:] if line.strip()]
+    entries = []
+    for line in lines[1:]:
+        if not line.strip():
+            continue
+        if line.lstrip().startswith("model: "):
+            indent = line[: len(line) - len(line.lstrip())]
+            model_name = line.split("model: ", 1)[1].strip()
+            normalized_model_name = normalize_upstream_model_name(
+                provider="",
+                model_name=model_name,
+            )
+            entries.append(f"{indent}model: {normalized_model_name}")
+            continue
+        entries.append(line)
+    return entries
 
 
 def render_litellm_config(*, base_config, generated_snippets):
