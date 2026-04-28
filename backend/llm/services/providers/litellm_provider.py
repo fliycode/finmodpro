@@ -298,6 +298,7 @@ class LiteLLMEmbeddingProvider(LiteLLMApiMixin, BaseEmbeddingProvider):
         vectors = []
         total_request_tokens = 0
         started_at = time.monotonic()
+        merged_options = self._resolve_options(options)
         upstream_model = (
             (self.model_config.options or {}).get("litellm", {}).get("upstream_model")
             if self.model_config is not None
@@ -305,7 +306,11 @@ class LiteLLMEmbeddingProvider(LiteLLMApiMixin, BaseEmbeddingProvider):
         ) or self.model_name
         try:
             for text in texts:
-                payload = {"model": self.model_name, "input": text}
+                payload = {
+                    "model": self.model_name,
+                    "input": text,
+                    "encoding_format": merged_options.get("encoding_format") or "float",
+                }
                 response_payload = self._post_json(
                     "/v1/embeddings",
                     payload,
