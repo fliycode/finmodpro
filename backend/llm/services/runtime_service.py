@@ -12,6 +12,7 @@ from llm.services.model_config_service import get_active_model_config
 from llm.services.providers.litellm_provider import (
     LiteLLMChatProvider,
     LiteLLMEmbeddingProvider,
+    LiteLLMRerankProvider,
 )
 
 
@@ -50,6 +51,14 @@ def _build_provider(model_config):
 
         if model_config.capability == ModelConfig.CAPABILITY_EMBEDDING:
             return LiteLLMEmbeddingProvider(
+                endpoint=_normalize_litellm_endpoint(model_config.endpoint),
+                model_name=model_config.model_name,
+                options=model_config.options,
+                model_config=model_config if model_config.pk else None,
+            )
+
+        if model_config.capability == ModelConfig.CAPABILITY_RERANK:
+            return LiteLLMRerankProvider(
                 endpoint=_normalize_litellm_endpoint(model_config.endpoint),
                 model_name=model_config.model_name,
                 options=model_config.options,

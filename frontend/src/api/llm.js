@@ -142,6 +142,8 @@ export const normalizeFineTuneRun = (item, index = 0) => ({
   run_key: item?.run_key ?? '',
   external_job_id: item?.external_job_id ?? '',
   runner_name: item?.runner_name ?? '',
+  runner_server_id: item?.runner_server_id ?? null,
+  runner_server_name: item?.runner_server_name ?? '',
   artifact_path: item?.artifact_path ?? '',
   export_path: item?.export_path ?? '',
   deployment_endpoint: item?.deployment_endpoint ?? '',
@@ -161,6 +163,29 @@ export const normalizeFineTuneRun = (item, index = 0) => ({
   created_at: item?.created_at ?? '',
   updated_at: item?.updated_at ?? '',
 });
+
+export const normalizeFineTuneRunnerServer = (item, index = 0) => ({
+  id: item?.id ?? index,
+  name: item?.name ?? '',
+  base_url: item?.base_url ?? '',
+  default_work_dir: item?.default_work_dir ?? '',
+  is_enabled: item?.is_enabled ?? false,
+  has_auth_token: item?.has_auth_token ?? false,
+  auth_token_masked: item?.auth_token_masked ?? '',
+  created_at: item?.created_at ?? '',
+  updated_at: item?.updated_at ?? '',
+});
+
+export const normalizeFineTuneRunnerServerPayload = (payload = {}) => {
+  const fineTuneServers = getArray(payload, ['fine_tune_servers']).map((item, index) => (
+    normalizeFineTuneRunnerServer(item, index)
+  ));
+
+  return {
+    total: toNumber(payload.total, fineTuneServers.length),
+    fine_tune_servers: fineTuneServers,
+  };
+};
 
 export const normalizeFineTunePayload = (payload = {}) => {
   const fineTuneRuns = getArray(payload, ['fine_tune_runs']).map((item, index) => normalizeFineTuneRun(item, index));
@@ -261,6 +286,42 @@ export const createLlmApi = (overrides = {}) => {
       })));
     },
 
+    async getFineTuneRunnerServers() {
+      return normalizeFineTuneRunnerServerPayload(unwrap(await fetchJson('/api/ops/fine-tune-servers/', {
+        method: 'GET',
+        auth: true,
+      })));
+    },
+
+    async createFineTuneRunnerServer(payload) {
+      const data = unwrap(await fetchJson('/api/ops/fine-tune-servers/', {
+        method: 'POST',
+        auth: true,
+        body: JSON.stringify(payload),
+      }));
+      return {
+        fine_tune_server: normalizeFineTuneRunnerServer(data.fine_tune_server || data),
+      };
+    },
+
+    async updateFineTuneRunnerServer(id, payload) {
+      const data = unwrap(await fetchJson(`/api/ops/fine-tune-servers/${id}/`, {
+        method: 'PATCH',
+        auth: true,
+        body: JSON.stringify(payload),
+      }));
+      return {
+        fine_tune_server: normalizeFineTuneRunnerServer(data.fine_tune_server || data),
+      };
+    },
+
+    async deleteFineTuneRunnerServer(id) {
+      return unwrap(await fetchJson(`/api/ops/fine-tune-servers/${id}/`, {
+        method: 'DELETE',
+        auth: true,
+      }));
+    },
+
     async createFineTuneRun(payload) {
       const data = unwrap(await fetchJson('/api/ops/fine-tunes/', {
         method: 'POST',
@@ -287,6 +348,17 @@ export const createLlmApi = (overrides = {}) => {
       }));
       return {
         fine_tune_run: normalizeFineTuneRun(data.fine_tune_run || data),
+      };
+    },
+
+    async dispatchFineTuneRun(id) {
+      const data = unwrap(await fetchJson(`/api/ops/fine-tunes/${id}/dispatch/`, {
+        method: 'POST',
+        auth: true,
+      }));
+      return {
+        dispatch: data.dispatch || {},
+        fine_tune_run: normalizeFineTuneRun(data.fine_tune_run || {}),
       };
     },
   };

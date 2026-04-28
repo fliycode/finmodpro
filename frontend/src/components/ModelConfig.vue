@@ -26,12 +26,18 @@ const errorMsg = ref("");
 const drawerVisible = ref(false);
 const editingId = ref(null);
 const fineTuneRuns = ref([]);
+const fineTuneRunnerServers = ref([]);
 const fineTuneLoading = ref(false);
+const runnerServerLoading = ref(false);
 const fineTuneSaving = ref(false);
+const runnerServerSaving = ref(false);
 const fineTuneError = ref("");
 const fineTuneDrawerVisible = ref(false);
+const runnerServerDrawerVisible = ref(false);
 const editingFineTuneId = ref(null);
+const editingRunnerServerId = ref(null);
 const fineTuneFilterModelId = ref("");
+const dispatchingFineTuneId = ref(null);
 
 const defaultFormState = () => ({
   name: "",
@@ -49,19 +55,32 @@ const defaultFormState = () => ({
 
 const defaultFineTuneFormState = () => ({
   base_model_id: "",
+  runner_server_id: "",
   dataset_name: "",
   dataset_version: "",
   strategy: "lora",
   runner_name: "",
   training_config_json: "{\n  \"epochs\": 3\n}",
   status: "pending",
+  external_job_id: "",
   artifact_path: "",
   metrics_json: "{\n  \"f1_score\": 0.9\n}",
   notes: "",
 });
 
+const defaultRunnerServerFormState = () => ({
+  name: "",
+  base_url: "",
+  auth_token: "",
+  default_work_dir: "",
+  is_enabled: true,
+  has_auth_token: false,
+  auth_token_masked: "",
+});
+
 const form = reactive(defaultFormState());
 const fineTuneForm = reactive(defaultFineTuneFormState());
+const runnerServerForm = reactive(defaultRunnerServerFormState());
 
 const chatConfigs = computed(() =>
   configs.value.filter((c) => ["chat", "llm", "generation"].includes(String(c.capability).toLowerCase())),
@@ -76,9 +95,14 @@ const fineTuneModelOptions = computed(() => configs.value.map((config) => ({
   value: config.id,
   label: `${config.name} · ${config.model_name}`,
 })));
+const runnerServerOptions = computed(() => fineTuneRunnerServers.value.map((server) => ({
+  value: server.id,
+  label: `${server.name} · ${server.base_url}`,
+})));
 const supportsTokenOptions = computed(() => ["deepseek", "litellm", "dashscope"].includes(form.provider));
 const drawerTitle = computed(() => (editingId.value ? "编辑模型配置" : "新增模型配置"));
 const fineTuneDrawerTitle = computed(() => (editingFineTuneId.value ? "编辑微调登记" : "新增微调登记"));
+const runnerServerDrawerTitle = computed(() => (editingRunnerServerId.value ? "编辑训练服务器" : "新增训练服务器"));
 const isModelsMode = computed(() => props.mode !== "fine-tunes");
 const isFineTunesMode = computed(() => props.mode === "fine-tunes");
 const pageAlerts = computed(() => getConsolePageAlerts({
@@ -161,26 +185,50 @@ const resetFineTuneForm = () => {
   editingFineTuneId.value = null;
 };
 
+const resetRunnerServerForm = () => {
+  Object.assign(runnerServerForm, defaultRunnerServerFormState());
+  editingRunnerServerId.value = null;
+};
+
 const openCreateFineTune = (baseModelId = "") => {
   resetFineTuneForm();
   fineTuneForm.base_model_id = baseModelId || fineTuneFilterModelId.value || chatConfigs.value[0]?.id || configs.value[0]?.id || "";
   fineTuneDrawerVisible.value = true;
 };
 
+const openCreateRunnerServer = () => {
+  resetRunnerServerForm();
+  runnerServerDrawerVisible.value = true;
+};
+
 const openEditFineTune = (run) => {
   resetFineTuneForm();
   editingFineTuneId.value = run.id;
   fineTuneForm.base_model_id = run.base_model_id;
+  fineTuneForm.runner_server_id = run.runner_server_id || "";
   fineTuneForm.dataset_name = run.dataset_name;
   fineTuneForm.dataset_version = run.dataset_version;
   fineTuneForm.strategy = run.strategy;
   fineTuneForm.runner_name = run.runner_name || "";
   fineTuneForm.training_config_json = JSON.stringify(run.training_config || {}, null, 2);
   fineTuneForm.status = run.status;
+  fineTuneForm.external_job_id = run.external_job_id || "";
   fineTuneForm.artifact_path = run.artifact_path;
   fineTuneForm.metrics_json = JSON.stringify(run.metrics || {}, null, 2);
   fineTuneForm.notes = run.notes || "";
   fineTuneDrawerVisible.value = true;
+};
+
+const openEditRunnerServer = (server) => {
+  resetRunnerServerForm();
+  editingRunnerServerId.value = server.id;
+  runnerServerForm.name = server.name;
+  runnerServerForm.base_url = server.base_url;
+  runnerServerForm.default_work_dir = server.default_work_dir || "";
+  runnerServerForm.is_enabled = Boolean(server.is_enabled);
+  runnerServerForm.has_auth_token = Boolean(server.has_auth_token);
+  runnerServerForm.auth_token_masked = server.auth_token_masked || "";
+  runnerServerDrawerVisible.value = true;
 };
 
 const buildFineTunePayload = () => {
@@ -199,6 +247,7 @@ const buildFineTunePayload = () => {
 
   const payload = {
     base_model_id: Number(fineTuneForm.base_model_id),
+    runner_server_id: fineTuneForm.runner_server_id ? Number(fineTuneForm.runner_server_id) : null,
     dataset_name: fineTuneForm.dataset_name.trim(),
     dataset_version: fineTuneForm.dataset_version.trim(),
     strategy: fineTuneForm.strategy.trim() || "lora",
@@ -226,6 +275,19 @@ const buildFineTunePayload = () => {
     artifact_path: fineTuneForm.artifact_path.trim(),
     metrics,
   };
+};
+
+const buildRunnerServerPayload = () => {
+  const payload = {
+    name: runnerServerForm.name.trim(),
+    base_url: runnerServerForm.base_url.trim(),
+    default_work_dir: runnerServerForm.default_work_dir.trim(),
+    is_enabled: Boolean(runnerServerForm.is_enabled),
+  };
+  if (runnerServerForm.auth_token.trim()) {
+    payload.auth_token = runnerServerForm.auth_token.trim();
+  }
+  return payload;
 };
 
 const fetchConfigs = async () => {
@@ -257,6 +319,20 @@ const fetchFineTunes = async () => {
     fineTuneRuns.value = [];
   } finally {
     fineTuneLoading.value = false;
+  }
+};
+
+const fetchRunnerServers = async () => {
+  runnerServerLoading.value = true;
+  try {
+    const data = await llmApi.getFineTuneRunnerServers();
+    fineTuneRunnerServers.value = Array.isArray(data?.fine_tune_servers) ? data.fine_tune_servers : [];
+  } catch (error) {
+    console.error("Failed to fetch fine-tune runner servers:", error);
+    fineTuneError.value = error.message || "加载训练服务器失败";
+    fineTuneRunnerServers.value = [];
+  } finally {
+    runnerServerLoading.value = false;
   }
 };
 
@@ -341,6 +417,62 @@ const submitFineTune = async () => {
   }
 };
 
+const submitRunnerServer = async () => {
+  if (!runnerServerForm.name.trim() || !runnerServerForm.base_url.trim()) {
+    flash.error("请完整填写训练服务器名称和地址");
+    return;
+  }
+  runnerServerSaving.value = true;
+  try {
+    const payload = buildRunnerServerPayload();
+    if (editingRunnerServerId.value) {
+      await llmApi.updateFineTuneRunnerServer(editingRunnerServerId.value, payload);
+      flash.success("训练服务器已更新");
+    } else {
+      await llmApi.createFineTuneRunnerServer(payload);
+      flash.success("训练服务器已创建");
+    }
+    runnerServerDrawerVisible.value = false;
+    resetRunnerServerForm();
+    await fetchRunnerServers();
+  } catch (error) {
+    flash.error(error.message || "保存训练服务器失败");
+  } finally {
+    runnerServerSaving.value = false;
+  }
+};
+
+const removeRunnerServer = async (server) => {
+  if (!server || !window.confirm(`确认删除训练服务器「${server.name}」吗？`)) {
+    return;
+  }
+  try {
+    await llmApi.deleteFineTuneRunnerServer(server.id);
+    flash.success("训练服务器已删除");
+    await fetchRunnerServers();
+    await fetchFineTunes();
+  } catch (error) {
+    flash.error(error.message || "删除训练服务器失败");
+  }
+};
+
+const dispatchFineTune = async (run) => {
+  if (!run?.id) {
+    return;
+  }
+  dispatchingFineTuneId.value = run.id;
+  try {
+    const result = await llmApi.dispatchFineTuneRun(run.id);
+    const jobId = result?.dispatch?.job_id || result?.fine_tune_run?.external_job_id;
+    flash.success(jobId ? `训练任务已提交：${jobId}` : "训练任务已提交");
+    await fetchFineTunes();
+  } catch (error) {
+    flash.error(error.message || "提交远程训练失败");
+  } finally {
+    dispatchingFineTuneId.value = null;
+  }
+};
+
 const formatFineTuneMetrics = (metrics) => {
   if (!metrics || Object.keys(metrics).length === 0) {
     return "暂无指标";
@@ -364,7 +496,9 @@ const formatFineTuneControlPlane = (run) => {
   const exportStatus = run.dataset_manifest?.export_status || "pending";
   const callbackState = run.callback_token ? "callback 已签发" : "callback 已隐藏";
   const registration = run.registered_model_config_id ? `候选模型 #${run.registered_model_config_id}` : "未注册候选模型";
-  return `${run.run_key || "未分配 run_key"} / export:${exportStatus} / ${callbackState} / ${registration}`;
+  const server = run.runner_server_name || "训练服务器未指定";
+  const remoteJob = run.external_job_id || "远端任务未提交";
+  return `${run.run_key || "未分配 run_key"} / ${server} / ${remoteJob} / export:${exportStatus} / ${callbackState} / ${registration}`;
 };
 
 const formatDate = (dateStr) => {
@@ -380,6 +514,7 @@ onMounted(async () => {
   await fetchConfigs();
   if (isFineTunesMode.value) {
     fineTuneFilterModelId.value = getInitialFineTuneFilterId(configs.value, fineTuneFilterModelId.value);
+    await fetchRunnerServers();
     await fetchFineTunes();
   }
 });
@@ -562,6 +697,50 @@ onMounted(async () => {
 
     <AppSectionCard
       v-if="isFineTunesMode"
+      title="远程训练服务器"
+      desc="登记 GPU runner agent 地址、工作目录和鉴权信息，微调任务会绑定到这里并从当前服务器发起提交。"
+      admin
+    >
+      <template #header>
+        <el-button type="primary" @click="openCreateRunnerServer()">新增训练服务器</el-button>
+      </template>
+      <div v-if="runnerServerLoading && fineTuneRunnerServers.length === 0" class="admin-empty-state">加载中...</div>
+      <div v-else-if="fineTuneRunnerServers.length === 0" class="admin-empty-state">暂无远程训练服务器</div>
+      <el-table v-else :data="fineTuneRunnerServers" stripe style="width: 100%">
+        <el-table-column prop="name" label="名称" min-width="180" />
+        <el-table-column label="地址" min-width="240">
+          <template #default="{ row }">
+            <span class="mono-text">{{ row.base_url }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="工作目录" min-width="200">
+          <template #default="{ row }">
+            <span class="mono-text">{{ row.default_work_dir || '使用 agent 默认目录' }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="鉴权" width="140">
+          <template #default="{ row }">
+            <span class="muted-text">{{ row.has_auth_token ? row.auth_token_masked : '未配置' }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="状态" width="110">
+          <template #default="{ row }">
+            <el-tag :type="row.is_enabled ? 'success' : 'info'">{{ row.is_enabled ? '已启用' : '已停用' }}</el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="操作" width="180" fixed="right">
+          <template #default="{ row }">
+            <div class="table-actions">
+              <el-button size="small" plain @click="openEditRunnerServer(row)">编辑</el-button>
+              <el-button size="small" type="danger" plain @click="removeRunnerServer(row)">删除</el-button>
+            </div>
+          </template>
+        </el-table-column>
+      </el-table>
+    </AppSectionCard>
+
+    <AppSectionCard
+      v-if="isFineTunesMode"
       title="微调控制面"
       desc="训练执行仍保持外部运行，这里登记数据集、导出、回调与候选模型回流状态。"
       admin
@@ -607,7 +786,7 @@ onMounted(async () => {
         <el-table-column label="运行标识" min-width="220">
           <template #default="{ row }">
             <div class="mono-text">{{ row.run_key || '待生成' }}</div>
-            <div class="muted-text">{{ row.runner_name || 'runner 未指定' }}</div>
+            <div class="muted-text">{{ row.runner_server_name || '训练服务器未指定' }} / {{ row.runner_name || 'runner 未指定' }}</div>
           </template>
         </el-table-column>
         <el-table-column label="状态" width="120">
@@ -637,9 +816,21 @@ onMounted(async () => {
             <span class="muted-text">{{ formatDate(row.updated_at) }}</span>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="120" fixed="right">
+        <el-table-column label="操作" width="210" fixed="right">
           <template #default="{ row }">
-            <el-button size="small" plain @click="openEditFineTune(row)">编辑</el-button>
+            <div class="table-actions">
+              <el-button size="small" plain @click="openEditFineTune(row)">编辑</el-button>
+              <el-button
+                v-if="row.runner_server_id"
+                size="small"
+                type="primary"
+                plain
+                :loading="dispatchingFineTuneId === row.id"
+                @click="dispatchFineTune(row)"
+              >
+                {{ row.external_job_id ? '重提' : '提交' }}
+              </el-button>
+            </div>
           </template>
         </el-table-column>
       </el-table>
@@ -700,6 +891,39 @@ onMounted(async () => {
       </div>
     </el-drawer>
 
+    <el-drawer v-if="isFineTunesMode" v-model="runnerServerDrawerVisible" :title="runnerServerDrawerTitle" size="520px" destroy-on-close>
+      <div class="model-form">
+        <el-form label-position="top">
+          <el-form-item label="服务器名称">
+            <el-input v-model="runnerServerForm.name" placeholder="例如：gpu-runner-a" />
+          </el-form-item>
+          <el-form-item label="Base URL">
+            <el-input v-model="runnerServerForm.base_url" placeholder="例如：https://gpu-runner.example" />
+          </el-form-item>
+          <el-form-item label="Agent Bearer Token">
+            <el-input
+              v-model="runnerServerForm.auth_token"
+              type="password"
+              show-password
+              placeholder="新建时可填写，编辑时留空表示保留原 token"
+            />
+            <div v-if="runnerServerForm.has_auth_token" class="form-footnote">已保存令牌：{{ runnerServerForm.auth_token_masked || '已配置' }}</div>
+          </el-form-item>
+          <el-form-item label="默认工作目录">
+            <el-input v-model="runnerServerForm.default_work_dir" placeholder="例如：/srv/llamafactory/jobs" />
+          </el-form-item>
+          <el-form-item>
+            <el-switch v-model="runnerServerForm.is_enabled" active-text="允许微调任务提交到该服务器" />
+          </el-form-item>
+        </el-form>
+
+        <div class="drawer-actions">
+          <el-button @click="runnerServerDrawerVisible = false">取消</el-button>
+          <el-button type="primary" @click="submitRunnerServer" :loading="runnerServerSaving">保存服务器</el-button>
+        </div>
+      </div>
+    </el-drawer>
+
     <el-drawer v-if="isFineTunesMode" v-model="fineTuneDrawerVisible" :title="fineTuneDrawerTitle" size="560px" destroy-on-close>
       <div class="model-form">
         <el-form label-position="top">
@@ -714,6 +938,21 @@ onMounted(async () => {
             </el-select>
           </el-form-item>
           <div class="form-grid">
+            <el-form-item label="训练服务器">
+              <el-select v-model="fineTuneForm.runner_server_id" clearable filterable style="width: 100%" placeholder="选择远程训练服务器">
+                <el-option
+                  v-for="option in runnerServerOptions"
+                  :key="option.value"
+                  :label="option.label"
+                  :value="option.value"
+                />
+              </el-select>
+            </el-form-item>
+            <el-form-item label="Runner 标识">
+              <el-input v-model="fineTuneForm.runner_name" placeholder="例如：llamafactory-runner-a" />
+            </el-form-item>
+          </div>
+          <div class="form-grid">
             <el-form-item label="数据集名称">
               <el-input v-model="fineTuneForm.dataset_name" placeholder="例如：财报基准集" />
             </el-form-item>
@@ -725,8 +964,8 @@ onMounted(async () => {
             <el-form-item label="策略">
               <el-input v-model="fineTuneForm.strategy" placeholder="例如：lora" />
             </el-form-item>
-            <el-form-item label="Runner">
-              <el-input v-model="fineTuneForm.runner_name" placeholder="例如：llamafactory-runner-a" />
+            <el-form-item label="远端作业">
+              <el-input v-model="fineTuneForm.external_job_id" disabled placeholder="提交后自动回填" />
             </el-form-item>
           </div>
           <el-form-item label="训练配置 JSON">

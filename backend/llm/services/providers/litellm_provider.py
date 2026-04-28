@@ -7,7 +7,7 @@ from django.conf import settings
 
 from common.exceptions import UpstreamRateLimitError, UpstreamServiceError
 from llm.services.model_invocation_log_service import record_model_invocation
-from llm.services.providers.base import BaseChatProvider, BaseEmbeddingProvider
+from llm.services.providers.base import BaseChatProvider, BaseEmbeddingProvider, BaseRerankProvider
 
 
 logger = logging.getLogger(__name__)
@@ -362,3 +362,79 @@ class LiteLLMEmbeddingProvider(LiteLLMApiMixin, BaseEmbeddingProvider):
             except Exception:
                 logger.exception("Failed to record successful embedding invocation log")
         return vectors
+
+
+class LiteLLMRerankProvider(LiteLLMApiMixin, BaseRerankProvider):
+    def rerank(self, *, query, documents, top_n=None, options=None, trace_id="", request_id=""):
+        payload = {
+            "model": self.model_name,
+            "query": query,
+            "documents": documents,
+        }
+        if top_n is not None:
+            payload["top_n"] = top_n
+
+        started_at = time.monotonic()
+        upstream_model = (
+            (self.model_config.options or {}).get("litellm", {}).get("upstream_model")
+            if self.model_config is not None
+            else None
+        ) or self.model_name
+        try:
+            response_payload = self._post_json(
+                "/v1/rerank",
+                payload,
+                options=options,
+                capability="rerank",
+            )
+        except (UpstreamServiceError, UpstreamRateLimitError) as exc:
+            if self.model_config is not None and self.model_config.pk is not None:
+                try:
+                    record_model_invocation(
+                        model_config=self.model_config,
+                        capability="rerank",
+                        alias=self.model_name,
+                        upstream_model=upstream_model,
+                        status="failed",
+                        latency_ms=int((time.monotonic() - started_at) * 1000),
+                        error_code=exc.code,
+                        error_message=exc.message,
+                        trace_id=trace_id,
+                        request_id=request_id,
+                    )
+                except Exception:
+                    logger.exception("Failed to record failed rerank invocation log")
+            raise
+
+        results = response_payload.get("results") or response_payload.get("data") or []
+        normalized_results = [
+            {
+                "index": item["index"],
+                "relevance_score": item["relevance_score"],
+            }
+            for item in results
+            if isinstance(item, dict) and "index" in item and "relevance_score" in item
+        ]
+        if not normalized_results:
+            raise UpstreamServiceError(
+                "模型服务返回了空重排结果。",
+                status_code=502,
+                code="llm_empty_rerank",
+                provider=self.provider_name,
+            )
+
+        if self.model_config is not None and self.model_config.pk is not None:
+            try:
+                record_model_invocation(
+                    model_config=self.model_config,
+                    capability="rerank",
+                    alias=self.model_name,
+                    upstream_model=upstream_model,
+                    status="success",
+                    latency_ms=int((time.monotonic() - started_at) * 1000),
+                    trace_id=trace_id,
+                    request_id=request_id,
+                )
+            except Exception:
+                logger.exception("Failed to record successful rerank invocation log")
+        return normalized_results

@@ -7,6 +7,9 @@ from llm.controllers.console_controller import (
 )
 from llm.controllers.fine_tune_controller import (
     FineTuneRunCallbackView,
+    FineTuneRunnerServerDetailView,
+    FineTuneRunnerServerListCreateView,
+    FineTuneRunDispatchView,
     FineTuneRunDetailView,
     FineTuneRunExportDetailView,
     FineTuneRunListCreateView,
@@ -77,6 +80,26 @@ urlpatterns = [
     ),
     path("evaluations", EvalRecordListCreateView.as_view(), name="evaluation-list-create-legacy"),
     path("evaluations/", EvalRecordListCreateView.as_view(), name="evaluation-list-create"),
+    path(
+        "fine-tune-servers",
+        FineTuneRunnerServerListCreateView.as_view(),
+        name="fine-tune-server-list-create-legacy",
+    ),
+    path(
+        "fine-tune-servers/",
+        FineTuneRunnerServerListCreateView.as_view(),
+        name="fine-tune-server-list-create",
+    ),
+    path(
+        "fine-tune-servers/<int:runner_server_id>",
+        FineTuneRunnerServerDetailView.as_view(),
+        name="fine-tune-server-detail-legacy",
+    ),
+    path(
+        "fine-tune-servers/<int:runner_server_id>/",
+        FineTuneRunnerServerDetailView.as_view(),
+        name="fine-tune-server-detail",
+    ),
     path("fine-tunes", FineTuneRunListCreateView.as_view(), name="fine-tune-list-create-legacy"),
     path("fine-tunes/", FineTuneRunListCreateView.as_view(), name="fine-tune-list-create"),
     path(
@@ -118,6 +141,16 @@ urlpatterns = [
         "fine-tunes/<int:fine_tune_run_id>/runner-spec/",
         FineTuneRunRunnerSpecView.as_view(),
         name="fine-tune-runner-spec",
+    ),
+    path(
+        "fine-tunes/<int:fine_tune_run_id>/dispatch",
+        FineTuneRunDispatchView.as_view(),
+        name="fine-tune-dispatch-legacy",
+    ),
+    path(
+        "fine-tunes/<int:fine_tune_run_id>/dispatch/",
+        FineTuneRunDispatchView.as_view(),
+        name="fine-tune-dispatch",
     ),
     path(
         "model-configs/test-connection",

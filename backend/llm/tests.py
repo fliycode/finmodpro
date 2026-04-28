@@ -27,6 +27,7 @@ from llm.services.providers.litellm_provider import LiteLLMChatProvider, LiteLLM
 from llm.services.runtime_service import (
     get_chat_provider,
     get_embedding_provider,
+    get_rerank_provider,
 )
 from rbac.services.rbac_service import ROLE_ADMIN, ROLE_MEMBER, ROLE_SUPER_ADMIN, seed_roles_and_permissions
 
@@ -1002,6 +1003,8 @@ class FineTuneRunApiTests(TestCase):
                 "run_key",
                 "external_job_id",
                 "runner_name",
+                "runner_server_id",
+                "runner_server_name",
                 "artifact_path",
                 "export_path",
                 "deployment_endpoint",
@@ -1371,6 +1374,129 @@ class FineTuneRunCallbackApiTests(TestCase):
             manifest_file["url"].endswith(f"{run.run_key}/manifest.json"),
             msg=manifest_file["url"],
         )
+
+    def test_admin_can_configure_remote_runner_server_and_bind_it_to_fine_tune_runs(self):
+        create_server_response = self.client.post(
+            "/api/ops/fine-tune-servers/",
+            data=json.dumps(
+                {
+                    "name": "gpu-runner-a",
+                    "base_url": "https://gpu-runner.example",
+                    "auth_token": "runner-secret-token",
+                    "default_work_dir": "/srv/llamafactory/jobs",
+                    "is_enabled": True,
+                }
+            ),
+            content_type="application/json",
+            HTTP_AUTHORIZATION=f"Bearer {self.admin_access_token}",
+        )
+
+        self.assertEqual(create_server_response.status_code, 201)
+        server_payload = create_server_response.json()["data"]["fine_tune_server"]
+        self.assertEqual(server_payload["name"], "gpu-runner-a")
+        self.assertEqual(server_payload["base_url"], "https://gpu-runner.example")
+        self.assertTrue(server_payload["has_auth_token"])
+        self.assertEqual(server_payload["auth_token_masked"], "runner******oken")
+
+        base_model = get_active_model_config(ModelConfig.CAPABILITY_CHAT)
+        create_run_response = self.client.post(
+            "/api/ops/fine-tunes/",
+            data=json.dumps(
+                {
+                    "base_model_id": base_model.id,
+                    "dataset_name": "财报基准集",
+                    "dataset_version": "2026Q3",
+                    "strategy": "lora",
+                    "runner_server_id": server_payload["id"],
+                    "training_config": {"epochs": 2},
+                }
+            ),
+            content_type="application/json",
+            HTTP_AUTHORIZATION=f"Bearer {self.admin_access_token}",
+        )
+
+        self.assertEqual(create_run_response.status_code, 201)
+        run_payload = create_run_response.json()["data"]["fine_tune_run"]
+        self.assertEqual(run_payload["runner_server_id"], server_payload["id"])
+        self.assertEqual(run_payload["runner_server_name"], "gpu-runner-a")
+
+        runner_spec_response = self.client.get(
+            f"/api/ops/fine-tunes/{run_payload['id']}/runner-spec/",
+            HTTP_X_FINE_TUNE_TOKEN=run_payload["callback_token"],
+        )
+        self.assertEqual(runner_spec_response.status_code, 200)
+        runner_spec = runner_spec_response.json()["data"]
+        self.assertEqual(runner_spec["runner_target"]["server_id"], server_payload["id"])
+        self.assertEqual(runner_spec["runner_target"]["name"], "gpu-runner-a")
+        self.assertEqual(runner_spec["runner_target"]["base_url"], "https://gpu-runner.example")
+        self.assertEqual(runner_spec["runner_target"]["default_work_dir"], "/srv/llamafactory/jobs")
+
+    @patch("urllib.request.urlopen")
+    def test_dispatch_endpoint_submits_job_spec_to_remote_runner(self, mock_urlopen):
+        mock_urlopen.return_value = _FakeHttpResponse(
+            {
+                "code": 0,
+                "data": {
+                    "job_id": "gpu-job-001",
+                    "status": "queued",
+                    "runner_name": "gpu-runner-a",
+                },
+            }
+        )
+        create_server_response = self.client.post(
+            "/api/ops/fine-tune-servers/",
+            data=json.dumps(
+                {
+                    "name": "gpu-runner-a",
+                    "base_url": "https://gpu-runner.example",
+                    "auth_token": "runner-secret-token",
+                    "default_work_dir": "/srv/llamafactory/jobs",
+                    "is_enabled": True,
+                }
+            ),
+            content_type="application/json",
+            HTTP_AUTHORIZATION=f"Bearer {self.admin_access_token}",
+        )
+        server_id = create_server_response.json()["data"]["fine_tune_server"]["id"]
+        base_model = get_active_model_config(ModelConfig.CAPABILITY_CHAT)
+        create_run_response = self.client.post(
+            "/api/ops/fine-tunes/",
+            data=json.dumps(
+                {
+                    "base_model_id": base_model.id,
+                    "dataset_name": "财报基准集",
+                    "dataset_version": "2026Q3",
+                    "strategy": "lora",
+                    "runner_server_id": server_id,
+                    "training_config": {"epochs": 2, "learning_rate": 0.0001},
+                }
+            ),
+            content_type="application/json",
+            HTTP_AUTHORIZATION=f"Bearer {self.admin_access_token}",
+        )
+        run_id = create_run_response.json()["data"]["fine_tune_run"]["id"]
+
+        dispatch_response = self.client.post(
+            f"/api/ops/fine-tunes/{run_id}/dispatch/",
+            HTTP_AUTHORIZATION=f"Bearer {self.admin_access_token}",
+        )
+
+        self.assertEqual(dispatch_response.status_code, 200)
+        payload = dispatch_response.json()["data"]
+        self.assertEqual(payload["dispatch"]["job_id"], "gpu-job-001")
+        self.assertEqual(payload["fine_tune_run"]["external_job_id"], "gpu-job-001")
+        self.assertEqual(payload["fine_tune_run"]["runner_name"], "gpu-runner-a")
+
+        request_obj = mock_urlopen.call_args.args[0]
+        self.assertEqual(request_obj.full_url, "https://gpu-runner.example/api/v1/fine-tune-jobs")
+        self.assertEqual(request_obj.headers["Authorization"], "Bearer runner-secret-token")
+        remote_payload = json.loads(request_obj.data.decode("utf-8"))
+        self.assertEqual(remote_payload["run_key"], payload["fine_tune_run"]["run_key"])
+        self.assertTrue(remote_payload["platform"]["api_base_url"].startswith("http://testserver"))
+        self.assertEqual(remote_payload["runner_target"]["default_work_dir"], "/srv/llamafactory/jobs")
+        self.assertEqual(remote_payload["training_job"]["framework"], "llamafactory")
+        self.assertEqual(remote_payload["callback"]["token_header"], "X-Fine-Tune-Token")
+        self.assertTrue(remote_payload["callback"]["token"].startswith("ftcb_"))
 
 
 class LiteLLMGatewayAuditModelTests(TestCase):
@@ -1765,8 +1891,9 @@ class LiteLLMGatewayCommandServiceTests(TestCase):
         # and default-embedding (Ollama, active).
         result = migrate_active_configs_to_litellm(triggered_by=self.admin_user)
 
-        self.assertEqual(result["migrated_capabilities"], ["chat", "embedding"])
+        self.assertEqual(result["migrated_capabilities"], ["chat", "embedding", "rerank"])
         self.assertTrue(ModelConfig.objects.filter(provider="litellm", capability="chat", is_active=True).exists())
+        self.assertTrue(ModelConfig.objects.filter(provider="litellm", capability="rerank", is_active=True).exists())
         self.assertTrue(LiteLLMSyncEvent.objects.filter(status="success").exists())
 
     def test_migrate_to_litellm_copies_source_chat_options_and_upstream_metadata(self):
@@ -1872,6 +1999,29 @@ class LiteLLMGatewayCommandServiceTests(TestCase):
         route = ModelConfig.objects.get(provider="litellm", capability="embedding", is_active=True)
         self.assertEqual(route.options["litellm"]["upstream_provider"], "dashscope")
         self.assertEqual(route.options["litellm"]["upstream_model"], "openai/text-embedding-v4")
+
+    def test_migrate_to_litellm_creates_active_rerank_route(self):
+        active_rerank = get_active_model_config(ModelConfig.CAPABILITY_RERANK)
+        active_rerank.provider = ModelConfig.PROVIDER_DASHSCOPE
+        active_rerank.name = "dashscope-rerank"
+        active_rerank.model_name = "qwen3-vl-rerank"
+        active_rerank.endpoint = "https://dashscope.aliyuncs.com/api/v1/services/rerank/text-rerank/text-rerank"
+        active_rerank.options = {"api_key": "sk-dashscope"}
+        active_rerank.save()
+
+        result = migrate_active_configs_to_litellm(triggered_by=self.admin_user)
+
+        self.assertIn(ModelConfig.CAPABILITY_RERANK, result["migrated_capabilities"])
+        route = ModelConfig.objects.get(
+            provider=ModelConfig.PROVIDER_LITELLM,
+            capability=ModelConfig.CAPABILITY_RERANK,
+            is_active=True,
+        )
+        self.assertEqual(route.model_name, "qwen3-vl-rerank")
+        self.assertEqual(
+            route.options["litellm"]["upstream_model"],
+            "openai/qwen3-vl-rerank",
+        )
 
     def test_migrate_to_litellm_prunes_stale_nested_routes_when_canonical_route_exists(self):
         active_embedding = get_active_model_config(ModelConfig.CAPABILITY_EMBEDDING)
@@ -2058,6 +2208,39 @@ class LiteLLMGatewayCommandServiceTests(TestCase):
         log = ModelInvocationLog.objects.get(trace_id="embed-fail-trace")
         self.assertEqual(log.status, "failed")
         self.assertEqual(log.model_config, model_config)
+
+    @patch("urllib.request.urlopen")
+    def test_get_rerank_provider_supports_active_litellm_route(self, mock_urlopen):
+        mock_urlopen.return_value = _FakeHttpResponse({
+            "results": [
+                {"index": 1, "relevance_score": 0.91},
+                {"index": 0, "relevance_score": 0.55},
+            ],
+        })
+        ModelConfig.objects.filter(capability=ModelConfig.CAPABILITY_RERANK).update(is_active=False)
+        ModelConfig.objects.create(
+            name="litellm-rerank-test",
+            capability=ModelConfig.CAPABILITY_RERANK,
+            provider=ModelConfig.PROVIDER_LITELLM,
+            model_name="rerank-default",
+            endpoint="http://localhost:4000",
+            options={
+                "api_key": "sk-test",
+                "litellm": {"upstream_model": "openai/qwen-rerank"},
+            },
+            is_active=True,
+        )
+
+        provider = get_rerank_provider()
+        result = provider.rerank(
+            query="capital of france",
+            documents=["Berlin is in Germany.", "Paris is in France."],
+            top_n=1,
+        )
+
+        self.assertEqual(result, [{"index": 1, "relevance_score": 0.91}, {"index": 0, "relevance_score": 0.55}])
+        request_obj = mock_urlopen.call_args.args[0]
+        self.assertTrue(request_obj.full_url.endswith("/v1/rerank"))
 
     @patch("urllib.request.urlopen")
     def test_litellm_chat_provider_records_distinct_alias_and_upstream_model(self, mock_urlopen):
