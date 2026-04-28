@@ -11,6 +11,7 @@ from llm.services.providers.base import BaseChatProvider, BaseEmbeddingProvider,
 
 
 logger = logging.getLogger(__name__)
+TRANSPORT_RETRY_ATTEMPTS = 2
 
 
 class LiteLLMApiMixin:
@@ -60,78 +61,107 @@ class LiteLLMApiMixin:
                 "url": url,
             },
         )
-        try:
-            response = request.urlopen(
-                request.Request(url, data=body, headers=self._build_headers(api_key), method="POST"),
-                timeout=30,
-            )
-            response_payload = json.loads(response.read().decode("utf-8"))
-            logger.info(
-                "Completed %s provider call",
-                self.provider_name,
-                extra={
-                    "provider": self.provider_name,
-                    "capability": capability,
-                    "model_name": self.model_name,
-                    "duration_ms": int((time.monotonic() - started_at) * 1000),
-                },
-            )
-            return response_payload
-        except error.HTTPError as exc:
-            response_body = exc.read().decode("utf-8", errors="ignore")
-            logger.exception(
-                "HTTP error from %s provider",
-                self.provider_name,
-                extra={
-                    "provider": self.provider_name,
-                    "capability": capability,
-                    "model_name": self.model_name,
-                    "status_code": exc.code,
-                    "response_body": response_body[:500],
-                },
-            )
-            lowered_body = response_body.lower()
-            if exc.code == 429:
-                raise UpstreamRateLimitError(
-                    provider=self.provider_name,
-                    retry_after=exc.headers.get("Retry-After"),
-                ) from exc
-            if exc.code in {401, 403} or "api key" in lowered_body or "unauthorized" in lowered_body:
+        for attempt in range(1, TRANSPORT_RETRY_ATTEMPTS + 1):
+            try:
+                response = request.urlopen(
+                    request.Request(url, data=body, headers=self._build_headers(api_key), method="POST"),
+                    timeout=30,
+                )
+                response_payload = json.loads(response.read().decode("utf-8"))
+                logger.info(
+                    "Completed %s provider call",
+                    self.provider_name,
+                    extra={
+                        "provider": self.provider_name,
+                        "capability": capability,
+                        "model_name": self.model_name,
+                        "duration_ms": int((time.monotonic() - started_at) * 1000),
+                    },
+                )
+                return response_payload
+            except error.HTTPError as exc:
+                response_body = exc.read().decode("utf-8", errors="ignore")
+                logger.exception(
+                    "HTTP error from %s provider",
+                    self.provider_name,
+                    extra={
+                        "provider": self.provider_name,
+                        "capability": capability,
+                        "model_name": self.model_name,
+                        "status_code": exc.code,
+                        "response_body": response_body[:500],
+                    },
+                )
+                lowered_body = response_body.lower()
+                if exc.code == 429:
+                    raise UpstreamRateLimitError(
+                        provider=self.provider_name,
+                        retry_after=exc.headers.get("Retry-After"),
+                    ) from exc
+                if exc.code in {401, 403} or "api key" in lowered_body or "unauthorized" in lowered_body:
+                    raise UpstreamServiceError(
+                        "LiteLLM 认证失败。",
+                        status_code=502,
+                        code="llm_provider_auth_failed",
+                        provider=self.provider_name,
+                    ) from exc
+                if exc.code == 404 or "model" in lowered_body and "not" in lowered_body:
+                    raise UpstreamServiceError(
+                        "LiteLLM 模型名称无效。",
+                        status_code=502,
+                        code="llm_provider_invalid_model",
+                        provider=self.provider_name,
+                    ) from exc
                 raise UpstreamServiceError(
-                    "LiteLLM 认证失败。",
+                    "模型服务调用失败。",
                     status_code=502,
-                    code="llm_provider_auth_failed",
+                    code="llm_provider_error",
                     provider=self.provider_name,
                 ) from exc
-            if exc.code == 404 or "model" in lowered_body and "not" in lowered_body:
+            except (error.URLError, TimeoutError) as exc:
+                if attempt < TRANSPORT_RETRY_ATTEMPTS:
+                    logger.warning(
+                        "Retrying %s provider call after transport error",
+                        self.provider_name,
+                        extra={
+                            "provider": self.provider_name,
+                            "capability": capability,
+                            "model_name": self.model_name,
+                            "attempt": attempt,
+                        },
+                    )
+                    continue
+                logger.exception(
+                    "Transport error from %s provider",
+                    self.provider_name,
+                    extra={
+                        "provider": self.provider_name,
+                        "capability": capability,
+                        "model_name": self.model_name,
+                    },
+                )
                 raise UpstreamServiceError(
-                    "LiteLLM 模型名称无效。",
-                    status_code=502,
-                    code="llm_provider_invalid_model",
+                    "LiteLLM 服务暂不可用。",
+                    status_code=503,
+                    code="llm_provider_unavailable",
                     provider=self.provider_name,
                 ) from exc
-            raise UpstreamServiceError(
-                "模型服务调用失败。",
-                status_code=502,
-                code="llm_provider_error",
-                provider=self.provider_name,
-            ) from exc
-        except (error.URLError, TimeoutError, json.JSONDecodeError) as exc:
-            logger.exception(
-                "Transport error from %s provider",
-                self.provider_name,
-                extra={
-                    "provider": self.provider_name,
-                    "capability": capability,
-                    "model_name": self.model_name,
-                },
-            )
-            raise UpstreamServiceError(
-                "LiteLLM 服务暂不可用。",
-                status_code=503,
-                code="llm_provider_unavailable",
-                provider=self.provider_name,
-            ) from exc
+            except json.JSONDecodeError as exc:
+                logger.exception(
+                    "Transport error from %s provider",
+                    self.provider_name,
+                    extra={
+                        "provider": self.provider_name,
+                        "capability": capability,
+                        "model_name": self.model_name,
+                    },
+                )
+                raise UpstreamServiceError(
+                    "LiteLLM 服务暂不可用。",
+                    status_code=503,
+                    code="llm_provider_unavailable",
+                    provider=self.provider_name,
+                ) from exc
 
 
 class LiteLLMChatProvider(LiteLLMApiMixin, BaseChatProvider):
