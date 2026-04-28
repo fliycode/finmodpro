@@ -3,6 +3,7 @@ from django.db import transaction
 
 from llm.models import ModelConfig
 from llm.services.litellm_alias_service import sync_litellm_routes
+from llm.services.litellm_route_utils import normalize_upstream_model_name
 from llm.services.model_config_service import get_active_model_config
 from llm.services.runtime_service import _build_provider
 
@@ -15,15 +16,7 @@ def _strip_litellm_prefixes(name):
 
 
 def _build_upstream_model_name(*, provider, model_name):
-    if not model_name:
-        return ""
-    if "/" in model_name:
-        return model_name
-    if provider == ModelConfig.PROVIDER_DASHSCOPE:
-        prefix = "openai"
-    else:
-        prefix = provider or "openai"
-    return f"{prefix}/{model_name}"
+    return normalize_upstream_model_name(provider=provider, model_name=model_name)
 
 
 def _build_litellm_route_options(model_config):
@@ -32,16 +25,16 @@ def _build_litellm_route_options(model_config):
 
     if model_config.provider == ModelConfig.PROVIDER_LITELLM:
         upstream_provider = litellm_options.get("upstream_provider") or ""
-        upstream_model = litellm_options.get("upstream_model") or _build_upstream_model_name(
+        upstream_model = _build_upstream_model_name(
             provider=upstream_provider or "openai",
-            model_name=model_config.model_name,
+            model_name=litellm_options.get("upstream_model") or model_config.model_name,
         )
         api_base = source_options.get("api_base") or litellm_options.get("base_url") or model_config.endpoint
     else:
         upstream_provider = litellm_options.get("upstream_provider") or model_config.provider
-        upstream_model = litellm_options.get("upstream_model") or _build_upstream_model_name(
+        upstream_model = _build_upstream_model_name(
             provider=upstream_provider,
-            model_name=model_config.model_name,
+            model_name=litellm_options.get("upstream_model") or model_config.model_name,
         )
         api_base = source_options.get("api_base") or model_config.endpoint
 

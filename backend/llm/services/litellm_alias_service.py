@@ -4,11 +4,14 @@ from django.conf import settings
 
 from llm.models import LiteLLMSyncEvent, ModelConfig
 from llm.services.litellm_config_render_service import try_build_rendered_litellm_config
+from llm.services.litellm_route_utils import normalize_upstream_model_name
 
 
-def _build_litellm_alias_config(*, alias, upstream_model_name, api_base, api_key=""):
-    if "/" not in upstream_model_name:
-        upstream_model_name = f"openai/{upstream_model_name}"
+def _build_litellm_alias_config(*, alias, upstream_model_name, api_base, api_key="", upstream_provider=""):
+    upstream_model_name = normalize_upstream_model_name(
+        provider=upstream_provider,
+        model_name=upstream_model_name,
+    )
     api_key_line = f"      api_key: {api_key}\n" if api_key else ""
     return (
         "model_list:\n"
@@ -56,12 +59,17 @@ def sync_litellm_route_for_config(model_config, *, triggered_by):
             (model_config.options or {}).get("litellm", {}).get("upstream_model")
             or model_config.model_name
         )
+        upstream_provider = (
+            (model_config.options or {}).get("litellm", {}).get("upstream_provider")
+            or ""
+        )
         config_path.write_text(
             _build_litellm_alias_config(
                 alias=model_config.model_name,
                 upstream_model_name=upstream_model_name,
                 api_base=api_base,
                 api_key=api_key,
+                upstream_provider=upstream_provider,
             ),
             encoding="utf-8",
         )
@@ -102,12 +110,17 @@ def sync_litellm_routes(*, triggered_by):
                 (route.options or {}).get("litellm", {}).get("upstream_model")
                 or route.model_name
             )
+            upstream_provider = (
+                (route.options or {}).get("litellm", {}).get("upstream_provider")
+                or ""
+            )
             config_path.write_text(
                 _build_litellm_alias_config(
                     alias=route.model_name,
                     upstream_model_name=upstream_model_name,
                     api_base=api_base,
                     api_key=api_key,
+                    upstream_provider=upstream_provider,
                 ),
                 encoding="utf-8",
             )

@@ -86,6 +86,7 @@ const buildProcessStep = (document, task) => {
   const status = String(document.status || '').toLowerCase();
   const step = String(task?.current_step || '').toLowerCase();
   const taskStatus = String(task?.status || '').toLowerCase();
+  const hasTask = Boolean(task);
 
   if (status === 'indexed' || step === 'completed' || taskStatus === 'succeeded') {
     return {
@@ -131,7 +132,7 @@ const buildProcessStep = (document, task) => {
     };
   }
 
-  if (status === 'parsed' || step === 'parsing' || taskStatus === 'running') {
+  if ((status === 'parsed' && hasTask) || step === 'parsing' || taskStatus === 'running') {
     return {
       code: 'parsing',
       label: '解析中',

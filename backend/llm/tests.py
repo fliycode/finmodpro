@@ -23,6 +23,7 @@ from llm.services.model_config_service import get_active_model_config
 from llm.services.fine_tune_service import create_fine_tune_run
 from llm.services.prompt_service import load_prompt_template, render_prompt
 from llm.services.litellm_alias_service import sync_litellm_route_for_config
+from llm.services.litellm_config_render_service import build_rendered_litellm_config
 from llm.services.providers.litellm_provider import LiteLLMChatProvider, LiteLLMEmbeddingProvider
 from llm.services.runtime_service import (
     get_chat_provider,
@@ -2000,6 +2001,32 @@ class LiteLLMGatewayCommandServiceTests(TestCase):
         self.assertEqual(route.options["litellm"]["upstream_provider"], "dashscope")
         self.assertEqual(route.options["litellm"]["upstream_model"], "openai/text-embedding-v4")
 
+    def test_migrate_to_litellm_repairs_stale_dashscope_embedding_prefix_on_existing_route(self):
+        route = ModelConfig.objects.create(
+            name="litellm-existing-embed",
+            capability=ModelConfig.CAPABILITY_EMBEDDING,
+            provider=ModelConfig.PROVIDER_LITELLM,
+            model_name="text-embedding-v4",
+            endpoint=settings.LITELLM_GATEWAY_URL,
+            options={
+                "api_key": "sk-dashscope",
+                "api_base": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+                "litellm": {
+                    "upstream_provider": "dashscope",
+                    "upstream_model": "dashscope/text-embedding-v4",
+                },
+            },
+            is_active=True,
+        )
+
+        migrate_active_configs_to_litellm(triggered_by=self.admin_user)
+
+        route.refresh_from_db()
+        self.assertEqual(
+            route.options["litellm"]["upstream_model"],
+            "openai/text-embedding-v4",
+        )
+
     def test_migrate_to_litellm_creates_active_rerank_route(self):
         active_rerank = get_active_model_config(ModelConfig.CAPABILITY_RERANK)
         active_rerank.provider = ModelConfig.PROVIDER_DASHSCOPE
@@ -3162,6 +3189,19 @@ class LiteLLMAliasYamlRegressionTests(TestCase):
         self.assertIn("model: openai/gpt-4o", yaml_text,
                       "Bare model name must be prefixed with openai/")
 
+    def test_dashscope_embedding_upstream_is_rendered_as_openai_compatible_model(self):
+        model_config = self._make_litellm_model_config(
+            upstream_model="dashscope/text-embedding-v4",
+            model_name="text-embedding-v4",
+        )
+        model_config.capability = ModelConfig.CAPABILITY_EMBEDDING
+        model_config.save(update_fields=["capability", "updated_at"])
+
+        yaml_text = self._sync_and_read_yaml(model_config)
+
+        self.assertIn("model: openai/text-embedding-v4", yaml_text)
+        self.assertNotIn("model: dashscope/text-embedding-v4", yaml_text)
+
     def test_absent_upstream_model_falls_back_to_model_name(self):
         """When options.litellm.upstream_model is absent, model_name is used as the upstream."""
         model_config = self._make_litellm_model_config(upstream_model=None, model_name="my-fallback-route")
@@ -3184,3 +3224,41 @@ class LiteLLMGatewaySettingsTests(TestCase):
     def test_litellm_render_defaults_match_deploy_paths(self):
         self.assertTrue(str(settings.LITELLM_BASE_CONFIG_PATH).endswith("deploy/litellm/config.yaml"))
         self.assertTrue(str(settings.LITELLM_RENDERED_CONFIG_PATH).endswith("deploy/litellm/rendered.config.yaml"))
+
+
+class LiteLLMConfigRenderRegressionTests(TestCase):
+    def setUp(self):
+        self.temp_dir = Path(tempfile.mkdtemp(dir=Path.cwd()))
+
+    def tearDown(self):
+        shutil.rmtree(self.temp_dir, ignore_errors=True)
+
+    def test_render_normalizes_stale_dashscope_embedding_snippet(self):
+        base_config_path = self.temp_dir / "base.yaml"
+        generated_root = self.temp_dir / "generated"
+        output_path = self.temp_dir / "rendered.yaml"
+        generated_root.mkdir(parents=True, exist_ok=True)
+        base_config_path.write_text(
+            "model_list:\n"
+            "litellm_settings:\n"
+            "  drop_params: true\n",
+            encoding="utf-8",
+        )
+        (generated_root / "route-embedding-7.yaml").write_text(
+            "model_list:\n"
+            "  - model_name: text-embedding-v4\n"
+            "    litellm_params:\n"
+            "      model: dashscope/text-embedding-v4\n"
+            "      api_base: https://dashscope.aliyuncs.com/compatible-mode/v1\n",
+            encoding="utf-8",
+        )
+
+        build_rendered_litellm_config(
+            base_config_path=str(base_config_path),
+            generated_root=str(generated_root),
+            output_path=str(output_path),
+        )
+
+        rendered = output_path.read_text(encoding="utf-8")
+        self.assertIn("model: openai/text-embedding-v4", rendered)
+        self.assertNotIn("model: dashscope/text-embedding-v4", rendered)
