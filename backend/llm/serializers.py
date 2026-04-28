@@ -303,6 +303,8 @@ class FineTuneRunUpdateSerializer(serializers.Serializer):
     dataset_name = serializers.CharField(required=False, allow_blank=False, max_length=255)
     dataset_version = serializers.CharField(required=False, allow_blank=True, max_length=128)
     strategy = serializers.CharField(required=False, allow_blank=True, max_length=64)
+    runner_name = serializers.CharField(required=False, allow_blank=True, max_length=128)
+    training_config = serializers.DictField(required=False)
     status = serializers.ChoiceField(choices=FineTuneRun.STATUS_CHOICES, required=False)
     artifact_path = serializers.CharField(required=False, allow_blank=True, max_length=500)
     deployment_endpoint = serializers.CharField(required=False, allow_blank=True, max_length=500)
