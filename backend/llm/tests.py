@@ -1,6 +1,8 @@
 import json
 import os
 import shutil
+import subprocess
+import sys
 import tempfile
 from decimal import Decimal
 from io import BytesIO
@@ -3262,3 +3264,26 @@ class LiteLLMConfigRenderRegressionTests(TestCase):
         rendered = output_path.read_text(encoding="utf-8")
         self.assertIn("model: openai/text-embedding-v4", rendered)
         self.assertNotIn("model: dashscope/text-embedding-v4", rendered)
+
+    def test_render_service_imports_without_django_settings(self):
+        env = os.environ.copy()
+        env.pop("DJANGO_SETTINGS_MODULE", None)
+        python_path = env.get("PYTHONPATH", "")
+        env["PYTHONPATH"] = (
+            f"{Path.cwd()}:{python_path}" if python_path else str(Path.cwd())
+        )
+
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-c",
+                "import llm.services.litellm_config_render_service",
+            ],
+            cwd=Path.cwd(),
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
