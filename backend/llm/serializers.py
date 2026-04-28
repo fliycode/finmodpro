@@ -1,6 +1,6 @@
 from rest_framework import serializers
 
-from llm.models import EvalRecord, FineTuneRun, ModelConfig
+from llm.models import EvalRecord, FineTuneRun, FineTuneRunnerServer, ModelConfig
 
 
 def _mask_api_key(value):
@@ -195,6 +195,39 @@ class EvalRecordCreateSerializer(serializers.Serializer):
     run_notes = serializers.CharField(required=False, allow_blank=True, default="")
 
 
+class FineTuneRunnerServerSummarySerializer(serializers.ModelSerializer):
+    has_auth_token = serializers.SerializerMethodField()
+    auth_token_masked = serializers.SerializerMethodField()
+
+    def get_has_auth_token(self, obj):
+        return bool(obj.auth_token)
+
+    def get_auth_token_masked(self, obj):
+        return _mask_api_key(obj.auth_token)
+
+    class Meta:
+        model = FineTuneRunnerServer
+        fields = (
+            "id",
+            "name",
+            "base_url",
+            "default_work_dir",
+            "is_enabled",
+            "has_auth_token",
+            "auth_token_masked",
+            "created_at",
+            "updated_at",
+        )
+
+
+class FineTuneRunnerServerWriteSerializer(serializers.Serializer):
+    name = serializers.CharField(max_length=255)
+    base_url = serializers.URLField(max_length=500)
+    auth_token = serializers.CharField(required=False, allow_blank=True, max_length=255)
+    default_work_dir = serializers.CharField(required=False, allow_blank=True, max_length=500, default="")
+    is_enabled = serializers.BooleanField(required=False, default=True)
+
+
 class FineTuneRunSummarySerializer(serializers.ModelSerializer):
     base_model_id = serializers.IntegerField(source="base_model.id")
     base_model_name = serializers.CharField(source="base_model.name")
@@ -202,9 +235,19 @@ class FineTuneRunSummarySerializer(serializers.ModelSerializer):
     base_model_provider = serializers.CharField(source="base_model.provider")
     callback_token = serializers.SerializerMethodField()
     registered_model_config_id = serializers.IntegerField(source="registered_model_config.id", allow_null=True)
+    runner_server_id = serializers.SerializerMethodField()
+    runner_server_name = serializers.SerializerMethodField()
 
     def get_callback_token(self, obj):
-        return getattr(obj, "callback_token", "")
+        return getattr(obj, "callback_token", "") or getattr(obj, "callback_token_value", "")
+
+    def get_runner_server_id(self, obj):
+        return obj.runner_server_id
+
+    def get_runner_server_name(self, obj):
+        if obj.runner_server_id is None:
+            return ""
+        return obj.runner_server.name
 
     class Meta:
         model = FineTuneRun
@@ -221,6 +264,8 @@ class FineTuneRunSummarySerializer(serializers.ModelSerializer):
             "run_key",
             "external_job_id",
             "runner_name",
+            "runner_server_id",
+            "runner_server_name",
             "artifact_path",
             "export_path",
             "deployment_endpoint",
@@ -244,6 +289,7 @@ class FineTuneRunSummarySerializer(serializers.ModelSerializer):
 
 class FineTuneRunCreateSerializer(serializers.Serializer):
     base_model_id = serializers.IntegerField()
+    runner_server_id = serializers.IntegerField(required=False, allow_null=True)
     dataset_name = serializers.CharField(max_length=255)
     dataset_version = serializers.CharField(required=False, allow_blank=True, max_length=128, default="")
     strategy = serializers.CharField(required=False, allow_blank=True, max_length=64, default="lora")
@@ -253,6 +299,7 @@ class FineTuneRunCreateSerializer(serializers.Serializer):
 
 
 class FineTuneRunUpdateSerializer(serializers.Serializer):
+    runner_server_id = serializers.IntegerField(required=False, allow_null=True)
     dataset_name = serializers.CharField(required=False, allow_blank=False, max_length=255)
     dataset_version = serializers.CharField(required=False, allow_blank=True, max_length=128)
     strategy = serializers.CharField(required=False, allow_blank=True, max_length=64)

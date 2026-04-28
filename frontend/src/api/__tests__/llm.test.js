@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 
 import {
   createLlmApi,
+  normalizeFineTuneRun,
   normalizeModelConfigPayload,
 } from '../llm.js';
 
@@ -84,4 +85,43 @@ test('createLlmApi deletes model configs', async () => {
       },
     },
   ]);
+});
+
+test('normalizeFineTuneRun keeps runner server metadata', () => {
+  const run = normalizeFineTuneRun({
+    id: 12,
+    run_key: 'ft-001',
+    runner_server_id: 9,
+    runner_server_name: 'gpu-runner-a',
+  });
+
+  assert.equal(run.runner_server_id, 9);
+  assert.equal(run.runner_server_name, 'gpu-runner-a');
+});
+
+test('createLlmApi manages fine-tune runner servers and dispatch', async () => {
+  const calls = [];
+  const api = createLlmApi({
+    fetchJson: async (path, options) => {
+      calls.push({ path, options });
+      return { code: 0, data: { fine_tune_server: { id: 1 }, fine_tune_run: { id: 8 }, dispatch: { job_id: 'gpu-job-001' } } };
+    },
+  });
+
+  await api.getFineTuneRunnerServers();
+  await api.createFineTuneRunnerServer({ name: 'gpu-a' });
+  await api.updateFineTuneRunnerServer(1, { name: 'gpu-b' });
+  await api.deleteFineTuneRunnerServer(1);
+  await api.dispatchFineTuneRun(8);
+
+  assert.deepEqual(
+    calls.map((call) => ({ path: call.path, method: call.options.method })),
+    [
+      { path: '/api/ops/fine-tune-servers/', method: 'GET' },
+      { path: '/api/ops/fine-tune-servers/', method: 'POST' },
+      { path: '/api/ops/fine-tune-servers/1/', method: 'PATCH' },
+      { path: '/api/ops/fine-tune-servers/1/', method: 'DELETE' },
+      { path: '/api/ops/fine-tunes/8/dispatch/', method: 'POST' },
+    ],
+  );
 });

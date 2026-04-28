@@ -107,7 +107,7 @@ def get_export_bundle_detail(*, fine_tune_run):
     }
 
 
-def get_runner_execution_spec(*, fine_tune_run, request):
+def get_runner_execution_spec(*, fine_tune_run, request, include_callback_token=False):
     export_detail = get_export_bundle_detail(fine_tune_run=fine_tune_run)
     base_url = settings.FINE_TUNE_EXPORT_BASE_URL.strip().rstrip("/")
 
@@ -123,10 +123,35 @@ def get_runner_execution_spec(*, fine_tune_run, request):
             }
         )
 
+    callback_contract = {
+        "url": request.build_absolute_uri(f"/api/ops/fine-tunes/{fine_tune_run.id}/callback/"),
+        "token_header": "X-Fine-Tune-Token",
+    }
+    if include_callback_token:
+        callback_contract["token"] = fine_tune_run.callback_token_value
+
+    runner_target = {
+        "server_id": fine_tune_run.runner_server_id,
+        "name": "",
+        "base_url": "",
+        "default_work_dir": "",
+    }
+    if fine_tune_run.runner_server_id:
+        runner_target = {
+            "server_id": fine_tune_run.runner_server_id,
+            "name": fine_tune_run.runner_server.name,
+            "base_url": fine_tune_run.runner_server.base_url,
+            "default_work_dir": fine_tune_run.runner_server.default_work_dir,
+        }
+
     return {
         "fine_tune_run_id": fine_tune_run.id,
         "run_key": fine_tune_run.run_key,
         "status": fine_tune_run.status,
+        "platform": {
+            "api_base_url": request.build_absolute_uri("/").rstrip("/"),
+        },
+        "runner_target": runner_target,
         "training_job": {
             "framework": "llamafactory",
             "strategy": fine_tune_run.strategy,
@@ -142,8 +167,5 @@ def get_runner_execution_spec(*, fine_tune_run, request):
             "manifest": export_detail["manifest"],
             "files": export_files,
         },
-        "callback": {
-            "url": request.build_absolute_uri(f"/api/ops/fine-tunes/{fine_tune_run.id}/callback/"),
-            "token_header": "X-Fine-Tune-Token",
-        },
+        "callback": callback_contract,
     }

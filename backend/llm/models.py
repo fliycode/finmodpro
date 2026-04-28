@@ -124,6 +124,19 @@ class EvalRecord(models.Model):
         ordering = ["-created_at", "-id"]
 
 
+class FineTuneRunnerServer(models.Model):
+    name = models.CharField(max_length=255, unique=True)
+    base_url = models.URLField(max_length=500)
+    auth_token = models.CharField(max_length=255, blank=True, default="")
+    default_work_dir = models.CharField(max_length=500, blank=True, default="")
+    is_enabled = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["name", "id"]
+
+
 class FineTuneRun(models.Model):
     STATUS_PENDING = "pending"
     STATUS_RUNNING = "running"
@@ -148,6 +161,13 @@ class FineTuneRun(models.Model):
         blank=True,
         null=True,
     )
+    runner_server = models.ForeignKey(
+        FineTuneRunnerServer,
+        related_name="fine_tune_runs",
+        on_delete=models.SET_NULL,
+        blank=True,
+        null=True,
+    )
     run_key = models.CharField(max_length=64, blank=True, default="", db_index=True)
     external_job_id = models.CharField(max_length=255, blank=True, default="", db_index=True)
     runner_name = models.CharField(max_length=128, blank=True, default="")
@@ -165,6 +185,7 @@ class FineTuneRun(models.Model):
     deployment_endpoint = models.CharField(max_length=500, blank=True, default="")
     deployment_model_name = models.CharField(max_length=255, blank=True, default="")
     callback_token_hash = models.CharField(max_length=128, blank=True, default="")
+    callback_token_value = models.CharField(max_length=255, blank=True, default="")
     dataset_manifest = models.JSONField(default=dict, blank=True)
     training_config = models.JSONField(default=dict, blank=True)
     artifact_manifest = models.JSONField(default=dict, blank=True)
