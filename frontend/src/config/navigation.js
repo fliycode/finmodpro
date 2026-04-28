@@ -15,6 +15,7 @@ export const navigationMap = {
     { id: 'admin-llm-models', label: 'Models / Routing', to: '/admin/llm/models', icon: 'sliders', group: 'admin-llm' },
     { id: 'admin-llm-observability', label: 'Logs / Observability', to: '/admin/llm/observability', icon: 'eye', group: 'admin-llm' },
     { id: 'admin-llm-costs', label: 'Cost / Usage', to: '/admin/llm/costs', icon: 'beaker', group: 'admin-llm' },
+    { id: 'admin-llm-fine-tunes', label: 'Fine-tunes / LLaMA-Factory', to: '/admin/llm/fine-tunes', icon: 'spark', group: 'admin-llm' },
     { id: 'admin-evaluation', label: '评测结果', to: '/admin/evaluation', icon: 'beaker', group: 'admin-governance' },
   ],
 };
