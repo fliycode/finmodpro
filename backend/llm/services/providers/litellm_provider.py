@@ -11,7 +11,7 @@ from llm.services.providers.base import BaseChatProvider, BaseEmbeddingProvider,
 
 
 logger = logging.getLogger(__name__)
-TRANSPORT_RETRY_ATTEMPTS = 2
+TRANSPORT_RETRY_ATTEMPTS = 3
 
 
 class LiteLLMApiMixin:
