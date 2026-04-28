@@ -295,32 +295,32 @@ class LiteLLMChatProvider(LiteLLMApiMixin, BaseChatProvider):
 
 class LiteLLMEmbeddingProvider(LiteLLMApiMixin, BaseEmbeddingProvider):
     def embed(self, *, texts, options=None, trace_id="", request_id=""):
-        vectors = []
-        total_request_tokens = 0
         started_at = time.monotonic()
         merged_options = self._resolve_options(options)
+        total_request_tokens = 0
         upstream_model = (
             (self.model_config.options or {}).get("litellm", {}).get("upstream_model")
             if self.model_config is not None
             else None
         ) or self.model_name
         try:
-            for text in texts:
-                payload = {
-                    "model": self.model_name,
-                    "input": text,
-                    "encoding_format": merged_options.get("encoding_format") or "float",
-                }
-                response_payload = self._post_json(
-                    "/v1/embeddings",
-                    payload,
-                    options=options,
-                    capability="embedding",
-                )
-                usage = response_payload.get("usage") or {}
-                total_request_tokens += usage.get("prompt_tokens", 0)
-                data = response_payload.get("data") or []
-                embedding = (data[0] or {}).get("embedding")
+            payload = {
+                "model": self.model_name,
+                "input": texts[0] if len(texts) == 1 else texts,
+                "encoding_format": merged_options.get("encoding_format") or "float",
+            }
+            response_payload = self._post_json(
+                "/v1/embeddings",
+                payload,
+                options=options,
+                capability="embedding",
+            )
+            usage = response_payload.get("usage") or {}
+            total_request_tokens = usage.get("prompt_tokens", 0)
+            data = response_payload.get("data") or []
+            vectors = []
+            for item in data:
+                embedding = (item or {}).get("embedding")
                 if not isinstance(embedding, list) or not embedding:
                     raise UpstreamServiceError(
                         "模型服务返回了空向量。",
@@ -329,6 +329,13 @@ class LiteLLMEmbeddingProvider(LiteLLMApiMixin, BaseEmbeddingProvider):
                         provider=self.provider_name,
                     )
                 vectors.append(embedding)
+            if len(vectors) != len(texts):
+                raise UpstreamServiceError(
+                    "模型服务返回的向量数量不匹配。",
+                    status_code=502,
+                    code="llm_invalid_embedding_count",
+                    provider=self.provider_name,
+                )
         except (UpstreamServiceError, UpstreamRateLimitError) as exc:
             if self.model_config is not None and self.model_config.pk is not None:
                 try:

@@ -3,7 +3,7 @@ import os
 from django.conf import settings
 
 from knowledgebase.models import DocumentChunk
-from knowledgebase.services.embedding_service import build_dense_embedding
+from knowledgebase.services.embedding_service import build_dense_embedding, build_dense_embeddings
 
 
 class VectorService:
@@ -111,28 +111,32 @@ class VectorService:
     def _build_rows(self, document):
         rows = []
         chunks_to_update = []
-        queryset = DocumentChunk.objects.filter(document=document).order_by("chunk_index")
-        for chunk in queryset:
-            vector_id = int(chunk.id)
-            vector = build_dense_embedding(chunk.content)
-            rows.append(
-                {
-                    "id": vector_id,
-                    "vector": vector,
-                    "document_id": document.id,
-                    "chunk_id": chunk.id,
-                    "document_title": document.title,
-                    "doc_type": document.doc_type,
-                    "source_date": document.source_date.isoformat()
-                    if document.source_date
-                    else "",
-                    "chunk_index": chunk.chunk_index,
-                    "page_label": chunk.metadata.get("page_label", ""),
-                    "content": chunk.content,
-                }
-            )
-            chunk.vector_id = str(vector_id)
-            chunks_to_update.append(chunk)
+        chunks = list(DocumentChunk.objects.filter(document=document).order_by("chunk_index"))
+        batch_size = max(int(getattr(settings, "KB_EMBEDDING_BATCH_SIZE", 1) or 1), 1)
+
+        for start in range(0, len(chunks), batch_size):
+            chunk_batch = chunks[start:start + batch_size]
+            vectors = build_dense_embeddings([chunk.content for chunk in chunk_batch])
+            for chunk, vector in zip(chunk_batch, vectors):
+                vector_id = int(chunk.id)
+                rows.append(
+                    {
+                        "id": vector_id,
+                        "vector": vector,
+                        "document_id": document.id,
+                        "chunk_id": chunk.id,
+                        "document_title": document.title,
+                        "doc_type": document.doc_type,
+                        "source_date": document.source_date.isoformat()
+                        if document.source_date
+                        else "",
+                        "chunk_index": chunk.chunk_index,
+                        "page_label": chunk.metadata.get("page_label", ""),
+                        "content": chunk.content,
+                    }
+                )
+                chunk.vector_id = str(vector_id)
+                chunks_to_update.append(chunk)
         return rows, chunks_to_update
 
     def index(self, document):

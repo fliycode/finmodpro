@@ -14,7 +14,7 @@ from django.utils import timezone
 
 from authentication.models import User
 from authentication.services.jwt_service import generate_access_token
-from knowledgebase.models import Document, IngestionTask
+from knowledgebase.models import Document, DocumentChunk, IngestionTask
 from knowledgebase.services.chunk_service import build_document_chunks
 from knowledgebase.services.document_service import (
     batch_enqueue_document_ingestion,
@@ -38,6 +38,15 @@ from rbac.services.rbac_service import ROLE_ADMIN, seed_roles_and_permissions
 
 class FakeEmbeddingProvider:
     def embed(self, *, texts, options=None):
+        return [[float(index + 1) for index in range(64)] for _ in texts]
+
+
+class RecordingEmbeddingProvider:
+    def __init__(self):
+        self.calls = []
+
+    def embed(self, *, texts, options=None):
+        self.calls.append(list(texts))
         return [[float(index + 1) for index in range(64)] for _ in texts]
 
 
@@ -1263,3 +1272,58 @@ class ParserServiceTests(TestCase):
         )
         with self.assertRaisesRegex(ValueError, "不支持的文档类型"):
             ParserService().parse(doc)
+
+
+class _FakeMilvusClient:
+    def __init__(self):
+        self.insert_calls = []
+
+    def insert(self, collection_name, rows):
+        self.insert_calls.append((collection_name, rows))
+
+
+@override_settings(KB_EMBEDDING_BATCH_SIZE=2)
+class VectorServiceBatchingTests(TestCase):
+    def setUp(self):
+        self.media_root = tempfile.mkdtemp()
+        self.override = override_settings(MEDIA_ROOT=self.media_root)
+        self.override.enable()
+
+    def tearDown(self):
+        self.override.disable()
+        shutil.rmtree(self.media_root, ignore_errors=True)
+
+    @patch("rag.services.vector_store_service.index_document")
+    @patch.object(VectorService, "_delete_existing_document_vectors")
+    @patch.object(VectorService, "ensure_collection")
+    def test_index_batches_chunk_embeddings(self, mock_ensure_collection, _mock_delete_existing_vectors, mock_index_document):
+        provider = RecordingEmbeddingProvider()
+        fake_client = _FakeMilvusClient()
+        mock_ensure_collection.return_value = fake_client
+        document = Document.objects.create(
+            title="Batch me",
+            file=SimpleUploadedFile("batch.txt", b"batch me", content_type="text/plain"),
+            filename="batch.txt",
+            doc_type="txt",
+            status=Document.STATUS_CHUNKED,
+            visibility=Document.VISIBILITY_INTERNAL,
+            parsed_text="chunk one\nchunk two\nchunk three",
+        )
+        DocumentChunk.objects.create(document=document, chunk_index=0, content="chunk one")
+        DocumentChunk.objects.create(document=document, chunk_index=1, content="chunk two")
+        DocumentChunk.objects.create(document=document, chunk_index=2, content="chunk three")
+
+        with patch(
+            "knowledgebase.services.embedding_service.get_embedding_provider",
+            return_value=provider,
+        ):
+            VectorService().index(document)
+
+        self.assertEqual(
+            provider.calls,
+            [["chunk one", "chunk two"], ["chunk three"]],
+        )
+        self.assertEqual(len(fake_client.insert_calls), 1)
+        inserted_rows = fake_client.insert_calls[0][1]
+        self.assertEqual(len(inserted_rows), 3)
+        mock_index_document.assert_called_once_with(document)
