@@ -13,7 +13,7 @@ from urllib.error import HTTPError, URLError
 from django.conf import settings
 from django.contrib.auth.models import Group
 from django.test import TestCase
-from django.test import Client, override_settings
+from django.test import Client, SimpleTestCase, override_settings
 
 from common.exceptions import ServiceConfigurationError, UpstreamRateLimitError, UpstreamServiceError
 from authentication.models import User
@@ -23,6 +23,7 @@ from llm.services import model_config_command_service
 from llm.services.model_config_command_service import migrate_active_configs_to_litellm
 from llm.services.model_config_service import get_active_model_config
 from llm.services.fine_tune_service import create_fine_tune_run
+from llm.services.fine_tune_runner_client import build_llamafactory_command
 from llm.services.prompt_service import load_prompt_template, render_prompt
 from llm.services.litellm_alias_service import sync_litellm_route_for_config
 from llm.services.litellm_config_render_service import build_rendered_litellm_config
@@ -1063,6 +1064,133 @@ class FineTuneRunApiTests(TestCase):
         self.assertEqual(payload["data"]["fine_tune_run"]["metrics"]["f1_score"], 0.95)
         self.assertEqual(payload["data"]["fine_tune_run"]["notes"], "训练结果已回写平台。")
         self.assertEqual(payload["data"]["fine_tune_run"]["artifact_manifest"], {})
+
+    def test_update_fine_tune_run_accepts_runner_name_and_training_config(self):
+        base_model = get_active_model_config(ModelConfig.CAPABILITY_CHAT)
+        run = FineTuneRun.objects.create(
+            base_model=base_model,
+            dataset_name="财报基准集",
+            dataset_version="2026Q1",
+            strategy="lora",
+            runner_name="legacy-runner",
+            training_config={"epochs": 3},
+            status=FineTuneRun.STATUS_PENDING,
+            notes="等待登记。",
+        )
+
+        response = self.client.patch(
+            f"/api/ops/fine-tunes/{run.id}",
+            data=json.dumps(
+                {
+                    "runner_name": "llamafactory-runner-a",
+                    "training_config": {
+                        "template": "llama3",
+                        "cutoff_len": 4096,
+                        "num_train_epochs": 5,
+                        "lora_rank": 16,
+                    },
+                }
+            ),
+            content_type="application/json",
+            HTTP_AUTHORIZATION=f"Bearer {self.admin_access_token}",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()["data"]["fine_tune_run"]
+        self.assertEqual(payload["runner_name"], "llamafactory-runner-a")
+        self.assertEqual(payload["training_config"]["template"], "llama3")
+        self.assertEqual(payload["training_config"]["cutoff_len"], 4096)
+        self.assertEqual(payload["training_config"]["num_train_epochs"], 5)
+        self.assertEqual(payload["training_config"]["lora_rank"], 16)
+
+
+class FineTuneRunnerClientTests(SimpleTestCase):
+    def test_build_llamafactory_command_supports_native_sft_lora_fields(self):
+        command = build_llamafactory_command(
+            spec={
+                "run_key": "ft-001",
+                "training_job": {
+                    "base_model_name": "meta-llama/Meta-Llama-3-8B-Instruct",
+                    "strategy": "qlora",
+                    "training_config": {
+                        "template": "llama3",
+                        "cutoff_len": 4096,
+                        "max_samples": 2000,
+                        "preprocessing_num_workers": 8,
+                        "dataloader_num_workers": 2,
+                        "overwrite_cache": True,
+                        "packing": False,
+                        "per_device_train_batch_size": 2,
+                        "gradient_accumulation_steps": 8,
+                        "learning_rate": 0.0001,
+                        "num_train_epochs": 3,
+                        "lr_scheduler_type": "cosine",
+                        "warmup_ratio": 0.1,
+                        "max_grad_norm": 1.0,
+                        "logging_steps": 10,
+                        "save_steps": 200,
+                        "plot_loss": True,
+                        "save_only_model": False,
+                        "report_to": "none",
+                        "bf16": True,
+                        "gradient_checkpointing": True,
+                        "lora_rank": 16,
+                        "lora_alpha": 32,
+                        "lora_dropout": 0.05,
+                        "lora_target": "all",
+                        "quantization_bit": 4,
+                    },
+                },
+            },
+            export_dir="/tmp/export",
+            output_dir="/tmp/output",
+        )
+
+        self.assertEqual(command[:4], ["llamafactory-cli", "train", "--stage", "sft"])
+        self.assertIn("--template", command)
+        self.assertIn("llama3", command)
+        self.assertIn("--cutoff_len", command)
+        self.assertIn("4096", command)
+        self.assertIn("--max_samples", command)
+        self.assertIn("--per_device_train_batch_size", command)
+        self.assertIn("--gradient_accumulation_steps", command)
+        self.assertIn("--lr_scheduler_type", command)
+        self.assertIn("--logging_steps", command)
+        self.assertIn("--save_steps", command)
+        self.assertIn("--plot_loss", command)
+        self.assertIn("--save_only_model", command)
+        self.assertIn("--bf16", command)
+        self.assertIn("--gradient_checkpointing", command)
+        self.assertIn("--lora_rank", command)
+        self.assertIn("--lora_alpha", command)
+        self.assertIn("--lora_dropout", command)
+        self.assertIn("--lora_target", command)
+        self.assertIn("--quantization_bit", command)
+        self.assertIn("--finetuning_type", command)
+        qlora_index = command.index("--finetuning_type")
+        self.assertEqual(command[qlora_index + 1], "qlora")
+
+    def test_build_llamafactory_command_keeps_legacy_field_compatibility(self):
+        command = build_llamafactory_command(
+            spec={
+                "run_key": "ft-legacy",
+                "training_job": {
+                    "base_model_name": "deepseek-ai/deepseek-llm-7b-chat",
+                    "strategy": "lora",
+                    "training_config": {
+                        "epochs": 4,
+                        "batch_size": 3,
+                    },
+                },
+            },
+            export_dir="/tmp/export",
+            output_dir="/tmp/output",
+        )
+
+        epochs_index = command.index("--num_train_epochs")
+        batch_index = command.index("--per_device_train_batch_size")
+        self.assertEqual(command[epochs_index + 1], "4")
+        self.assertEqual(command[batch_index + 1], "3")
 
 
 class FineTuneRunCallbackApiTests(TestCase):

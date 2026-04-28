@@ -4,6 +4,16 @@ import { RouterLink } from "vue-router";
 import { llmApi, normalizeModelConfigPayload } from "../api/llm.js";
 import { useFlash } from "../lib/flash.js";
 import {
+  buildLlamaFactoryTrainingConfig,
+  createLlamaFactoryTrainingFormState,
+  LLAMAFACTORY_EVAL_STRATEGY_OPTIONS,
+  LLAMAFACTORY_PRECISION_OPTIONS,
+  LLAMAFACTORY_REPORT_TO_OPTIONS,
+  LLAMAFACTORY_SCHEDULER_OPTIONS,
+  LLAMAFACTORY_STRATEGY_OPTIONS,
+  normalizeLlamaFactoryTrainingConfig,
+} from "../lib/llamafactory-config.js";
+import {
   getConsolePageAlerts,
   getInitialFineTuneFilterId,
   shouldShowConsoleConfigRetry,
@@ -58,9 +68,8 @@ const defaultFineTuneFormState = () => ({
   runner_server_id: "",
   dataset_name: "",
   dataset_version: "",
-  strategy: "lora",
   runner_name: "",
-  training_config_json: "{\n  \"epochs\": 3\n}",
+  training: createLlamaFactoryTrainingFormState(),
   status: "pending",
   external_job_id: "",
   artifact_path: "",
@@ -129,6 +138,7 @@ const pageCopy = computed(() => {
     subtitle: "管理平台级对话和向量模型，并明确当前启用关系、LiteLLM alias 入口以及与微调回流模型的衔接方式。",
   };
 });
+const isQlorStrategy = computed(() => fineTuneForm.training?.strategy === "qlora");
 
 const resetForm = () => {
   Object.assign(form, defaultFormState());
@@ -208,9 +218,11 @@ const openEditFineTune = (run) => {
   fineTuneForm.runner_server_id = run.runner_server_id || "";
   fineTuneForm.dataset_name = run.dataset_name;
   fineTuneForm.dataset_version = run.dataset_version;
-  fineTuneForm.strategy = run.strategy;
   fineTuneForm.runner_name = run.runner_name || "";
-  fineTuneForm.training_config_json = JSON.stringify(run.training_config || {}, null, 2);
+  fineTuneForm.training = normalizeLlamaFactoryTrainingConfig({
+    strategy: run.strategy,
+    trainingConfig: run.training_config || {},
+  });
   fineTuneForm.status = run.status;
   fineTuneForm.external_job_id = run.external_job_id || "";
   fineTuneForm.artifact_path = run.artifact_path;
@@ -236,13 +248,15 @@ const buildFineTunePayload = () => {
     throw new Error("请选择基础模型");
   }
 
+  if (!String(fineTuneForm.training.template || "").trim()) {
+    throw new Error("请填写 LLaMA-Factory template");
+  }
+
   let trainingConfig = {};
-  if (fineTuneForm.training_config_json.trim()) {
-    try {
-      trainingConfig = JSON.parse(fineTuneForm.training_config_json);
-    } catch (error) {
-      throw new Error("训练配置 JSON 格式不正确");
-    }
+  try {
+    trainingConfig = buildLlamaFactoryTrainingConfig(fineTuneForm.training);
+  } catch (error) {
+    throw new Error("高级附加参数 JSON 格式不正确");
   }
 
   const payload = {
@@ -250,7 +264,7 @@ const buildFineTunePayload = () => {
     runner_server_id: fineTuneForm.runner_server_id ? Number(fineTuneForm.runner_server_id) : null,
     dataset_name: fineTuneForm.dataset_name.trim(),
     dataset_version: fineTuneForm.dataset_version.trim(),
-    strategy: fineTuneForm.strategy.trim() || "lora",
+    strategy: fineTuneForm.training.strategy || "lora",
     runner_name: fineTuneForm.runner_name.trim(),
     training_config: trainingConfig,
     notes: fineTuneForm.notes.trim(),
@@ -924,7 +938,7 @@ onMounted(async () => {
       </div>
     </el-drawer>
 
-    <el-drawer v-if="isFineTunesMode" v-model="fineTuneDrawerVisible" :title="fineTuneDrawerTitle" size="560px" destroy-on-close>
+    <el-drawer v-if="isFineTunesMode" v-model="fineTuneDrawerVisible" :title="fineTuneDrawerTitle" size="780px" destroy-on-close>
       <div class="model-form">
         <el-form label-position="top">
           <el-form-item label="基础模型">
@@ -961,19 +975,220 @@ onMounted(async () => {
             </el-form-item>
           </div>
           <div class="form-grid">
-            <el-form-item label="策略">
-              <el-input v-model="fineTuneForm.strategy" placeholder="例如：lora" />
+            <el-form-item label="训练阶段">
+              <el-input :model-value="String(fineTuneForm.training.stage || 'sft').toUpperCase()" disabled />
+            </el-form-item>
+            <el-form-item label="微调方式">
+              <el-select v-model="fineTuneForm.training.strategy" style="width: 100%">
+                <el-option
+                  v-for="option in LLAMAFACTORY_STRATEGY_OPTIONS"
+                  :key="option.value"
+                  :label="option.label"
+                  :value="option.value"
+                />
+              </el-select>
+            </el-form-item>
+          </div>
+          <div class="form-grid">
+            <el-form-item label="Template">
+              <el-input v-model="fineTuneForm.training.template" placeholder="例如：llama3 / qwen / deepseek" />
             </el-form-item>
             <el-form-item label="远端作业">
               <el-input v-model="fineTuneForm.external_job_id" disabled placeholder="提交后自动回填" />
             </el-form-item>
           </div>
-          <el-form-item label="训练配置 JSON">
+          <el-alert
+            title="输出目录、导出目录和回调地址仍由 runner/control plane 管理，这里只暴露常用训练参数；未覆盖的原生字段可放在高级附加参数 JSON。"
+            type="info"
+            :closable="false"
+            show-icon
+          />
+
+          <div class="llamafactory-section">
+            <div class="llamafactory-section__title">数据参数</div>
+            <div class="form-grid">
+              <el-form-item label="cutoff_len">
+                <el-input-number v-model="fineTuneForm.training.cutoff_len" :min="128" :max="32768" :step="128" style="width: 100%" />
+              </el-form-item>
+              <el-form-item label="max_samples">
+                <el-input-number v-model="fineTuneForm.training.max_samples" :min="1" :step="1000" style="width: 100%" />
+              </el-form-item>
+            </div>
+            <div class="form-grid">
+              <el-form-item label="preprocessing_num_workers">
+                <el-input-number v-model="fineTuneForm.training.preprocessing_num_workers" :min="0" :max="64" style="width: 100%" />
+              </el-form-item>
+              <el-form-item label="dataloader_num_workers">
+                <el-input-number v-model="fineTuneForm.training.dataloader_num_workers" :min="0" :max="64" style="width: 100%" />
+              </el-form-item>
+            </div>
+            <div class="form-grid form-grid--toggles">
+              <el-form-item label="overwrite_cache">
+                <el-switch v-model="fineTuneForm.training.overwrite_cache" />
+              </el-form-item>
+              <el-form-item label="packing">
+                <el-switch v-model="fineTuneForm.training.packing" />
+              </el-form-item>
+            </div>
+          </div>
+
+          <div class="llamafactory-section">
+            <div class="llamafactory-section__title">训练参数</div>
+            <div class="form-grid">
+              <el-form-item label="per_device_train_batch_size">
+                <el-input-number v-model="fineTuneForm.training.per_device_train_batch_size" :min="1" :max="512" style="width: 100%" />
+              </el-form-item>
+              <el-form-item label="gradient_accumulation_steps">
+                <el-input-number v-model="fineTuneForm.training.gradient_accumulation_steps" :min="1" :max="1024" style="width: 100%" />
+              </el-form-item>
+            </div>
+            <div class="form-grid">
+              <el-form-item label="learning_rate">
+                <el-input-number v-model="fineTuneForm.training.learning_rate" :min="0" :step="0.00001" :precision="6" style="width: 100%" />
+              </el-form-item>
+              <el-form-item label="num_train_epochs">
+                <el-input-number v-model="fineTuneForm.training.num_train_epochs" :min="1" :step="1" style="width: 100%" />
+              </el-form-item>
+            </div>
+            <div class="form-grid">
+              <el-form-item label="lr_scheduler_type">
+                <el-select v-model="fineTuneForm.training.lr_scheduler_type" style="width: 100%">
+                  <el-option
+                    v-for="option in LLAMAFACTORY_SCHEDULER_OPTIONS"
+                    :key="option.value"
+                    :label="option.label"
+                    :value="option.value"
+                  />
+                </el-select>
+              </el-form-item>
+              <el-form-item label="warmup_ratio">
+                <el-input-number v-model="fineTuneForm.training.warmup_ratio" :min="0" :max="1" :step="0.01" :precision="2" style="width: 100%" />
+              </el-form-item>
+            </div>
+            <div class="form-grid">
+              <el-form-item label="max_grad_norm">
+                <el-input-number v-model="fineTuneForm.training.max_grad_norm" :min="0" :step="0.1" :precision="2" style="width: 100%" />
+              </el-form-item>
+              <el-form-item label="precision">
+                <el-select v-model="fineTuneForm.training.precision_type" style="width: 100%">
+                  <el-option
+                    v-for="option in LLAMAFACTORY_PRECISION_OPTIONS"
+                    :key="option.value"
+                    :label="option.label"
+                    :value="option.value"
+                  />
+                </el-select>
+              </el-form-item>
+            </div>
+            <div class="form-grid">
+              <el-form-item label="logging_steps">
+                <el-input-number v-model="fineTuneForm.training.logging_steps" :min="1" :step="1" style="width: 100%" />
+              </el-form-item>
+              <el-form-item label="save_steps">
+                <el-input-number v-model="fineTuneForm.training.save_steps" :min="1" :step="1" style="width: 100%" />
+              </el-form-item>
+            </div>
+          </div>
+
+          <div class="llamafactory-section">
+            <div class="llamafactory-section__title">评估参数</div>
+            <div class="form-grid">
+              <el-form-item label="val_size">
+                <el-input-number v-model="fineTuneForm.training.val_size" :min="0" :max="0.9" :step="0.01" :precision="2" style="width: 100%" />
+              </el-form-item>
+              <el-form-item label="per_device_eval_batch_size">
+                <el-input-number v-model="fineTuneForm.training.per_device_eval_batch_size" :min="1" :max="512" style="width: 100%" />
+              </el-form-item>
+            </div>
+            <div class="form-grid">
+              <el-form-item label="eval_strategy">
+                <el-select v-model="fineTuneForm.training.eval_strategy" style="width: 100%">
+                  <el-option
+                    v-for="option in LLAMAFACTORY_EVAL_STRATEGY_OPTIONS"
+                    :key="option.value"
+                    :label="option.label"
+                    :value="option.value"
+                  />
+                </el-select>
+              </el-form-item>
+              <el-form-item label="eval_steps">
+                <el-input-number v-model="fineTuneForm.training.eval_steps" :min="1" :step="1" style="width: 100%" />
+              </el-form-item>
+            </div>
+          </div>
+
+          <div class="llamafactory-section">
+            <div class="llamafactory-section__title">LoRA 参数</div>
+            <div class="form-grid">
+              <el-form-item label="lora_rank">
+                <el-input-number v-model="fineTuneForm.training.lora_rank" :min="1" :max="1024" style="width: 100%" />
+              </el-form-item>
+              <el-form-item label="lora_alpha">
+                <el-input-number v-model="fineTuneForm.training.lora_alpha" :min="1" :max="4096" style="width: 100%" />
+              </el-form-item>
+            </div>
+            <div class="form-grid">
+              <el-form-item label="lora_dropout">
+                <el-input-number v-model="fineTuneForm.training.lora_dropout" :min="0" :max="1" :step="0.01" :precision="2" style="width: 100%" />
+              </el-form-item>
+              <el-form-item label="lora_target">
+                <el-input v-model="fineTuneForm.training.lora_target" placeholder="例如：all / q_proj,v_proj" />
+              </el-form-item>
+            </div>
+          </div>
+
+          <div v-if="isQlorStrategy" class="llamafactory-section">
+            <div class="llamafactory-section__title">QLoRA 参数</div>
+            <div class="form-grid">
+              <el-form-item label="quantization_bit">
+                <el-select v-model="fineTuneForm.training.quantization_bit" style="width: 100%">
+                  <el-option label="8" :value="8" />
+                  <el-option label="4" :value="4" />
+                  <el-option label="2" :value="2" />
+                </el-select>
+              </el-form-item>
+              <el-form-item label="quantization_method">
+                <el-input v-model="fineTuneForm.training.quantization_method" placeholder="例如：bitsandbytes" />
+              </el-form-item>
+            </div>
+            <el-form-item label="double_quantization">
+              <el-switch v-model="fineTuneForm.training.double_quantization" />
+            </el-form-item>
+          </div>
+
+          <div class="llamafactory-section">
+            <div class="llamafactory-section__title">输出与运行</div>
+            <div class="form-grid">
+              <el-form-item label="report_to">
+                <el-select v-model="fineTuneForm.training.report_to" style="width: 100%">
+                  <el-option
+                    v-for="option in LLAMAFACTORY_REPORT_TO_OPTIONS"
+                    :key="option.value"
+                    :label="option.label"
+                    :value="option.value"
+                  />
+                </el-select>
+              </el-form-item>
+              <el-form-item label="gradient_checkpointing">
+                <el-switch v-model="fineTuneForm.training.gradient_checkpointing" />
+              </el-form-item>
+            </div>
+            <div class="form-grid form-grid--toggles">
+              <el-form-item label="plot_loss">
+                <el-switch v-model="fineTuneForm.training.plot_loss" />
+              </el-form-item>
+              <el-form-item label="save_only_model">
+                <el-switch v-model="fineTuneForm.training.save_only_model" />
+              </el-form-item>
+            </div>
+          </div>
+
+          <el-form-item label="高级附加参数 JSON">
             <el-input
-              v-model="fineTuneForm.training_config_json"
+              v-model="fineTuneForm.training.advanced_config_json"
               type="textarea"
-              :rows="5"
-              placeholder='{"epochs": 3, "learning_rate": 0.0001}'
+              :rows="6"
+              placeholder='{"ddp_timeout": 180000000}'
             />
           </el-form-item>
           <div class="form-grid" v-if="editingFineTuneId">
@@ -1051,6 +1266,23 @@ onMounted(async () => {
 .model-form {
   display: grid;
   gap: 20px;
+}
+
+.llamafactory-section {
+  display: grid;
+  gap: 16px;
+  padding: 16px;
+  border: 1px solid var(--line-soft);
+  border-radius: 8px;
+  background: var(--surface-1);
+}
+
+.llamafactory-section__title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--app-text-muted);
+  letter-spacing: 0;
+  text-transform: uppercase;
 }
 
 .form-grid {

@@ -71,12 +71,14 @@ def materialize_export_bundle(*, spec, work_dir):
 def build_llamafactory_command(*, spec, export_dir, output_dir):
     training_job = spec.get("training_job") or {}
     training_config = training_job.get("training_config") or {}
+    stage = training_config.get("stage") or "sft"
+    finetuning_type = training_config.get("finetuning_type") or training_job.get("strategy") or "lora"
 
     command = [
         "llamafactory-cli",
         "train",
         "--stage",
-        "sft",
+        str(stage),
         "--do_train",
         "true",
         "--model_name_or_path",
@@ -86,24 +88,67 @@ def build_llamafactory_command(*, spec, export_dir, output_dir):
         "--dataset",
         "finmodpro_train",
         "--finetuning_type",
-        training_job.get("strategy") or "lora",
+        str(finetuning_type),
         "--output_dir",
         str(output_dir),
         "--overwrite_output_dir",
-        "true",
+        str(training_config.get("overwrite_output_dir", True)).lower(),
     ]
 
-    option_mapping = {
-        "epochs": "--num_train_epochs",
-        "learning_rate": "--learning_rate",
-        "batch_size": "--per_device_train_batch_size",
-        "cutoff_len": "--cutoff_len",
-    }
-    for config_key, cli_flag in option_mapping.items():
-        value = training_config.get(config_key)
+    def get_config_value(*keys):
+        for key in keys:
+            if key in training_config and training_config.get(key) not in {None, ""}:
+                return training_config.get(key)
+        return None
+
+    def append_option(flag, value):
         if value is None or value == "":
-            continue
-        command.extend([cli_flag, str(value)])
+            return
+        if isinstance(value, bool):
+            command.extend([flag, str(value).lower()])
+            return
+        if isinstance(value, (list, tuple)):
+            command.extend([flag, ",".join(str(item) for item in value)])
+            return
+        command.extend([flag, str(value)])
+
+    option_mapping = (
+        (("template",), "--template"),
+        (("cutoff_len",), "--cutoff_len"),
+        (("max_samples",), "--max_samples"),
+        (("preprocessing_num_workers",), "--preprocessing_num_workers"),
+        (("dataloader_num_workers",), "--dataloader_num_workers"),
+        (("overwrite_cache",), "--overwrite_cache"),
+        (("packing",), "--packing"),
+        (("per_device_train_batch_size", "batch_size"), "--per_device_train_batch_size"),
+        (("gradient_accumulation_steps",), "--gradient_accumulation_steps"),
+        (("learning_rate",), "--learning_rate"),
+        (("num_train_epochs", "epochs"), "--num_train_epochs"),
+        (("lr_scheduler_type",), "--lr_scheduler_type"),
+        (("warmup_ratio",), "--warmup_ratio"),
+        (("max_grad_norm",), "--max_grad_norm"),
+        (("val_size",), "--val_size"),
+        (("per_device_eval_batch_size",), "--per_device_eval_batch_size"),
+        (("eval_strategy",), "--eval_strategy"),
+        (("eval_steps",), "--eval_steps"),
+        (("logging_steps",), "--logging_steps"),
+        (("save_steps",), "--save_steps"),
+        (("plot_loss",), "--plot_loss"),
+        (("save_only_model",), "--save_only_model"),
+        (("report_to",), "--report_to"),
+        (("bf16",), "--bf16"),
+        (("fp16",), "--fp16"),
+        (("gradient_checkpointing",), "--gradient_checkpointing"),
+        (("lora_rank",), "--lora_rank"),
+        (("lora_alpha",), "--lora_alpha"),
+        (("lora_dropout",), "--lora_dropout"),
+        (("lora_target",), "--lora_target"),
+        (("quantization_bit",), "--quantization_bit"),
+        (("quantization_method",), "--quantization_method"),
+        (("double_quantization",), "--double_quantization"),
+    )
+    for aliases, cli_flag in option_mapping:
+        append_option(cli_flag, get_config_value(*aliases))
 
     return command
 
