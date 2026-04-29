@@ -428,11 +428,11 @@ const handleBannerAction = async (action) => {
   align-items: flex-start;
   justify-content: space-between;
   gap: 18px;
-  padding: 18px 22px;
-  border-radius: 24px;
+  padding: 24px 28px;
+  border-radius: var(--radius-2xl);
   border: 1px solid var(--line-soft);
   background: linear-gradient(180deg, rgba(248, 250, 252, 0.98), rgba(255, 255, 255, 0.96));
-  box-shadow: var(--shadow-soft);
+  box-shadow: var(--shadow-md);
 }
 
 .overview-banner.is-warning {
@@ -458,7 +458,7 @@ const handleBannerAction = async (action) => {
 }
 
 .overview-banner__copy {
-  gap: 10px;
+  gap: 8px;
   min-width: 0;
 }
 
@@ -471,31 +471,36 @@ const handleBannerAction = async (action) => {
 
 .overview-banner__eyebrow {
   margin: 0;
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.12em;
+  font-family: var(--font-display);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  letter-spacing: 0.1em;
   text-transform: uppercase;
   color: var(--text-muted);
 }
 
 .overview-banner__title {
   margin: 0;
-  font-size: clamp(26px, 3vw, 34px);
-  line-height: 1.08;
+  font-family: var(--font-display);
+  font-size: var(--fs-3xl);
+  font-weight: 600;
+  line-height: var(--lh-tight);
+  letter-spacing: -0.015em;
   color: var(--text-primary);
 }
 
 .overview-banner__summary {
   margin: 0;
   max-width: 720px;
+  font-size: var(--fs-base);
   color: var(--text-secondary);
-  line-height: 1.65;
+  line-height: var(--lh-snug);
 }
 
 .overview-banner__meta {
   display: flex;
   flex-wrap: wrap;
-  gap: 10px;
+  gap: 8px;
 }
 
 .overview-banner__meta span {
@@ -503,10 +508,10 @@ const handleBannerAction = async (action) => {
   align-items: center;
   min-height: 32px;
   padding: 0 12px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: var(--surface-3);
   color: var(--text-secondary);
-  font-size: 12px;
+  font-size: var(--fs-xs);
   font-weight: 600;
 }
 
@@ -527,32 +532,43 @@ const handleBannerAction = async (action) => {
 .overview-metric {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  padding: 18px 20px;
-  border-radius: 20px;
+  gap: 8px;
+  padding: 20px 22px;
+  border-radius: var(--radius-xl);
   border: 1px solid var(--line-soft);
   background: var(--surface-2);
-  box-shadow: var(--shadow-soft);
+  box-shadow: var(--shadow-sm);
+  transition: box-shadow 0.25s ease, transform 0.25s ease;
+}
+
+.overview-metric:hover {
+  box-shadow: var(--shadow-md);
+  transform: translateY(-1px);
 }
 
 .overview-metric__label {
-  font-size: 12px;
-  font-weight: 700;
+  font-family: var(--font-display);
+  font-size: var(--fs-xs);
+  font-weight: 600;
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--text-muted);
 }
 
 .overview-metric__value {
-  font-size: clamp(28px, 3vw, 34px);
+  font-family: var(--font-display);
+  font-size: var(--fs-3xl);
+  font-weight: 700;
   line-height: 1;
+  letter-spacing: -0.02em;
   color: var(--text-primary);
 }
 
 .overview-metric__note {
   margin: 0;
+  font-size: var(--fs-sm);
   color: var(--text-secondary);
-  line-height: 1.6;
+  line-height: var(--lh-snug);
 }
 
 .overview-main,
@@ -860,5 +876,27 @@ const handleBannerAction = async (action) => {
   .summary-grid {
     grid-template-columns: 1fr;
   }
+}
+
+:global(:root[data-theme='dark']) .overview-banner {
+  border-color: var(--line-soft);
+  background: linear-gradient(180deg, rgba(26, 34, 45, 0.98), rgba(20, 26, 36, 0.96));
+}
+
+:global(:root[data-theme='dark']) .overview-banner.is-warning {
+  background: linear-gradient(180deg, rgba(50, 35, 10, 0.96), rgba(40, 28, 8, 0.94));
+}
+
+:global(:root[data-theme='dark']) .overview-banner.is-risk {
+  background: linear-gradient(180deg, rgba(55, 20, 15, 0.96), rgba(45, 15, 10, 0.94));
+}
+
+:global(:root[data-theme='dark']) .overview-metric {
+  background: var(--surface-2);
+}
+
+:global(:root[data-theme='dark']) .failure-item,
+:global(:root[data-theme='dark']) .audit-item {
+  background: var(--surface-2);
 }
 </style>
