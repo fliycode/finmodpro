@@ -26,6 +26,12 @@ Frontend conventions:
 - Keep page-specific styles close to the owning view or component; `frontend/src/style.css` is for shared tokens and shell rules.
 - Avoid decorative dashboard heroes, fake trend charts, and gradient-heavy cards; prefer restrained institutional surfaces and evidence-driven layouts.
 
+## Frontend design-reference workflow
+
+- When a user explicitly asks for premium polish, stronger visual design, or inspiration from specific websites/products, use `frontend-design-reference` before `frontend-design` or implementation.
+- Use `frontend-design-reference` to pick one primary style reference, at most one secondary reference, and the minimum necessary pattern categories.
+- Do not paste raw `galaxy` snippets into product code; translate them into local components and existing shell patterns.
+
 ## Testing Guidelines
 Backend tests use Django's test runner and `pytest` discovery settings from `backend/pytest.ini`; keep tests in each app's `tests.py` or `test_*.py`. Frontend tests run with `node --test` and are placed beside source in `__tests__/`, for example `frontend/src/lib/__tests__/auth-form.test.js`. Add or update tests with every behavior change.
 
