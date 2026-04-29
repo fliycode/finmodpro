@@ -8,6 +8,10 @@ import {
   normalizeGatewayCostsSummary,
   normalizeGatewayCostsTimeseries,
 } from '../lib/llm-gateway.js';
+import OpsCommandDeck from './admin/ops/OpsCommandDeck.vue';
+import OpsInspectorDrawer from './admin/ops/OpsInspectorDrawer.vue';
+import OpsSectionFrame from './admin/ops/OpsSectionFrame.vue';
+import OpsStatusBand from './admin/ops/OpsStatusBand.vue';
 import AppSectionCard from './ui/AppSectionCard.vue';
 
 const filters = reactive({
@@ -89,6 +93,12 @@ const metricCards = computed(() => ([
   },
 ]));
 
+const frameMeta = computed(() => [
+  `最近刷新：${refreshedAt.value || '尚未刷新'}`,
+  `请求总数：${summary.value.total_requests}`,
+  `窗口：${filters.time}`,
+]);
+
 const maxSeriesRequests = computed(() => {
   const counts = timeseries.value.points.map((item) => item.request_count);
   return counts.length ? Math.max(...counts) : 1;
@@ -122,16 +132,13 @@ onMounted(async () => {
 </script>
 
 <template>
-  <div class="page-stack gateway-page">
-    <section class="page-hero gateway-page__hero gateway-page__hero--costs">
-      <div>
-        <div class="page-hero__eyebrow">LLM Gateway / Cost & Usage</div>
-        <h1 class="page-hero__title">Cost / Usage</h1>
-        <p class="page-hero__subtitle">
-          用 token、估算成本、时间分布和模型占比解释“钱花在哪、量出在哪、是输入贵还是输出贵”。
-        </p>
-      </div>
-
+  <OpsSectionFrame
+    eyebrow="War room / Cost & usage"
+    title="Cost / Usage"
+    summary="用 token、估算成本、时间分布和模型占比解释“钱花在哪、量出在哪、是输入贵还是输出贵”。"
+    :meta="frameMeta"
+  >
+    <template #actions>
       <div class="gateway-page__hero-actions">
         <el-select v-model="filters.model" clearable placeholder="按 alias 筛选" style="width: 180px;">
           <el-option v-for="item in modelOptions" :key="item.value" :label="item.label" :value="item.value" />
@@ -144,20 +151,18 @@ onMounted(async () => {
         </el-select>
         <el-button :loading="isLoading" @click="fetchCosts">刷新</el-button>
       </div>
-    </section>
+    </template>
 
-    <el-alert v-if="errorMsg" :title="errorMsg" type="error" show-icon :closable="false" />
-    <el-alert v-else-if="pricingGapNotice" :title="pricingGapNotice" type="warning" show-icon :closable="false" />
+    <template #alerts>
+      <el-alert v-if="errorMsg" :title="errorMsg" type="error" show-icon :closable="false" />
+      <el-alert v-else-if="pricingGapNotice" :title="pricingGapNotice" type="warning" show-icon :closable="false" />
+    </template>
 
-    <section class="gateway-metric-strip">
-      <article v-for="metric in metricCards" :key="metric.key" class="gateway-metric-card">
-        <span class="gateway-metric-card__label">{{ metric.label }}</span>
-        <strong class="gateway-metric-card__value">{{ metric.value }}</strong>
-        <p class="gateway-metric-card__note">{{ metric.note }}</p>
-      </article>
-    </section>
+    <template #status-band>
+      <OpsStatusBand :items="metricCards" />
+    </template>
 
-    <div class="cost-grid">
+    <OpsCommandDeck>
       <AppSectionCard title="成本结构" desc="把输入成本、输出成本和当前最贵路由放在一处判断。" admin>
         <div class="cost-breakdown-grid">
           <article class="cost-breakdown-card">
@@ -193,9 +198,9 @@ onMounted(async () => {
           </article>
         </div>
       </AppSectionCard>
-    </div>
+    </OpsCommandDeck>
 
-    <AppSectionCard title="模型占比" desc="按模型展示请求占比、token 与估算成本，便于后续治理热门高成本路由。" admin>
+    <OpsInspectorDrawer title="模型占比" desc="按模型展示请求占比、token 与估算成本，便于后续治理热门高成本路由。">
       <el-table :data="models.models" stripe>
         <el-table-column prop="alias" label="Alias" min-width="160" />
         <el-table-column prop="request_count" label="请求数" width="110" />
@@ -225,8 +230,8 @@ onMounted(async () => {
           </template>
         </el-table-column>
       </el-table>
-    </AppSectionCard>
-  </div>
+    </OpsInspectorDrawer>
+  </OpsSectionFrame>
 </template>
 
 <style scoped>

@@ -72,7 +72,13 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <header class="app-topbar" :class="{ 'app-topbar--compact': props.compact }">
+  <header
+    :class="[
+      'app-topbar',
+      `app-topbar--${props.area}`,
+      { 'app-topbar--compact': props.compact },
+    ]"
+  >
     <div class="app-topbar__title-group">
       <img class="app-topbar__brand-logo" :src="finmodproMark" alt="FinModPro" />
       <div class="app-topbar__copy">
@@ -89,10 +95,17 @@ onBeforeUnmount(() => {
         <span class="app-topbar__user">{{ profileName }}</span>
       </div>
       <template v-for="action in actions" :key="action.id">
-        <button v-if="action.id === 'logout'" type="button" class="app-topbar__button" @click="handleLogout">
+        <button
+          v-if="action.id === 'logout'"
+          type="button"
+          class="app-topbar__button"
+          @click="handleLogout"
+        >
           {{ action.label }}
         </button>
-        <RouterLink v-else :to="action.to">{{ action.label }}</RouterLink>
+        <RouterLink v-else class="app-topbar__button" :to="action.to">
+          {{ action.label }}
+        </RouterLink>
       </template>
     </div>
   </header>

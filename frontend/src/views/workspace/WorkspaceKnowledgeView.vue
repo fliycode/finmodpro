@@ -3,23 +3,38 @@ import KnowledgeBase from '../../components/KnowledgeBase.vue';
 </script>
 
 <template>
-  <div class="page-stack workspace-page">
-    <section class="page-hero workspace-page__hero">
+  <section class="workspace-dossier-page">
+    <header class="workspace-dossier-page__header">
       <div>
-        <div class="page-hero__eyebrow">知识工作台</div>
-        <h1 class="page-hero__title">知识检索与文档管理</h1>
-        <p class="page-hero__subtitle">
-          面向文档入库、状态跟踪和明细核查，优先突出检索效率与知识资产质量。
-        </p>
+        <p class="workspace-dossier-page__eyebrow">Archive desk</p>
+        <h1>知识检索与文档管理</h1>
       </div>
-    </section>
-
+    </header>
     <KnowledgeBase />
-  </div>
+  </section>
 </template>
 
 <style scoped>
-.workspace-page__hero {
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(238, 242, 246, 0.9));
+.workspace-dossier-page {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.workspace-dossier-page__eyebrow {
+  margin: 0 0 6px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: #8b7358;
+}
+
+.workspace-dossier-page h1 {
+  margin: 0;
+  color: #2f2418;
+  font-size: 34px;
+  line-height: 1.06;
+  letter-spacing: -0.03em;
 }
 </style>

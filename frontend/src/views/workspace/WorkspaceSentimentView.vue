@@ -3,23 +3,38 @@ import SentimentAnalysis from '../../components/SentimentAnalysis.vue';
 </script>
 
 <template>
-  <div class="page-stack workspace-page">
-    <section class="page-hero workspace-page__hero">
+  <section class="workspace-dossier-page">
+    <header class="workspace-dossier-page__header">
       <div>
-        <div class="page-hero__eyebrow">舆情工作台</div>
-        <h1 class="page-hero__title">舆情分析</h1>
-        <p class="page-hero__subtitle">
-          复用现有数据集与文档范围，对已入库文本生成情绪判断、风险倾向与证据摘要。
-        </p>
+        <p class="workspace-dossier-page__eyebrow">Sentiment dossier</p>
+        <h1>舆情分析</h1>
       </div>
-    </section>
-
+    </header>
     <SentimentAnalysis />
-  </div>
+  </section>
 </template>
 
 <style scoped>
-.workspace-page__hero {
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(238, 242, 246, 0.9));
+.workspace-dossier-page {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.workspace-dossier-page__eyebrow {
+  margin: 0 0 6px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: #8b7358;
+}
+
+.workspace-dossier-page h1 {
+  margin: 0;
+  color: #2f2418;
+  font-size: 34px;
+  line-height: 1.06;
+  letter-spacing: -0.03em;
 }
 </style>

@@ -20,6 +20,10 @@ import {
   getInitialFineTuneFilterId,
   shouldShowConsoleConfigRetry,
 } from "../lib/llm-console.js";
+import OpsCommandDeck from "./admin/ops/OpsCommandDeck.vue";
+import OpsInspectorDrawer from "./admin/ops/OpsInspectorDrawer.vue";
+import OpsSectionFrame from "./admin/ops/OpsSectionFrame.vue";
+import OpsStatusBand from "./admin/ops/OpsStatusBand.vue";
 import AppSectionCard from "./ui/AppSectionCard.vue";
 
 const props = defineProps({
@@ -129,6 +133,76 @@ const pageCopy = computed(() => {
   };
 });
 const isQlorStrategy = computed(() => fineTuneForm.training?.strategy === "qlora");
+const consoleStatusItems = computed(() => {
+  if (isFineTunesMode.value) {
+    return [
+      {
+        key: "runs",
+        label: "微调登记",
+        value: fineTuneRuns.value.length,
+        note: "当前控制面登记的训练记录。",
+      },
+      {
+        key: "runners",
+        label: "训练服务器",
+        value: fineTuneRunnerServers.value.length,
+        note: "可用于提交远程训练任务的 runner agent。",
+      },
+      {
+        key: "active-filter",
+        label: "基础模型筛选",
+        value: fineTuneFilterModelId.value ? "已收敛" : "全部",
+        note: fineTuneFilterModelId.value ? "当前已限定单个基础模型。" : "当前展示全部基础模型。",
+      },
+      {
+        key: "alerts",
+        label: "异常提醒",
+        value: pageAlerts.value.length,
+        note: "控制面加载、回写或配置异常会在这里暴露。",
+      },
+    ];
+  }
+
+  return [
+    {
+      key: "chat",
+      label: "对话模型",
+      value: chatConfigs.value.length,
+      note: "当前纳管的 chat / generation 模型。",
+    },
+    {
+      key: "embedding",
+      label: "向量模型",
+      value: embeddingConfigs.value.length,
+      note: "用于检索、召回与索引的 embedding 配置。",
+    },
+    {
+      key: "rerank",
+      label: "重排模型",
+      value: rerankConfigs.value.length,
+      note: "检索后重排链路的当前配置数量。",
+    },
+    {
+      key: "active",
+      label: "启用配置",
+      value: configs.value.filter((config) => config.is_active).length,
+      note: "当前实际参与请求链路的启用项。",
+    },
+  ];
+});
+const frameMeta = computed(() => {
+  if (isFineTunesMode.value) {
+    return [
+      `训练记录：${fineTuneRuns.value.length}`,
+      `训练服务器：${fineTuneRunnerServers.value.length}`,
+    ];
+  }
+
+  return [
+    `模型总数：${configs.value.length}`,
+    `已启用：${configs.value.filter((config) => config.is_active).length}`,
+  ];
+});
 
 const resetForm = () => {
   Object.assign(form, defaultFormState());
@@ -480,15 +554,13 @@ onMounted(async () => {
 </script>
 
 <template>
-  <div class="page-stack admin-page">
-    <section class="page-hero page-hero--admin">
-      <div>
-        <div class="page-hero__eyebrow">{{ pageCopy.eyebrow }}</div>
-        <h1 class="page-hero__title">{{ pageCopy.title }}</h1>
-        <p class="page-hero__subtitle">
-          {{ pageCopy.subtitle }}
-        </p>
-      </div>
+  <OpsSectionFrame
+    :eyebrow="pageCopy.eyebrow"
+    :title="pageCopy.title"
+    :summary="pageCopy.subtitle"
+    :meta="frameMeta"
+  >
+    <template #actions>
       <div v-if="isModelsMode" class="model-page__actions">
         <el-button @click="fetchConfigs" :loading="isLoading">刷新配置</el-button>
         <el-button type="primary" @click="openCreate('chat')">新增对话模型</el-button>
@@ -498,31 +570,34 @@ onMounted(async () => {
         <el-button @click="fetchFineTunes" :loading="fineTuneLoading">刷新微调记录</el-button>
         <el-button type="primary" @click="openCreateFineTune()">登记微调</el-button>
       </div>
-    </section>
+    </template>
 
-    <el-alert
-      v-for="alert in pageAlerts"
-      :key="alert.key"
-      :title="alert.message"
-      type="error"
-      show-icon
-      :closable="false"
-    />
+    <template #alerts>
+      <el-alert
+        v-for="alert in pageAlerts"
+        :key="alert.key"
+        :title="alert.message"
+        type="error"
+        show-icon
+        :closable="false"
+      />
+    </template>
+
+    <template #status-band>
+      <OpsStatusBand :items="consoleStatusItems" />
+    </template>
 
     <template v-if="isModelsMode">
-      <AppSectionCard
-        title="LLaMA-Factory 回流关系"
-        desc="微调控制面已迁移到独立页面，模型页保留当前启用关系和回流线索，避免训练链路继续混在 provider CRUD 里。"
-        admin
-      >
+      <OpsInspectorDrawer title="LLaMA-Factory 回流关系" desc="微调控制面已迁移到独立页面，模型页保留当前启用关系和回流线索，避免训练链路继续混在 provider CRUD 里。">
         <div class="model-page__split-callout">
           <p class="muted-text">需要查看训练状态、导出进度或候选模型回流时，请直接进入独立的 LLaMA-Factory 页面。</p>
           <RouterLink to="/admin/llm/fine-tunes" class="model-page__jump-link">
             打开 LLaMA-Factory
           </RouterLink>
         </div>
-      </AppSectionCard>
+      </OpsInspectorDrawer>
 
+      <OpsCommandDeck>
       <AppSectionCard title="对话模型" desc="支持 LiteLLM 与 DeepSeek。启用新模型后，智能问答和其它 chat 能力会自动切换。" admin>
       <div v-if="isLoading && chatConfigs.length === 0" class="admin-empty-state">加载中...</div>
       <div v-else-if="chatConfigs.length === 0" class="admin-empty-state">暂无对话模型配置</div>
@@ -652,58 +727,55 @@ onMounted(async () => {
         </el-table-column>
       </el-table>
       </AppSectionCard>
+      </OpsCommandDeck>
     </template>
 
-    <AppSectionCard
-      v-if="isFineTunesMode"
-      title="远程训练服务器"
-      desc="登记 GPU runner agent 地址、工作目录和鉴权信息，微调任务会绑定到这里并从当前服务器发起提交。"
-      admin
-    >
-      <template #header>
-        <el-button type="primary" @click="openCreateRunnerServer()">新增训练服务器</el-button>
-      </template>
-      <div v-if="runnerServerLoading && fineTuneRunnerServers.length === 0" class="admin-empty-state">加载中...</div>
-      <div v-else-if="fineTuneRunnerServers.length === 0" class="admin-empty-state">暂无远程训练服务器</div>
-      <el-table v-else :data="fineTuneRunnerServers" stripe style="width: 100%">
-        <el-table-column prop="name" label="名称" min-width="180" />
-        <el-table-column label="地址" min-width="240">
-          <template #default="{ row }">
-            <span class="mono-text">{{ row.base_url }}</span>
-          </template>
-        </el-table-column>
-        <el-table-column label="工作目录" min-width="200">
-          <template #default="{ row }">
-            <span class="mono-text">{{ row.default_work_dir || '使用 agent 默认目录' }}</span>
-          </template>
-        </el-table-column>
-        <el-table-column label="鉴权" width="140">
-          <template #default="{ row }">
-            <span class="muted-text">{{ row.has_auth_token ? row.auth_token_masked : '未配置' }}</span>
-          </template>
-        </el-table-column>
-        <el-table-column label="状态" width="110">
-          <template #default="{ row }">
-            <el-tag :type="row.is_enabled ? 'success' : 'info'">{{ row.is_enabled ? '已启用' : '已停用' }}</el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column label="操作" width="180" fixed="right">
-          <template #default="{ row }">
-            <div class="table-actions">
-              <el-button size="small" plain @click="openEditRunnerServer(row)">编辑</el-button>
-              <el-button size="small" type="danger" plain @click="removeRunnerServer(row)">删除</el-button>
-            </div>
-          </template>
-        </el-table-column>
-      </el-table>
-    </AppSectionCard>
+    <template v-if="isFineTunesMode">
+      <OpsInspectorDrawer title="远程训练服务器" desc="登记 GPU runner agent 地址、工作目录和鉴权信息，微调任务会绑定到这里并从当前服务器发起提交。">
+        <template #header>
+          <el-button type="primary" @click="openCreateRunnerServer()">新增训练服务器</el-button>
+        </template>
+        <div v-if="runnerServerLoading && fineTuneRunnerServers.length === 0" class="admin-empty-state">加载中...</div>
+        <div v-else-if="fineTuneRunnerServers.length === 0" class="admin-empty-state">暂无远程训练服务器</div>
+        <el-table v-else :data="fineTuneRunnerServers" stripe style="width: 100%">
+          <el-table-column prop="name" label="名称" min-width="180" />
+          <el-table-column label="地址" min-width="240">
+            <template #default="{ row }">
+              <span class="mono-text">{{ row.base_url }}</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="工作目录" min-width="200">
+            <template #default="{ row }">
+              <span class="mono-text">{{ row.default_work_dir || '使用 agent 默认目录' }}</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="鉴权" width="140">
+            <template #default="{ row }">
+              <span class="muted-text">{{ row.has_auth_token ? row.auth_token_masked : '未配置' }}</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="状态" width="110">
+            <template #default="{ row }">
+              <el-tag :type="row.is_enabled ? 'success' : 'info'">{{ row.is_enabled ? '已启用' : '已停用' }}</el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column label="操作" width="180" fixed="right">
+            <template #default="{ row }">
+              <div class="table-actions">
+                <el-button size="small" plain @click="openEditRunnerServer(row)">编辑</el-button>
+                <el-button size="small" type="danger" plain @click="removeRunnerServer(row)">删除</el-button>
+              </div>
+            </template>
+          </el-table-column>
+        </el-table>
+      </OpsInspectorDrawer>
 
-    <AppSectionCard
-      v-if="isFineTunesMode"
-      title="微调控制面"
-      desc="训练执行仍保持外部运行，这里登记数据集、导出、回调与候选模型回流状态。"
-      admin
-    >
+      <OpsCommandDeck>
+      <AppSectionCard
+        title="微调控制面"
+        desc="训练执行仍保持外部运行，这里登记数据集、导出、回调与候选模型回流状态。"
+        admin
+      >
       <template #header>
         <RouterLink to="/admin/llm/models" class="model-page__jump-link">
           返回模型配置
@@ -793,7 +865,9 @@ onMounted(async () => {
           </template>
         </el-table-column>
       </el-table>
-    </AppSectionCard>
+      </AppSectionCard>
+      </OpsCommandDeck>
+    </template>
 
     <el-drawer v-if="isModelsMode" v-model="drawerVisible" :title="drawerTitle" size="520px" destroy-on-close>
       <div class="model-form">
@@ -1168,7 +1242,7 @@ onMounted(async () => {
         </div>
       </div>
     </el-drawer>
-  </div>
+  </OpsSectionFrame>
 </template>
 
 <style scoped>

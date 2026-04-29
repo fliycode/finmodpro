@@ -3,23 +3,38 @@ import RiskSummary from '../../components/RiskSummary.vue';
 </script>
 
 <template>
-  <div class="page-stack workspace-page">
-    <section class="page-hero workspace-page__hero">
+  <section class="workspace-dossier-page">
+    <header class="workspace-dossier-page__header">
       <div>
-        <div class="page-hero__eyebrow">风险工作台</div>
-        <h1 class="page-hero__title">风险摘要与报告</h1>
-        <p class="page-hero__subtitle">
-          把事件筛选、人工复核和报告生成整合到一个更安静的工作界面里，强调结论、证据与来源。
-        </p>
+        <p class="workspace-dossier-page__eyebrow">Risk dossier</p>
+        <h1>风险摘要与报告</h1>
       </div>
-    </section>
-
+    </header>
     <RiskSummary />
-  </div>
+  </section>
 </template>
 
 <style scoped>
-.workspace-page__hero {
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(238, 242, 246, 0.9));
+.workspace-dossier-page {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.workspace-dossier-page__eyebrow {
+  margin: 0 0 6px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: #8b7358;
+}
+
+.workspace-dossier-page h1 {
+  margin: 0;
+  color: #2f2418;
+  font-size: 34px;
+  line-height: 1.06;
+  letter-spacing: -0.03em;
 }
 </style>

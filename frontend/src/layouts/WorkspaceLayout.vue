@@ -1,26 +1,26 @@
 <script setup>
-import { computed } from 'vue';
-import { RouterView, useRoute } from 'vue-router';
+import { RouterView } from 'vue-router';
 
 import AppSidebar from '../components/ui/AppSidebar.vue';
 import FlashStack from '../components/ui/FlashStack.vue';
 import ThemeToggle from '../components/ui/ThemeToggle.vue';
-
-const route = useRoute();
-const isQaPage = computed(() => route.path === '/workspace/qa');
 </script>
 
 <template>
   <div class="app-shell app-shell--workspace">
     <AppSidebar area="workspace" />
-    <div class="app-shell__main">
-      <div v-if="!isQaPage" class="app-shell__utility-bar" aria-label="页面工具栏">
+    <main class="workspace-frame">
+      <header class="workspace-frame__utility">
+        <div class="workspace-frame__utility-copy">
+          <p class="workspace-frame__eyebrow">Dossier workspace</p>
+          <strong>结论先行，证据随后，动作最后。</strong>
+        </div>
         <ThemeToggle />
-      </div>
+      </header>
       <FlashStack />
-      <div class="app-shell__content app-shell__content--workspace">
+      <section class="workspace-frame__body">
         <RouterView />
-      </div>
-    </div>
+      </section>
+    </main>
   </div>
 </template>
