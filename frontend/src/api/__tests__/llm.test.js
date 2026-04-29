@@ -6,6 +6,7 @@ import {
   normalizeFineTuneRun,
   normalizeModelConfigPayload,
 } from '../llm.js';
+import { createApiConfig } from '../config.js';
 
 test('normalizeModelConfigPayload exposes LiteLLM routing fields', () => {
   const rows = normalizeModelConfigPayload({
@@ -123,5 +124,39 @@ test('createLlmApi manages fine-tune runner servers and dispatch', async () => {
       { path: '/api/ops/fine-tune-servers/1/', method: 'DELETE' },
       { path: '/api/ops/fine-tunes/8/dispatch/', method: 'POST' },
     ],
+  );
+});
+
+test('createApiConfig surfaces field validation details from error payloads', async () => {
+  const api = createApiConfig({
+    baseURL: 'http://localhost:8000',
+    fetchImpl: async () => ({
+      ok: false,
+      status: 400,
+      json: async () => ({
+        code: 400,
+        message: '请求参数错误。',
+        data: {
+          dataset_name: ['This field is required.'],
+          training_config: {
+            template: ['This field may not be blank.'],
+          },
+        },
+      }),
+    }),
+  });
+
+  await assert.rejects(
+    () => api.fetchJson('/api/ops/fine-tunes/', {
+      method: 'POST',
+      auth: true,
+      body: JSON.stringify({}),
+    }),
+    (error) => {
+      assert.match(error.message, /请求参数错误/);
+      assert.match(error.message, /dataset_name/);
+      assert.match(error.message, /training_config\.template/);
+      return true;
+    },
   );
 });
