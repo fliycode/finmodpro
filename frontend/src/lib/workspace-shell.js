@@ -1,10 +1,22 @@
-const DEFAULT_SIDEBAR_PRESENTATION = Object.freeze({
-  mode: 'expanded',
-  showBrandCopy: true,
-  showGroupLabels: true,
-  showItemLabels: true,
+import { getAuthenticatedShellSpec } from './authenticated-shell.js';
+
+const SIDEBAR_PRESENTATIONS = Object.freeze({
+  dossier: Object.freeze({
+    mode: 'editorial',
+    showBrandCopy: true,
+    showGroupLabels: true,
+    showItemLabels: true,
+  }),
+  'war-room': Object.freeze({
+    mode: 'dense',
+    showBrandCopy: true,
+    showGroupLabels: true,
+    showItemLabels: true,
+  }),
 });
 
-export function getSidebarPresentation(_area) {
-  return DEFAULT_SIDEBAR_PRESENTATION;
+export function getSidebarPresentation(area) {
+  const spec = getAuthenticatedShellSpec(area);
+
+  return SIDEBAR_PRESENTATIONS[spec.persona] ?? SIDEBAR_PRESENTATIONS.dossier;
 }

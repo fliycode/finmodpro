@@ -5,6 +5,7 @@ import { RouterLink, useRouter } from 'vue-router';
 import AppIcon from './AppIcon.vue';
 import finmodproMark from '../../assets/finmodpro-mark.svg';
 import { getNavItems, getTopbarActions } from '../../config/navigation.js';
+import { authSession } from '../../lib/auth-session.js';
 import { authStorage } from '../../lib/auth-storage.js';
 import { getSidebarPresentation } from '../../lib/workspace-shell.js';
 
@@ -31,60 +32,57 @@ const profileActions = computed(() => [
 const areaMeta = computed(() => {
   if (props.area === 'admin') {
     return {
-      label: '管理控制台',
-      sublabel: '治理与运维总览',
+      label: 'War room console',
+      sublabel: '路由、观测与治理',
+      eyebrow: 'Operator shell',
     };
   }
 
   return {
-    label: '业务工作区',
-    sublabel: '分析、检索与持续工作',
+    label: 'Dossier workspace',
+    sublabel: '结论优先的金融分析台',
+    eyebrow: 'Case-led flow',
   };
 });
 
-const navGroups = computed(() => {
+const groupCatalog = computed(() => {
   if (props.area === 'admin') {
     return [
-      {
-        id: 'admin-overview',
-        label: '总览',
-        items: items.value.filter((item) => item.group === 'admin-overview'),
-      },
-      {
-        id: 'admin-governance',
-        label: '治理',
-        items: items.value.filter((item) => item.group === 'admin-governance'),
-      },
-      {
-        id: 'admin-llm',
-        label: 'LLM 中台',
-        items: items.value.filter((item) => item.group === 'admin-llm'),
-      },
-    ].filter((group) => group.items.length > 0);
+      { id: 'admin-overview', label: '总览引导' },
+      { id: 'admin-governance', label: '治理审阅' },
+      { id: 'admin-llm', label: 'Gateway ops' },
+    ];
   }
 
   return [
-    {
-      id: 'workspace-core',
-      label: '核心工作',
-      items: items.value.filter((item) => ['qa', 'knowledge', 'risk', 'sentiment'].includes(item.id)),
-    },
-    {
-      id: 'workspace-context',
-      label: '工作记录',
-      items: items.value.filter((item) => item.id === 'history'),
-    },
-  ].filter((group) => group.items.length > 0);
+    { id: 'workspace-core', label: '核心档案' },
+    { id: 'workspace-support', label: '辅助记录' },
+  ];
+});
+
+const navGroups = computed(() => {
+  return groupCatalog.value
+    .map((group) => ({
+      ...group,
+      items: items.value.filter((item) => item.group === group.id),
+    }))
+    .filter((group) => group.items.length > 0);
 });
 
 const handleLogout = async () => {
-  authStorage.clear();
+  await authSession.logout();
   await router.replace('/login');
 };
 </script>
 
 <template>
-  <aside class="app-sidebar">
+  <aside
+    :class="[
+      'app-sidebar',
+      `app-sidebar--${props.area}`,
+      `app-sidebar--${sidebarPresentation.mode}`,
+    ]"
+  >
     <div
       class="app-sidebar__brand"
       :title="sidebarPresentation.showBrandCopy ? undefined : areaMeta.label"
@@ -93,7 +91,7 @@ const handleLogout = async () => {
         <img class="app-sidebar__brand-logo" :src="finmodproMark" alt="FinModPro" />
       </div>
       <div v-if="sidebarPresentation.showBrandCopy" class="app-sidebar__brand-copy">
-        <span class="app-sidebar__brand-eyebrow">FinModPro</span>
+        <span class="app-sidebar__brand-eyebrow">{{ areaMeta.eyebrow }}</span>
         <strong>{{ areaMeta.label }}</strong>
         <p>{{ areaMeta.sublabel }}</p>
       </div>
@@ -162,6 +160,10 @@ const handleLogout = async () => {
           </RouterLink>
         </template>
       </div>
+    </div>
+
+    <div v-else class="app-sidebar__ops-note">
+      <p>保持对 Gateway、治理与异常状态的持续扫描。</p>
     </div>
   </aside>
 </template>

@@ -9,6 +9,10 @@ import {
   normalizeGatewayLogsSummary,
   normalizeGatewayTrace,
 } from '../lib/llm-gateway.js';
+import OpsCommandDeck from './admin/ops/OpsCommandDeck.vue';
+import OpsInspectorDrawer from './admin/ops/OpsInspectorDrawer.vue';
+import OpsSectionFrame from './admin/ops/OpsSectionFrame.vue';
+import OpsStatusBand from './admin/ops/OpsStatusBand.vue';
 import AppSectionCard from './ui/AppSectionCard.vue';
 
 const filters = reactive({
@@ -111,6 +115,12 @@ const metricCards = computed(() => ([
   },
 ]));
 
+const frameMeta = computed(() => [
+  `最近刷新：${refreshedAt.value || '尚未刷新'}`,
+  `日志总量：${logs.value.total}`,
+  `窗口：${filters.time}`,
+]);
+
 const maxLatencyBucket = computed(() => {
   const counts = summary.value.latency_buckets.map((item) => item.count);
   return counts.length ? Math.max(...counts) : 1;
@@ -128,16 +138,13 @@ onMounted(async () => {
 </script>
 
 <template>
-  <div class="page-stack gateway-page">
-    <section class="page-hero gateway-page__hero gateway-page__hero--observability">
-      <div>
-        <div class="page-hero__eyebrow">LLM Gateway / Logs & Observability</div>
-        <h1 class="page-hero__title">Logs / Observability</h1>
-        <p class="page-hero__subtitle">
-          用 request 级摘要表格、错误分析、延迟分布和 trace 入口，回答“哪条路由在出错、为什么错、一次请求走了什么链路”。
-        </p>
-      </div>
-
+  <OpsSectionFrame
+    eyebrow="War room / Logs & observability"
+    title="Logs / Observability"
+    summary="用 request 级摘要表格、错误分析、延迟分布和 trace 入口，回答“哪条路由在出错、为什么错、一次请求走了什么链路”。"
+    :meta="frameMeta"
+  >
+    <template #actions>
       <div class="gateway-page__hero-actions">
         <el-select v-model="filters.model" clearable placeholder="按 alias 筛选" style="width: 180px;">
           <el-option v-for="item in modelOptions" :key="item.value" :label="item.label" :value="item.value" />
@@ -154,19 +161,17 @@ onMounted(async () => {
         </el-select>
         <el-button :loading="isLoading" @click="refreshAll">应用筛选</el-button>
       </div>
-    </section>
+    </template>
 
-    <el-alert v-if="errorMsg" :title="errorMsg" type="error" show-icon :closable="false" />
+    <template #alerts>
+      <el-alert v-if="errorMsg" :title="errorMsg" type="error" show-icon :closable="false" />
+    </template>
 
-    <section class="gateway-metric-strip">
-      <article v-for="metric in metricCards" :key="metric.key" class="gateway-metric-card">
-        <span class="gateway-metric-card__label">{{ metric.label }}</span>
-        <strong class="gateway-metric-card__value">{{ metric.value }}</strong>
-        <p class="gateway-metric-card__note">{{ metric.note }}</p>
-      </article>
-    </section>
+    <template #status-band>
+      <OpsStatusBand :items="metricCards" />
+    </template>
 
-    <div class="observability-grid">
+    <OpsCommandDeck>
       <AppSectionCard title="错误分析" desc="把错误类型聚合和最近错误样本并排展示，便于先判断主因再下钻具体请求。" admin>
         <div class="analysis-grid">
           <div class="analysis-column">
@@ -206,9 +211,9 @@ onMounted(async () => {
           </article>
         </div>
       </AppSectionCard>
-    </div>
+    </OpsCommandDeck>
 
-    <AppSectionCard title="请求级日志" desc="保留请求级别摘要，不暴露原始 prompt / response。" admin>
+    <OpsInspectorDrawer title="Request log" desc="保留请求级别摘要，不暴露原始 prompt / response。">
       <el-table :data="logs.logs" stripe>
         <el-table-column prop="time" label="时间" min-width="165" />
         <el-table-column prop="alias" label="Alias" min-width="130" />
@@ -253,7 +258,7 @@ onMounted(async () => {
           @current-change="handlePageChange"
         />
       </div>
-    </AppSectionCard>
+    </OpsInspectorDrawer>
 
     <el-drawer v-model="traceDrawerVisible" size="520px" title="Trace 明细" destroy-on-close>
       <div class="trace-panel">
@@ -274,7 +279,7 @@ onMounted(async () => {
         </div>
       </div>
     </el-drawer>
-  </div>
+  </OpsSectionFrame>
 </template>
 
 <style scoped>

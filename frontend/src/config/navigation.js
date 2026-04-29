@@ -2,11 +2,11 @@ import { isAdminProfile } from '../lib/session-state.js';
 
 export const navigationMap = {
   workspace: [
-    { id: 'qa', label: '智能问答', to: '/workspace/qa', icon: 'spark' },
-    { id: 'knowledge', label: '知识库管理', to: '/workspace/knowledge', icon: 'database' },
-    { id: 'history', label: '历史会话', to: '/workspace/history', icon: 'history' },
-    { id: 'risk', label: '风险与摘要', to: '/workspace/risk', icon: 'shield' },
-    { id: 'sentiment', label: '舆情分析', to: '/workspace/sentiment', icon: 'trending-up' },
+    { id: 'qa', label: '智能问答', to: '/workspace/qa', icon: 'spark', group: 'workspace-core' },
+    { id: 'knowledge', label: '知识库管理', to: '/workspace/knowledge', icon: 'database', group: 'workspace-core' },
+    { id: 'history', label: '历史会话', to: '/workspace/history', icon: 'history', group: 'workspace-support' },
+    { id: 'risk', label: '风险与摘要', to: '/workspace/risk', icon: 'shield', group: 'workspace-core' },
+    { id: 'sentiment', label: '舆情分析', to: '/workspace/sentiment', icon: 'trending-up', group: 'workspace-core' },
   ],
   admin: [
     { id: 'admin-overview', label: '仪表盘', to: '/admin/overview', icon: 'dashboard', group: 'admin-overview' },

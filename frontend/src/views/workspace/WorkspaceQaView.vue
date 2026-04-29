@@ -9,73 +9,63 @@ const sessionId = computed(() => route.query.session ?? null);
 </script>
 
 <template>
-  <div class="qa-page">
-    <section class="qa-page__hero">
-      <div class="qa-page__header">
-        <p class="qa-page__eyebrow">核心工作</p>
-        <h1 class="qa-page__title">智能问答</h1>
-        <p class="qa-page__subtitle">基于知识库的金融建模与风险分析对话</p>
+  <section class="workspace-dossier-page workspace-dossier-page--qa">
+    <header class="workspace-dossier-page__header">
+      <div>
+        <p class="workspace-dossier-page__eyebrow">Primary canvas</p>
+        <h1>智能问答</h1>
       </div>
-      <span class="qa-page__hint">
+      <span class="workspace-dossier-page__hint">
         {{ sessionId ? '继续会话中' : '新对话将自动创建会话' }}
       </span>
-    </section>
+    </header>
     <FinancialQA :session-id="sessionId" />
-  </div>
+  </section>
 </template>
 
 <style scoped>
-.qa-page {
+.workspace-dossier-page {
   display: flex;
   flex-direction: column;
-  height: 100%;
+  gap: 16px;
+  min-height: 0;
 }
 
-.qa-page__hero {
+.workspace-dossier-page__header {
   display: flex;
-  align-items: flex-end;
+  align-items: flex-start;
   justify-content: space-between;
   gap: 16px;
-  padding: 18px 0 14px;
-  border-bottom: 1px solid var(--line-soft);
-  flex-shrink: 0;
+  padding: 0 2px;
 }
 
-.qa-page__header {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.qa-page__eyebrow {
+.workspace-dossier-page__eyebrow {
   margin: 0;
-  font-family: var(--font-display);
-  font-size: var(--fs-xs);
-  font-weight: 600;
-  letter-spacing: 0.1em;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.16em;
   text-transform: uppercase;
-  color: var(--brand);
+  color: #8b7358;
 }
 
-.qa-page__title {
+.workspace-dossier-page h1 {
   margin: 0;
-  font-family: var(--font-display);
-  font-size: var(--fs-2xl);
-  font-weight: 600;
-  line-height: var(--lh-tight);
-  letter-spacing: -0.015em;
-  color: var(--text-primary);
+  font-size: 34px;
+  line-height: 1.05;
+  letter-spacing: -0.03em;
+  color: #2f2418;
 }
 
-.qa-page__subtitle {
-  margin: 4px 0 0;
-  color: var(--text-secondary);
-  font-size: var(--fs-sm);
-}
-
-.qa-page__hint {
-  font-size: var(--fs-xs);
-  color: var(--text-muted);
+.workspace-dossier-page__hint {
+  padding-top: 6px;
+  font-size: 12px;
+  color: #8b7358;
   flex-shrink: 0;
+}
+
+@media (max-width: 720px) {
+  .workspace-dossier-page__header {
+    flex-direction: column;
+  }
 }
 </style>

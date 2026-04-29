@@ -8,6 +8,10 @@ import {
   cloneRouteOptions,
   getRouteDeleteBlockReason,
 } from '../lib/llm-gateway.js';
+import OpsCommandDeck from './admin/ops/OpsCommandDeck.vue';
+import OpsInspectorDrawer from './admin/ops/OpsInspectorDrawer.vue';
+import OpsSectionFrame from './admin/ops/OpsSectionFrame.vue';
+import OpsStatusBand from './admin/ops/OpsStatusBand.vue';
 import AppSectionCard from './ui/AppSectionCard.vue';
 
 const flash = useFlash();
@@ -83,6 +87,11 @@ const routeMetrics = computed(() => ([
 ]));
 
 const drawerTitle = computed(() => (editingId.value ? '编辑 LiteLLM 路由' : '新增 LiteLLM 路由'));
+const frameMeta = computed(() => [
+  `LiteLLM 路由：${litellmConfigs.value.length}`,
+  `默认链路：${Object.values(defaultsByCapability.value).filter(Boolean).length}`,
+  `Legacy：${legacyConfigs.value.length}`,
+]);
 
 const fetchConfigs = async () => {
   isLoading.value = true;
@@ -268,46 +277,53 @@ onMounted(fetchConfigs);
 </script>
 
 <template>
-  <div class="page-stack gateway-page">
-    <section class="page-hero gateway-page__hero gateway-page__hero--routing">
-      <div>
-        <div class="page-hero__eyebrow">LLM Gateway / Models & Routing</div>
-        <h1 class="page-hero__title">Models / Routing</h1>
-        <p class="page-hero__subtitle">
-          把 alias → upstream mapping、默认模型、fallback / 权重、key 状态与同步动作放进同一页，直接回答“当前默认路由是谁、后备链路是谁、有没有凭据、有没有同步”。
-        </p>
-      </div>
-
+  <OpsSectionFrame
+    eyebrow="War room / Models & routing"
+    title="Models / Routing"
+    summary="把 alias → upstream mapping、默认模型、fallback / 权重、key 状态与同步动作放进同一页，直接回答“当前默认路由是谁、后备链路是谁、有没有凭据、有没有同步”。"
+    :meta="frameMeta"
+  >
+    <template #actions>
       <div class="gateway-page__hero-actions">
         <el-button :loading="isLoading" @click="fetchConfigs">刷新</el-button>
         <el-button type="primary" plain :loading="isMigrating" @click="migrateRoutes">迁移到 LiteLLM</el-button>
         <el-button type="primary" @click="openCreate('chat')">新增路由</el-button>
       </div>
-    </section>
+    </template>
 
-    <el-alert v-if="errorMsg" :title="errorMsg" type="error" show-icon :closable="false" />
+    <template #alerts>
+      <el-alert v-if="errorMsg" :title="errorMsg" type="error" show-icon :closable="false" />
+    </template>
 
-    <section class="gateway-metric-strip">
-      <article v-for="metric in routeMetrics" :key="metric.key" class="gateway-metric-card">
-        <span class="gateway-metric-card__label">{{ metric.label }}</span>
-        <strong class="gateway-metric-card__value">{{ metric.value }}</strong>
-        <p class="gateway-metric-card__note">{{ metric.note }}</p>
-      </article>
-    </section>
+    <template #status-band>
+      <OpsStatusBand :items="routeMetrics" />
+    </template>
 
-    <AppSectionCard title="默认模型" desc="按 capability 直接展示当前默认链路，避免在大表里来回寻找激活项。" admin>
-      <div class="route-default-grid">
-        <article v-for="(config, key) in defaultsByCapability" :key="key" class="route-default-card">
-          <span class="route-default-card__eyebrow">{{ formatCapability(key) }}</span>
-          <strong class="route-default-card__title">{{ config?.alias || '尚未启用' }}</strong>
-          <p class="route-default-card__meta">上游：{{ config?.upstream_model || '未登记' }}</p>
-          <p class="route-default-card__meta">Provider：{{ config?.upstream_provider || config?.provider || '未配置' }}</p>
-          <p class="route-default-card__meta">Key：{{ config?.has_api_key ? '已配置' : '未配置' }}</p>
-        </article>
-      </div>
-    </AppSectionCard>
+    <OpsCommandDeck>
+      <AppSectionCard title="默认模型" desc="按 capability 直接展示当前默认链路，避免在大表里来回寻找激活项。" admin>
+        <div class="route-default-grid">
+          <article v-for="(config, key) in defaultsByCapability" :key="key" class="route-default-card">
+            <span class="route-default-card__eyebrow">{{ formatCapability(key) }}</span>
+            <strong class="route-default-card__title">{{ config?.alias || '尚未启用' }}</strong>
+            <p class="route-default-card__meta">上游：{{ config?.upstream_model || '未登记' }}</p>
+            <p class="route-default-card__meta">Provider：{{ config?.upstream_provider || config?.provider || '未配置' }}</p>
+            <p class="route-default-card__meta">Key：{{ config?.has_api_key ? '已配置' : '未配置' }}</p>
+          </article>
+        </div>
+      </AppSectionCard>
 
-    <AppSectionCard title="路由清单" desc="以高密度表格展示 alias、fallback、权重和 key 覆盖情况。" admin>
+      <AppSectionCard v-if="legacyConfigs.length" title="兼容保留项" desc="这些配置继续保留用于兼容或回退，但不再作为统一网关主治理入口。" admin>
+        <div class="legacy-grid">
+          <article v-for="config in legacyConfigs" :key="config.id" class="legacy-card">
+            <strong>{{ config.name }}</strong>
+            <p>{{ config.provider }} · {{ formatCapability(config.capability) }}</p>
+            <p class="mono-text">{{ config.endpoint }}</p>
+          </article>
+        </div>
+      </AppSectionCard>
+    </OpsCommandDeck>
+
+    <OpsInspectorDrawer title="Route registry" desc="以高密度表格展示 alias、fallback、权重和 key 覆盖情况。">
       <template #header>
         <div class="inline-actions">
           <el-button size="small" @click="openCreate('chat')">新增对话</el-button>
@@ -368,18 +384,8 @@ onMounted(fetchConfigs);
               </div>
             </template>
           </el-table-column>
-        </el-table>
-    </AppSectionCard>
-
-    <AppSectionCard v-if="legacyConfigs.length" title="兼容保留项" desc="这些配置继续保留用于兼容或回退，但不再作为统一网关主治理入口。" admin>
-      <div class="legacy-grid">
-        <article v-for="config in legacyConfigs" :key="config.id" class="legacy-card">
-          <strong>{{ config.name }}</strong>
-          <p>{{ config.provider }} · {{ formatCapability(config.capability) }}</p>
-          <p class="mono-text">{{ config.endpoint }}</p>
-        </article>
-      </div>
-    </AppSectionCard>
+      </el-table>
+    </OpsInspectorDrawer>
 
     <el-drawer v-model="drawerVisible" size="560px" :title="drawerTitle" destroy-on-close>
       <el-form label-position="top">
@@ -441,7 +447,7 @@ onMounted(fetchConfigs);
         </div>
       </template>
     </el-drawer>
-  </div>
+  </OpsSectionFrame>
 </template>
 
 <style scoped>

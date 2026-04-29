@@ -4,6 +4,10 @@ import { RouterLink } from 'vue-router';
 
 import { llmGatewayApi } from '../api/llm-gateway.js';
 import { normalizeGatewaySummary } from '../lib/llm-gateway.js';
+import OpsCommandDeck from './admin/ops/OpsCommandDeck.vue';
+import OpsInspectorDrawer from './admin/ops/OpsInspectorDrawer.vue';
+import OpsSectionFrame from './admin/ops/OpsSectionFrame.vue';
+import OpsStatusBand from './admin/ops/OpsStatusBand.vue';
 import AppSectionCard from './ui/AppSectionCard.vue';
 
 const summary = ref(normalizeGatewaySummary());
@@ -62,6 +66,11 @@ const metricCards = computed(() => ([
   },
 ]));
 
+const frameMeta = computed(() => [
+  `最近刷新：${refreshedAt.value || '尚未刷新'}`,
+  `近 24h 请求：${summary.value.traffic.request_count}`,
+]);
+
 const maxTopModelRequests = computed(() => {
   const counts = summary.value.top_models.map((item) => item.request_count);
   return counts.length ? Math.max(...counts) : 1;
@@ -99,36 +108,28 @@ onMounted(fetchSummary);
 </script>
 
 <template>
-  <div class="page-stack gateway-page">
-    <section class="page-hero gateway-page__hero">
-      <div>
-        <div class="page-hero__eyebrow">LLM Gateway / Dashboard</div>
-        <h1 class="page-hero__title">LiteLLM Gateway 总览</h1>
-        <p class="page-hero__subtitle">
-          只保留四类判断信息：Gateway health、error rate、top models、最近错误。先回答“网关现在稳不稳、热点在哪、错在哪”。
-        </p>
-        <div class="gateway-page__meta">
-          <span>最近刷新：{{ refreshedAt || '尚未刷新' }}</span>
-          <span>近 24h 请求：{{ summary.traffic.request_count }}</span>
-        </div>
-      </div>
-
+  <OpsSectionFrame
+    eyebrow="War room / Gateway overview"
+    title="LiteLLM Gateway 总览"
+    summary="只保留四类判断信息：Gateway health、error rate、top models、最近错误。先回答“网关现在稳不稳、热点在哪、错在哪”。"
+    :meta="frameMeta"
+    :tone="gatewayTone === 'warning' ? 'warning' : 'neutral'"
+  >
+    <template #actions>
       <div class="gateway-page__hero-actions">
         <el-button :loading="isLoading" @click="fetchSummary">刷新总览</el-button>
       </div>
-    </section>
+    </template>
 
-    <el-alert v-if="errorMsg" :title="errorMsg" type="error" show-icon :closable="false" />
+    <template #alerts>
+      <el-alert v-if="errorMsg" :title="errorMsg" type="error" show-icon :closable="false" />
+    </template>
 
-    <section class="gateway-metric-strip">
-      <article v-for="metric in metricCards" :key="metric.key" class="gateway-metric-card">
-        <span class="gateway-metric-card__label">{{ metric.label }}</span>
-        <strong class="gateway-metric-card__value">{{ metric.value }}</strong>
-        <p class="gateway-metric-card__note">{{ metric.note }}</p>
-      </article>
-    </section>
+    <template #status-band>
+      <OpsStatusBand :items="metricCards" />
+    </template>
 
-    <div class="gateway-dashboard-grid">
+    <OpsCommandDeck>
       <AppSectionCard title="Gateway health" desc="把网关状态和最近一次同步结论放在同一块判断面板里。" admin>
         <div class="health-panel">
           <div class="health-panel__status">
@@ -167,9 +168,34 @@ onMounted(fetchSummary);
           </article>
         </div>
       </AppSectionCard>
-    </div>
 
-    <AppSectionCard title="最近错误" desc="不展开复杂日志，只保留足够支持二次排查的错误样本。" admin>
+      <AppSectionCard title="Top models" desc="按最近请求量排序，直接回答当前最热的 alias 在哪里。" admin>
+        <div v-if="summary.top_models.length === 0" class="admin-empty-state">近 24 小时暂无请求</div>
+        <div v-else class="rank-list">
+          <article v-for="(item, index) in summary.top_models" :key="`${item.alias}-${index}`" class="rank-list__item">
+            <div class="rank-list__main">
+              <span class="rank-list__index">{{ String(index + 1).padStart(2, '0') }}</span>
+              <div>
+                <strong>{{ item.alias }}</strong>
+                <p>{{ item.request_count }} 次请求</p>
+              </div>
+            </div>
+            <div class="rank-list__bar">
+              <span
+                class="rank-list__fill"
+                :style="{ width: `${(item.request_count / maxTopModelRequests) * 100}%` }"
+              />
+            </div>
+          </article>
+        </div>
+      </AppSectionCard>
+    </OpsCommandDeck>
+
+    <OpsInspectorDrawer title="错误样本" desc="只保留足够支持二次排查的错误样本，不展开整页复杂日志。">
+      <template #header>
+        <RouterLink to="/admin/llm/observability" class="gateway-page__jump-link">进入日志观测</RouterLink>
+      </template>
+
       <div v-if="summary.recent_errors.length === 0" class="admin-empty-state">当前窗口内暂无错误样本</div>
       <div v-else class="error-list">
         <article v-for="item in summary.recent_errors" :key="`${item.trace_id}-${item.time}`" class="error-list__item">
@@ -188,11 +214,8 @@ onMounted(fetchSummary);
           <p class="error-list__message">{{ item.error_message || '未提供错误信息。' }}</p>
         </article>
       </div>
-      <template #header>
-        <RouterLink to="/admin/llm/observability" class="gateway-page__jump-link">进入日志观测</RouterLink>
-      </template>
-    </AppSectionCard>
-  </div>
+    </OpsInspectorDrawer>
+  </OpsSectionFrame>
 </template>
 
 <style scoped>

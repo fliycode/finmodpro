@@ -14,6 +14,10 @@ import {
   normalizeDashboardPayload,
 } from '../lib/admin-dashboard.js';
 import AdminChart from './admin/AdminChart.vue';
+import OpsCommandDeck from './admin/ops/OpsCommandDeck.vue';
+import OpsInspectorDrawer from './admin/ops/OpsInspectorDrawer.vue';
+import OpsSectionFrame from './admin/ops/OpsSectionFrame.vue';
+import OpsStatusBand from './admin/ops/OpsStatusBand.vue';
 import AppSectionCard from './ui/AppSectionCard.vue';
 
 const router = useRouter();
@@ -178,6 +182,13 @@ const operationalSummary = computed(() => [
   },
 ]);
 
+const opsMeta = computed(() => [
+  `最近刷新：${refreshedAt.value}`,
+  `待审风险：${dashboardStats.value.pending_risk_event_count}`,
+  `失败入库：${dashboardStats.value.failed_document_count}`,
+  `近 24h 问答：${dashboardStats.value.chat_request_count_24h}`,
+]);
+
 const trendOption = computed(() => buildTrendChartOption(dashboardStats.value));
 const riskOption = computed(() => buildRiskDistributionOption(dashboardStats.value));
 const documentOption = computed(() => buildDocumentStatusOption(dashboardStats.value));
@@ -245,20 +256,14 @@ const handleBannerAction = async (action) => {
 </script>
 
 <template>
-  <div class="page-stack admin-page">
-    <section class="overview-banner" :class="toneClass(banner.tone)">
-      <div class="overview-banner__copy">
-        <p class="overview-banner__eyebrow">{{ banner.eyebrow }}</p>
-        <h1 class="overview-banner__title">{{ banner.title }}</h1>
-        <p class="overview-banner__summary">{{ banner.summary }}</p>
-        <div class="overview-banner__meta">
-          <span>最近刷新：{{ refreshedAt }}</span>
-          <span>待审风险：{{ dashboardStats.pending_risk_event_count }}</span>
-          <span>失败入库：{{ dashboardStats.failed_document_count }}</span>
-          <span>近 24h 问答：{{ dashboardStats.chat_request_count_24h }}</span>
-        </div>
-      </div>
-
+  <OpsSectionFrame
+    eyebrow="War room / Platform overview"
+    :title="banner.title"
+    :summary="banner.summary"
+    :meta="opsMeta"
+    :tone="banner.tone"
+  >
+    <template #actions>
       <div class="overview-banner__actions">
         <el-button
           v-for="action in banner.actions"
@@ -270,25 +275,21 @@ const handleBannerAction = async (action) => {
         </el-button>
         <el-button @click="fetchData" :loading="isLoading">刷新运行状态</el-button>
       </div>
-    </section>
+    </template>
 
-    <el-alert v-if="errorMsg" :title="errorMsg" type="error" show-icon :closable="false" />
+    <template #alerts>
+      <el-alert v-if="errorMsg" :title="errorMsg" type="error" show-icon :closable="false" />
+    </template>
 
-    <section class="overview-metrics">
-      <article v-for="metric in headlineMetrics" :key="metric.key" class="overview-metric">
-        <span class="overview-metric__label">{{ metric.label }}</span>
-        <strong class="overview-metric__value">{{ metric.value }}</strong>
-        <p class="overview-metric__note">{{ metric.note }}</p>
-      </article>
-    </section>
+    <template #status-band>
+      <OpsStatusBand :items="headlineMetrics" />
+    </template>
 
-    <section class="overview-primary-chart">
+    <OpsCommandDeck>
       <AppSectionCard title="近 7 天请求与命中趋势" desc="用于判断问答规模和知识召回表现是否同步变化。" admin>
         <AdminChart :option="trendOption" height="320px" />
       </AppSectionCard>
-    </section>
 
-    <section class="overview-main">
       <AppSectionCard title="待处理事项" desc="优先用于判断今天需要人工跟进的治理动作。" admin>
         <div v-if="!hasQueueItems" class="focus-empty-state">
           <div class="focus-empty-state__icon">✓</div>
@@ -317,9 +318,7 @@ const handleBannerAction = async (action) => {
           </article>
         </div>
       </AppSectionCard>
-    </section>
 
-    <section class="overview-secondary">
       <AppSectionCard title="最近失败任务" desc="优先查看可重试的失败入库与处理异常。" admin>
         <div v-if="failureItems.length === 0" class="failure-empty-state">暂无失败任务</div>
         <div v-else class="failure-list">
@@ -364,9 +363,7 @@ const handleBannerAction = async (action) => {
           </article>
         </div>
       </AppSectionCard>
-    </section>
 
-    <section class="overview-charts">
       <AppSectionCard title="风险等级分布" desc="快速观察当前风险审查压力主要集中在哪个等级。" admin>
         <AdminChart :option="riskOption" height="310px" />
       </AppSectionCard>
@@ -374,51 +371,59 @@ const handleBannerAction = async (action) => {
       <AppSectionCard title="文档处理状态" desc="反映知识资产当前是否存在积压、失败或未完成索引。" admin>
         <AdminChart :option="documentOption" height="310px" />
       </AppSectionCard>
-    </section>
+    </OpsCommandDeck>
 
-    <section class="overview-evidence">
-      <div ref="activitySection" class="overview-evidence__column">
-        <AppSectionCard title="最近活动" desc="面向治理判断的最新动态。" admin>
-          <div v-if="activityItems.length === 0" class="activity-empty">暂无最近活动</div>
-          <div v-else class="activity-list">
-            <article v-for="(item, index) in activityItems" :key="`${item.timestamp}-${index}`" class="activity-item">
-              <span class="activity-item__dot" :class="toneClass(item.tone)" />
-              <div class="activity-item__content">
-                <div class="activity-item__meta">
+    <OpsInspectorDrawer title="巡检记录" desc="把最近活动和运行证据收进同一条巡检带，方便继续向下追查。">
+      <div class="overview-inspector-grid">
+        <div ref="activitySection" class="overview-evidence__column">
+          <AppSectionCard title="最近活动" desc="面向治理判断的最新动态。" admin>
+            <div v-if="activityItems.length === 0" class="activity-empty">暂无最近活动</div>
+            <div v-else class="activity-list">
+              <article v-for="(item, index) in activityItems" :key="`${item.timestamp}-${index}`" class="activity-item">
+                <span class="activity-item__dot" :class="toneClass(item.tone)" />
+                <div class="activity-item__content">
+                  <div class="activity-item__meta">
+                    <span>{{ formatActivityType(item.type) }}</span>
+                    <span>{{ formatTimestamp(item.timestamp) }}</span>
+                  </div>
+                  <p>{{ item.message }}</p>
+                </div>
+              </article>
+            </div>
+          </AppSectionCard>
+        </div>
+
+        <div ref="evidenceSection" class="overview-evidence__column">
+          <AppSectionCard title="运行证据" desc="保留最近证据链，方便继续向下追查。" admin>
+            <template #header>
+              <span class="evidence-count">{{ evidenceItems.length }} 条记录</span>
+            </template>
+
+            <div v-if="evidenceItems.length === 0" class="evidence-log-list__empty">暂无运行证据</div>
+            <div v-else class="evidence-log-list">
+              <article v-for="(item, index) in evidenceItems" :key="`${item.timestamp}-${index}`" class="evidence-log">
+                <div class="evidence-log__head">
+                  <span class="evidence-log__badge" :class="toneClass(item.tone)">{{ formatStatus(item.status) }}</span>
                   <span>{{ formatActivityType(item.type) }}</span>
                   <span>{{ formatTimestamp(item.timestamp) }}</span>
                 </div>
-                <p>{{ item.message }}</p>
-              </div>
-            </article>
-          </div>
-        </AppSectionCard>
+                <p class="evidence-log__message">{{ item.message }}</p>
+              </article>
+            </div>
+          </AppSectionCard>
+        </div>
       </div>
-
-      <div ref="evidenceSection" class="overview-evidence__column">
-        <AppSectionCard title="运行证据" desc="保留最近证据链，方便继续向下追查。" admin>
-          <template #header>
-            <span class="evidence-count">{{ evidenceItems.length }} 条记录</span>
-          </template>
-
-          <div v-if="evidenceItems.length === 0" class="evidence-log-list__empty">暂无运行证据</div>
-          <div v-else class="evidence-log-list">
-            <article v-for="(item, index) in evidenceItems" :key="`${item.timestamp}-${index}`" class="evidence-log">
-              <div class="evidence-log__head">
-                <span class="evidence-log__badge" :class="toneClass(item.tone)">{{ formatStatus(item.status) }}</span>
-                <span>{{ formatActivityType(item.type) }}</span>
-                <span>{{ formatTimestamp(item.timestamp) }}</span>
-              </div>
-              <p class="evidence-log__message">{{ item.message }}</p>
-            </article>
-          </div>
-        </AppSectionCard>
-      </div>
-    </section>
-  </div>
+    </OpsInspectorDrawer>
+  </OpsSectionFrame>
 </template>
 
 <style scoped>
+.overview-inspector-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
 .admin-page {
   gap: 20px;
 }
@@ -869,6 +874,7 @@ const handleBannerAction = async (action) => {
 }
 
 @media (max-width: 960px) {
+  .overview-inspector-grid,
   .overview-main,
   .overview-evidence,
   .overview-metrics,

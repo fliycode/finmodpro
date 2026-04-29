@@ -7,21 +7,21 @@ import FlashStack from '../components/ui/FlashStack.vue';
 </script>
 
 <template>
-  <div class="app-shell">
+  <div class="app-shell app-shell--admin">
     <AppSidebar area="admin" />
-    <div class="app-shell__main">
+    <main class="admin-frame">
       <AppTopbar
-        eyebrow="管理员端"
-        title="管理控制台"
-        subtitle="平台治理、风险审查与模型运维总览。"
+        eyebrow="War room"
+        title="Model operations"
+        subtitle="Routing, observability, governance, and review surfaces."
         area="admin"
         switch-target="/workspace/qa"
         switch-label="进入工作区"
       />
       <FlashStack />
-      <div class="app-shell__content">
+      <section class="admin-frame__body">
         <RouterView />
-      </div>
-    </div>
+      </section>
+    </main>
   </div>
 </template>
