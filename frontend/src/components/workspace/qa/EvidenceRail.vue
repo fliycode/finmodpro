@@ -20,7 +20,7 @@ defineProps({
     <header class="evidence-rail__header">
       <div>
         <p class="evidence-rail__eyebrow">Evidence rail</p>
-        <h2>证据索引</h2>
+        <h2>引用与线索</h2>
       </div>
       <div class="evidence-rail__meta">
         <span>{{ citationCount }} 条依据</span>
@@ -38,10 +38,13 @@ defineProps({
   display: flex;
   flex-direction: column;
   min-height: 0;
-  border: 1px solid rgba(95, 69, 35, 0.14);
-  border-radius: 20px;
-  background: rgba(248, 241, 229, 0.9);
-  box-shadow: 0 18px 48px -38px rgba(80, 54, 20, 0.28);
+  border: 1px solid rgba(95, 123, 255, 0.16);
+  border-radius: 16px;
+  background:
+    linear-gradient(180deg, rgba(10, 18, 31, 0.92), rgba(8, 14, 26, 0.92)),
+    radial-gradient(circle at top right, rgba(89, 100, 255, 0.1), transparent 40%);
+  box-shadow: 0 22px 56px -42px rgba(3, 9, 22, 0.94);
+  backdrop-filter: blur(18px);
   overflow: hidden;
 }
 
@@ -50,7 +53,7 @@ defineProps({
   flex-direction: column;
   gap: 12px;
   padding: 18px 18px 16px;
-  border-bottom: 1px solid rgba(95, 69, 35, 0.12);
+  border-bottom: 1px solid rgba(95, 123, 255, 0.12);
 }
 
 .evidence-rail__eyebrow {
@@ -59,14 +62,14 @@ defineProps({
   font-weight: 700;
   letter-spacing: 0.16em;
   text-transform: uppercase;
-  color: #8b7358;
+  color: #7c93bb;
 }
 
 .evidence-rail h2 {
   margin: 0;
   font-size: 20px;
   line-height: 1.2;
-  color: #2f2418;
+  color: #eef4ff;
 }
 
 .evidence-rail__meta {
@@ -81,8 +84,9 @@ defineProps({
   min-height: 28px;
   padding: 0 10px;
   border-radius: 999px;
-  background: rgba(154, 106, 44, 0.08);
-  color: #8a6030;
+  border: 1px solid rgba(93, 130, 255, 0.2);
+  background: rgba(49, 68, 130, 0.22);
+  color: #a9beff;
   font-size: 12px;
   font-weight: 700;
 }

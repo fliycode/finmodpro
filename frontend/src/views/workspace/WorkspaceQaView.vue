@@ -35,8 +35,14 @@ const sessionId = computed(() => route.query.session ?? null);
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 16px;
-  padding: 0 2px;
+  gap: 18px;
+  padding: 20px 24px;
+  border: 1px solid rgba(96, 126, 255, 0.16);
+  border-radius: 16px;
+  background:
+    linear-gradient(180deg, rgba(12, 20, 36, 0.96), rgba(9, 15, 28, 0.94)),
+    radial-gradient(circle at top right, rgba(90, 106, 255, 0.16), transparent 38%);
+  box-shadow: 0 22px 52px -34px rgba(4, 10, 22, 0.92);
 }
 
 .workspace-dossier-page__eyebrow {
@@ -45,7 +51,7 @@ const sessionId = computed(() => route.query.session ?? null);
   font-weight: 700;
   letter-spacing: 0.16em;
   text-transform: uppercase;
-  color: #8b7358;
+  color: #7f95bf;
 }
 
 .workspace-dossier-page h1 {
@@ -53,13 +59,13 @@ const sessionId = computed(() => route.query.session ?? null);
   font-size: 34px;
   line-height: 1.05;
   letter-spacing: -0.03em;
-  color: #2f2418;
+  color: #eef4ff;
 }
 
 .workspace-dossier-page__hint {
   padding-top: 6px;
   font-size: 12px;
-  color: #8b7358;
+  color: #93a8cb;
   flex-shrink: 0;
 }
 

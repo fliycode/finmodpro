@@ -16,7 +16,7 @@ defineProps({
     <header class="conversation-canvas__header">
       <div>
         <p class="conversation-canvas__eyebrow">Conversation region</p>
-        <h2>会话编排</h2>
+        <h2>AI 会话主屏</h2>
       </div>
       <span class="conversation-canvas__meta">{{ messageCount }} 条消息</span>
     </header>
@@ -34,10 +34,13 @@ defineProps({
   display: flex;
   flex-direction: column;
   min-height: 0;
-  border: 1px solid rgba(95, 69, 35, 0.14);
-  border-radius: 22px;
-  background: rgba(251, 246, 237, 0.9);
-  box-shadow: 0 18px 48px -36px rgba(80, 54, 20, 0.28);
+  border: 1px solid rgba(95, 123, 255, 0.18);
+  border-radius: 16px;
+  background:
+    linear-gradient(180deg, rgba(12, 20, 36, 0.9), rgba(9, 15, 28, 0.9)),
+    radial-gradient(circle at top, rgba(84, 99, 255, 0.14), transparent 42%);
+  box-shadow: 0 22px 56px -36px rgba(3, 9, 22, 0.88);
+  backdrop-filter: blur(18px);
   overflow: hidden;
 }
 
@@ -52,7 +55,7 @@ defineProps({
 
 .conversation-canvas__header {
   padding-bottom: 14px;
-  border-bottom: 1px solid rgba(95, 69, 35, 0.12);
+  border-bottom: 1px solid rgba(95, 123, 255, 0.12);
 }
 
 .conversation-canvas__eyebrow {
@@ -61,14 +64,14 @@ defineProps({
   font-weight: 700;
   letter-spacing: 0.16em;
   text-transform: uppercase;
-  color: #8b7358;
+  color: #7c93bb;
 }
 
 .conversation-canvas h2 {
   margin: 0;
   font-size: 22px;
   line-height: 1.2;
-  color: #2f2418;
+  color: #eef4ff;
 }
 
 .conversation-canvas__meta {
@@ -77,8 +80,9 @@ defineProps({
   min-height: 30px;
   padding: 0 10px;
   border-radius: 999px;
-  background: rgba(154, 106, 44, 0.1);
-  color: #8a6030;
+  border: 1px solid rgba(93, 130, 255, 0.2);
+  background: rgba(49, 68, 130, 0.24);
+  color: #a9beff;
   font-size: 12px;
   font-weight: 700;
 }

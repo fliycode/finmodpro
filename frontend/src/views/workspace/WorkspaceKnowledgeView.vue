@@ -27,12 +27,12 @@ import KnowledgeBase from '../../components/KnowledgeBase.vue';
   font-weight: 700;
   letter-spacing: 0.16em;
   text-transform: uppercase;
-  color: #8b7358;
+  color: #7f95bf;
 }
 
 .workspace-dossier-page h1 {
   margin: 0;
-  color: #2f2418;
+  color: #eef4ff;
   font-size: 34px;
   line-height: 1.06;
   letter-spacing: -0.03em;

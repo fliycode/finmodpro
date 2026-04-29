@@ -84,12 +84,12 @@ const permissionsLabel = computed(() => {
   font-weight: 700;
   letter-spacing: 0.16em;
   text-transform: uppercase;
-  color: #8b7358;
+  color: #7f95bf;
 }
 
 .workspace-support-page h1 {
   margin: 0;
-  color: #2f2418;
+  color: #eef4ff;
   font-size: 34px;
   line-height: 1.06;
   letter-spacing: -0.03em;
@@ -109,8 +109,8 @@ const permissionsLabel = computed(() => {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  background: #7f5b2f;
-  color: #fbf6ed;
+  background: linear-gradient(135deg, #315fff, #725dff);
+  color: #f5f9ff;
   font-size: 28px;
   font-weight: 800;
 }
@@ -124,8 +124,8 @@ const permissionsLabel = computed(() => {
   margin-bottom: 6px;
   padding: 3px 9px;
   border-radius: 999px;
-  background: rgba(154, 106, 44, 0.12);
-  color: #8b5f2d;
+  background: rgba(59, 115, 255, 0.16);
+  color: #9db5ff;
   font-size: 12px;
   font-weight: 700;
 }
@@ -134,12 +134,12 @@ const permissionsLabel = computed(() => {
   margin: 0;
   font-size: 26px;
   line-height: 1.2;
-  color: #2f2418;
+  color: #eef4ff;
 }
 
 .profile-panel__identity p {
   margin: 6px 0 0;
-  color: #6f5a42;
+  color: #93a8cb;
 }
 
 .profile-panel__actions {
@@ -154,10 +154,10 @@ const permissionsLabel = computed(() => {
   align-items: center;
   min-height: 36px;
   padding: 0 12px;
-  border: 1px solid rgba(95, 69, 35, 0.14);
-  border-radius: 10px;
-  background: rgba(255, 251, 245, 0.96);
-  color: #2f2418;
+  border: 1px solid rgba(96, 126, 255, 0.16);
+  border-radius: 12px;
+  background: rgba(14, 23, 39, 0.82);
+  color: #d1def7;
   font-weight: 700;
   text-decoration: none;
 }
@@ -170,17 +170,17 @@ const permissionsLabel = computed(() => {
 .profile-detail {
   min-width: 0;
   padding: 18px 20px;
-  border-bottom: 1px solid rgba(95, 69, 35, 0.12);
+  border-bottom: 1px solid rgba(96, 126, 255, 0.12);
 }
 
 .profile-detail:nth-child(odd) {
-  border-right: 1px solid rgba(95, 69, 35, 0.12);
+  border-right: 1px solid rgba(96, 126, 255, 0.12);
 }
 
 .profile-detail span {
   display: block;
   margin-bottom: 5px;
-  color: #8b7358;
+  color: #7f95bf;
   font-size: 12px;
   font-weight: 700;
 }
@@ -188,7 +188,7 @@ const permissionsLabel = computed(() => {
 .profile-detail strong {
   display: block;
   overflow-wrap: anywhere;
-  color: #2f2418;
+  color: #eef4ff;
   font-size: 15px;
 }
 

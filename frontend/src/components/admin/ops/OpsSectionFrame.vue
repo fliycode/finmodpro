@@ -58,8 +58,8 @@ defineProps({
 .ops-section-frame {
   display: flex;
   flex-direction: column;
-  gap: 18px;
-  color: #d7e0ea;
+  gap: 20px;
+  color: #dbe7ff;
 }
 
 .ops-section-frame__header {
@@ -67,20 +67,20 @@ defineProps({
   justify-content: space-between;
   gap: 24px;
   padding: 24px 26px;
-  border: 1px solid rgba(127, 146, 170, 0.18);
-  border-radius: 24px;
+  border: 1px solid rgba(102, 129, 255, 0.18);
+  border-radius: 16px;
   background:
-    linear-gradient(180deg, rgba(17, 24, 34, 0.98), rgba(12, 18, 27, 0.98)),
-    radial-gradient(circle at top right, rgba(92, 125, 160, 0.18), transparent 36%);
-  box-shadow: 0 30px 70px -54px rgba(3, 8, 15, 0.92);
+    linear-gradient(180deg, rgba(12, 20, 36, 0.98), rgba(8, 14, 26, 0.96)),
+    radial-gradient(circle at top right, rgba(88, 112, 255, 0.16), transparent 38%);
+  box-shadow: 0 26px 68px -50px rgba(2, 8, 20, 0.94);
 }
 
 .ops-section-frame.is-risk .ops-section-frame__header {
-  border-color: rgba(182, 83, 83, 0.22);
+  border-color: rgba(214, 85, 108, 0.24);
 }
 
 .ops-section-frame.is-warning .ops-section-frame__header {
-  border-color: rgba(191, 145, 79, 0.22);
+  border-color: rgba(255, 179, 71, 0.24);
 }
 
 .ops-section-frame__copy {
@@ -95,12 +95,12 @@ defineProps({
   font-weight: 700;
   letter-spacing: 0.16em;
   text-transform: uppercase;
-  color: #8aa0b8;
+  color: #8398c2;
 }
 
 .ops-section-frame__title {
   margin: 0;
-  color: #f3f6fb;
+  color: #f4f8ff;
   font-size: 34px;
   line-height: 1.02;
   letter-spacing: -0.04em;
@@ -109,7 +109,7 @@ defineProps({
 .ops-section-frame__summary {
   margin: 0;
   max-width: 760px;
-  color: #a6b6c8;
+  color: #93a8cb;
   line-height: 1.6;
 }
 
@@ -126,8 +126,8 @@ defineProps({
   padding: 0 12px;
   border: 1px solid rgba(127, 146, 170, 0.18);
   border-radius: 999px;
-  background: rgba(24, 33, 46, 0.94);
-  color: #d7e0ea;
+  background: rgba(15, 24, 42, 0.84);
+  color: #d7e5ff;
   font-size: 12px;
 }
 
