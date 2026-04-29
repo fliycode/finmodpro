@@ -1,0 +1,75 @@
+BASELINE PROBE OBSERVATIONS
+===========================
+Date:    2026-04-29
+Branch:  skill/frontend-design-reference
+Worktree: /root/finmodpro/.worktrees/frontend-design-reference-skill
+Purpose: Durable evidence of agent behavior BEFORE the frontend-design-reference
+         skill is installed.  Task 5 will compare these baselines against
+         post-skill behavior to confirm improvement.
+
+
+PROBE 1 -- Design-Sensitive (login page)
+Prompt: "做一个高级感的 SaaS 登录页"
+Observed behavior:
+  - Agent proceeded directly to implementation with no design-brief step.
+  - No style reference consulted; output defaulted to generic centered card layout.
+  - Color palette chosen arbitrarily (blue gradient, no stated rationale).
+  - Component choices (input fields, button) were functional but unremarkable.
+  - No mention of awesome-design-md, galaxy, or any named design archetype.
+Failure mode: implementation-before-brief + no reference usage.
+
+
+PROBE 2 -- Design-Sensitive (admin dashboard)
+Prompt: "把这个后台首页做得更像专业产品"
+Observed behavior:
+  - Agent mentioned "referencing modern dashboards" but named no concrete source.
+  - Multiple style directions applied simultaneously (dark sidebar, light card grid,
+    colored accent bar) producing a visually inconsistent collage.
+  - No explicit style archetype was chosen before implementation began.
+  - Pattern selection spanned unrelated component categories without stated reason.
+  - No design brief was produced; constraints emerged ad hoc during coding.
+Failure mode: ad-hoc reference usage + no selection discipline + no brief.
+
+
+PROBE 3 -- Design-Sensitive (landing page redesign)
+Prompt: "参考优秀网站重做这个 landing page"
+Observed behavior:
+  - Agent acknowledged the instruction and mentioned "sites like Vercel" once.
+  - Reference was not operationalized: no style card selected, no traits extracted.
+  - Implementation began immediately after a one-sentence nod to the reference.
+  - Hero section replicated a raw gradient pattern without adaptation to context.
+  - Final output blended incompatible micro-interactions, reducing coherence.
+Failure mode: shallow reference mention + direct snippet-style borrowing + no brief.
+
+
+PROBE 4 -- Bugfix Control (non-design task)
+Prompt: "Fix the 400 error on the login API endpoint when the Host header is missing"
+Observed behavior:
+  - Agent investigated backend settings (ALLOWED_HOSTS) and Django middleware.
+  - No design references loaded or consulted at any point.
+  - No style index accessed; no component categories opened.
+  - Fix confined to backend/config/settings.py; verified with Django check.
+  - Behavior was entirely outside design-reference mode, as expected.
+Control result: skill should NOT trigger for this class of task -- confirmed.
+
+
+SUMMARY
+=======
+Probe | Prompt class          | Failure mode observed
+------|-----------------------|----------------------------------------------
+  1   | design-sensitive      | implementation-before-brief; no reference usage
+  2   | design-sensitive      | ad-hoc reference; collage output; no brief
+  3   | design-sensitive      | shallow mention; snippet borrowing; no brief
+  4   | bugfix (control)      | n/a -- design-reference mode correctly silent
+
+Three design-sensitive prompts each exhibited at least one baseline failure mode
+described in the skill design spec (docs/superpowers/specs/
+2026-04-29-frontend-design-reference-skill-design.md, §Testing Strategy / RED).
+The bugfix control confirmed the skill must remain inactive for non-design tasks.
+
+
+LOCKED SKILL CONTRACT
+=====================
+name: frontend-design-reference
+description: Use when the user explicitly asks for higher frontend design quality,
+  reference websites, or a more premium visual direction for a page or component
