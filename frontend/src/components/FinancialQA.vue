@@ -80,6 +80,44 @@ const latestAssistantEntry = computed(() => (
 const latestCitations = computed(() => latestAssistantEntry.value?.citations ?? []);
 const chapterTabs = computed(() => qaPageModel?.regions ?? []);
 const evidenceHistoryItems = computed(() => historyItems.value.slice(0, 5));
+const knowledgeGraphNodes = computed(() => {
+  const labels = [...new Set(
+    latestCitations.value
+      .map((item) => item?.document_title || item?.doc_type || '')
+      .map((value) => String(value).trim())
+      .filter(Boolean),
+  )].slice(0, 4);
+
+  return labels.map((label, index) => ({
+    id: `${label}-${index}`,
+    label,
+    tone: index === 0 ? 'primary' : 'secondary',
+  }));
+});
+const recommendedQuestions = computed(() => {
+  if (latestCitations.value.length > 0) {
+    const firstTitle = latestCitations.value[0]?.document_title || '当前依据';
+    return [
+      `基于《${firstTitle}》提炼三条最关键的风险信号`,
+      '把当前回答整理成适合汇报的风险摘要',
+      '列出还需要补充验证的证据与下一步问题',
+    ];
+  }
+
+  if (activeDatasetId.value) {
+    return [
+      '围绕当前知识库先给我一个整体判断框架',
+      '先列出值得重点追问的三类风险主题',
+      '给我一个适合继续深挖的分析提纲',
+    ];
+  }
+
+  return [
+    '先给我一个适合当前问题的分析框架',
+    '把这个问题拆成结论、证据、待验证三部分',
+    '给我三个更专业的追问方向',
+  ];
+});
 
 const qaActionLabels = {
   history: '历史会话',
@@ -111,6 +149,11 @@ const getFriendlyErrorMessage = (error) => {
 
 const setActiveChapter = (chapterId) => {
   activeChapter.value = chapterId;
+};
+
+const applySuggestedQuestion = (value) => {
+  query.value = value;
+  activeChapter.value = 'conversation';
 };
 
 const scrollToBottom = async () => {
@@ -562,10 +605,13 @@ const handleAsk = async () => {
               <span>{{ latestCitations.length ? '来自最近结论' : '等待回答' }}</span>
             </header>
             <div v-if="latestCitations.length" class="evidence-list">
-              <article
+              <button
                 v-for="(cite, index) in latestCitations"
                 :key="`${cite.document_title}-${index}`"
-                class="evidence-card"
+                type="button"
+                class="evidence-card evidence-card--interactive"
+                :title="`基于 ${cite.document_title || '该文档'} 继续追问`"
+                @click="applySuggestedQuestion(`基于《${cite.document_title || '当前文档'}》继续补充关键风险与证据。`)"
               >
                 <header class="evidence-card__header">
                   <span class="evidence-card__index">[{{ index + 1 }}]</span>
@@ -577,9 +623,34 @@ const handleAsk = async () => {
                   <span v-if="cite.score > 0">· 相关度 {{ (cite.score * 100).toFixed(0) }}%</span>
                 </p>
                 <p class="evidence-card__snippet">{{ cite.snippet || '暂无摘录。' }}</p>
-              </article>
+              </button>
             </div>
             <p v-else class="evidence-empty">发送问题后，引用依据会在这里沉淀为证据索引。</p>
+          </section>
+
+          <section class="evidence-block">
+            <header class="evidence-block__header">
+              <h3>知识关系</h3>
+              <span>{{ knowledgeGraphNodes.length ? '基于最新引用' : '等待来源' }}</span>
+            </header>
+            <div class="knowledge-graph">
+              <div class="knowledge-graph__hub">AI</div>
+              <div class="knowledge-graph__nodes">
+                <button
+                  v-for="node in knowledgeGraphNodes"
+                  :key="node.id"
+                  type="button"
+                  class="knowledge-graph__node"
+                  :class="`knowledge-graph__node--${node.tone}`"
+                  @click="applySuggestedQuestion(`围绕《${node.label}》继续展开交叉验证。`)"
+                >
+                  {{ node.label }}
+                </button>
+                <p v-if="knowledgeGraphNodes.length === 0" class="knowledge-graph__empty">
+                  回答生成后，这里会把来源文档组织成可继续追问的线索节点。
+                </p>
+              </div>
+            </div>
           </section>
 
           <section class="evidence-block">
@@ -594,6 +665,24 @@ const handleAsk = async () => {
                 <p>{{ item.summaryPreview || item.preview }}</p>
               </li>
             </ul>
+          </section>
+
+          <section class="evidence-block">
+            <header class="evidence-block__header">
+              <h3>推荐追问</h3>
+              <span>一键带入输入框</span>
+            </header>
+            <div class="recommendation-list">
+              <button
+                v-for="question in recommendedQuestions"
+                :key="question"
+                type="button"
+                class="recommendation-item"
+                @click="applySuggestedQuestion(question)"
+              >
+                {{ question }}
+              </button>
+            </div>
           </section>
         </div>
       </EvidenceRail>
@@ -628,7 +717,7 @@ const handleAsk = async () => {
 .qa-dossier-shell {
   display: flex;
   flex-direction: column;
-  gap: 18px;
+  gap: 20px;
   min-height: 0;
 }
 
@@ -640,25 +729,30 @@ const handleAsk = async () => {
 .qa-dossier-shell__chapter {
   min-height: 34px;
   padding: 0 12px;
-  border: 1px solid rgba(154, 106, 44, 0.12);
+  border: 1px solid rgba(92, 124, 255, 0.16);
   border-radius: 999px;
-  background: rgba(255, 248, 238, 0.9);
-  color: #7f6547;
+  background: rgba(14, 24, 42, 0.82);
+  color: #90a5cd;
   font-size: 13px;
   font-weight: 700;
   cursor: pointer;
+  transition:
+    border-color 0.24s ease,
+    background-color 0.24s ease,
+    color 0.24s ease,
+    transform 0.24s ease;
 }
 
 .qa-dossier-shell__chapter.is-active {
-  background: #8b5f2d;
-  border-color: #8b5f2d;
-  color: #fbf6ed;
+  background: linear-gradient(135deg, rgba(58, 99, 255, 0.3), rgba(123, 88, 255, 0.26));
+  border-color: rgba(102, 138, 255, 0.42);
+  color: #eef4ff;
 }
 
 .qa-dossier-layout {
   display: grid;
   grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr) minmax(280px, 0.82fr);
-  gap: 18px;
+  gap: 20px;
   min-height: 0;
 }
 
@@ -669,20 +763,33 @@ const handleAsk = async () => {
 }
 
 .ghost-btn {
-  min-height: 36px;
-  padding: 0 13px;
-  border-radius: 8px;
-  border: 1px solid rgba(154, 106, 44, 0.12);
-  background: rgba(255, 248, 238, 0.9);
-  color: #5f482e;
+  min-height: 38px;
+  padding: 0 14px;
+  border-radius: 12px;
+  border: 1px solid rgba(90, 124, 255, 0.16);
+  background: rgba(15, 24, 41, 0.78);
+  color: #a9bce0;
   font-weight: 700;
   cursor: pointer;
+  transition:
+    transform 0.24s cubic-bezier(0.16, 1, 0.3, 1),
+    border-color 0.2s ease,
+    background-color 0.2s ease,
+    color 0.2s ease,
+    box-shadow 0.2s ease;
+}
+
+.ghost-btn:hover {
+  transform: translateY(-1px);
+  border-color: rgba(102, 138, 255, 0.3);
+  color: #eef4ff;
+  box-shadow: 0 14px 32px -24px rgba(40, 78, 189, 0.8);
 }
 
 .ghost-btn--primary {
-  background: #8b5f2d;
-  border-color: #8b5f2d;
-  color: #fbf6ed;
+  background: linear-gradient(135deg, #2c63ff, #5669ff 60%, #7a5dff);
+  border-color: rgba(122, 147, 255, 0.62);
+  color: #f7fbff;
 }
 
 .chat-window,
@@ -701,9 +808,9 @@ const handleAsk = async () => {
   margin: 16px 18px 0;
   padding: 11px 12px;
   border-radius: 12px;
-  border: 1px solid rgba(180, 72, 52, 0.16);
-  background: rgba(255, 243, 239, 0.96);
-  color: #8d3f32;
+  border: 1px solid rgba(224, 92, 120, 0.24);
+  background: rgba(51, 18, 34, 0.82);
+  color: #ffb4c1;
   font-size: 13px;
   line-height: 1.55;
 }
@@ -718,8 +825,8 @@ const handleAsk = async () => {
   overflow-y: auto;
   display: flex;
   flex-direction: column;
-  gap: 16px;
-  padding: 18px 18px 14px;
+  gap: 18px;
+  padding: 20px 20px 14px;
 }
 
 .messages--empty {
@@ -749,8 +856,8 @@ const handleAsk = async () => {
 }
 
 .avatar {
-  width: 36px;
-  height: 36px;
+  width: 38px;
+  height: 38px;
   border-radius: 12px;
   display: inline-flex;
   align-items: center;
@@ -759,49 +866,52 @@ const handleAsk = async () => {
   font-weight: 800;
   letter-spacing: 0.04em;
   flex-shrink: 0;
+  border: 1px solid rgba(103, 134, 255, 0.18);
+  box-shadow: 0 16px 28px -24px rgba(10, 20, 40, 0.94);
 }
 
 .avatar-user {
-  background: #7f5b2f;
-  color: #fbf6ed;
+  background: linear-gradient(135deg, rgba(41, 74, 153, 0.92), rgba(70, 42, 133, 0.92));
+  color: #eff5ff;
 }
 
 .avatar-assistant {
-  background: rgba(154, 106, 44, 0.14);
-  color: #6c4f2b;
+  background: rgba(47, 73, 128, 0.52);
+  color: #b8ccff;
 }
 
 .avatar-system {
-  background: rgba(154, 106, 44, 0.08);
-  color: #8b7358;
+  background: rgba(20, 29, 46, 0.92);
+  color: #8fa1c2;
 }
 
 .bubble {
-  border-radius: 18px;
-  padding: 14px 16px;
-  background: rgba(255, 251, 245, 0.96);
-  color: #2f2418;
-  border: 1px solid rgba(95, 69, 35, 0.1);
-  line-height: 1.72;
+  border-radius: 16px;
+  padding: 16px 18px;
+  background: rgba(14, 22, 37, 0.88);
+  color: #d8e5ff;
+  border: 1px solid rgba(93, 124, 255, 0.12);
+  line-height: 1.78;
   white-space: pre-wrap;
+  box-shadow: 0 20px 44px -32px rgba(3, 8, 20, 0.94);
 }
 
 .message.user .bubble {
-  background: #2f2418;
-  color: #f7f1e5;
-  border-color: transparent;
+  background: linear-gradient(135deg, rgba(39, 70, 152, 0.92), rgba(68, 48, 144, 0.94));
+  color: #eff5ff;
+  border-color: rgba(113, 142, 255, 0.28);
 }
 
 .message.system .bubble {
-  background: rgba(255, 248, 238, 0.94);
-  color: #6f5a42;
+  background: rgba(19, 27, 43, 0.9);
+  color: #97a8c7;
   border-style: dashed;
 }
 
 .bubble-error {
-  border-color: rgba(180, 72, 52, 0.16);
-  background: rgba(255, 243, 239, 0.96);
-  color: #8d3f32;
+  border-color: rgba(224, 92, 120, 0.26);
+  background: rgba(52, 18, 36, 0.86);
+  color: #ffc1cc;
 }
 
 .bubble-text {
@@ -820,7 +930,7 @@ const handleAsk = async () => {
   width: 16px;
   height: 4px;
   border-radius: 999px;
-  background: rgba(139, 95, 45, 0.44);
+  background: rgba(132, 156, 255, 0.54);
   animation: ledgerPulse 1.1s ease-in-out infinite;
 }
 
@@ -837,7 +947,7 @@ const handleAsk = async () => {
 .typing-surface p {
   margin: 10px 0 0;
   font-size: 13px;
-  color: #7f6547;
+  color: #92a6cb;
 }
 
 .duration-info,
@@ -847,11 +957,11 @@ const handleAsk = async () => {
 }
 
 .duration-info {
-  color: #7f6547;
+  color: #8ea4d1;
 }
 
 .answer-notice {
-  color: #8a6030;
+  color: #b8c8ec;
 }
 
 .citation-jump {
@@ -862,7 +972,7 @@ const handleAsk = async () => {
   padding: 0;
   border: 0;
   background: transparent;
-  color: #8b5f2d;
+  color: #86a7ff;
   font-size: 12px;
   font-weight: 700;
   cursor: pointer;
@@ -874,51 +984,61 @@ const handleAsk = async () => {
 
 .input-area {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 42px;
-  gap: 10px;
+  grid-template-columns: minmax(0, 1fr) 46px;
+  gap: 12px;
   align-items: center;
   margin: 16px 18px 18px;
-  padding: 10px 10px 10px 16px;
-  border-radius: 18px;
-  border: 1px solid rgba(95, 69, 35, 0.12);
-  background: rgba(255, 251, 245, 0.98);
+  padding: 14px 14px 14px 18px;
+  border-radius: 14px;
+  border: 1px solid rgba(98, 128, 255, 0.18);
+  background:
+    linear-gradient(180deg, rgba(12, 20, 34, 0.96), rgba(9, 15, 28, 0.96)),
+    radial-gradient(circle at 88% 100%, rgba(90, 111, 255, 0.18), transparent 24%);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.02),
+    0 20px 44px -30px rgba(6, 12, 26, 0.96);
 }
 
 .input-area textarea {
-  height: 24px;
-  min-height: 24px;
-  max-height: 120px;
+  height: 28px;
+  min-height: 28px;
+  max-height: 140px;
   resize: none;
   overflow: auto;
   border: 0;
   background: transparent;
   padding: 0;
   font: inherit;
-  color: #2f2418;
-  line-height: 24px;
+  color: #ecf4ff;
+  line-height: 28px;
   outline: none;
 }
 
+.input-area textarea::placeholder {
+  color: #7387ad;
+}
+
 .send-btn {
-  width: 40px;
-  height: 40px;
+  width: 44px;
+  height: 44px;
   border: none;
   border-radius: 12px;
-  background: #8b5f2d;
-  color: #fbf6ed;
+  background: linear-gradient(135deg, #2f63ff, #596cff 65%, #785fff);
+  color: #f6fbff;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
+  box-shadow: 0 16px 30px -18px rgba(64, 96, 255, 0.78);
   transition:
     transform 0.24s cubic-bezier(0.16, 1, 0.3, 1),
     opacity 0.2s ease,
-    background-color 0.2s ease;
+    filter 0.2s ease;
 }
 
 .send-btn:hover:not(:disabled) {
-  background: #7a5226;
-  transform: translateY(-1px);
+  filter: brightness(1.05);
+  transform: translateY(-1px) scale(1.01);
 }
 
 .send-btn :deep(.app-icon) {
@@ -941,7 +1061,7 @@ const handleAsk = async () => {
   font-weight: 700;
   letter-spacing: 0.16em;
   text-transform: uppercase;
-  color: #8b7358;
+  color: #7c93bb;
 }
 
 .qa-empty-dossier h3 {
@@ -949,12 +1069,12 @@ const handleAsk = async () => {
   font-size: 26px;
   line-height: 1.1;
   letter-spacing: -0.03em;
-  color: #2f2418;
+  color: #eef4ff;
 }
 
 .qa-empty-dossier p {
   margin: 0;
-  color: #6f5a42;
+  color: #93a8cb;
   line-height: 1.75;
 }
 
@@ -968,9 +1088,11 @@ const handleAsk = async () => {
 
 .qa-dossier-entry {
   padding: 18px 18px 16px;
-  border-radius: 18px;
-  border: 1px solid rgba(95, 69, 35, 0.12);
-  background: rgba(255, 251, 245, 0.92);
+  border-radius: 14px;
+  border: 1px solid rgba(96, 126, 255, 0.14);
+  background:
+    linear-gradient(180deg, rgba(14, 22, 37, 0.86), rgba(10, 17, 30, 0.88)),
+    radial-gradient(circle at top right, rgba(94, 90, 255, 0.12), transparent 36%);
 }
 
 .qa-dossier-entry__header {
@@ -987,17 +1109,17 @@ const handleAsk = async () => {
   font-weight: 700;
   letter-spacing: 0.14em;
   text-transform: uppercase;
-  color: #8b7358;
+  color: #7c93bb;
 }
 
 .qa-dossier-entry__header span {
-  color: #8a6030;
+  color: #a2b8e8;
   font-size: 12px;
   font-weight: 700;
 }
 
 .qa-dossier-entry__body {
-  color: #2f2418;
+  color: #dbe7ff;
   line-height: 1.8;
   white-space: pre-wrap;
 }
@@ -1005,8 +1127,8 @@ const handleAsk = async () => {
 .qa-dossier-entry__note {
   margin-top: 12px;
   padding-top: 12px;
-  border-top: 1px solid rgba(95, 69, 35, 0.1);
-  color: #8a6030;
+  border-top: 1px solid rgba(96, 126, 255, 0.12);
+  color: #aabde6;
   font-size: 13px;
   line-height: 1.65;
 }
@@ -1024,15 +1146,28 @@ const handleAsk = async () => {
 }
 
 .evidence-action {
-  min-height: 38px;
-  padding: 0 12px;
-  border-radius: 10px;
-  border: 1px solid rgba(95, 69, 35, 0.12);
-  background: rgba(255, 251, 245, 0.96);
-  color: #5f482e;
+  min-height: 40px;
+  padding: 0 14px;
+  border-radius: 12px;
+  border: 1px solid rgba(92, 124, 255, 0.14);
+  background: rgba(14, 23, 39, 0.82);
+  color: #c7d6f7;
   font-weight: 700;
   cursor: pointer;
   text-align: left;
+  transition:
+    transform 0.24s cubic-bezier(0.16, 1, 0.3, 1),
+    border-color 0.2s ease,
+    background-color 0.2s ease;
+}
+
+.evidence-action:hover,
+.recommendation-item:hover,
+.evidence-card--interactive:hover,
+.knowledge-graph__node:hover {
+  transform: translateY(-1px);
+  border-color: rgba(106, 138, 255, 0.28);
+  background: rgba(20, 32, 56, 0.92);
 }
 
 .evidence-block {
@@ -1051,11 +1186,11 @@ const handleAsk = async () => {
 .evidence-block__header h3 {
   margin: 0;
   font-size: 15px;
-  color: #2f2418;
+  color: #eef4ff;
 }
 
 .evidence-block__header span {
-  color: #8b7358;
+  color: #8197c1;
   font-size: 12px;
 }
 
@@ -1073,8 +1208,27 @@ const handleAsk = async () => {
 .evidence-history-list li {
   padding: 14px;
   border-radius: 14px;
-  border: 1px solid rgba(95, 69, 35, 0.12);
-  background: rgba(255, 251, 245, 0.94);
+  border: 1px solid rgba(92, 124, 255, 0.14);
+  background: rgba(14, 22, 37, 0.86);
+  box-shadow: 0 18px 36px -30px rgba(3, 8, 20, 0.96);
+}
+
+.evidence-card--interactive,
+.knowledge-graph__node,
+.recommendation-item {
+  width: 100%;
+  border: 1px solid rgba(92, 124, 255, 0.14);
+  cursor: pointer;
+  text-align: left;
+  transition:
+    transform 0.24s cubic-bezier(0.16, 1, 0.3, 1),
+    border-color 0.2s ease,
+    background-color 0.2s ease,
+    box-shadow 0.2s ease;
+}
+
+.evidence-card--interactive {
+  display: block;
 }
 
 .evidence-card__header {
@@ -1085,42 +1239,94 @@ const handleAsk = async () => {
 }
 
 .evidence-card__index {
-  color: #8b5f2d;
+  color: #89a8ff;
   font-weight: 800;
 }
 
 .evidence-card__meta,
 .evidence-history-list span {
   margin: 0 0 8px;
-  color: #8b7358;
+  color: #8197c1;
   font-size: 12px;
 }
 
 .evidence-card__snippet,
 .evidence-history-list p {
   margin: 0;
-  color: #4d3d2a;
+  color: #c1d1f1;
   line-height: 1.65;
 }
 
 .evidence-history-list strong {
   display: block;
   margin-bottom: 6px;
-  color: #2f2418;
+  color: #eef4ff;
 }
 
 .evidence-empty {
   margin: 0;
   padding: 14px;
   border-radius: 14px;
-  background: rgba(255, 251, 245, 0.92);
-  color: #6f5a42;
+  border: 1px solid rgba(92, 124, 255, 0.12);
+  background: rgba(14, 22, 37, 0.82);
+  color: #93a8cb;
   line-height: 1.65;
 }
 
 :deep(.qa-history-drawer .el-drawer__body) {
   padding: 18px;
-  background: #f7f1e5;
+  background: linear-gradient(180deg, #0a1220, #0e1729);
+}
+
+.knowledge-graph {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.knowledge-graph__hub {
+  width: 100%;
+  min-height: 40px;
+  padding: 0 14px;
+  border-radius: 12px;
+  border: 1px solid rgba(108, 136, 255, 0.22);
+  background: linear-gradient(135deg, rgba(44, 99, 255, 0.28), rgba(98, 90, 255, 0.22));
+  color: #eef4ff;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+}
+
+.knowledge-graph__nodes,
+.recommendation-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.knowledge-graph__node,
+.recommendation-item {
+  min-height: 44px;
+  padding: 0 14px;
+  border-radius: 12px;
+  background: rgba(14, 22, 37, 0.86);
+  color: #d7e5ff;
+  font-weight: 600;
+}
+
+.knowledge-graph__node--primary {
+  color: #eef4ff;
+}
+
+.knowledge-graph__empty {
+  margin: 0;
+  padding: 14px;
+  border-radius: 12px;
+  border: 1px dashed rgba(92, 124, 255, 0.16);
+  color: #93a8cb;
+  line-height: 1.65;
 }
 
 @keyframes ledgerPulse {
@@ -1154,11 +1360,17 @@ const handleAsk = async () => {
   .qa-dossier-layout {
     display: block;
   }
+
+  .conversation-canvas,
+  .answer-dossier,
+  .evidence-rail {
+    margin-bottom: 16px;
+  }
 }
 
 @media (max-width: 720px) {
   .input-area {
-    grid-template-columns: minmax(0, 1fr) 40px;
+    grid-template-columns: minmax(0, 1fr) 44px;
     margin-inline: 14px;
   }
 

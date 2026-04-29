@@ -2,21 +2,20 @@
 import { RouterView } from 'vue-router';
 
 import AppSidebar from '../components/ui/AppSidebar.vue';
+import AppTopbar from '../components/ui/AppTopbar.vue';
 import FlashStack from '../components/ui/FlashStack.vue';
-import ThemeToggle from '../components/ui/ThemeToggle.vue';
 </script>
 
 <template>
   <div class="app-shell app-shell--workspace">
     <AppSidebar area="workspace" />
     <main class="workspace-frame">
-      <header class="workspace-frame__utility">
-        <div class="workspace-frame__utility-copy">
-          <p class="workspace-frame__eyebrow">Dossier workspace</p>
-          <strong>结论先行，证据随后，动作最后。</strong>
-        </div>
-        <ThemeToggle />
-      </header>
+      <AppTopbar
+        eyebrow="Research desk"
+        title="金融分析控制台"
+        subtitle="统一处理智能问答、知识检索、风险研判与会话线索。"
+        area="workspace"
+      />
       <FlashStack />
       <section class="workspace-frame__body">
         <RouterView />

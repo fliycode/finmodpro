@@ -230,7 +230,7 @@ onMounted(async () => {
   font-weight: 700;
   letter-spacing: 0.16em;
   text-transform: uppercase;
-  color: #8b7358;
+  color: #7f95bf;
 }
 
 .history-filters {
@@ -242,7 +242,7 @@ onMounted(async () => {
 .workspace-support-page h1,
 .history-filters__copy h2 {
   margin: 0;
-  color: #2f2418;
+  color: #eef4ff;
   letter-spacing: -0.03em;
 }
 
@@ -260,18 +260,18 @@ onMounted(async () => {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  color: #6f5a42;
+  color: #93a8cb;
   font-size: 13px;
 }
 
 .history-filters__field input {
   min-height: 42px;
-  border: 1px solid rgba(95, 69, 35, 0.14);
+  border: 1px solid rgba(96, 126, 255, 0.18);
   border-radius: 12px;
   padding: 0 14px;
   font: inherit;
-  background: rgba(255, 251, 245, 0.96);
-  color: #2f2418;
+  background: rgba(11, 20, 35, 0.94);
+  color: #eef4ff;
 }
 
 .history-filters__actions {
@@ -282,24 +282,24 @@ onMounted(async () => {
 .ghost-btn {
   min-height: 38px;
   padding: 0 14px;
-  border-radius: 10px;
-  border: 1px solid rgba(95, 69, 35, 0.14);
-  background: rgba(255, 251, 245, 0.96);
-  color: #2f2418;
+  border-radius: 12px;
+  border: 1px solid rgba(96, 126, 255, 0.16);
+  background: rgba(14, 23, 39, 0.82);
+  color: #d1def7;
   font-weight: 700;
   cursor: pointer;
 }
 
 .ghost-btn--primary {
-  background: #8b5f2d;
-  border-color: #8b5f2d;
-  color: #fbf6ed;
+  background: linear-gradient(135deg, #2f63ff, #596cff 65%, #785fff);
+  border-color: rgba(122, 147, 255, 0.62);
+  color: #f7fbff;
 }
 
 .history-filters__hint,
 .history-error {
   margin: 0;
-  color: #6f5a42;
+  color: #93a8cb;
   font-size: 13px;
 }
 
@@ -309,21 +309,21 @@ onMounted(async () => {
   gap: 8px;
   padding: 14px;
   border-radius: 14px;
-  background: rgba(255, 251, 245, 0.96);
-  color: #2f2418;
-  border: 1px solid rgba(95, 69, 35, 0.12);
+  background: rgba(14, 22, 37, 0.88);
+  color: #eef4ff;
+  border: 1px solid rgba(96, 126, 255, 0.14);
 }
 
 .history-session-summary__meta {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
-  color: #6f5a42;
+  color: #93a8cb;
   font-size: 12px;
 }
 
 .history-error {
-  color: #9b3131;
+  color: #ffb4c1;
 }
 
 @media (max-width: 720px) {
