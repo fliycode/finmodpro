@@ -166,7 +166,35 @@ export const createApiConfig = (overrides = {}) => {
     return response;
   };
 
-  const parseJson = async (response) => response.json().catch(() => ({}));
+const parseJson = async (response) => response.json().catch(() => ({}));
+
+  const collectErrorDetails = (value, path = '') => {
+    if (Array.isArray(value)) {
+      return value.flatMap((item) => collectErrorDetails(item, path));
+    }
+
+    if (value && typeof value === 'object') {
+      return Object.entries(value).flatMap(([key, nestedValue]) => {
+        const nextPath = path ? `${path}.${key}` : key;
+        return collectErrorDetails(nestedValue, nextPath);
+      });
+    }
+
+    if (value === null || value === undefined || value === '') {
+      return [];
+    }
+
+    return [path ? `${path}: ${String(value)}` : String(value)];
+  };
+
+  const buildErrorMessage = (data, fallbackMessage) => {
+    const baseMessage = data?.message || data?.error || fallbackMessage;
+    const details = collectErrorDetails(data?.data);
+    if (details.length === 0) {
+      return baseMessage;
+    }
+    return `${baseMessage} ${details.join(' ; ')}`;
+  };
 
   const fetchJson = async (path, options = {}) => {
     const response = await request(path, options);
@@ -176,7 +204,7 @@ export const createApiConfig = (overrides = {}) => {
       if (response.status === 401 && options.auth) {
         throw new Error(AUTH_EXPIRED_MESSAGE);
       }
-      throw new Error(data.message || data.error || '请求失败，请稍后重试');
+      throw new Error(buildErrorMessage(data, '请求失败，请稍后重试'));
     }
 
     return data;

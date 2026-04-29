@@ -4,8 +4,6 @@ import { RouterLink } from "vue-router";
 import { llmApi, normalizeModelConfigPayload } from "../api/llm.js";
 import { useFlash } from "../lib/flash.js";
 import {
-  buildLlamaFactoryTrainingConfig,
-  createLlamaFactoryTrainingFormState,
   LLAMAFACTORY_EVAL_STRATEGY_OPTIONS,
   LLAMAFACTORY_PRECISION_OPTIONS,
   LLAMAFACTORY_REPORT_TO_OPTIONS,
@@ -13,6 +11,10 @@ import {
   LLAMAFACTORY_STRATEGY_OPTIONS,
   normalizeLlamaFactoryTrainingConfig,
 } from "../lib/llamafactory-config.js";
+import {
+  buildFineTunePayload,
+  createFineTuneFormState,
+} from "../lib/fine-tune-form.js";
 import {
   getConsolePageAlerts,
   getInitialFineTuneFilterId,
@@ -63,19 +65,7 @@ const defaultFormState = () => ({
   api_key_masked: "",
 });
 
-const defaultFineTuneFormState = () => ({
-  base_model_id: "",
-  runner_server_id: "",
-  dataset_name: "",
-  dataset_version: "",
-  runner_name: "",
-  training: createLlamaFactoryTrainingFormState(),
-  status: "pending",
-  external_job_id: "",
-  artifact_path: "",
-  metrics_json: "{\n  \"f1_score\": 0.9\n}",
-  notes: "",
-});
+const defaultFineTuneFormState = () => createFineTuneFormState();
 
 const defaultRunnerServerFormState = () => ({
   name: "",
@@ -243,54 +233,6 @@ const openEditRunnerServer = (server) => {
   runnerServerDrawerVisible.value = true;
 };
 
-const buildFineTunePayload = () => {
-  if (!fineTuneForm.base_model_id) {
-    throw new Error("请选择基础模型");
-  }
-
-  if (!String(fineTuneForm.training.template || "").trim()) {
-    throw new Error("请填写 LLaMA-Factory template");
-  }
-
-  let trainingConfig = {};
-  try {
-    trainingConfig = buildLlamaFactoryTrainingConfig(fineTuneForm.training);
-  } catch (error) {
-    throw new Error("高级附加参数 JSON 格式不正确");
-  }
-
-  const payload = {
-    base_model_id: Number(fineTuneForm.base_model_id),
-    runner_server_id: fineTuneForm.runner_server_id ? Number(fineTuneForm.runner_server_id) : null,
-    dataset_name: fineTuneForm.dataset_name.trim(),
-    dataset_version: fineTuneForm.dataset_version.trim(),
-    strategy: fineTuneForm.training.strategy || "lora",
-    runner_name: fineTuneForm.runner_name.trim(),
-    training_config: trainingConfig,
-    notes: fineTuneForm.notes.trim(),
-  };
-
-  if (!editingFineTuneId.value) {
-    return payload;
-  }
-
-  let metrics = {};
-  if (fineTuneForm.metrics_json.trim()) {
-    try {
-      metrics = JSON.parse(fineTuneForm.metrics_json);
-    } catch (error) {
-      throw new Error("微调指标 JSON 格式不正确");
-    }
-  }
-
-  return {
-    ...payload,
-    status: fineTuneForm.status,
-    artifact_path: fineTuneForm.artifact_path.trim(),
-    metrics,
-  };
-};
-
 const buildRunnerServerPayload = () => {
   const payload = {
     name: runnerServerForm.name.trim(),
@@ -412,7 +354,10 @@ const runConnectionTest = async () => {
 const submitFineTune = async () => {
   fineTuneSaving.value = true;
   try {
-    const payload = buildFineTunePayload();
+    const payload = buildFineTunePayload({
+      fineTuneForm,
+      editingFineTuneId: editingFineTuneId.value,
+    });
     if (editingFineTuneId.value) {
       await llmApi.updateFineTuneRun(editingFineTuneId.value, payload);
       flash.success("微调登记已更新");
