@@ -889,12 +889,12 @@ html[data-theme='dark'] body {
 
 .theme-toggle {
   position: relative;
-  width: 58px;
+  width: 64px;
   height: 34px;
-  padding: 3px;
+  padding: 0;
   border: 1px solid var(--line-strong);
   border-radius: 999px;
-  background: color-mix(in srgb, var(--surface-2) 86%, transparent);
+  background: transparent;
   color: var(--text-primary);
   box-shadow: 0 16px 36px -24px rgba(16, 24, 40, 0.42);
   cursor: pointer;
@@ -903,38 +903,72 @@ html[data-theme='dark'] body {
   flex: 0 0 auto;
 }
 
+.theme-toggle:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--brand-500) 72%, white);
+  outline-offset: 3px;
+}
+
 .theme-toggle__track {
   position: relative;
   z-index: 2;
-  display: flex;
-  align-items: center;
   width: 100%;
   height: 100%;
   border-radius: inherit;
-  background: rgba(36, 87, 197, 0.08);
+  background: #73c0fc;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.24);
+  display: block;
+  overflow: hidden;
+  transition: background-color 0.28s ease;
 }
 
-.theme-toggle__thumb {
-  width: 26px;
-  height: 26px;
-  border-radius: 999px;
+.theme-toggle--dark .theme-toggle__track {
+  background: #183153;
+}
+
+.theme-toggle__celestial {
+  position: absolute;
+  z-index: 1;
+  width: 24px;
+  height: 24px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  background: #fff;
-  color: #2457c5;
+  pointer-events: none;
+}
+
+.theme-toggle__moon {
+  top: 5px;
+  left: 5px;
+  color: #73c0fc;
+  animation: theme-moon-tilt 5s linear infinite;
+}
+
+.theme-toggle__sun {
+  top: 5px;
+  right: 5px;
+  color: #ffd43b;
+  animation: theme-sun-rotate 15s linear infinite;
+}
+
+.theme-toggle__thumb {
+  position: absolute;
+  left: 2px;
+  bottom: 2px;
+  z-index: 2;
+  width: 26px;
+  height: 26px;
+  border-radius: 999px;
+  background: #f1f5f9;
   box-shadow: 0 10px 22px -14px rgba(16, 24, 40, 0.45);
   transform: translateX(0);
   transition:
     background-color 0.24s ease,
-    color 0.24s ease,
     transform 0.24s ease;
 }
 
 .theme-toggle--dark .theme-toggle__thumb {
-  background: #111827;
-  color: #f8d36a;
-  transform: translateX(24px);
+  background: #e8edf4;
+  transform: translateX(30px);
 }
 
 .theme-toggle__wash {
@@ -956,8 +990,8 @@ html[data-theme='dark'] body {
 }
 
 .theme-toggle .app-icon {
-  width: 16px;
-  height: 16px;
+  width: 24px;
+  height: 24px;
 }
 
 @keyframes theme-wash {
@@ -968,6 +1002,37 @@ html[data-theme='dark'] body {
   100% {
     opacity: 0;
     transform: scale(42);
+  }
+}
+
+@keyframes theme-sun-rotate {
+  0% {
+    transform: rotate(0deg);
+  }
+  100% {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes theme-moon-tilt {
+  0% {
+    transform: rotate(0deg);
+  }
+  25% {
+    transform: rotate(-10deg);
+  }
+  75% {
+    transform: rotate(10deg);
+  }
+  100% {
+    transform: rotate(0deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .theme-toggle__sun,
+  .theme-toggle__moon {
+    animation: none;
   }
 }
 
@@ -2557,23 +2622,22 @@ code {
 
 .theme-toggle {
   border-color: rgba(102, 132, 255, 0.18);
-  background: rgba(14, 23, 39, 0.76);
+  background: transparent;
   box-shadow: none;
   backdrop-filter: blur(14px);
 }
 
 .theme-toggle__track {
-  background: rgba(59, 115, 255, 0.12);
+  background: #73c0fc;
 }
 
-.theme-toggle__thumb {
-  background: linear-gradient(135deg, #f2f6ff, #c9d8ff);
-  color: #2d61ea;
+.theme-toggle--dark .theme-toggle__track {
+  background: #183153;
 }
 
+.theme-toggle__thumb,
 .theme-toggle--dark .theme-toggle__thumb {
-  background: linear-gradient(135deg, #192846, #10192b);
-  color: #8fb8ff;
+  background: #e8edf4;
 }
 
 .el-card.ui-card,
