@@ -10,14 +10,7 @@ import FlashStack from '../components/ui/FlashStack.vue';
   <div class="app-shell app-shell--admin">
     <AppSidebar area="admin" />
     <main class="admin-frame">
-      <AppTopbar
-        eyebrow="Risk console"
-        title="FinGPT-RAG 管理台"
-        subtitle="风险态势、知识治理、模型网关与审计运行面。"
-        area="admin"
-        switch-target="/workspace/qa"
-        switch-label="进入工作区"
-      />
+      <AppTopbar area="admin" />
       <FlashStack />
       <section class="admin-frame__body">
         <RouterView />
