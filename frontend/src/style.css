@@ -2433,6 +2433,691 @@ code {
     }
   }
 
+/* Neutral design refresh
+   Keeps the authenticated shell readable in both themes and removes the
+   warm/yellow workspace treatment that was fighting the theme toggle. */
+:root {
+  --shell-canvas-light: #f5f7fb;
+  --shell-surface-light: rgba(255, 255, 255, 0.92);
+  --shell-panel-light: #ffffff;
+  --shell-line-light: rgba(15, 23, 42, 0.08);
+  --shell-ink-light: #101828;
+  --shell-muted-light: #667085;
+  --shell-sidebar-light: rgba(255, 255, 255, 0.9);
+  --shell-canvas-dark: #0f1724;
+  --shell-surface-dark: rgba(17, 24, 39, 0.92);
+  --shell-panel-dark: #182231;
+  --shell-line-dark: rgba(148, 163, 184, 0.16);
+  --shell-ink-dark: #eef2ff;
+  --shell-muted-dark: #94a3b8;
+  --shell-sidebar-dark: rgba(10, 15, 24, 0.96);
+  --workspace-accent: #2457c5;
+  --workspace-accent-soft: rgba(36, 87, 197, 0.12);
+  --workspace-line: rgba(36, 87, 197, 0.14);
+  --workspace-ink: var(--shell-ink-light);
+  --workspace-muted: var(--shell-muted-light);
+  --workspace-panel: var(--shell-panel-light);
+  --admin-accent: #5b6cff;
+  --admin-alert: #5b6cff;
+}
+
+:root[data-theme='light'] {
+  --shell-canvas: var(--shell-canvas-light);
+  --shell-surface: var(--shell-surface-light);
+  --shell-panel: var(--shell-panel-light);
+  --shell-line: var(--shell-line-light);
+  --shell-ink: var(--shell-ink-light);
+  --shell-muted: var(--shell-muted-light);
+  --shell-sidebar: var(--shell-sidebar-light);
+}
+
+:root[data-theme='dark'] {
+  --shell-canvas: var(--shell-canvas-dark);
+  --shell-surface: var(--shell-surface-dark);
+  --shell-panel: var(--shell-panel-dark);
+  --shell-line: var(--shell-line-dark);
+  --shell-ink: var(--shell-ink-dark);
+  --shell-muted: var(--shell-muted-dark);
+  --shell-sidebar: var(--shell-sidebar-dark);
+  --workspace-ink: var(--shell-ink-dark);
+  --workspace-muted: var(--shell-muted-dark);
+  --workspace-panel: #202b3c;
+  --workspace-line: rgba(91, 108, 255, 0.16);
+  --workspace-accent-soft: rgba(91, 108, 255, 0.16);
+}
+
+.app-shell {
+  --page-bg: var(--shell-canvas);
+  --surface-1: var(--shell-surface);
+  --surface-2: var(--shell-panel);
+  --surface-3: color-mix(in srgb, var(--shell-panel) 92%, var(--shell-canvas));
+  --surface-hover: color-mix(in srgb, var(--shell-panel) 72%, var(--shell-canvas));
+  --text-primary: var(--shell-ink);
+  --text-secondary: var(--shell-muted);
+  --text-muted: color-mix(in srgb, var(--shell-muted) 82%, var(--shell-ink));
+  --line-soft: var(--shell-line);
+  --line-strong: color-mix(in srgb, var(--shell-line) 55%, var(--shell-ink));
+  --brand: var(--workspace-accent);
+  --brand-hover: #1f4ea8;
+  --brand-active: #173c86;
+  --brand-soft: var(--workspace-accent-soft);
+  --accent: var(--workspace-accent);
+  --accent-bg: var(--workspace-accent-soft);
+  --accent-border: rgba(36, 87, 197, 0.22);
+  background:
+    radial-gradient(circle at top left, rgba(36, 87, 197, 0.08), transparent 28%),
+    radial-gradient(circle at top right, rgba(91, 108, 255, 0.06), transparent 30%),
+    var(--page-bg);
+  color: var(--text-secondary);
+}
+
+.app-shell--workspace,
+.app-shell--admin {
+  grid-template-columns: var(--workspace-sidebar-width) minmax(0, 1fr);
+}
+
+.workspace-frame,
+.admin-frame {
+  min-width: 0;
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  color: var(--text-secondary);
+}
+
+.workspace-frame__utility {
+  background: var(--surface-1);
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.workspace-frame__eyebrow {
+  color: var(--text-muted);
+}
+
+.workspace-frame__utility-copy strong {
+  color: var(--text-primary);
+}
+
+.workspace-frame__body,
+.admin-frame__body {
+  max-width: 1720px;
+  padding: 20px 24px 36px;
+}
+
+.app-shell--workspace .flash-stack,
+.app-shell--admin .flash-stack {
+  max-width: none;
+  margin: 0;
+  padding-inline: 24px;
+}
+
+.app-sidebar {
+  padding: 18px 12px 16px;
+  gap: 14px;
+  border-right-color: var(--line-soft);
+  background: var(--shell-sidebar);
+  color: var(--text-secondary);
+}
+
+.app-sidebar--workspace,
+.app-sidebar--admin {
+  background: var(--shell-sidebar);
+}
+
+.app-sidebar__brand {
+  padding: 0 4px 12px;
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.app-sidebar__brand-mark {
+  background: var(--surface-2);
+  border: 1px solid var(--line-soft);
+}
+
+.app-sidebar__brand-eyebrow,
+.app-sidebar__brand p,
+.app-sidebar__group-label,
+.app-sidebar__ops-note p {
+  color: var(--text-muted);
+}
+
+.app-sidebar__brand strong,
+.app-sidebar__item-label {
+  color: var(--text-primary);
+}
+
+.app-sidebar__group + .app-sidebar__group {
+  border-top-color: var(--line-soft);
+}
+
+.app-sidebar__item {
+  min-height: 40px;
+  padding: 8px 10px;
+  border-radius: 12px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text-secondary);
+}
+
+.app-sidebar__item:hover {
+  background: var(--surface-hover);
+  border-color: var(--line-soft);
+  color: var(--text-primary);
+}
+
+.app-sidebar__item.router-link-active {
+  background: var(--surface-2);
+  border-color: var(--line-soft);
+  box-shadow: inset 2px 0 0 var(--brand);
+  color: var(--brand);
+  transform: translateX(1px);
+}
+
+.app-sidebar__item-icon {
+  width: 28px;
+  height: 28px;
+  border-radius: 9px;
+  background: var(--brand-soft);
+  color: var(--brand);
+}
+
+.app-sidebar__item:hover .app-sidebar__item-icon,
+.router-link-active .app-sidebar__item-icon {
+  background: var(--brand-soft);
+  color: var(--brand);
+}
+
+.app-sidebar__profile {
+  border-top-color: var(--line-soft);
+}
+
+.app-sidebar__profile-trigger,
+.app-sidebar__profile-menu,
+.app-sidebar__profile-action {
+  color: var(--text-secondary);
+}
+
+.app-sidebar__profile-trigger:hover,
+.app-sidebar__profile:focus-within .app-sidebar__profile-trigger {
+  border-color: var(--line-soft);
+  background: var(--surface-hover);
+}
+
+.app-sidebar__avatar {
+  background: var(--brand);
+  color: #fff;
+}
+
+.app-sidebar__profile-summary em {
+  background: var(--brand-soft);
+  color: var(--brand);
+}
+
+.app-sidebar__profile-menu {
+  border-color: var(--line-soft);
+  background: var(--surface-2);
+}
+
+.app-sidebar__profile-action:hover {
+  background: var(--brand-soft);
+  color: var(--brand);
+}
+
+.app-sidebar__ops-note {
+  border-top-color: var(--line-soft);
+}
+
+.app-sidebar__ops-note p {
+  color: var(--text-muted);
+}
+
+.app-topbar {
+  background: var(--surface-1);
+  border-bottom: 1px solid var(--line-soft);
+  color: var(--text-primary);
+}
+
+.app-topbar__search-input {
+  background: var(--surface-2);
+  border-color: var(--line-soft);
+  color: var(--text-primary);
+}
+
+.app-topbar__search-input::placeholder {
+  color: var(--text-muted);
+}
+
+.app-topbar__avatar-trigger {
+  border-color: var(--line-strong);
+}
+
+.app-topbar__dropdown {
+  background: var(--surface-2);
+  border-color: var(--line-soft);
+}
+
+.app-topbar__dropdown-summary strong,
+.app-topbar__dropdown-item {
+  color: var(--text-primary);
+}
+
+.app-topbar__dropdown-summary span,
+.app-topbar__dropdown-summary em {
+  color: var(--text-muted);
+}
+
+.app-topbar__dropdown-item:hover {
+  background: var(--surface-hover);
+  color: var(--brand);
+}
+
+.theme-toggle {
+  border-color: var(--line-strong);
+  background: transparent;
+  box-shadow: none;
+}
+
+.theme-toggle__track {
+  background: linear-gradient(180deg, #88c3ff, #5b7fff);
+}
+
+.theme-toggle--dark .theme-toggle__track {
+  background: linear-gradient(180deg, #294168, #14263f);
+}
+
+.theme-toggle__thumb,
+.theme-toggle--dark .theme-toggle__thumb {
+  background: #ffffff;
+}
+
+.el-card.ui-card,
+.ui-card.el-card,
+.app-shell .el-card,
+.app-shell .admin-section-card {
+  background: var(--surface-2);
+  border-color: var(--line-soft);
+  box-shadow: var(--shadow-md);
+}
+
+.page-hero,
+.section-heading__title,
+.section-heading__desc,
+.admin-empty-state,
+.muted-text {
+  color: var(--text-secondary);
+}
+
+.page-hero {
+  background: var(--surface-1);
+  border-color: var(--line-soft);
+}
+
+.workspace-dossier-page__header {
+  background: var(--surface-1);
+  border-color: var(--line-soft);
+}
+
+.app-sidebar--workspace .app-sidebar__brand-mark,
+.app-sidebar--admin .app-sidebar__brand-mark {
+  background: var(--surface-2);
+  border-color: var(--line-soft);
+}
+
+.app-sidebar--workspace .app-sidebar__item.router-link-active,
+.app-sidebar--admin .app-sidebar__item.router-link-active {
+  color: var(--brand);
+}
+
+@media (max-width: 960px) {
+  .app-shell,
+  .app-shell--workspace,
+  .app-shell--admin {
+    grid-template-columns: 1fr;
+  }
+
+  .app-sidebar {
+    border-right: 0;
+    border-bottom: 1px solid var(--line-soft);
+  }
+
+  .workspace-frame__utility,
+  .app-topbar,
+  .workspace-frame__body,
+  .admin-frame__body,
+  .app-shell--workspace .flash-stack,
+  .app-shell--admin .flash-stack {
+    padding-inline: 16px;
+  }
+}
+
+/* EOF hard override */
+:root[data-theme='light'] .app-shell {
+  --page-bg: #f5f7fb;
+  --surface-1: rgba(255, 255, 255, 0.92);
+  --surface-2: #ffffff;
+  --surface-3: #f2f5fa;
+  --surface-hover: #edf2f8;
+  --text-primary: #101828;
+  --text-secondary: #667085;
+  --text-muted: #98a2b3;
+  --line-soft: rgba(15, 23, 42, 0.08);
+  --line-strong: rgba(15, 23, 42, 0.12);
+  --brand: #2457c5;
+  --brand-soft: rgba(36, 87, 197, 0.12);
+}
+
+:root[data-theme='dark'] .app-shell {
+  --page-bg: #0f1724;
+  --surface-1: rgba(17, 24, 39, 0.92);
+  --surface-2: #182231;
+  --surface-3: #202b3c;
+  --surface-hover: #263142;
+  --text-primary: #eef2ff;
+  --text-secondary: #94a3b8;
+  --text-muted: #64748b;
+  --line-soft: rgba(148, 163, 184, 0.16);
+  --line-strong: rgba(148, 163, 184, 0.24);
+  --brand: #5b6cff;
+  --brand-soft: rgba(91, 108, 255, 0.16);
+}
+
+
+/* EOF neutral override */
+:root[data-theme='light'] .app-shell {
+  --page-bg: var(--shell-canvas-light);
+  --surface-1: var(--shell-surface-light);
+  --surface-2: var(--shell-panel-light);
+  --surface-3: color-mix(in srgb, var(--shell-panel-light) 92%, var(--shell-canvas-light));
+  --surface-hover: color-mix(in srgb, var(--shell-panel-light) 72%, var(--shell-canvas-light));
+  --text-primary: var(--shell-ink-light);
+  --text-secondary: var(--shell-muted-light);
+  --text-muted: color-mix(in srgb, var(--shell-muted-light) 82%, var(--shell-ink-light));
+  --line-soft: var(--shell-line-light);
+  --line-strong: color-mix(in srgb, var(--shell-line-light) 55%, var(--shell-ink-light));
+  --brand: var(--workspace-accent);
+  --brand-soft: var(--workspace-accent-soft);
+}
+
+:root[data-theme='dark'] .app-shell {
+  --page-bg: var(--shell-canvas-dark);
+  --surface-1: var(--shell-surface-dark);
+  --surface-2: var(--shell-panel-dark);
+  --surface-3: color-mix(in srgb, var(--shell-panel-dark) 92%, var(--shell-canvas-dark));
+  --surface-hover: color-mix(in srgb, var(--shell-panel-dark) 72%, var(--shell-canvas-dark));
+  --text-primary: var(--shell-ink-dark);
+  --text-secondary: var(--shell-muted-dark);
+  --text-muted: color-mix(in srgb, var(--shell-muted-dark) 82%, var(--shell-ink-dark));
+  --line-soft: var(--shell-line-dark);
+  --line-strong: color-mix(in srgb, var(--shell-line-dark) 55%, var(--shell-ink-dark));
+  --brand: var(--workspace-accent);
+  --brand-soft: var(--workspace-accent-soft);
+}
+
+
+/* Final neutral override: must stay last so it wins over the older dark shell. */
+:root {
+  --shell-canvas-light: #f5f7fb;
+  --shell-surface-light: rgba(255, 255, 255, 0.92);
+  --shell-panel-light: #ffffff;
+  --shell-line-light: rgba(15, 23, 42, 0.08);
+  --shell-ink-light: #101828;
+  --shell-muted-light: #667085;
+  --shell-sidebar-light: rgba(255, 255, 255, 0.9);
+  --shell-canvas-dark: #0f1724;
+  --shell-surface-dark: rgba(17, 24, 39, 0.92);
+  --shell-panel-dark: #182231;
+  --shell-line-dark: rgba(148, 163, 184, 0.16);
+  --shell-ink-dark: #eef2ff;
+  --shell-muted-dark: #94a3b8;
+  --shell-sidebar-dark: rgba(10, 15, 24, 0.96);
+  --workspace-accent: #2457c5;
+  --workspace-accent-soft: rgba(36, 87, 197, 0.12);
+  --workspace-line: rgba(36, 87, 197, 0.14);
+  --workspace-ink: var(--shell-ink-light);
+  --workspace-muted: var(--shell-muted-light);
+  --workspace-panel: var(--shell-panel-light);
+  --admin-accent: #5b6cff;
+  --admin-alert: #5b6cff;
+}
+
+:root[data-theme='light'] {
+  --shell-canvas: var(--shell-canvas-light);
+  --shell-surface: var(--shell-surface-light);
+  --shell-panel: var(--shell-panel-light);
+  --shell-line: var(--shell-line-light);
+  --shell-ink: var(--shell-ink-light);
+  --shell-muted: var(--shell-muted-light);
+  --shell-sidebar: var(--shell-sidebar-light);
+}
+
+:root[data-theme='dark'] {
+  --shell-canvas: var(--shell-canvas-dark);
+  --shell-surface: var(--shell-surface-dark);
+  --shell-panel: var(--shell-panel-dark);
+  --shell-line: var(--shell-line-dark);
+  --shell-ink: var(--shell-ink-dark);
+  --shell-muted: var(--shell-muted-dark);
+  --shell-sidebar: var(--shell-sidebar-dark);
+  --workspace-ink: var(--shell-ink-dark);
+  --workspace-muted: var(--shell-muted-dark);
+  --workspace-panel: #202b3c;
+  --workspace-line: rgba(91, 108, 255, 0.16);
+  --workspace-accent-soft: rgba(91, 108, 255, 0.16);
+}
+
+.app-shell {
+  --page-bg: var(--shell-canvas);
+  --surface-1: var(--shell-surface);
+  --surface-2: var(--shell-panel);
+  --surface-3: color-mix(in srgb, var(--shell-panel) 92%, var(--shell-canvas));
+  --surface-hover: color-mix(in srgb, var(--shell-panel) 72%, var(--shell-canvas));
+  --text-primary: var(--shell-ink);
+  --text-secondary: var(--shell-muted);
+  --text-muted: color-mix(in srgb, var(--shell-muted) 82%, var(--shell-ink));
+  --line-soft: var(--shell-line);
+  --line-strong: color-mix(in srgb, var(--shell-line) 55%, var(--shell-ink));
+  --brand: var(--workspace-accent);
+  --brand-hover: #1f4ea8;
+  --brand-active: #173c86;
+  --brand-soft: var(--workspace-accent-soft);
+  --accent: var(--workspace-accent);
+  --accent-bg: var(--workspace-accent-soft);
+  --accent-border: rgba(36, 87, 197, 0.22);
+  background:
+    radial-gradient(circle at top left, rgba(36, 87, 197, 0.08), transparent 28%),
+    radial-gradient(circle at top right, rgba(91, 108, 255, 0.06), transparent 30%),
+    var(--page-bg);
+  color: var(--text-secondary);
+}
+
+.app-shell--workspace,
+.app-shell--admin {
+  grid-template-columns: var(--workspace-sidebar-width) minmax(0, 1fr);
+}
+
+.workspace-frame,
+.admin-frame {
+  color: var(--text-secondary);
+}
+
+.workspace-frame__utility {
+  background: var(--surface-1);
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.workspace-frame__eyebrow,
+.workspace-frame__utility-copy strong,
+.app-sidebar__brand strong,
+.app-sidebar__item-label,
+.app-sidebar__brand-eyebrow,
+.app-sidebar__brand p,
+.app-sidebar__group-label,
+.app-sidebar__ops-note p,
+.section-heading__title,
+.app-shell .section-heading__title,
+.workspace-dossier-page h1,
+.risk-dossier-panel__header h3,
+.analytics-chart-card__head h4,
+.risk-company-brief__header h4 {
+  color: var(--text-primary);
+}
+
+.workspace-frame__eyebrow,
+.app-sidebar__brand-eyebrow,
+.app-sidebar__brand p,
+.app-sidebar__group-label,
+.app-sidebar__ops-note p,
+.workspace-dossier-page__eyebrow,
+.risk-dossier-panel__header p,
+.section-heading__desc,
+.app-shell .section-heading__desc,
+.admin-empty-state,
+.muted-text,
+.workspace-dossier-page__hint,
+.risk-dossier-panel,
+.analytics-company-list li span,
+.analytics-chart-card__head span,
+.risk-company-brief__header span {
+  color: var(--text-secondary);
+}
+
+.workspace-frame__body,
+.admin-frame__body,
+.app-shell--workspace .flash-stack,
+.app-shell--admin .flash-stack {
+  padding-inline: 24px;
+}
+
+.app-sidebar {
+  background: var(--shell-sidebar);
+  color: var(--text-secondary);
+  border-right-color: var(--line-soft);
+}
+
+.app-sidebar__brand,
+.app-sidebar__group + .app-sidebar__group,
+.app-sidebar__profile,
+.app-sidebar__ops-note,
+.app-shell .el-card__header {
+  border-color: var(--line-soft);
+}
+
+.app-sidebar__brand-mark,
+.app-sidebar__profile-menu,
+.app-sidebar__profile-trigger:hover,
+.app-sidebar__profile:focus-within .app-sidebar__profile-trigger,
+.app-sidebar__item:hover,
+.app-sidebar__item.router-link-active,
+.app-sidebar--workspace .app-sidebar__item.router-link-active,
+.app-sidebar--admin .app-sidebar__item.router-link-active,
+.app-topbar,
+.workspace-frame__utility,
+.page-hero,
+.workspace-dossier-page__header,
+.el-card.ui-card,
+.ui-card.el-card,
+.app-shell .el-card,
+.app-shell .admin-section-card {
+  background: var(--surface-2);
+}
+
+.app-sidebar__brand-mark,
+.app-sidebar__item-icon,
+.app-sidebar__avatar,
+.app-sidebar__profile-summary em,
+.app-sidebar__profile-action:hover,
+.app-topbar__dropdown-item:hover,
+.meta-chip {
+  background: var(--brand-soft);
+}
+
+.app-sidebar__brand-mark,
+.app-sidebar__item-icon,
+.app-sidebar__avatar,
+.app-sidebar__profile-summary em,
+.app-sidebar__profile-action:hover,
+.app-topbar__dropdown-item:hover,
+.meta-chip {
+  color: var(--brand);
+}
+
+.app-sidebar__item {
+  color: var(--text-secondary);
+}
+
+.app-sidebar__item:hover,
+.app-sidebar__item.router-link-active,
+.app-sidebar--workspace .app-sidebar__item.router-link-active,
+.app-sidebar--admin .app-sidebar__item.router-link-active,
+.app-topbar__dropdown-item:hover {
+  border-color: var(--line-soft);
+  color: var(--brand);
+}
+
+.app-sidebar__item.router-link-active,
+.app-sidebar--workspace .app-sidebar__item.router-link-active,
+.app-sidebar--admin .app-sidebar__item.router-link-active {
+  box-shadow: inset 2px 0 0 var(--brand);
+  transform: translateX(1px);
+}
+
+.app-sidebar--workspace .app-sidebar__brand-mark,
+.app-sidebar--admin .app-sidebar__brand-mark {
+  border-color: var(--line-soft);
+}
+
+.app-topbar {
+  color: var(--text-primary);
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.app-topbar__search-input,
+.app-topbar__dropdown,
+.app-sidebar__profile-menu {
+  background: var(--surface-2);
+  border-color: var(--line-soft);
+}
+
+.app-topbar__search-input {
+  color: var(--text-primary);
+}
+
+.app-topbar__search-input::placeholder,
+.app-topbar__dropdown-summary span,
+.app-topbar__dropdown-summary em {
+  color: var(--text-muted);
+}
+
+.theme-toggle {
+  border-color: var(--line-strong);
+}
+
+.theme-toggle__track {
+  background: linear-gradient(180deg, #88c3ff, #5b7fff);
+}
+
+.theme-toggle--dark .theme-toggle__track {
+  background: linear-gradient(180deg, #294168, #14263f);
+}
+
+.theme-toggle__thumb,
+.theme-toggle--dark .theme-toggle__thumb {
+  background: #ffffff;
+}
+
+@media (max-width: 960px) {
+  .workspace-frame__body,
+  .admin-frame__body,
+  .app-shell--workspace .flash-stack,
+  .app-shell--admin .flash-stack {
+    padding-inline: 16px;
+  }
+
+  .app-sidebar {
+    border-bottom: 1px solid var(--line-soft);
+  }
+}
+
 /* --- Unified authenticated console redesign --- */
 .app-shell {
   --page-bg: #07111f;
@@ -2775,4 +3460,35 @@ code {
   .app-shell--admin .flash-stack {
     padding-inline: 16px;
   }
+}
+
+/* EOF theme fix */
+:root[data-theme='light'] .app-shell {
+  --page-bg: #f5f7fb;
+  --surface-1: rgba(255, 255, 255, 0.92);
+  --surface-2: #ffffff;
+  --surface-3: #f2f5fa;
+  --surface-hover: #edf2f8;
+  --text-primary: #101828;
+  --text-secondary: #667085;
+  --text-muted: #98a2b3;
+  --line-soft: rgba(15, 23, 42, 0.08);
+  --line-strong: rgba(15, 23, 42, 0.12);
+  --brand: #2457c5;
+  --brand-soft: rgba(36, 87, 197, 0.12);
+}
+
+:root[data-theme='dark'] .app-shell {
+  --page-bg: #0f1724;
+  --surface-1: rgba(17, 24, 39, 0.92);
+  --surface-2: #182231;
+  --surface-3: #202b3c;
+  --surface-hover: #263142;
+  --text-primary: #eef2ff;
+  --text-secondary: #94a3b8;
+  --text-muted: #64748b;
+  --line-soft: rgba(148, 163, 184, 0.16);
+  --line-strong: rgba(148, 163, 184, 0.24);
+  --brand: #5b6cff;
+  --brand-soft: rgba(91, 108, 255, 0.16);
 }
