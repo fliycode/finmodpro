@@ -3,12 +3,10 @@ import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
 
 import { kbApi } from '../api/knowledgebase.js';
 import KnowledgeBaseDetailPanel from './knowledgebase/KnowledgeBaseDetailPanel.vue';
+import KnowledgeBaseMetricsRail from './knowledgebase/KnowledgeBaseMetricsRail.vue';
 import KnowledgeBasePreviewModal from './knowledgebase/KnowledgeBasePreviewModal.vue';
 import KnowledgeBaseTable from './knowledgebase/KnowledgeBaseTable.vue';
 import KnowledgeBaseToolbar from './knowledgebase/KnowledgeBaseToolbar.vue';
-import KnowledgeArchiveShell from './workspace/knowledge/KnowledgeArchiveShell.vue';
-import KnowledgeAssetLedger from './workspace/knowledge/KnowledgeAssetLedger.vue';
-import KnowledgeDocumentInspector from './workspace/knowledge/KnowledgeDocumentInspector.vue';
 import { useFlash } from '../lib/flash.js';
 import { getDocumentRowActions, getIngestionAction, isIngestionInFlight } from '../lib/knowledgebase-actions.js';
 import {
@@ -19,6 +17,13 @@ import {
   buildSelectionAfterBatchDelete,
   summarizeBatchResult,
 } from '../lib/knowledgebase-workspace.js';
+
+const props = defineProps({
+  showAdminMetrics: {
+    type: Boolean,
+    default: false,
+  },
+});
 
 const items = ref([]);
 const isLoading = ref(false);
@@ -67,6 +72,44 @@ const statusTone = {
   failed: 'danger',
 };
 
+const parseSizeToBytes = (value) => {
+  const match = String(value || '').match(/^([\d.]+)\s*(B|KB|MB|GB)$/i);
+  if (!match) {
+    return 0;
+  }
+
+  const amount = Number(match[1]);
+  const unit = match[2].toUpperCase();
+  const multiplier = {
+    B: 1,
+    KB: 1024,
+    MB: 1024 ** 2,
+    GB: 1024 ** 3,
+  }[unit] || 1;
+
+  return Number.isFinite(amount) ? amount * multiplier : 0;
+};
+
+const formatBytes = (bytes) => {
+  if (!Number.isFinite(bytes) || bytes <= 0) {
+    return '0 B';
+  }
+
+  if (bytes >= 1024 ** 3) {
+    return `${(bytes / 1024 ** 3).toFixed(1)} GB`;
+  }
+
+  if (bytes >= 1024 ** 2) {
+    return `${(bytes / 1024 ** 2).toFixed(1)} MB`;
+  }
+
+  if (bytes >= 1024) {
+    return `${(bytes / 1024).toFixed(1)} KB`;
+  }
+
+  return `${Math.round(bytes)} B`;
+};
+
 const decoratedItems = computed(() =>
   items.value.map((item) => ({
     ...item,
@@ -103,6 +146,62 @@ const indexedCount = computed(() =>
 const failedCount = computed(() =>
   items.value.filter((item) => item.status === 'failed').length,
 );
+
+const totalVectorCount = computed(() =>
+  items.value.reduce((sum, item) => sum + Number(item.vectorCount || 0), 0),
+);
+
+const totalStorageBytes = computed(() =>
+  items.value.reduce((sum, item) => sum + parseSizeToBytes(item.size), 0),
+);
+
+const readyRate = computed(() => {
+  if (decoratedItems.value.length === 0) {
+    return '0%';
+  }
+
+  return `${Math.round((indexedCount.value / decoratedItems.value.length) * 100)}%`;
+});
+
+const pageModeLabel = computed(() => (props.showAdminMetrics ? '管理员知识库' : '工作区知识库'));
+
+const summaryCards = computed(() => [
+  {
+    id: 'datasets',
+    label: '知识库总数',
+    value: datasets.value.length,
+    delta: isLoadingDatasets.value ? '同步中' : '数据集',
+    tone: 'violet',
+  },
+  {
+    id: 'documents',
+    label: '文档总数',
+    value: pagination.value.total,
+    delta: `${decoratedItems.value.length} 条当前页`,
+    tone: 'blue',
+  },
+  {
+    id: 'storage',
+    label: '数据总量',
+    value: formatBytes(totalStorageBytes.value),
+    delta: '当前筛选估算',
+    tone: 'green',
+  },
+  {
+    id: 'vectors',
+    label: '向量总数',
+    value: totalVectorCount.value.toLocaleString('zh-CN'),
+    delta: '当前页向量',
+    tone: 'amber',
+  },
+  {
+    id: 'ready',
+    label: '可检索率',
+    value: readyRate.value,
+    delta: `${failedCount.value} 个失败`,
+    tone: 'purple',
+  },
+]);
 
 const activeDataset = computed(() =>
   datasets.value.find((dataset) => String(dataset.id) === String(selectedDatasetId.value)) || null,
@@ -501,44 +600,41 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="kb-page">
+  <div :class="['kb-page', { 'kb-page--admin': showAdminMetrics }]">
     <input ref="fileInput" type="file" hidden @change="handleFileChange" />
     <input ref="versionFileInput" type="file" hidden @change="handleVersionFileChange" />
 
-    <KnowledgeArchiveShell>
-      <template #filters>
-        <div class="kb-filter-spine">
-          <section class="kb-overview">
-            <div class="kb-overview__copy">
-              <p class="eyebrow">Archive desk</p>
-              <h2>知识检索与文档管理</h2>
-              <p class="kb-overview__text">
-                顶部先固定筛选、入库状态与数据集边界，下面再进入资产总账与文档细查。
-              </p>
-            </div>
-            <div class="kb-overview__stats">
-              <div class="stat-card">
-                <span class="stat-label">文档总数</span>
-                <strong>{{ pagination.total }}</strong>
-              </div>
-              <div class="stat-card">
-                <span class="stat-label">处理中</span>
-                <strong>{{ activeProcessingCount }}</strong>
-              </div>
-              <div class="stat-card">
-                <span class="stat-label">已入库</span>
-                <strong>{{ indexedCount }}</strong>
-              </div>
-              <div class="stat-card">
-                <span class="stat-label">失败</span>
-                <strong>{{ failedCount }}</strong>
-              </div>
-              <div class="stat-card">
-                <span class="stat-label">数据集</span>
-                <strong>{{ datasets.length }}</strong>
-              </div>
-            </div>
-          </section>
+    <section class="kb-overview">
+      <div class="kb-overview__copy">
+        <p class="eyebrow">{{ pageModeLabel }}</p>
+        <h2>知识库管理</h2>
+        <p class="kb-overview__text">
+          以知识库、文档、向量入库状态为主线组织操作区，先看资产概况，再完成筛选、上传、入库与明细追踪。
+        </p>
+      </div>
+      <div class="kb-overview__stats">
+        <article
+          v-for="card in summaryCards"
+          :key="card.id"
+          :class="['stat-card', `stat-card--${card.tone}`]"
+        >
+          <span class="stat-card__icon" aria-hidden="true"></span>
+          <div>
+            <span class="stat-label">{{ card.label }}</span>
+            <strong>{{ card.value }}</strong>
+            <small>{{ card.delta }}</small>
+          </div>
+        </article>
+      </div>
+    </section>
+
+    <div class="kb-command-grid">
+      <main class="kb-command-grid__main">
+        <section class="kb-ledger-panel">
+          <div class="kb-tabs">
+            <button class="kb-tab active" type="button">知识库列表</button>
+            <button class="kb-tab" type="button">数据源管理</button>
+          </div>
 
           <KnowledgeBaseToolbar
             :search-keyword="searchKeyword"
@@ -594,15 +690,7 @@ onUnmounted(() => {
               </div>
             </div>
           </section>
-        </div>
-      </template>
 
-      <template #ledger>
-        <KnowledgeAssetLedger
-          :total="pagination.total"
-          :active-count="activeProcessingCount"
-          :indexed-count="indexedCount"
-        >
           <div v-if="checkedDocumentIds.length > 0" class="kb-batchbar">
             <span>已选择 {{ checkedDocumentIds.length }} 个文档</span>
             <div class="kb-batchbar__actions">
@@ -625,11 +713,16 @@ onUnmounted(() => {
             @row-action="handleRowAction"
             @change-page="changePage"
           />
-        </KnowledgeAssetLedger>
-      </template>
+        </section>
 
-      <template #inspector>
-        <KnowledgeDocumentInspector>
+        <section class="kb-detail-panel">
+          <header class="kb-detail-panel__header">
+            <div>
+              <p class="eyebrow">Document inspector</p>
+              <h3>文档详情与切块</h3>
+            </div>
+            <span>{{ selectedDocument ? selectedDocument.processStep.label : '未选择文档' }}</span>
+          </header>
           <KnowledgeBaseDetailPanel
             :document="selectedDocument"
             :primary-action="selectedIngestionAction"
@@ -650,9 +743,19 @@ onUnmounted(() => {
             @change-tab="activeTab = $event"
             @toggle-chunk="expandedChunkIds = buildChunkExpansionState(expandedChunkIds, $event)"
           />
-        </KnowledgeDocumentInspector>
-      </template>
-    </KnowledgeArchiveShell>
+        </section>
+      </main>
+
+      <KnowledgeBaseMetricsRail
+        v-if="showAdminMetrics"
+        :documents="decoratedItems"
+        :datasets="datasets"
+        :total-documents="pagination.total"
+        :active-count="activeProcessingCount"
+        :indexed-count="indexedCount"
+        :failed-count="failedCount"
+      />
+    </div>
 
     <KnowledgeBasePreviewModal
       v-model="isPreviewOpen"
@@ -663,29 +766,29 @@ onUnmounted(() => {
 
 <style scoped>
 .kb-page {
-  min-height: 0;
-}
-
-.kb-filter-spine {
   display: flex;
   flex-direction: column;
   gap: 18px;
+  min-height: 0;
+  color: var(--text-secondary);
 }
 
 .kb-overview,
 .kb-dataset-composer,
-.kb-batchbar {
-  border: 1px solid rgba(95, 69, 35, 0.14);
-  border-radius: 22px;
-  background: rgba(251, 246, 237, 0.94);
-  box-shadow: 0 18px 52px -42px rgba(80, 54, 20, 0.28);
+.kb-batchbar,
+.kb-ledger-panel,
+.kb-detail-panel {
+  border: 1px solid var(--line-soft);
+  background: var(--surface-2);
+  box-shadow: var(--shadow-md);
 }
 
 .kb-overview {
-  display: grid;
-  grid-template-columns: minmax(0, 1.1fr) minmax(340px, 0.9fr);
-  gap: 24px;
-  padding: 24px;
+  padding: 22px;
+  border-radius: 22px;
+  background:
+    linear-gradient(135deg, rgba(36, 87, 197, 0.1), transparent 34%),
+    var(--surface-2);
 }
 
 .eyebrow {
@@ -694,53 +797,143 @@ onUnmounted(() => {
   font-weight: 700;
   letter-spacing: 0.16em;
   text-transform: uppercase;
-  color: #8b7358;
+  color: var(--brand);
 }
 
 .kb-overview h2,
 .kb-dataset-composer h3 {
   margin: 0;
-  color: #2f2418;
+  color: var(--text-primary);
   letter-spacing: -0.02em;
 }
 
 .kb-overview__text,
 .kb-dataset-composer p {
   margin: 10px 0 0;
-  color: #6f5a42;
+  color: var(--text-secondary);
   line-height: 1.75;
 }
 
 .kb-overview__stats {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 14px;
+  margin-top: 18px;
 }
 
 .stat-card {
-  border: 1px solid rgba(95, 69, 35, 0.12);
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-height: 104px;
+  padding: 18px;
+  border: 1px solid var(--line-soft);
   border-radius: 16px;
-  padding: 16px;
-  background: rgba(255, 251, 245, 0.94);
+  background: color-mix(in srgb, var(--surface-2) 88%, var(--brand-soft));
+}
+
+.stat-card__icon {
+  width: 48px;
+  height: 48px;
+  flex: 0 0 auto;
+  border-radius: 15px;
+  background: linear-gradient(135deg, #2457c5, #7ca6f2);
+  box-shadow: 0 16px 30px -24px rgba(36, 87, 197, 0.65);
+}
+
+.stat-card--violet .stat-card__icon {
+  background: linear-gradient(135deg, #44318d, #7f63f4);
+}
+
+.stat-card--green .stat-card__icon {
+  background: linear-gradient(135deg, #1f7a64, #58c896);
+}
+
+.stat-card--amber .stat-card__icon {
+  background: linear-gradient(135deg, #8a5a20, #d99731);
+}
+
+.stat-card--purple .stat-card__icon {
+  background: linear-gradient(135deg, #4b357e, #9a78f4);
 }
 
 .stat-label {
   display: block;
-  color: #8b7358;
+  color: var(--text-muted);
   font-size: 12px;
   margin-bottom: 6px;
 }
 
 .stat-card strong {
-  color: #2f2418;
-  font-size: 20px;
+  display: block;
+  color: var(--text-primary);
+  font-size: clamp(20px, 2vw, 26px);
+  line-height: 1.1;
+}
+
+.stat-card small {
+  display: block;
+  margin-top: 8px;
+  color: var(--success);
+  font-size: 12px;
+}
+
+.kb-command-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 18px;
+  align-items: start;
+  min-height: 0;
+}
+
+.kb-page--admin .kb-command-grid {
+  grid-template-columns: minmax(0, 1fr) 286px;
+}
+
+.kb-command-grid__main {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  min-width: 0;
+}
+
+.kb-ledger-panel,
+.kb-detail-panel {
+  border-radius: 18px;
+  overflow: hidden;
+}
+
+.kb-tabs {
+  display: flex;
+  align-items: flex-end;
+  gap: 24px;
+  min-height: 50px;
+  padding: 0 18px;
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.kb-tab {
+  height: 50px;
+  border: 0;
+  border-bottom: 3px solid transparent;
+  background: transparent;
+  color: var(--text-muted);
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.kb-tab.active {
+  border-bottom-color: var(--brand);
+  color: var(--brand);
 }
 
 .kb-dataset-composer {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(320px, 0.95fr);
   gap: 20px;
-  padding: 22px;
+  margin: 0 18px 18px;
+  padding: 18px;
+  border-radius: 16px;
 }
 
 .kb-dataset-composer__form {
@@ -751,12 +944,12 @@ onUnmounted(() => {
 .kb-search,
 .kb-textarea {
   width: 100%;
-  border: 1px solid rgba(95, 69, 35, 0.14);
-  border-radius: 14px;
+  border: 1px solid var(--line-strong);
+  border-radius: 12px;
   padding: 12px 14px;
   font: inherit;
-  color: #2f2418;
-  background: rgba(255, 251, 245, 0.98);
+  color: var(--text-primary);
+  background: var(--surface-3);
 }
 
 .kb-textarea {
@@ -780,11 +973,12 @@ onUnmounted(() => {
   justify-content: space-between;
   gap: 16px;
   padding: 14px 18px;
-  margin-bottom: 16px;
+  margin: 0 18px 16px;
+  border-radius: 14px;
 }
 
 .kb-batchbar span {
-  color: #5f482e;
+  color: var(--text-primary);
   font-weight: 700;
 }
 
@@ -799,15 +993,15 @@ onUnmounted(() => {
 }
 
 .kb-primary-btn {
-  border: 1px solid #8b5f2d;
-  background: #8b5f2d;
-  color: #fbf6ed;
+  border: 1px solid var(--brand);
+  background: var(--brand);
+  color: #fff;
 }
 
 .kb-secondary-btn {
-  border: 1px solid rgba(95, 69, 35, 0.14);
-  background: rgba(255, 251, 245, 0.96);
-  color: #2f2418;
+  border: 1px solid var(--line-strong);
+  background: var(--surface-2);
+  color: var(--text-primary);
 }
 
 .kb-danger-btn {
@@ -816,14 +1010,51 @@ onUnmounted(() => {
   color: #9b3131;
 }
 
+.kb-detail-panel {
+  padding: 18px;
+}
+
+.kb-detail-panel__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+  margin-bottom: 14px;
+}
+
+.kb-detail-panel__header h3 {
+  margin: 0;
+  color: var(--text-primary);
+}
+
+.kb-detail-panel__header span {
+  display: inline-flex;
+  align-items: center;
+  min-height: 30px;
+  padding: 0 10px;
+  border-radius: 999px;
+  background: var(--brand-soft);
+  color: var(--brand);
+  font-size: 12px;
+  font-weight: 700;
+}
+
 @media (max-width: 1180px) {
-  .kb-overview,
+  .kb-page--admin .kb-command-grid,
   .kb-dataset-composer {
     grid-template-columns: 1fr;
+  }
+
+  .kb-overview__stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 
 @media (max-width: 720px) {
+  .kb-overview__stats {
+    grid-template-columns: 1fr;
+  }
+
   .kb-batchbar {
     flex-direction: column;
     align-items: flex-start;

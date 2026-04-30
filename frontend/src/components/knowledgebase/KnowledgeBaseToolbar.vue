@@ -38,14 +38,6 @@ defineEmits([
 
 <template>
   <section class="kb-toolbar ui-card">
-    <input
-      :value="searchKeyword"
-      class="kb-search"
-      type="text"
-      placeholder="搜索文档名、文件名、上传者"
-      @input="$emit('update:searchKeyword', $event.target.value)"
-    />
-
     <select
       class="kb-select"
       :value="statusFilter"
@@ -82,6 +74,14 @@ defineEmits([
       </option>
     </select>
 
+    <input
+      :value="searchKeyword"
+      class="kb-search"
+      type="text"
+      placeholder="搜索知识库、文档、上传者..."
+      @input="$emit('update:searchKeyword', $event.target.value)"
+    />
+
     <button class="kb-secondary-btn" @click="$emit('create-dataset')">
       新建数据集
     </button>
@@ -95,25 +95,37 @@ defineEmits([
 <style scoped>
 .kb-toolbar {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 160px 160px 180px auto auto;
-  gap: 14px;
-  padding: 18px 22px;
+  grid-template-columns: 150px 150px 170px minmax(220px, 1fr) auto auto;
+  gap: 12px;
+  padding: 18px;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  background: transparent;
 }
 
 .kb-search,
 .kb-select {
-  height: 44px;
-  border: 1px solid rgba(20, 32, 51, 0.12);
-  border-radius: 14px;
+  height: 40px;
+  min-width: 0;
+  border: 1px solid var(--line-strong);
+  border-radius: 10px;
   padding: 0 14px;
-  background: #fff;
-  color: #142033;
+  background: var(--surface-3);
+  color: var(--text-primary);
+  outline: none;
+}
+
+.kb-search:focus,
+.kb-select:focus {
+  border-color: var(--brand);
+  box-shadow: 0 0 0 3px var(--brand-soft);
 }
 
 .kb-primary-btn,
 .kb-secondary-btn {
-  height: 44px;
-  border-radius: 14px;
+  height: 40px;
+  border-radius: 10px;
   padding: 0 18px;
   font-weight: 700;
   cursor: pointer;
@@ -121,14 +133,14 @@ defineEmits([
 
 .kb-primary-btn {
   border: none;
-  background: #2457c5;
+  background: var(--brand);
   color: #fff;
 }
 
 .kb-secondary-btn {
-  border: 1px solid rgba(20, 32, 51, 0.12);
-  background: #fff;
-  color: #142033;
+  border: 1px solid var(--line-strong);
+  background: var(--surface-2);
+  color: var(--text-primary);
 }
 
 .kb-primary-btn:disabled {
