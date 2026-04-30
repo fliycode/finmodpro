@@ -54,6 +54,16 @@ const iconMap = {
   'file-text': 'lucide:file-text',
   // Logos
   'github': 'lucide:github',
+  // QA / Chat
+  'mic': 'lucide:mic',
+  'zap': 'lucide:zap',
+  'file': 'lucide:file-text',
+  'clipboard': 'lucide:clipboard-list',
+  'pie-chart': 'lucide:chart-pie',
+  'layers': 'lucide:layers-3',
+  'home': 'lucide:home',
+  'message-circle': 'lucide:message-circle',
+  'globe': 'lucide:globe',
   // Direction
   'chevron-down': 'lucide:chevron-down',
   'chevron-right': 'lucide:chevron-right',
