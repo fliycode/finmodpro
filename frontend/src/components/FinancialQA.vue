@@ -380,45 +380,33 @@ const handleAsk = async () => {
 
 <template>
   <div class="qa-shell">
-    <!-- Page Hero -->
-    <header class="qa-hero">
-      <div class="qa-hero__icon">
-        <div class="qa-hero__glow" />
-        <div class="qa-hero__mic">
-          <AppIcon name="mic" :size="22" />
-        </div>
-      </div>
-      <div class="qa-hero__titles">
-        <h1 class="qa-hero__title">智能问答</h1>
-        <p class="qa-hero__subtitle">基于金融领域知识的精准问答与分析</p>
-      </div>
-      <div class="qa-hero__actions">
-        <button
-          type="button"
-          class="qa-hero__action"
-          title="历史会话"
-          @click="historyDrawerOpen = true"
-        >
-          <AppIcon name="history" :size="18" />
-        </button>
-        <button
-          type="button"
-          class="qa-hero__action"
-          title="记忆管理"
-          @click="memoryDrawerOpen = true"
-        >
-          <AppIcon name="brain-circuit" :size="18" />
-        </button>
-        <button
-          type="button"
-          class="qa-hero__action qa-hero__action--new"
-          title="新对话"
-          @click="startNewConversation"
-        >
-          <AppIcon name="plus" :size="18" />
-        </button>
-      </div>
-    </header>
+    <!-- QA Toolbar -->
+    <div class="qa-toolbar">
+      <button
+        type="button"
+        class="qa-toolbar__action"
+        title="历史会话"
+        @click="historyDrawerOpen = true"
+      >
+        <AppIcon name="history" :size="18" />
+      </button>
+      <button
+        type="button"
+        class="qa-toolbar__action"
+        title="记忆管理"
+        @click="memoryDrawerOpen = true"
+      >
+        <AppIcon name="brain-circuit" :size="18" />
+      </button>
+      <button
+        type="button"
+        class="qa-toolbar__action qa-toolbar__action--primary"
+        title="新对话"
+        @click="startNewConversation"
+      >
+        <AppIcon name="plus" :size="18" />
+      </button>
+    </div>
 
     <!-- 2-Column Layout -->
     <div class="qa-layout">
@@ -683,99 +671,37 @@ const handleAsk = async () => {
   min-height: 0;
 }
 
-/* ---- Hero Header ---- */
+/* ---- Toolbar ---- */
 
-.qa-hero {
-  display: flex;
-  align-items: center;
-  gap: 20px;
-  padding: 20px 24px;
-  border: 1px solid rgba(66, 108, 255, 0.14);
-  border-radius: 14px;
-  background:
-    linear-gradient(180deg, rgba(10, 19, 38, 0.94), rgba(7, 14, 28, 0.94)),
-    radial-gradient(circle at top right, rgba(71, 94, 255, 0.14), transparent 38%);
-  box-shadow: 0 20px 48px -32px rgba(4, 10, 22, 0.88);
-}
-
-.qa-hero__icon {
-  position: relative;
-  width: 64px;
-  height: 64px;
-  flex-shrink: 0;
-}
-
-.qa-hero__glow {
-  position: absolute;
-  inset: -4px;
-  border-radius: 50%;
-  border: 1.5px solid rgba(84, 198, 255, 0.25);
-  background: rgba(23, 58, 115, 0.65);
-  box-shadow: 0 0 28px rgba(54, 150, 255, 0.55);
-}
-
-.qa-hero__mic {
-  position: absolute;
-  inset: 8px;
-  display: grid;
-  place-items: center;
-  border-radius: 50%;
-  background: linear-gradient(135deg, #5fe7ff, #4e6dff);
-  box-shadow: inset 0 2px 6px rgba(255, 255, 255, 0.24), 0 0 18px rgba(71, 109, 255, 0.5);
-  color: #fff;
-}
-
-.qa-hero__titles {
-  flex: 1;
-  min-width: 0;
-}
-
-.qa-hero__title {
-  margin: 0;
-  font-size: 24px;
-  font-weight: 700;
-  line-height: 1.2;
-  letter-spacing: 0.01em;
-  color: #f4f7ff;
-}
-
-.qa-hero__subtitle {
-  margin: 6px 0 0;
-  font-size: 13px;
-  color: #8597bb;
-}
-
-.qa-hero__actions {
+.qa-toolbar {
   display: flex;
   gap: 8px;
-  flex-shrink: 0;
+  padding: 0 0 4px;
 }
 
-.qa-hero__action {
-  width: 38px;
-  height: 38px;
+.qa-toolbar__action {
+  width: 34px;
+  height: 34px;
   display: grid;
   place-items: center;
-  border: 1px solid rgba(102, 132, 255, 0.16);
-  border-radius: 10px;
+  border: 1px solid rgba(102, 132, 255, 0.14);
+  border-radius: 8px;
   background: rgba(15, 24, 44, 0.78);
   color: #95aacd;
   cursor: pointer;
   transition:
     border-color 0.2s ease,
     background-color 0.2s ease,
-    color 0.2s ease,
-    transform 0.2s ease;
+    color 0.2s ease;
 }
 
-.qa-hero__action:hover {
+.qa-toolbar__action:hover {
   border-color: rgba(102, 132, 255, 0.28);
   background: rgba(20, 32, 56, 0.92);
   color: #eef4ff;
-  transform: translateY(-1px);
 }
 
-.qa-hero__action--new {
+.qa-toolbar__action--primary {
   border-color: rgba(100, 140, 255, 0.28);
   background: linear-gradient(135deg, rgba(44, 99, 255, 0.32), rgba(86, 75, 255, 0.26));
   color: #c5d4ff;
@@ -1495,26 +1421,6 @@ const handleAsk = async () => {
 }
 
 @media (max-width: 720px) {
-  .qa-hero {
-    flex-wrap: wrap;
-    gap: 14px;
-    padding: 16px 18px;
-  }
-
-  .qa-hero__title {
-    font-size: 20px;
-  }
-
-  .qa-hero__icon {
-    width: 48px;
-    height: 48px;
-  }
-
-  .qa-hero__actions {
-    width: 100%;
-    justify-content: flex-end;
-  }
-
   .qa-messages {
     padding: 14px 14px 10px;
   }

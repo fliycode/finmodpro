@@ -24,13 +24,6 @@ const permissionsLabel = computed(() => {
 
 <template>
   <section class="workspace-support-page">
-    <header class="workspace-support-page__header">
-      <div>
-        <p class="workspace-support-page__eyebrow">Support surface</p>
-        <h1>个人信息</h1>
-      </div>
-    </header>
-
     <ProfileIdentitySheet>
       <template #identity>
         <section class="profile-panel">
@@ -76,23 +69,6 @@ const permissionsLabel = computed(() => {
   display: flex;
   flex-direction: column;
   gap: 16px;
-}
-
-.workspace-support-page__eyebrow {
-  margin: 0 0 6px;
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.16em;
-  text-transform: uppercase;
-  color: #7f95bf;
-}
-
-.workspace-support-page h1 {
-  margin: 0;
-  color: #eef4ff;
-  font-size: 34px;
-  line-height: 1.06;
-  letter-spacing: -0.03em;
 }
 
 .profile-panel {

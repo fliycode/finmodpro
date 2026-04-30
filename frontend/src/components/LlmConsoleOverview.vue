@@ -78,23 +78,15 @@ onMounted(fetchSummary);
 
 <template>
   <div class="page-stack admin-llm-page">
-    <section class="page-hero admin-llm-page__hero">
-      <div>
-        <div class="page-hero__eyebrow">LLM 中台 / 总览</div>
-        <h1 class="page-hero__title">LLM 中台总览</h1>
-        <p class="page-hero__subtitle">
-          把当前接入的基础设施、启用中的模型链路和最近运行摘要集中到一个入口里，先回答“接了什么、现在怎样、下一步去哪看”。
-        </p>
-        <div class="admin-llm-page__meta">
-          <span>最近刷新：{{ refreshedAt || '尚未刷新' }}</span>
-          <span>基础设施：{{ providerCards.length }}</span>
-        </div>
+    <div class=”admin-llm-page__toolbar”>
+      <div class=”admin-llm-page__meta”>
+        <span>最近刷新：{{ refreshedAt || '尚未刷新' }}</span>
+        <span>基础设施：{{ providerCards.length }}</span>
       </div>
-
-      <div class="admin-llm-page__actions">
-        <el-button @click="fetchSummary" :loading="isLoading">刷新总览</el-button>
+      <div class=”admin-llm-page__actions”>
+        <el-button @click=”fetchSummary” :loading=”isLoading”>刷新总览</el-button>
       </div>
-    </section>
+    </div>
 
     <el-alert v-if="errorMsg" :title="errorMsg" type="error" show-icon :closable="false" />
 
@@ -161,8 +153,12 @@ onMounted(fetchSummary);
 </template>
 
 <style scoped>
-.admin-llm-page__hero {
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(238, 242, 246, 0.9));
+.admin-llm-page__toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
 }
 
 .admin-llm-page__meta {

@@ -14,6 +14,14 @@ const props = defineProps({
     type: String,
     default: 'workspace',
   },
+  title: {
+    type: String,
+    default: '',
+  },
+  subtitle: {
+    type: String,
+    default: '',
+  },
 });
 
 const router = useRouter();
@@ -75,17 +83,22 @@ onBeforeUnmount(() => {
 
 <template>
   <header :class="['app-topbar', `app-topbar--${props.area}`]">
-    <div class="app-topbar__search">
-      <AppIcon name="search" class="app-topbar__search-icon" />
-      <input
-        v-model="searchQuery"
-        type="text"
-        class="app-topbar__search-input"
-        placeholder="搜索金融资讯、知识条目..."
-      />
+    <div v-if="props.title" class="app-topbar__title-group">
+      <h1 class="app-topbar__page-title">{{ props.title }}</h1>
+      <p v-if="props.subtitle" class="app-topbar__page-subtitle">{{ props.subtitle }}</p>
     </div>
 
     <div class="app-topbar__actions">
+      <div class="app-topbar__search">
+        <AppIcon name="search" class="app-topbar__search-icon" />
+        <input
+          v-model="searchQuery"
+          type="text"
+          class="app-topbar__search-input"
+          placeholder="搜索金融资讯、知识条目..."
+        />
+      </div>
+
       <ThemeToggle />
 
       <div class="app-topbar__avatar-group">

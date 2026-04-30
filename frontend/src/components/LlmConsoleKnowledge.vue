@@ -66,23 +66,16 @@ onMounted(fetchKnowledge);
 
 <template>
   <div class="page-stack admin-llm-page">
-    <section class="page-hero admin-llm-page__hero">
-      <div>
-        <div class="page-hero__eyebrow">LLM 中台 / 知识库接入</div>
-        <h1 class="page-hero__title">知识库解析与入库链路</h1>
-        <p class="page-hero__subtitle">
-          重点回答“当前文档解析链路是否真实可用”，把 Unstructured、fallback 语义和近期入库结果放到同一张治理页面里。
-        </p>
-        <div class="admin-llm-page__meta">
-          <span>最近刷新：{{ refreshedAt || '尚未刷新' }}</span>
-          <span>失败任务：{{ payload.recent_failures.length }}</span>
-        </div>
+    <div class=”admin-llm-page__toolbar”>
+      <div class=”admin-llm-page__meta”>
+        <span>最近刷新：{{ refreshedAt || '尚未刷新' }}</span>
+        <span>失败任务：{{ payload.recent_failures.length }}</span>
       </div>
 
       <div class="admin-llm-page__actions">
         <el-button @click="fetchKnowledge" :loading="isLoading">刷新知识链路</el-button>
       </div>
-    </section>
+    </div>
 
     <el-alert v-if="errorMsg" :title="errorMsg" type="error" show-icon :closable="false" />
 
@@ -133,8 +126,12 @@ onMounted(fetchKnowledge);
 </template>
 
 <style scoped>
-.admin-llm-page__hero {
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(238, 242, 246, 0.9));
+.admin-llm-page__toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
 }
 
 .admin-llm-page__meta {
