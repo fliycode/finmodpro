@@ -10,6 +10,7 @@ export const navigationMap = {
   ],
   admin: [
     { id: 'admin-overview', label: '数据看板', to: '/admin/overview', icon: 'dashboard', group: 'admin-overview' },
+    { id: 'admin-knowledge', label: '知识库管理', to: '/admin/knowledge', icon: 'database', group: 'admin-overview' },
     { id: 'admin-users', label: '用户管理', to: '/admin/users', icon: 'users', group: 'admin-governance' },
     { id: 'admin-llm-overview', label: 'Gateway', to: '/admin/llm', icon: 'network', group: 'admin-llm' },
     { id: 'admin-llm-models', label: 'Models / Routing', to: '/admin/llm/models', icon: 'sliders', group: 'admin-llm' },

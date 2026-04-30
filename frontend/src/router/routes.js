@@ -89,6 +89,11 @@ export const appRoutes = [
         meta: { title: '用户管理', subtitle: '管理平台用户账号、角色分配与访问权限。' },
       },
       {
+        path: 'knowledge',
+        component: () => import('../views/admin/AdminKnowledgeView.vue'),
+        meta: { title: '知识库管理', subtitle: '管理员视角查看知识资产、入库链路、存储和向量资源指标。' },
+      },
+      {
         path: 'llm',
         component: () => import('../views/admin/AdminLlmOverviewView.vue'),
         meta: { title: 'LLM 中台总览', subtitle: '基础设施接入、模型链路状态与运行摘要。' },
