@@ -39,7 +39,7 @@ Backend tests use Django's test runner and `pytest` discovery settings from `bac
 Recent history follows Conventional Commits: `feat(frontend): ...`, `fix(frontend): ...`, `refactor(frontend): ...`. Continue using `type(scope): imperative summary`, with scopes like `frontend`, `backend`, or a backend app name. PRs should include a short problem statement, a change summary, linked issues when applicable, and verification notes listing the commands you ran. Include screenshots or recordings for UI changes.
 
 ## Deployment Workflow
-This repository is the live `finmodpro` project. The source of truth is GitHub, and normal delivery is `local change -> push -> pipeline deploy`; avoid manual server edits unless the task explicitly requires them. The deployment target is `root@47.85.103.76`, and shell access is expected through `plink`.
+This repository is the live `finmodpro` project. The source of truth is GitHub, and normal delivery is `local change -> push -> pipeline deploy`; avoid manual server edits unless the task explicitly requires them. This machine IS the production server. Deployments run directly via `./scripts/deploy.sh` — no SSH needed.
 
 ## Security & Configuration Tips
 Copy `frontend/.env.example` and `backend/.env.example` for local setup, but never commit real secrets. Store server passwords and similar credentials in a local password manager or other out-of-repo secret store, not in `AGENTS.md`, source files, or scripts. Default local development uses SQLite and in-memory Celery/Redis substitutes; document any required external services when changing that assumption.

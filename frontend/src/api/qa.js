@@ -185,6 +185,12 @@ export const qaApi = {
           return;
         }
 
+        if (eventName === 'error') {
+          throw new Error(
+            data.message || data.error || data.detail || '对话服务异常，请稍后重试。',
+          );
+        }
+
         if (eventName === 'done') {
           const normalized = normalizeAnswerPayload({
             ...data,

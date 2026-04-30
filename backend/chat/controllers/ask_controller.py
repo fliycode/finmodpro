@@ -44,22 +44,33 @@ def _build_error_payload(*, message, code, error_type, provider=None, details=No
     return payload
 
 
-def _build_configuration_error_response(exc):
+def _get_config_user_message(exc):
+    """Return user-facing error message for ServiceConfigurationError subtypes."""
     if isinstance(exc, ModelNotConfiguredError):
-        message = (
+        return (
             "\u5f53\u524d\u672a\u914d\u7f6e\u53ef\u7528\u7684\u5bf9\u8bdd\u6a21\u578b\uff0c"
             "\u8bf7\u5148\u5728\u6a21\u578b\u914d\u7f6e\u4e2d\u542f\u7528 chat \u6a21\u578b\u3002"
         )
-        code = "chat_model_not_configured"
-    elif isinstance(exc, ProviderConfigurationError):
-        message = (
+    if isinstance(exc, ProviderConfigurationError):
+        return (
             "\u5f53\u524d\u5bf9\u8bdd\u6a21\u578b provider \u4e0d\u53ef\u7528\uff0c"
             "\u8bf7\u68c0\u67e5\u6a21\u578b\u914d\u7f6e\u3002"
         )
-        code = "chat_provider_unavailable"
-    else:
-        message = exc.message
-        code = exc.code
+    return exc.message
+
+
+def _get_config_user_code(exc):
+    """Return error code for ServiceConfigurationError subtypes."""
+    if isinstance(exc, ModelNotConfiguredError):
+        return "chat_model_not_configured"
+    if isinstance(exc, ProviderConfigurationError):
+        return "chat_provider_unavailable"
+    return exc.code
+
+
+def _build_configuration_error_response(exc):
+    message = _get_config_user_message(exc)
+    code = _get_config_user_code(exc)
 
     return JsonResponse(
         _build_error_payload(
@@ -73,31 +84,41 @@ def _build_configuration_error_response(exc):
     )
 
 
-def _build_upstream_error_response(exc):
-    if exc.code == "llm_provider_unavailable":
-        message = (
+def _get_upstream_user_message(exc):
+    """Return user-facing error message for UpstreamServiceError codes."""
+    messages = {
+        "llm_provider_unavailable": (
             "\u5bf9\u8bdd\u6a21\u578b\u670d\u52a1\u5f53\u524d\u4e0d\u53ef\u7528\uff0c"
             "\u8bf7\u7a0d\u540e\u91cd\u8bd5\u3002"
-        )
-        error_type = "provider_unavailable"
-    elif exc.code == "upstream_rate_limited":
-        message = (
+        ),
+        "upstream_rate_limited": (
             "\u4e0a\u6e38\u6a21\u578b\u670d\u52a1\u89e6\u53d1\u9650\u6d41\uff0c"
             "\u8bf7\u7a0d\u540e\u91cd\u8bd5\u3002"
-        )
-        error_type = "rate_limited"
-    elif exc.code == "llm_provider_auth_failed":
-        message = "\u5f53\u524d\u5bf9\u8bdd\u6a21\u578b\u8ba4\u8bc1\u5931\u8d25\uff0c\u8bf7\u8054\u7cfb\u7ba1\u7406\u5458\u68c0\u67e5 API Key\u3002"
-        error_type = "provider_auth_failed"
-    elif exc.code == "llm_provider_invalid_model":
-        message = "\u5f53\u524d\u5bf9\u8bdd\u6a21\u578b\u540d\u79f0\u65e0\u6548\uff0c\u8bf7\u8054\u7cfb\u7ba1\u7406\u5458\u68c0\u67e5\u6a21\u578b\u914d\u7f6e\u3002"
-        error_type = "provider_invalid_model"
-    else:
-        message = (
-            "\u5bf9\u8bdd\u6a21\u578b\u4e0a\u6e38\u670d\u52a1\u8c03\u7528\u5931\u8d25\uff0c"
-            "\u8bf7\u7a0d\u540e\u91cd\u8bd5\u3002"
-        )
-        error_type = "upstream_error"
+        ),
+        "llm_provider_auth_failed": (
+            "\u5f53\u524d\u5bf9\u8bdd\u6a21\u578b\u8ba4\u8bc1\u5931\u8d25\uff0c"
+            "\u8bf7\u8054\u7cfb\u7ba1\u7406\u5458\u68c0\u67e5 API Key\u3002"
+        ),
+        "llm_provider_invalid_model": (
+            "\u5f53\u524d\u5bf9\u8bdd\u6a21\u578b\u540d\u79f0\u65e0\u6548\uff0c"
+            "\u8bf7\u8054\u7cfb\u7ba1\u7406\u5458\u68c0\u67e5\u6a21\u578b\u914d\u7f6e\u3002"
+        ),
+    }
+    return messages.get(
+        exc.code,
+        "\u5bf9\u8bdd\u6a21\u578b\u4e0a\u6e38\u670d\u52a1\u8c03\u7528\u5931\u8d25\uff0c\u8bf7\u7a0d\u540e\u91cd\u8bd5\u3002",
+    )
+
+
+def _build_upstream_error_response(exc):
+    code_to_error_type = {
+        "llm_provider_unavailable": "provider_unavailable",
+        "upstream_rate_limited": "rate_limited",
+        "llm_provider_auth_failed": "provider_auth_failed",
+        "llm_provider_invalid_model": "provider_invalid_model",
+    }
+    message = _get_upstream_user_message(exc)
+    error_type = code_to_error_type.get(exc.code, "upstream_error")
 
     details = {"upstream_message": exc.message}
     if exc.retry_after is not None:
@@ -237,8 +258,8 @@ def chat_ask_stream_view(request):
             yield _build_sse_event(
                 "error",
                 _build_error_payload(
-                    message=exc.message,
-                    code=exc.code,
+                    message=_get_config_user_message(exc),
+                    code=_get_config_user_code(exc),
                     error_type="configuration_error",
                     provider=exc.provider,
                     details=exc.details,
@@ -250,7 +271,7 @@ def chat_ask_stream_view(request):
                 {
                     "type": "upstream_error",
                     "code": exc.code,
-                    "message": exc.message,
+                    "message": _get_upstream_user_message(exc),
                     "provider": exc.provider,
                 },
             )
