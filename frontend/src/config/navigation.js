@@ -9,7 +9,7 @@ export const navigationMap = {
     { id: 'sentiment', label: '舆情分析', to: '/workspace/sentiment', icon: 'trending-up', group: 'workspace-core' },
   ],
   admin: [
-    { id: 'admin-overview', label: '仪表盘', to: '/admin/overview', icon: 'dashboard', group: 'admin-overview' },
+    { id: 'admin-overview', label: '数据看板', to: '/admin/overview', icon: 'dashboard', group: 'admin-overview' },
     { id: 'admin-users', label: '用户管理', to: '/admin/users', icon: 'users', group: 'admin-governance' },
     { id: 'admin-llm-overview', label: 'Gateway', to: '/admin/llm', icon: 'network', group: 'admin-llm' },
     { id: 'admin-llm-models', label: 'Models / Routing', to: '/admin/llm/models', icon: 'sliders', group: 'admin-llm' },
