@@ -77,23 +77,16 @@ onMounted(fetchObservability);
 
 <template>
   <div class="page-stack admin-llm-page">
-    <section class="page-hero admin-llm-page__hero">
-      <div>
-        <div class="page-hero__eyebrow">LLM 中台 / 观测</div>
-        <h1 class="page-hero__title">观测与异常摘要</h1>
-        <p class="page-hero__subtitle">
-          不在 FinModPro 内重做 Langfuse，而是把调用量、命中情况、失败事件和外部观测入口压缩成一页治理摘要。
-        </p>
-        <div class="admin-llm-page__meta">
-          <span>最近刷新：{{ refreshedAt || '尚未刷新' }}</span>
-          <span>失败事件：{{ payload.recent_failures.length }}</span>
-        </div>
+    <div class="admin-llm-page__toolbar">
+      <div class="admin-llm-page__meta">
+        <span>最近刷新：{{ refreshedAt || '尚未刷新' }}</span>
+        <span>失败事件：{{ payload.recent_failures.length }}</span>
       </div>
 
       <div class="admin-llm-page__actions">
         <el-button @click="fetchObservability" :loading="isLoading">刷新观测</el-button>
       </div>
-    </section>
+    </div>
 
     <el-alert v-if="errorMsg" :title="errorMsg" type="error" show-icon :closable="false" />
 
@@ -142,8 +135,12 @@ onMounted(fetchObservability);
 </template>
 
 <style scoped>
-.admin-llm-page__hero {
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(238, 242, 246, 0.9));
+.admin-llm-page__toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
 }
 
 .admin-llm-page__meta {

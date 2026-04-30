@@ -1198,11 +1198,41 @@ html[data-theme='dark'] body {
   box-shadow: var(--shadow-sm);
 }
 
+/* Page title ─────────────────────────────────────── */
+.app-topbar__title-group {
+  display: flex;
+  align-items: baseline;
+  gap: 14px;
+  min-width: 0;
+  flex-shrink: 1;
+}
+
+.app-topbar__page-title {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: var(--fs-xl);
+  font-weight: 600;
+  line-height: var(--lh-tight);
+  letter-spacing: -0.01em;
+  color: var(--text-primary);
+  white-space: nowrap;
+}
+
+.app-topbar__page-subtitle {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--fs-sm);
+  line-height: var(--lh-snug);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 /* Search ─────────────────────────────────────────── */
 .app-topbar__search {
   position: relative;
-  flex: 1;
-  max-width: 480px;
+  width: 280px;
+  flex-shrink: 0;
 }
 
 .app-topbar__search-icon {

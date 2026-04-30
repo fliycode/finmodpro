@@ -145,13 +145,6 @@ onMounted(async () => {
 
 <template>
   <section class="workspace-support-page">
-    <header class="workspace-support-page__header">
-      <div>
-        <p class="workspace-support-page__eyebrow">Support surface</p>
-        <h1>历史会话</h1>
-      </div>
-    </header>
-
     <HistoryWorkbench>
       <template #filters>
         <div class="history-filters">
@@ -222,7 +215,6 @@ onMounted(async () => {
   gap: 16px;
 }
 
-.workspace-support-page__eyebrow,
 .history-filters__eyebrow,
 .history-session-summary__eyebrow {
   margin: 0 0 6px;
@@ -239,21 +231,12 @@ onMounted(async () => {
   gap: 14px;
 }
 
-.workspace-support-page h1,
 .history-filters__copy h2 {
   margin: 0;
   color: #eef4ff;
-  letter-spacing: -0.03em;
-}
-
-.workspace-support-page h1 {
-  font-size: 34px;
-  line-height: 1.06;
-}
-
-.history-filters__copy h2 {
   font-size: 22px;
   line-height: 1.2;
+  letter-spacing: -0.03em;
 }
 
 .history-filters__field {

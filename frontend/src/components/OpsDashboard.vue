@@ -304,25 +304,17 @@ const retryAuditAction = async (item) => {
 
 <template>
   <section class="ops-board" v-loading="isLoading">
-    <header class="ops-board__header">
-      <div>
-        <p class="ops-board__eyebrow">FinGPT-RAG / Risk intelligence</p>
-        <h1>数据看板</h1>
-        <p>全局风险态势感知，联动知识库、问答链路、风险提取与系统审计。</p>
-      </div>
-
-      <div class="ops-board__actions">
-        <button type="button" class="ops-board__search" @click="router.push('/workspace/knowledge')">
-          <AppIcon name="search" />
-          <span>搜索文档、研报、公司、关键词...</span>
-        </button>
-        <button type="button" class="ops-board__chip">{{ refreshedAt || '等待刷新' }}</button>
-        <button type="button" class="ops-board__chip is-primary" @click="fetchData">
-          <AppIcon name="refresh" />
-          刷新
-        </button>
-      </div>
-    </header>
+    <div class="ops-board__actions">
+      <button type="button" class="ops-board__search" @click="router.push('/workspace/knowledge')">
+        <AppIcon name="search" />
+        <span>搜索文档、研报、公司、关键词...</span>
+      </button>
+      <button type="button" class="ops-board__chip">{{ refreshedAt || '等待刷新' }}</button>
+      <button type="button" class="ops-board__chip is-primary" @click="fetchData">
+        <AppIcon name="refresh" />
+        刷新
+      </button>
+    </div>
 
     <el-alert v-if="errorMsg" :title="errorMsg" type="error" show-icon :closable="false" />
 
@@ -556,36 +548,6 @@ const retryAuditAction = async (item) => {
   display: grid;
   gap: 14px;
   color: var(--board-text);
-}
-
-.ops-board__header {
-  min-height: 92px;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(360px, 680px);
-  gap: 22px;
-  align-items: start;
-}
-
-.ops-board__eyebrow {
-  margin: 0 0 7px;
-  color: #7485a2;
-  font-size: 12px;
-  font-weight: 800;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-}
-
-.ops-board h1 {
-  margin: 0;
-  color: #f3f7ff;
-  font-size: 30px;
-  line-height: 1.08;
-}
-
-.ops-board__header p:last-child {
-  margin: 8px 0 0;
-  color: #8492aa;
-  font-size: 14px;
 }
 
 .ops-board__actions {
