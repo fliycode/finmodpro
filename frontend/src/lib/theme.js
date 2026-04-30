@@ -1,5 +1,6 @@
 const THEME_STORAGE_KEY = 'finmodpro_theme';
 const THEMES = new Set(['light', 'dark']);
+const DEFAULT_THEME = 'light';
 
 const getStorage = () => {
   try {
@@ -18,7 +19,7 @@ export const getSystemTheme = () => {
 };
 
 export const normalizeTheme = (theme) => (
-  THEMES.has(theme) ? theme : getSystemTheme()
+  THEMES.has(theme) ? theme : DEFAULT_THEME
 );
 
 export const getStoredTheme = () => {
@@ -33,6 +34,7 @@ export const applyTheme = (theme) => {
   if (root) {
     root.dataset.theme = normalizedTheme;
     root.style.colorScheme = normalizedTheme;
+    root.classList.toggle('dark', normalizedTheme === 'dark');
   }
 
   return normalizedTheme;
@@ -44,4 +46,4 @@ export const persistTheme = (theme) => {
   return normalizedTheme;
 };
 
-export const initializeTheme = () => applyTheme(getStoredTheme() || getSystemTheme());
+export const initializeTheme = () => applyTheme(getStoredTheme() || DEFAULT_THEME);
