@@ -32,9 +32,9 @@ const profileActions = computed(() => [
 const areaMeta = computed(() => {
   if (props.area === 'admin') {
     return {
-      label: 'War room console',
-      sublabel: '路由、观测与治理',
-      eyebrow: 'Operator shell',
+      label: 'FinGPT-RAG',
+      sublabel: '金融风险洞察引擎',
+      eyebrow: 'Risk console',
     };
   }
 
@@ -48,7 +48,7 @@ const areaMeta = computed(() => {
 const groupCatalog = computed(() => {
   if (props.area === 'admin') {
     return [
-      { id: 'admin-overview', label: '总览引导' },
+      { id: 'admin-overview', label: '风险看板' },
       { id: 'admin-governance', label: '治理审阅' },
       { id: 'admin-llm', label: 'Gateway ops' },
     ];
