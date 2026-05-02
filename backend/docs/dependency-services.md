@@ -216,20 +216,21 @@ export MILVUS_URI=http://127.0.0.1:19530
 - 本地开发默认可留空
 - 接入 Cloud 后再填
 
-## 六、Unstructured Parser Service
+## 六、轻量 Parser Service / PyMuPDF
 
 ### 当前作用
 
-- 为 `pdf/docx` 提供结构化文档解析能力
+- 为 `pdf/docx/txt` 提供统一 element 输出契约
+- `pdf` 主路径使用 PyMuPDF 提升文本块、页码和基础版面信息抽取质量
 - backend / celery 通过 `UNSTRUCTURED_API_URL` 访问解析服务
-- 采用标准 Unstructured API 协议（`POST /general/v0/general`，multipart 文件上传）
+- 保留兼容 Unstructured elements 的 HTTP 协议（`POST /general/v0/general`，multipart 文件上传）
 - 解析层与 chunk / embedding / retrieval 主链路解耦
 
 ### 推荐默认值
 
-- 生产环境：通过 `docker-compose.prod.yml` 中的 `unstructured-api` 服务自建
+- 生产环境：通过 `docker-compose.prod.yml` 中的 `unstructured-api` 轻量解析服务自建
 - 本地开发：可使用同一个容器，或直接用 `docker compose up unstructured-api` 单独启动
-- `pdf` 允许回退到 `pypdf`
+- `pdf` 主路径和 fallback 均使用 PyMuPDF
 - `docx` 不做本地回退，解析失败直接暴露给上游
 
 ### 关键变量
@@ -237,17 +238,16 @@ export MILVUS_URI=http://127.0.0.1:19530
 - `UNSTRUCTURED_API_URL` — 解析服务地址（默认 `http://unstructured-api:8000`）
 - `UNSTRUCTURED_API_KEY` — API Key（自建容器不需要）
 - `UNSTRUCTURED_TIMEOUT_SECONDS` — 请求超时（默认 30s）
-- `UNSTRUCTURED_PDF_STRATEGY` — PDF 解析策略（默认 `fast`，可选 `auto`/`hi_res`）
+- `UNSTRUCTURED_PDF_STRATEGY` — PDF 解析策略占位；当前轻量服务内由 PyMuPDF 执行
 - `UNSTRUCTURED_DOCX_STRATEGY` — DOCX 解析策略（默认 `fast`）
-- `UNSTRUCTURED_PDF_FALLBACK_ENABLED` — PDF 解析失败时是否回退到 pypdf（默认 `true`）
+- `UNSTRUCTURED_PDF_FALLBACK_ENABLED` — PDF 解析失败时是否启用后端 PyMuPDF fallback（默认 `true`）
 
 ### 资源与内存说明
 
-- 官方 `unstructured-api` 镜像约 2-3 GB
-- **`fast` 策略**（默认）：只做文本级提取，无需加载 CV 模型，内存占用 ~200-500 MB
-- **`hi_res` 策略**：会加载 Detectron2 版面分析模型，额外占用 ~500 MB+ 内存
-- 容器已配置 `mem_limit: 2g` 和 `UNSTRUCTURED_PARALLEL_MODE_ENABLED=false`
-- 建议对当前生产机（7G 内存）始终使用 `fast` 策略
+- 当前仓库使用 `deploy/unstructured-light` 自建轻量解析镜像，不使用官方重版解析镜像
+- PyMuPDF 作为 PDF 解析依赖接入，不新增独立 PyMuPDF 常驻服务
+- 容器配置 `mem_limit: 512m` 和 `UNSTRUCTURED_PARALLEL_MODE_ENABLED=false`
+- 当前生产机资源偏紧，建议保持轻量服务边界，不引入 OCR / Tesseract / Detectron2 等重依赖
 
 ### 启动命令
 
@@ -261,10 +261,11 @@ curl -s http://127.0.0.1:8000/healthcheck | head -c 200
 
 ### 说明
 
-- 当前仓库只把 Unstructured 作为解析边界，不改变 chunk / embedding / retrieval / API 语义
+- 当前仓库只把 `unstructured-api` 作为轻量解析服务名称和协议边界，不再把官方 Unstructured 作为 PDF 核心解析引擎
+- PDF 解析核心由 PyMuPDF 承担，不改变 chunk / embedding / retrieval / API 语义
 - 解析服务仅限内部网络，不对公网暴露
 - `unstructured-api` 容器无需暴露端口，backend 通过 Docker DNS 访问
-- 当 Unstructured 不可用时，只有 `pdf` 会回退到 `pypdf`
+- 当轻量解析服务不可用时，只有 `pdf` 会回退到后端 PyMuPDF fallback
 
 ## 七、推荐组合
 
@@ -377,7 +378,7 @@ python3 scripts/llamafactory_runner.py \
 - Redis 作为 Celery broker / backend（或其他真实 broker）
 - Milvus Lite（当前仓库默认推荐）或你自己的远程 Milvus URI
 - LiteLLM
-- Unstructured Parser Service
+- 轻量 Parser Service（PDF 引擎为 PyMuPDF）
 
 补充：
 
