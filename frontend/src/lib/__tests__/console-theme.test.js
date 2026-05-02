@@ -39,3 +39,18 @@ test('light console theme neutralizes known dark-only card surfaces', () => {
     assert.match(lightThemeStyles, new RegExp(selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
   });
 });
+
+test('console theme does not paint every summary or overview descendant', () => {
+  const styles = readStyles();
+
+  assert.doesNotMatch(styles, /:root\[data-theme='dark'\]\s+\[class\*='summary'\]/);
+  assert.doesNotMatch(styles, /:root\[data-theme='dark'\]\s+\[class\*='overview'\]/);
+
+  [
+    '.summary-tile__label',
+    '.summary-tile__icon',
+    '.board-panel__header',
+  ].forEach((selector) => {
+    assert.match(styles, new RegExp(selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+  });
+});

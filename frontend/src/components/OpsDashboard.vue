@@ -1,6 +1,5 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue';
-import { useRouter } from 'vue-router';
 import { ElMessage } from 'element-plus';
 
 import { dashboardApi } from '../api/dashboard.js';
@@ -8,8 +7,6 @@ import { riskApi } from '../api/risk.js';
 import {
   buildDashboardDocumentOption,
   buildDashboardDonutOption,
-  buildDashboardIndustryRows,
-  buildDashboardRegionRows,
   buildDashboardRiskLevelOption,
   buildDashboardSourceRows,
   buildDashboardSummaryMetrics,
@@ -19,7 +16,6 @@ import {
 import AdminChart from './admin/AdminChart.vue';
 import AppIcon from './ui/AppIcon.vue';
 
-const router = useRouter();
 const dashboardStats = ref(normalizeDashboardPayload({}));
 const audits = ref([]);
 const isLoading = ref(true);
@@ -111,15 +107,12 @@ const fetchData = async () => {
 onMounted(fetchData);
 
 const summaryMetrics = computed(() => buildDashboardSummaryMetrics(dashboardStats.value));
-const industryRows = computed(() => buildDashboardIndustryRows(dashboardStats.value));
-const regionRows = computed(() => buildDashboardRegionRows(dashboardStats.value));
 const sourceRows = computed(() => buildDashboardSourceRows({
   ...dashboardStats.value,
   audit_snippets: audits.value,
 }));
 
 const trendOption = computed(() => buildDashboardTrendOption(dashboardStats.value));
-const industryOption = computed(() => buildDashboardDonutOption(industryRows.value, ['34%', '50%']));
 const riskLevelOption = computed(() => buildDashboardRiskLevelOption(dashboardStats.value));
 const sourceOption = computed(() => buildDashboardDonutOption(sourceRows.value, ['36%', '50%']));
 const documentOption = computed(() => buildDashboardDocumentOption(dashboardStats.value));
@@ -138,28 +131,6 @@ const riskLevelRows = computed(() => {
   ].map((item) => ({
     ...item,
     percent: `${(item.value / total * 100).toFixed(1)}%`,
-  }));
-});
-
-const regionTiles = computed(() => {
-  const positions = [
-    [63, 31],
-    [73, 49],
-    [52, 25],
-    [44, 56],
-    [55, 48],
-    [67, 62],
-    [30, 35],
-    [73, 21],
-  ];
-
-  return regionRows.value.map((row, index) => ({
-    ...row,
-    style: {
-      '--tile-x': `${positions[index]?.[0] ?? 50}%`,
-      '--tile-y': `${positions[index]?.[1] ?? 50}%`,
-      '--tile-color': row.color,
-    },
   }));
 });
 
@@ -305,10 +276,6 @@ const retryAuditAction = async (item) => {
 <template>
   <section class="ops-board" v-loading="isLoading">
     <div class="ops-board__actions">
-      <button type="button" class="ops-board__search" @click="router.push('/workspace/knowledge')">
-        <AppIcon name="search" />
-        <span>搜索文档、研报、公司、关键词...</span>
-      </button>
       <button type="button" class="ops-board__chip">{{ refreshedAt || '等待刷新' }}</button>
       <button type="button" class="ops-board__chip is-primary" @click="fetchData">
         <AppIcon name="refresh" />
@@ -349,54 +316,7 @@ const retryAuditAction = async (item) => {
             <span>近90天</span>
           </div>
         </div>
-        <AdminChart :option="trendOption" height="318px" />
-      </article>
-
-      <article class="board-panel board-panel--industry">
-        <div class="board-panel__header">
-          <div>
-            <strong>行业风险分布</strong>
-            <span>预留维度，按当前风险样本估算</span>
-          </div>
-        </div>
-        <div class="donut-wrap">
-          <AdminChart :option="industryOption" height="282px" />
-          <div class="donut-center donut-center--industry">
-            <strong>{{ formatNumber(dashboardStats.risk_event_count) }}</strong>
-            <span>风险信息总数</span>
-          </div>
-        </div>
-      </article>
-
-      <article class="board-panel board-panel--map">
-        <div class="board-panel__header">
-          <div>
-            <strong>区域风险热力图</strong>
-            <span>区域覆盖为未来地理数据预留</span>
-          </div>
-          <div class="map-tabs">
-            <span class="is-active">中国</span>
-            <span>全球</span>
-          </div>
-        </div>
-        <div class="region-map">
-          <div class="region-map__shape">
-            <span
-              v-for="tile in regionTiles"
-              :key="tile.label"
-              class="region-map__tile"
-              :style="tile.style"
-              :title="`${tile.label}: ${formatNumber(tile.value)}`"
-            />
-          </div>
-          <div class="region-map__legend">
-            <div v-for="row in regionRows" :key="row.label">
-              <span :style="{ background: row.color }" />
-              <b>{{ row.label }}</b>
-              <em>{{ formatNumber(row.value) }}</em>
-            </div>
-          </div>
-        </div>
+        <AdminChart :option="trendOption" height="260px" />
       </article>
 
       <article class="board-panel board-panel--level">
@@ -408,7 +328,7 @@ const retryAuditAction = async (item) => {
         </div>
         <div class="risk-level-layout">
           <div class="donut-wrap">
-            <AdminChart :option="riskLevelOption" height="248px" />
+            <AdminChart :option="riskLevelOption" height="200px" />
             <div class="donut-center donut-center--level">
               <strong>{{ formatNumber(dashboardStats.risk_event_count) }}</strong>
               <span>风险信息总数</span>
@@ -419,6 +339,31 @@ const retryAuditAction = async (item) => {
               <span :style="{ background: row.color }" />
               <b>{{ row.label }}</b>
               <em>{{ formatNumber(row.value) }}（{{ row.percent }}）</em>
+            </div>
+          </div>
+        </div>
+      </article>
+
+      <article class="board-panel board-panel--source">
+        <div class="board-panel__header">
+          <div>
+            <strong>数据来源分布</strong>
+            <span>当前平台真实数据面来源</span>
+          </div>
+        </div>
+        <div class="source-layout">
+          <div class="donut-wrap">
+            <AdminChart :option="sourceOption" height="200px" />
+            <div class="donut-center donut-center--source">
+              <strong>{{ formatNumber(dashboardStats.document_count + dashboardStats.risk_event_count) }}</strong>
+              <span>核心样本量</span>
+            </div>
+          </div>
+          <div class="source-legend">
+            <div v-for="row in sourceRows" :key="row.label">
+              <span :style="{ background: row.color }" />
+              <b>{{ row.label }}</b>
+              <em>{{ formatNumber(row.value) }}</em>
             </div>
           </div>
         </div>
@@ -469,31 +414,6 @@ const retryAuditAction = async (item) => {
         </div>
       </article>
 
-      <article class="board-panel board-panel--source">
-        <div class="board-panel__header">
-          <div>
-            <strong>数据来源分布</strong>
-            <span>当前平台真实数据面来源</span>
-          </div>
-        </div>
-        <div class="source-layout">
-          <div class="donut-wrap">
-            <AdminChart :option="sourceOption" height="248px" />
-            <div class="donut-center donut-center--source">
-              <strong>{{ formatNumber(dashboardStats.document_count + dashboardStats.risk_event_count) }}</strong>
-              <span>核心样本量</span>
-            </div>
-          </div>
-          <div class="source-legend">
-            <div v-for="row in sourceRows" :key="row.label">
-              <span :style="{ background: row.color }" />
-              <b>{{ row.label }}</b>
-              <em>{{ formatNumber(row.value) }}</em>
-            </div>
-          </div>
-        </div>
-      </article>
-
       <article class="board-panel board-panel--process">
         <div class="board-panel__header">
           <div>
@@ -519,7 +439,7 @@ const retryAuditAction = async (item) => {
             <span>解析、切块、索引与失败状态</span>
           </div>
         </div>
-        <AdminChart :option="documentOption" height="236px" />
+        <AdminChart :option="documentOption" height="200px" />
       </article>
     </section>
 
@@ -557,7 +477,6 @@ const retryAuditAction = async (item) => {
   justify-content: flex-end;
 }
 
-.ops-board__search,
 .ops-board__chip {
   height: 40px;
   border: 1px solid var(--board-line);
@@ -571,14 +490,6 @@ const retryAuditAction = async (item) => {
   font: inherit;
   font-size: 13px;
   cursor: pointer;
-}
-
-.ops-board__search {
-  flex: 1 1 340px;
-  max-width: 440px;
-  border-radius: 22px;
-  justify-content: flex-start;
-  color: #76859e;
 }
 
 .ops-board__chip.is-primary {
@@ -672,8 +583,8 @@ const retryAuditAction = async (item) => {
 
 .ops-board__grid {
   display: grid;
-  grid-template-columns: minmax(460px, 1.45fr) minmax(340px, 0.9fr) minmax(360px, 0.95fr);
-  grid-auto-rows: minmax(220px, auto);
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-auto-rows: minmax(200px, auto);
   gap: 10px;
 }
 
@@ -689,17 +600,9 @@ const retryAuditAction = async (item) => {
   overflow: hidden;
 }
 
-.board-panel--trend {
-  min-height: 374px;
-}
-
-.board-panel--table {
-  grid-column: span 2;
-}
-
 .board-panel--process,
 .board-panel--documents {
-  min-height: 250px;
+  min-height: 220px;
 }
 
 .board-panel__header {
@@ -730,8 +633,7 @@ const retryAuditAction = async (item) => {
   font-weight: 700;
 }
 
-.board-tabs,
-.map-tabs {
+.board-tabs {
   display: flex;
   gap: 7px;
   padding: 3px;
@@ -740,8 +642,7 @@ const retryAuditAction = async (item) => {
   background: rgba(8, 17, 35, 0.5);
 }
 
-.board-tabs span,
-.map-tabs span {
+.board-tabs span {
   min-height: 26px;
   display: inline-flex;
   align-items: center;
@@ -752,8 +653,7 @@ const retryAuditAction = async (item) => {
   font-weight: 800;
 }
 
-.board-tabs .is-active,
-.map-tabs .is-active {
+.board-tabs .is-active {
   color: #fff;
   background: #164fbf;
 }
@@ -783,63 +683,13 @@ const retryAuditAction = async (item) => {
   font-weight: 800;
 }
 
-.donut-center--industry {
-  left: calc(34% - 54px);
-  top: 116px;
-  width: 108px;
-}
-
 .donut-center--level,
 .donut-center--source {
   left: calc(35% - 52px);
-  top: 102px;
+  top: 82px;
   width: 104px;
 }
 
-.region-map {
-  position: relative;
-  height: 282px;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 150px;
-  gap: 12px;
-  padding: 0 16px 16px;
-}
-
-.region-map__shape {
-  position: relative;
-  min-height: 248px;
-  border-radius: 32% 45% 36% 42%;
-  background:
-    radial-gradient(circle at 78% 22%, rgba(135, 88, 255, 0.34), transparent 20%),
-    radial-gradient(circle at 56% 58%, rgba(47, 116, 255, 0.42), transparent 38%),
-    radial-gradient(circle at 30% 42%, rgba(47, 211, 208, 0.18), transparent 32%),
-    rgba(13, 31, 66, 0.46);
-  border: 1px solid rgba(91, 132, 205, 0.18);
-  clip-path: polygon(12% 35%, 25% 20%, 43% 16%, 52% 7%, 66% 17%, 83% 16%, 91% 32%, 84% 48%, 92% 62%, 74% 73%, 65% 88%, 48% 80%, 35% 91%, 22% 74%, 8% 65%);
-}
-
-.region-map__shape::after {
-  content: "";
-  position: absolute;
-  inset: 18px;
-  border: 1px dashed rgba(116, 150, 220, 0.24);
-  border-radius: inherit;
-}
-
-.region-map__tile {
-  position: absolute;
-  left: var(--tile-x);
-  top: var(--tile-y);
-  width: 42px;
-  height: 30px;
-  border: 1px solid rgba(190, 214, 255, 0.3);
-  background: var(--tile-color);
-  box-shadow: 0 0 24px color-mix(in srgb, var(--tile-color) 44%, transparent);
-  transform: translate(-50%, -50%) skew(-10deg);
-  opacity: 0.9;
-}
-
-.region-map__legend,
 .source-legend,
 .risk-level-legend {
   display: flex;
@@ -852,7 +702,6 @@ const retryAuditAction = async (item) => {
   font-weight: 800;
 }
 
-.region-map__legend div,
 .source-legend div,
 .risk-level-legend div {
   display: grid;
@@ -861,7 +710,6 @@ const retryAuditAction = async (item) => {
   gap: 8px;
 }
 
-.region-map__legend span,
 .source-legend span,
 .risk-level-legend span {
   width: 10px;
@@ -869,7 +717,6 @@ const retryAuditAction = async (item) => {
   border-radius: 2px;
 }
 
-.region-map__legend b,
 .source-legend b,
 .risk-level-legend b {
   min-width: 0;
@@ -878,7 +725,6 @@ const retryAuditAction = async (item) => {
   white-space: nowrap;
 }
 
-.region-map__legend em,
 .source-legend em,
 .risk-level-legend em {
   color: #dbe7ff;
@@ -1035,9 +881,7 @@ const retryAuditAction = async (item) => {
 }
 
 @media (max-width: 900px) {
-  .ops-board__header,
   .ops-board__grid,
-  .region-map,
   .risk-level-layout,
   .source-layout {
     grid-template-columns: 1fr;
@@ -1072,10 +916,6 @@ const retryAuditAction = async (item) => {
   .board-panel__header {
     align-items: stretch;
     flex-direction: column;
-  }
-
-  .ops-board__search {
-    flex-basis: auto;
   }
 
   .process-grid {
