@@ -374,10 +374,20 @@ html[data-theme='dark'] body {
   color: var(--text-secondary);
 }
 
-:root[data-theme='dark'] .page-hero,
-:root[data-theme='dark'] [class$='__hero'],
-:root[data-theme='dark'] [class*='overview'],
-:root[data-theme='dark'] [class*='summary'] {
+:root[data-theme='dark'] :where(
+  .page-hero,
+  [class$='__hero'],
+  [class*='overview-card'],
+  [class*='overview-panel'],
+  [class*='overview-shell'],
+  [class*='overview-banner'],
+  [class*='summary-card'],
+  [class*='summary-panel'],
+  [class*='summary-shell'],
+  [class*='summary-content'],
+  .history-session-summary,
+  .risk-summary-shell
+) {
   background: linear-gradient(180deg, rgba(26, 34, 45, 0.98), rgba(20, 26, 36, 0.96));
 }
 
@@ -2648,4 +2658,73 @@ code {
 :root[data-theme='light'] .app-shell .risk-timeline__node::before {
   background: var(--surface-2) !important;
   box-shadow: none !important;
+}
+
+/* Keep broad theme fallbacks from painting square slabs inside the rounded ops board. */
+:root[data-theme='light'] .app-shell .ops-board :where(
+  .summary-tile,
+  .summary-tile__label,
+  .board-panel__header,
+  .risk-level-layout,
+  .source-layout,
+  .donut-wrap,
+  .source-legend,
+  .risk-level-legend,
+  .process-grid,
+  .process-item,
+  .event-table-wrap,
+  .event-table,
+  .event-table tbody,
+  .event-table tr,
+  .event-table td
+),
+:root[data-theme='dark'] .app-shell .ops-board :where(
+  .summary-tile,
+  .summary-tile__label,
+  .board-panel__header,
+  .risk-level-layout,
+  .source-layout,
+  .donut-wrap,
+  .source-legend,
+  .risk-level-legend,
+  .process-grid,
+  .process-item,
+  .event-table-wrap,
+  .event-table,
+  .event-table tbody,
+  .event-table tr,
+  .event-table td
+) {
+  background: transparent !important;
+  background-image: none !important;
+  box-shadow: none !important;
+}
+
+:root[data-theme='light'] .app-shell .ops-board .summary-tile__icon,
+:root[data-theme='dark'] .app-shell .ops-board .summary-tile__icon {
+  border-radius: 50% !important;
+  background: rgba(47, 116, 255, 0.16) !important;
+  background-image: none !important;
+  box-shadow: 0 0 22px rgba(47, 116, 255, 0.22) !important;
+}
+
+:root[data-theme='light'] .app-shell .ops-board :where(
+  .board-panel__header strong,
+  .summary-tile__label,
+  .source-legend em,
+  .risk-level-legend em,
+  .process-item strong
+) {
+  color: var(--text-primary) !important;
+}
+
+:root[data-theme='light'] .app-shell .ops-board :where(
+  .board-panel__header span,
+  .summary-tile p,
+  .source-legend,
+  .risk-level-legend,
+  .process-item b,
+  .ops-board__footer
+) {
+  color: var(--text-secondary) !important;
 }
