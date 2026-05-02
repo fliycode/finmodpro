@@ -2505,3 +2505,147 @@ code {
   --board-text: var(--text-primary) !important;
   --board-muted: var(--text-muted) !important;
 }
+
+:root[data-theme='light'] .app-shell :where(
+  .board-panel,
+  .ops-board__summary,
+  .ops-board__footer,
+  .history-session-summary,
+  .qa-main__card,
+  .qa-msg__bubble--ai,
+  .qa-msg-system,
+  .risk-topbar,
+  .risk-panel,
+  .risk-doc,
+  .risk-extract,
+  .risk-step,
+  .risk-step__n,
+  .risk-doc__bar,
+  .risk-extract__head,
+  .risk-extract__item,
+  .risk-timeline__arr,
+  .risk-kpi,
+  .risk-export__btn,
+  .qa-input-area,
+  .qa-input__row,
+  .qa-toggle,
+  .qa-rail__count,
+  .qa-rail__refresh,
+  .qa-question-btn,
+  .board-tabs,
+  .map-tabs,
+  .ops-section-frame__header,
+  .ops-inspector-drawer,
+  .ops-status-band__item,
+  .governance-review-queue__item,
+  .governance-review-distribution__item
+) {
+  border-color: var(--line-soft) !important;
+  background: var(--surface-2) !important;
+  background-image: none !important;
+  color: var(--text-secondary) !important;
+  box-shadow: var(--shadow-sm) !important;
+}
+
+:root[data-theme='light'] .app-shell :where(
+  .event-table th,
+  .risk-doc__pager button,
+  .risk-doc__page-num,
+  .risk-extract__download,
+  .profile-panel__actions a,
+  .ghost-btn:not(.ghost-btn--primary),
+  .qa-session-btn:hover,
+  .ops-board__search,
+  .process-item > span
+) {
+  border-color: var(--line-strong) !important;
+  background: var(--surface-3) !important;
+  background-image: none !important;
+  color: var(--text-secondary) !important;
+  box-shadow: none !important;
+}
+
+:root[data-theme='light'] .app-shell :where(
+  .risk-step.is-active,
+  .risk-extract__item.is-active
+) {
+  border-color: rgba(36, 87, 197, 0.24) !important;
+  background: var(--brand-soft) !important;
+  background-image: none !important;
+  color: var(--brand) !important;
+}
+
+:root[data-theme='light'] .app-shell :where(
+  .qa-notice--warn,
+  .qa-msg__bubble--error,
+  .risk-topbar__badge,
+  .risk-err
+) {
+  border-color: rgba(182, 83, 83, 0.22) !important;
+  background: rgba(182, 83, 83, 0.08) !important;
+  background-image: none !important;
+  color: #9b2f3a !important;
+  box-shadow: none !important;
+}
+
+:root[data-theme='light'] .qa-history-drawer .el-drawer__body {
+  background: var(--page-bg) !important;
+  background-image: none !important;
+}
+
+:root[data-theme='light'] .app-shell :where(
+  .risk-doc__page,
+  .region-map__shape
+) {
+  border-color: var(--line-soft) !important;
+  background:
+    linear-gradient(90deg, rgba(36, 87, 197, 0.04) 0 6px, transparent 6px calc(100% - 6px), rgba(36, 87, 197, 0.04) calc(100% - 6px)),
+    var(--surface-2) !important;
+  color: var(--text-primary) !important;
+}
+
+:root[data-theme='light'] .app-shell :where(
+  .risk-doc__page h3,
+  .risk-doc__page h4,
+  .risk-source__info strong,
+  .risk-extract__name,
+  .risk-timeline__node strong,
+  .risk-export__btn,
+  .qa-empty__title,
+  .qa-msg__bubble--ai,
+  .ops-section-frame__title,
+  .ops-inspector-drawer__title,
+  .ops-status-band__value,
+  .governance-review-queue__item
+) {
+  color: var(--text-primary) !important;
+}
+
+:root[data-theme='light'] .app-shell :where(
+  .risk-doc__page > p,
+  .risk-source__info p,
+  .risk-extract__desc,
+  .risk-extract__meta,
+  .risk-timeline__node span,
+  .risk-overview__label,
+  .risk-kpi span,
+  .risk-export__btn span,
+  .qa-empty__text,
+  .ops-section-frame__summary,
+  .ops-section-frame__meta span,
+  .ops-inspector-drawer__desc,
+  .ops-status-band__note
+) {
+  color: var(--text-secondary) !important;
+}
+
+:root[data-theme='light'] .app-shell :where(.ops-section-frame__meta span) {
+  border-color: var(--line-soft) !important;
+  background: var(--surface-3) !important;
+}
+
+:root[data-theme='light'] .app-shell .risk-overview__donut::after,
+:root[data-theme='light'] .app-shell .risk-timeline__node::before {
+  background: var(--surface-2) !important;
+  box-shadow: none !important;
+}
