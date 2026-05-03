@@ -162,8 +162,5 @@ const handleLogout = async () => {
       </div>
     </div>
 
-    <div v-else class="app-sidebar__ops-note">
-      <p>保持对 Gateway、治理与异常状态的持续扫描。</p>
-    </div>
   </aside>
 </template>

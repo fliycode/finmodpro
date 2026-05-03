@@ -724,6 +724,9 @@ html[data-theme='dark'] body {
   display: flex;
   flex-direction: column;
   gap: var(--shell-sidebar-group-gap);
+  flex: 1;
+  overflow-y: auto;
+  min-height: 0;
 }
 
 .app-shell--workspace .flash-stack {
@@ -733,7 +736,6 @@ html[data-theme='dark'] body {
 }
 
 .app-shell--workspace .app-sidebar__nav {
-  flex: 1;
   width: 100%;
   align-items: stretch;
   gap: 12px;
@@ -2126,8 +2128,7 @@ code {
 
 .app-sidebar__brand-eyebrow,
 .app-sidebar__brand p,
-.app-sidebar__group-label,
-.app-sidebar__ops-note p {
+.app-sidebar__group-label {
   color: var(--text-muted);
 }
 
@@ -2211,14 +2212,6 @@ code {
 .app-sidebar__profile-action:hover {
   background: var(--brand-soft);
   color: var(--brand);
-}
-
-.app-sidebar__ops-note {
-  border-top-color: var(--line-soft);
-}
-
-.app-sidebar__ops-note p {
-  color: var(--text-muted);
 }
 
 .app-topbar {
