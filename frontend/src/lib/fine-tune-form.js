@@ -30,7 +30,7 @@ export const buildFineTunePayload = ({
   }
 
   if (!String(fineTuneForm.training.template || '').trim()) {
-    throw new Error('请填写 LLaMA-Factory template');
+    throw new Error('请填写微调模板');
   }
 
   let trainingConfig = {};

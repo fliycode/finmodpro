@@ -25,7 +25,7 @@ test('workspace and admin navigation keep separate grouping vocabularies', () =>
   const adminGroups = [...new Set(navigationMap.admin.map((item) => item.group))];
 
   assert.ok(workspaceLabels.includes('智能问答'));
-  assert.ok(adminLabels.includes('Gateway'));
+  assert.ok(adminLabels.includes('网关总览'));
   assert.ok(adminLabels.includes('知识库管理'));
   assert.deepEqual(workspaceGroups, ['workspace-core', 'workspace-support']);
   assert.ok(adminGroups.includes('admin-llm'));
