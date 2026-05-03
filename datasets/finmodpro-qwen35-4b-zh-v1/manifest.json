@@ -1,0 +1,25 @@
+{
+  "name": "finmodpro-qwen35-4b-zh-v1",
+  "dataset_name": "finmodpro_zh_sft_v1",
+  "created_at": "2026-05-03T12:47:01Z",
+  "target_model": "Qwen 3.5 4B",
+  "stage": "sft",
+  "format": "llamafactory-openai-messages",
+  "sample_count": 30000,
+  "language": "zh",
+  "source_counts": {
+    "风险事件抽取": 6000,
+    "舆情倾向判断": 4000,
+    "知识库引用问答": 7000,
+    "风险报告摘要": 2500,
+    "资料不足处理": 1500,
+    "平台身份与边界": 2500,
+    "文档摘要": 3000,
+    "财务指标计算": 3500
+  },
+  "notes": [
+    "自然语言内容全部使用中文。",
+    "role/content 等结构字段遵循 LLaMA-Factory OpenAI messages 格式。",
+    "风险和舆情 JSON 中的字段名与枚举值保留 FinModPro 后端约定。"
+  ]
+}
