@@ -1,0 +1,68 @@
+### Qwen 3.5 4B LoRA SFT 训练配置
+### 数据集：finmodpro_zh_sft_v2 (30,000 条)
+### 框架：LLaMA-Factory
+
+## 模型
+model_name_or_path: Qwen/Qwen3.5-4B  # 或本地路径，如 /data/models/Qwen3.5-4B
+
+## 训练阶段
+stage: sft
+do_train: true
+finetuning_type: lora
+
+## 数据集
+dataset_dir: datasets/finmodpro-qwen35-4b-zh-v2
+dataset: finmodpro_zh_sft_v2
+template: qwen3  # Qwen 3.x 系列使用 qwen3 模板
+cutoff_len: 1024  # 我们数据集最长样本 ~464 字符，1024 token 足够
+max_samples: 30000
+preprocessing_num_workers: 8
+
+## LoRA 参数
+lora_rank: 16          # 4B 模型用 16 足够，更高容易过拟合
+lora_alpha: 32         # alpha = 2 × rank 是常用比例
+lora_dropout: 0.05     # 轻微正则化，防止过拟合
+lora_target: all       # 对所有线性层应用 LoRA（q,k,v,o,gate,up,down）
+
+## 量化（可选，显存不足时启用）
+# quantization_bit: 4
+# quantization_method: bitsandbytes
+# double_quantization: true
+
+## 训练超参数
+per_device_train_batch_size: 4     # 单卡 24GB 显存的推荐值
+gradient_accumulation_steps: 8     # 有效 batch size = 4 × 8 = 32
+learning_rate: 2.0e-4              # LoRA SFT 的常用学习率
+num_train_epochs: 3                # 30K 数据集跑 3 轮足够
+lr_scheduler_type: cosine          # cosine 衰减比 linear 更平滑
+warmup_ratio: 0.05                 # 前 5% steps 做 warmup
+max_grad_norm: 1.0                 # 梯度裁剪，防止爆炸
+
+## 精度
+bf16: true                         # 推荐 A100/4090 使用 bf16
+# fp16: true                       # V100 等不支持 bf16 的卡用 fp16
+
+## 优化器
+# 使用 LLaMA-8bit 优化器可节省显存
+# optim: adamw_torch  # 默认值，显存够用就用这个
+
+## 显存优化
+gradient_checkpointing: true       # 开启可节省 ~30% 显存
+
+## 验证集
+val_size: 0.05                     # 5% 验证集 = 1500 条
+per_device_eval_batch_size: 8
+eval_strategy: steps
+eval_steps: 100                    # 每 100 步评估一次
+
+## 日志和保存
+logging_steps: 10
+save_steps: 200
+save_total_limit: 3                # 只保留最近 3 个 checkpoint
+save_only_model: true              # 不保存 optimizer state，省空间
+output_dir: output/finmodpro-qwen35-4b-v2-lora
+overwrite_output_dir: true
+
+## 其他
+report_to: none                    # 不上报到 wandb 等平台（可改为 wandb）
+plot_loss: true                    # 生成 loss 曲线图
