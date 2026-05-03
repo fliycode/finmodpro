@@ -101,7 +101,7 @@ export const appRoutes = [
       {
         path: 'llm/models',
         component: () => import('../views/admin/AdminLlmModelsView.vue'),
-        meta: { title: 'Models / Routing', subtitle: '管理模型路由规则、权重分配与 fallback 策略。' },
+        meta: { title: '模型路由', subtitle: '管理模型路由规则、权重分配与 fallback 策略。' },
       },
       {
         path: 'llm/observability',
@@ -111,7 +111,7 @@ export const appRoutes = [
       {
         path: 'llm/costs',
         component: () => import('../views/admin/AdminLlmCostsView.vue'),
-        meta: { title: 'Cost / Usage', subtitle: '按模型、时间维度追踪 API 调用成本与用量。' },
+        meta: { title: '成本与用量', subtitle: '按模型、时间维度追踪 API 调用成本与用量。' },
       },
       {
         path: 'llm/knowledge',
@@ -121,7 +121,7 @@ export const appRoutes = [
       {
         path: 'llm/fine-tunes',
         component: () => import('../views/admin/AdminLlmFineTunesView.vue'),
-        meta: { title: 'Fine-tunes / LLaMA-Factory', subtitle: '管理 LLaMA-Factory 微调任务、实验与模型部署。' },
+        meta: { title: '微调管理', subtitle: '管理微调任务、实验与模型部署。' },
       },
       {
         path: 'models',

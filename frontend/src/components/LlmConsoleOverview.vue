@@ -47,7 +47,7 @@ const activityMetrics = computed(() => ([
     key: 'fine-tunes',
     label: '运行中微调',
     value: summary.value.recent_activity.running_fine_tune_count,
-    note: '展示当前 LLaMA-Factory 控制面是否存在活跃任务。',
+    note: '展示当前微调控制面是否存在活跃任务。',
   },
   {
     key: 'latest-fine-tune',

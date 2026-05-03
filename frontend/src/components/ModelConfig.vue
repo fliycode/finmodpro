@@ -120,8 +120,8 @@ const showConfigRetry = computed(() => shouldShowConsoleConfigRetry({
 const pageCopy = computed(() => {
   if (isFineTunesMode.value) {
     return {
-      eyebrow: "LLM 中台 / LLaMA-Factory",
-      title: "LLaMA-Factory 控制面",
+      eyebrow: "LLM 中台 / 微调管理",
+      title: "微调控制面",
       subtitle: "把微调登记、导出状态、回调令牌和候选模型回流从模型配置页中拆出来，单独观察训练链路的当前阶段。",
     };
   }
@@ -588,11 +588,11 @@ onMounted(async () => {
     </template>
 
     <template v-if="isModelsMode">
-      <OpsInspectorDrawer title="LLaMA-Factory 回流关系" desc="微调控制面已迁移到独立页面，模型页保留当前启用关系和回流线索，避免训练链路继续混在 provider CRUD 里。">
+      <OpsInspectorDrawer title="微调回流关系" desc="微调控制面已迁移到独立页面，模型页保留当前启用关系和回流线索，避免训练链路继续混在 provider CRUD 里。">
         <div class="model-page__split-callout">
-          <p class="muted-text">需要查看训练状态、导出进度或候选模型回流时，请直接进入独立的 LLaMA-Factory 页面。</p>
+          <p class="muted-text">需要查看训练状态、导出进度或候选模型回流时，请直接进入独立的微调管理页面。</p>
           <RouterLink to="/admin/llm/fine-tunes" class="model-page__jump-link">
-            打开 LLaMA-Factory
+            打开微调管理
           </RouterLink>
         </div>
       </OpsInspectorDrawer>
