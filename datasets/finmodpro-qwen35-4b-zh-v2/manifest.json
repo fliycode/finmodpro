@@ -1,0 +1,29 @@
+{
+  "name": "finmodpro-qwen35-4b-zh-v2",
+  "dataset_name": "finmodpro_zh_sft_v2",
+  "created_at": "2026-05-03T14:04:21Z",
+  "target_model": "Qwen 3.5 4B",
+  "stage": "sft",
+  "format": "llamafactory-openai-messages",
+  "sample_count": 30000,
+  "language": "zh",
+  "source_counts": {
+    "risk_extraction": 5850,
+    "sentiment": 4000,
+    "rag_qa": 6850,
+    "risk_report": 3000,
+    "insufficient_info": 2000,
+    "platform_identity": 300,
+    "document_summary": 4000,
+    "financial_calc": 4000
+  },
+  "improvements": [
+    "公司名扩充至 378 个（覆盖 12 个行业）",
+    "每个任务类型 8-12 种 prompt 变体",
+    "置信度使用连续随机值（0.55-0.95）",
+    "risk_type 与后端 schema 对齐（英文短词）",
+    "增加边缘样本：多事件文档、无事件文档、混合情绪",
+    "增加平台身份与边界 Q&A",
+    "增加资料不足处理场景"
+  ]
+}
