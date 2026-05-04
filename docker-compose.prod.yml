@@ -245,6 +245,54 @@ services:
         condition: service_started
     restart: unless-stopped
 
+  lightrag:
+    image: ghcr.io/hkuds/lightrag:latest
+    container_name: finmodpro-lightrag-1
+    ports:
+      - "127.0.0.1:9621:9621"
+    environment:
+      # LLM: DeepSeek Chat via LiteLLM gateway
+      LLM_BINDING: openai
+      LLM_BINDING_HOST: http://litellm:4000/v1
+      LLM_BINDING_API_KEY: ${LITELLM_MASTER_KEY:-change-me-litellm}
+      LLM_MODEL: chat-default
+
+      # Embedding: DashScope text-embedding-v4 direct
+      EMBEDDING_BINDING: openai
+      EMBEDDING_BINDING_HOST: https://dashscope.aliyuncs.com/compatible-mode/v1
+      EMBEDDING_BINDING_API_KEY: ${DASHSCOPE_API_KEY:-sk-9f31220b435444a2bddd9b05376ffbee}
+      EMBEDDING_MODEL: text-embedding-v4
+      EMBEDDING_DIM: "1024"
+
+      # Storage: Milvus vectors, NetworkX graph (Phase 1, no Neo4j)
+      LIGHTRAG_VECTOR_STORAGE: MilvusVectorDBStorage
+      MILVUS_URI: http://milvus:19530
+      MILVUS_DB_NAME: default
+      LIGHTRAG_KV_STORAGE: JsonKVStorage
+      LIGHTRAG_GRAPH_STORAGE: NetworkXStorage
+      LIGHTRAG_DOC_STATUS_STORAGE: JsonDocStatusStorage
+
+      # Working dirs
+      WORKING_DIR: /app/data/rag_storage
+      INPUT_DIR: /app/data/inputs
+
+      # Performance tuning (resource-constrained)
+      MAX_ASYNC: "4"
+      EMBEDDING_FUNC_MAX_ASYNC: "4"
+      CHUNK_SIZE: "1200"
+      WORKERS: "1"
+      LOG_LEVEL: INFO
+    volumes:
+      - lightrag_data:/app/data
+    restart: unless-stopped
+    mem_limit: 1g
+    mem_reservation: 512m
+    depends_on:
+      litellm:
+        condition: service_started
+      milvus:
+        condition: service_started
+
 volumes:
   backend_media:
   mysql_data:
@@ -252,3 +300,4 @@ volumes:
   etcd_data:
   minio_data:
   milvus_data:
+  lightrag_data:

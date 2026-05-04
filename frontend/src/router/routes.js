@@ -128,6 +128,11 @@ export const appRoutes = [
         redirect: '/admin/llm/models',
       },
       {
+        path: 'lightrag',
+        component: () => import('../views/admin/AdminLightragView.vue'),
+        meta: { title: '图谱检索', subtitle: 'LightRAG 图增强检索与文档图谱探索' },
+      },
+      {
         path: 'evaluation',
         component: () => import('../views/admin/AdminEvaluationView.vue'),
         meta: { title: '评测结果', subtitle: '查看模型评测结果、对比实验与质量报告。' },
