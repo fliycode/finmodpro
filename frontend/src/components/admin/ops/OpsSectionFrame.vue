@@ -25,16 +25,10 @@ defineProps({
 
 <template>
   <section class="ops-section-frame" :class="`is-${tone}`">
-    <header class="ops-section-frame__header">
-      <div class="ops-section-frame__copy">
-        <p v-if="eyebrow" class="ops-section-frame__eyebrow">{{ eyebrow }}</p>
-        <h1 v-if="title" class="ops-section-frame__title">{{ title }}</h1>
-        <p v-if="summary" class="ops-section-frame__summary">{{ summary }}</p>
-        <div v-if="meta.length" class="ops-section-frame__meta">
-          <span v-for="item in meta" :key="item">{{ item }}</span>
-        </div>
+    <header v-if="meta.length || $slots.actions" class="ops-section-frame__header">
+      <div v-if="meta.length" class="ops-section-frame__meta">
+        <span v-for="item in meta" :key="item">{{ item }}</span>
       </div>
-
       <div v-if="$slots.actions" class="ops-section-frame__actions">
         <slot name="actions" />
       </div>
@@ -64,9 +58,10 @@ defineProps({
 
 .ops-section-frame__header {
   display: flex;
+  align-items: center;
   justify-content: space-between;
-  gap: 24px;
-  padding: 24px 26px;
+  gap: 16px;
+  padding: 16px 20px;
   border: 1px solid rgba(102, 129, 255, 0.18);
   border-radius: 16px;
   background:
@@ -81,36 +76,6 @@ defineProps({
 
 .ops-section-frame.is-warning .ops-section-frame__header {
   border-color: rgba(255, 179, 71, 0.24);
-}
-
-.ops-section-frame__copy {
-  display: grid;
-  gap: 10px;
-  min-width: 0;
-}
-
-.ops-section-frame__eyebrow {
-  margin: 0;
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.16em;
-  text-transform: uppercase;
-  color: #8398c2;
-}
-
-.ops-section-frame__title {
-  margin: 0;
-  color: #f4f8ff;
-  font-size: 34px;
-  line-height: 1.02;
-  letter-spacing: -0.04em;
-}
-
-.ops-section-frame__summary {
-  margin: 0;
-  max-width: 760px;
-  color: #93a8cb;
-  line-height: 1.6;
 }
 
 .ops-section-frame__meta {
@@ -135,7 +100,7 @@ defineProps({
   display: flex;
   flex-wrap: wrap;
   gap: 10px;
-  align-items: flex-start;
+  align-items: center;
   justify-content: flex-end;
   min-width: 240px;
 }

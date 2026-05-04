@@ -28,7 +28,9 @@ const fetchSummary = async () => {
 };
 
 const providerCards = computed(() => summary.value.providers || []);
-const quickLinks = computed(() => summary.value.quick_links || []);
+const quickLinks = computed(() =>
+  (summary.value.quick_links || []).filter((item) => item.to !== '/admin/llm/fine-tunes'),
+);
 const activeModels = computed(() => Object.entries(summary.value.active_models || {}));
 const activityMetrics = computed(() => ([
   {

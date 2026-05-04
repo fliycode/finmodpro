@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 
 import { navigationMap } from '../navigation.js';
 
-test('admin llm navigation exposes the approved five-page IA', () => {
+test('admin llm navigation exposes the approved IA without fine-tune entry', () => {
   const llmItems = navigationMap.admin.filter((item) => item.group === 'admin-llm');
 
   assert.deepEqual(
@@ -13,7 +13,7 @@ test('admin llm navigation exposes the approved five-page IA', () => {
       '/admin/llm/models',
       '/admin/llm/observability',
       '/admin/llm/costs',
-      '/admin/llm/fine-tunes',
+      '/admin/lightrag',
     ],
   );
 });

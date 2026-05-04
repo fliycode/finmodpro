@@ -8,14 +8,13 @@ import FlashStack from '../components/ui/FlashStack.vue';
 
 const route = useRoute();
 const pageTitle = computed(() => route.meta?.title || '');
-const pageSubtitle = computed(() => route.meta?.subtitle || '');
 </script>
 
 <template>
   <div class="app-shell app-shell--admin">
     <AppSidebar area="admin" />
     <main class="admin-frame">
-      <AppTopbar area="admin" :title="pageTitle" :subtitle="pageSubtitle" />
+      <AppTopbar area="admin" :title="pageTitle" />
       <FlashStack />
       <section class="admin-frame__body">
         <RouterView />

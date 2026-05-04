@@ -18,10 +18,6 @@ const props = defineProps({
     type: String,
     default: '',
   },
-  subtitle: {
-    type: String,
-    default: '',
-  },
 });
 
 const router = useRouter();
@@ -85,7 +81,6 @@ onBeforeUnmount(() => {
   <header :class="['app-topbar', `app-topbar--${props.area}`]">
     <div v-if="props.title" class="app-topbar__title-group">
       <h1 class="app-topbar__page-title">{{ props.title }}</h1>
-      <p v-if="props.subtitle" class="app-topbar__page-subtitle">{{ props.subtitle }}</p>
     </div>
 
     <div class="app-topbar__actions">

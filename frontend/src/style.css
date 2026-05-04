@@ -1201,16 +1201,6 @@ html[data-theme='dark'] body {
   white-space: nowrap;
 }
 
-.app-topbar__page-subtitle {
-  margin: 0;
-  color: var(--text-muted);
-  font-size: var(--fs-sm);
-  line-height: var(--lh-snug);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
 /* Search ─────────────────────────────────────────── */
 .app-topbar__search {
   position: relative;
@@ -2634,7 +2624,6 @@ code {
   .risk-kpi span,
   .risk-export__btn span,
   .qa-empty__text,
-  .ops-section-frame__summary,
   .ops-section-frame__meta span,
   .ops-inspector-drawer__desc,
   .ops-status-band__note

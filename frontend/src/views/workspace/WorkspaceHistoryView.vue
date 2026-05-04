@@ -148,11 +148,6 @@ onMounted(async () => {
     <HistoryWorkbench>
       <template #filters>
         <div class="history-filters">
-          <div class="history-filters__copy">
-            <p class="history-filters__eyebrow">Session continuity</p>
-            <h2>检索、回看、导出真实会话记录</h2>
-          </div>
-
           <label class="history-filters__field">
             <span>关键词筛选</span>
             <input
@@ -215,7 +210,6 @@ onMounted(async () => {
   gap: 16px;
 }
 
-.history-filters__eyebrow,
 .history-session-summary__eyebrow {
   margin: 0 0 6px;
   font-size: 11px;
@@ -229,14 +223,6 @@ onMounted(async () => {
   display: flex;
   flex-direction: column;
   gap: 14px;
-}
-
-.history-filters__copy h2 {
-  margin: 0;
-  color: #eef4ff;
-  font-size: 22px;
-  line-height: 1.2;
-  letter-spacing: -0.03em;
 }
 
 .history-filters__field {

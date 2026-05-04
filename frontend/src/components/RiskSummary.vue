@@ -218,10 +218,6 @@ const downloadGeneratedReport = async (format = "markdown") => {
   <div class="risk-stage">
     <!-- Top Bar -->
     <div class="risk-topbar">
-      <div class="risk-topbar__title">
-        <h2>风险信息提取</h2>
-        <p>智能识别文档中的风险要素，结构化呈现关键信息</p>
-      </div>
       <div class="risk-topbar__center">
         <span class="risk-topbar__badge">
           <AppIcon name="shield" :size="14" />
@@ -500,6 +496,7 @@ const downloadGeneratedReport = async (format = "markdown") => {
 .risk-topbar {
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 20px;
   flex-shrink: 0;
   padding: 14px 18px;
@@ -509,23 +506,8 @@ const downloadGeneratedReport = async (format = "markdown") => {
     radial-gradient(circle at top right, rgba(233, 76, 89, 0.08), transparent 36%);
 }
 
-.risk-topbar__title { flex: 1; min-width: 0; }
-.risk-topbar__title h2 {
-  margin: 0;
-  font-size: 20px;
-  font-weight: 800;
-  color: #f4f7ff;
-  letter-spacing: -0.01em;
-  line-height: 1.2;
-}
-.risk-topbar__title p {
-  margin: 3px 0 0;
-  font-size: 12px;
-  color: #8597bb;
-}
-
 .risk-topbar__center {
-  flex-shrink: 0;
+  min-width: 0;
 }
 
 .risk-topbar__badge {

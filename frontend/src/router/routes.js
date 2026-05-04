@@ -120,8 +120,7 @@ export const appRoutes = [
       },
       {
         path: 'llm/fine-tunes',
-        component: () => import('../views/admin/AdminLlmFineTunesView.vue'),
-        meta: { title: '微调管理', subtitle: '管理微调任务、实验与模型部署。' },
+        redirect: '/admin/llm/models',
       },
       {
         path: 'models',

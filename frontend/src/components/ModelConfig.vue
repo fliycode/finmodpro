@@ -1,6 +1,5 @@
 <script setup>
 import { computed, onMounted, reactive, ref } from "vue";
-import { RouterLink } from "vue-router";
 import { llmApi, normalizeModelConfigPayload } from "../api/llm.js";
 import { useFlash } from "../lib/flash.js";
 import {
@@ -588,15 +587,6 @@ onMounted(async () => {
     </template>
 
     <template v-if="isModelsMode">
-      <OpsInspectorDrawer title="微调回流关系" desc="微调控制面已迁移到独立页面，模型页保留当前启用关系和回流线索，避免训练链路继续混在 provider CRUD 里。">
-        <div class="model-page__split-callout">
-          <p class="muted-text">需要查看训练状态、导出进度或候选模型回流时，请直接进入独立的微调管理页面。</p>
-          <RouterLink to="/admin/llm/fine-tunes" class="model-page__jump-link">
-            打开微调管理
-          </RouterLink>
-        </div>
-      </OpsInspectorDrawer>
-
       <OpsCommandDeck>
       <AppSectionCard title="对话模型" desc="支持 LiteLLM 与 DeepSeek。启用新模型后，智能问答和其它 chat 能力会自动切换。" admin>
       <div v-if="isLoading && chatConfigs.length === 0" class="admin-empty-state">加载中...</div>

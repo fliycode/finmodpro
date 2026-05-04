@@ -163,8 +163,6 @@ const readyRate = computed(() => {
   return `${Math.round((indexedCount.value / decoratedItems.value.length) * 100)}%`;
 });
 
-const pageModeLabel = computed(() => (props.showAdminMetrics ? '管理员知识库' : '工作区知识库'));
-
 const summaryCards = computed(() => [
   {
     id: 'datasets',
@@ -605,13 +603,6 @@ onUnmounted(() => {
     <input ref="versionFileInput" type="file" hidden @change="handleVersionFileChange" />
 
     <section class="kb-overview">
-      <div class="kb-overview__copy">
-        <p class="eyebrow">{{ pageModeLabel }}</p>
-        <h2>知识库管理</h2>
-        <p class="kb-overview__text">
-          以知识库、文档、向量入库状态为主线组织操作区，先看资产概况，再完成筛选、上传、入库与明细追踪。
-        </p>
-      </div>
       <div class="kb-overview__stats">
         <article
           v-for="card in summaryCards"
@@ -784,11 +775,11 @@ onUnmounted(() => {
 }
 
 .kb-overview {
-  padding: 22px;
-  border-radius: 22px;
-  background:
-    linear-gradient(135deg, rgba(36, 87, 197, 0.1), transparent 34%),
-    var(--surface-2);
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
 }
 
 .eyebrow {
@@ -818,7 +809,6 @@ onUnmounted(() => {
   display: grid;
   grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 14px;
-  margin-top: 18px;
 }
 
 .stat-card {
