@@ -81,18 +81,8 @@ const checkEntityExists = async () => {
 
 <template>
   <div class="page-stack lightrag-page">
-    <section class="lightrag-hero">
-      <div>
-        <span class="lightrag-hero__eyebrow">Graph governance</span>
-        <h2 class="lightrag-hero__title">图谱治理</h2>
-        <p class="lightrag-hero__subtitle">
-          把实体、关系、合并、删除等高风险动作从查询页剥离，单独收进治理页，便于审阅与权限控制。
-        </p>
-      </div>
-      <el-alert title="治理页默认面向管理员，建议在实际使用前先确认实体名与关系 id。" type="warning" show-icon :closable="false" />
-    </section>
-
     <el-alert v-if="errorMsg" :title="errorMsg" type="error" show-icon :closable="false" />
+    <el-alert title="治理页默认面向管理员，建议在实际使用前先确认实体名与关系 id。" type="warning" show-icon :closable="false" />
 
     <div class="lightrag-governance-grid">
       <AppSectionCard title="实体检查 / 创建" desc="先检查实体是否已存在，再做实体创建。" admin>
@@ -232,33 +222,7 @@ const checkEntityExists = async () => {
   gap: 16px;
 }
 
-.lightrag-hero {
-  display: grid;
-  gap: 16px;
-  padding: 24px 28px;
-  border: 1px solid var(--line-soft);
-  border-radius: 24px;
-  background: rgba(24, 34, 49, 0.92);
-  box-shadow: var(--shadow-md);
-}
-
-.lightrag-hero__eyebrow {
-  color: rgba(141, 208, 208, 0.92);
-  font-size: 12px;
-  font-weight: 700;
-  letter-spacing: 0.16em;
-  text-transform: uppercase;
-}
-
-.lightrag-hero__title {
-  margin: 0;
-  font-size: 32px;
-  color: var(--text-primary);
-}
-
-.lightrag-hero__subtitle,
 pre {
-  margin: 12px 0 0;
   color: var(--text-secondary);
   line-height: 1.7;
   white-space: pre-wrap;

@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onMounted, reactive, ref } from 'vue';
+import { onMounted, reactive, ref } from 'vue';
 
 import { lightragApi } from '../../api/lightrag.js';
 import { useFlash } from '../../lib/flash.js';
@@ -22,13 +22,6 @@ const pager = reactive({
 });
 
 const trackId = ref('');
-
-const metrics = computed(() => ([
-  { label: '总文档', value: statusCounts.value.all ?? 0 },
-  { label: '处理中', value: statusCounts.value.processing ?? 0 },
-  { label: '失败', value: statusCounts.value.failed ?? 0 },
-  { label: '已处理', value: statusCounts.value.processed ?? 0 },
-]));
 
 const loadDocuments = async () => {
   isLoading.value = true;
@@ -118,22 +111,6 @@ onMounted(loadDocuments);
 
 <template>
   <div class="page-stack lightrag-page">
-    <section class="lightrag-hero">
-      <div>
-        <span class="lightrag-hero__eyebrow">Document pipeline</span>
-        <h2 class="lightrag-hero__title">文档管线</h2>
-        <p class="lightrag-hero__subtitle">
-          把上传、扫描、状态统计、失败重跑和 track status 全部收进一页，方便管理员按阶段处理图谱入库。
-        </p>
-      </div>
-      <div class="lightrag-metrics">
-        <article v-for="item in metrics" :key="item.label" class="lightrag-metric">
-          <span>{{ item.label }}</span>
-          <strong>{{ item.value }}</strong>
-        </article>
-      </div>
-    </section>
-
     <el-alert v-if="errorMsg" :title="errorMsg" type="error" show-icon :closable="false" />
 
     <AppSectionCard title="上传与管线动作" desc="保留上传、扫描、失败重试、缓存清理与取消管线的管理动作。" admin>
@@ -212,62 +189,12 @@ onMounted(loadDocuments);
   gap: 16px;
 }
 
-.lightrag-hero,
-.lightrag-metric,
 .lightrag-document-card,
 .lightrag-track__document {
   border: 1px solid var(--line-soft);
   border-radius: 24px;
   background: rgba(24, 34, 49, 0.92);
   box-shadow: var(--shadow-md);
-}
-
-.lightrag-hero {
-  display: grid;
-  grid-template-columns: minmax(0, 1.2fr) minmax(260px, 0.8fr);
-  gap: 18px;
-  padding: 24px 28px;
-}
-
-.lightrag-hero__eyebrow {
-  color: rgba(141, 208, 208, 0.92);
-  font-size: 12px;
-  font-weight: 700;
-  letter-spacing: 0.16em;
-  text-transform: uppercase;
-}
-
-.lightrag-hero__title {
-  margin: 0;
-  font-size: 32px;
-  color: var(--text-primary);
-}
-
-.lightrag-hero__subtitle {
-  margin: 12px 0 0;
-  color: var(--text-secondary);
-  line-height: 1.7;
-}
-
-.lightrag-metrics {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
-}
-
-.lightrag-metric {
-  padding: 16px;
-  display: grid;
-  gap: 6px;
-}
-
-.lightrag-metric span {
-  color: var(--text-muted);
-}
-
-.lightrag-metric strong {
-  color: var(--text-primary);
-  font-size: 24px;
 }
 
 .lightrag-upload,
@@ -318,15 +245,4 @@ onMounted(loadDocuments);
   white-space: pre-wrap;
 }
 
-@media (max-width: 1024px) {
-  .lightrag-hero {
-    grid-template-columns: 1fr;
-  }
-}
-
-@media (max-width: 720px) {
-  .lightrag-metrics {
-    grid-template-columns: 1fr;
-  }
-}
 </style>

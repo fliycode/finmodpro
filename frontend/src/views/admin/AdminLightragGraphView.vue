@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onMounted, reactive, ref } from 'vue';
+import { onMounted, reactive, ref } from 'vue';
 
 import { lightragApi } from '../../api/lightrag.js';
 import { useFlash } from '../../lib/flash.js';
@@ -19,12 +19,6 @@ const form = reactive({
   maxDepth: 3,
   maxNodes: 80,
 });
-
-const graphSummary = computed(() => ([
-  { label: '节点', value: graph.value.nodes.length },
-  { label: '关系', value: graph.value.edges.length },
-  { label: '截断', value: graph.value.isTruncated ? '是' : '否' },
-]));
 
 const loadLabels = async () => {
   isLoading.value = true;
@@ -84,22 +78,6 @@ onMounted(loadLabels);
 
 <template>
   <div class="page-stack lightrag-page">
-    <section class="lightrag-hero">
-      <div>
-        <span class="lightrag-hero__eyebrow">Knowledge graph explorer</span>
-        <h2 class="lightrag-hero__title">图谱浏览</h2>
-        <p class="lightrag-hero__subtitle">
-          先选标签，再把节点与关系拆开看，避免把复杂图谱探索压缩成一块不可控的嵌入画布。
-        </p>
-      </div>
-      <div class="lightrag-summary">
-        <article v-for="item in graphSummary" :key="item.label" class="lightrag-summary__item">
-          <span>{{ item.label }}</span>
-          <strong>{{ item.value }}</strong>
-        </article>
-      </div>
-    </section>
-
     <el-alert v-if="errorMsg" :title="errorMsg" type="error" show-icon :closable="false" />
 
     <AppSectionCard
@@ -217,7 +195,6 @@ onMounted(loadLabels);
   gap: 16px;
 }
 
-.lightrag-hero,
 .lightrag-summary__item,
 .lightrag-labels,
 .lightrag-detail-card {
@@ -227,32 +204,12 @@ onMounted(loadLabels);
   box-shadow: var(--shadow-md);
 }
 
-.lightrag-hero {
-  display: grid;
-  grid-template-columns: minmax(0, 1.2fr) minmax(260px, 0.8fr);
-  gap: 18px;
-  padding: 24px 28px;
-}
-
-.lightrag-hero__eyebrow,
 .lightrag-field span {
   color: rgba(141, 208, 208, 0.92);
   font-size: 12px;
   font-weight: 700;
   letter-spacing: 0.16em;
   text-transform: uppercase;
-}
-
-.lightrag-hero__title {
-  margin: 0;
-  font-size: 32px;
-  color: var(--text-primary);
-}
-
-.lightrag-hero__subtitle {
-  margin: 12px 0 0;
-  color: var(--text-secondary);
-  line-height: 1.7;
 }
 
 .lightrag-summary {
@@ -343,7 +300,6 @@ onMounted(loadLabels);
 }
 
 @media (max-width: 1180px) {
-  .lightrag-hero,
   .lightrag-graph-grid,
   .lightrag-detail-grid {
     grid-template-columns: 1fr;

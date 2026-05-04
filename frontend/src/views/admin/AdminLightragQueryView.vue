@@ -28,25 +28,6 @@ const queryForm = reactive({
   include_chunk_content: true,
 });
 
-const statusCards = computed(() => ([
-  {
-    label: '服务状态',
-    value: overview.value.health?.status || '未知',
-  },
-  {
-    label: '鉴权模式',
-    value: overview.value.auth_status?.auth_mode || '未知',
-  },
-  {
-    label: '文档总量',
-    value: overview.value.status_counts?.status_counts?.all ?? 0,
-  },
-  {
-    label: '热门标签',
-    value: Array.isArray(overview.value.popular_labels) ? overview.value.popular_labels.length : 0,
-  },
-]));
-
 const referenceRows = computed(() => Array.isArray(result.value?.references) ? result.value.references : []);
 
 const loadOverview = async () => {
@@ -101,22 +82,6 @@ onMounted(loadOverview);
 
 <template>
   <div class="page-stack lightrag-page">
-    <section class="lightrag-hero">
-      <div class="lightrag-hero__copy">
-        <span class="lightrag-hero__eyebrow">Graph retrieval workbench</span>
-        <h2 class="lightrag-hero__title">图谱检索工作台</h2>
-        <p class="lightrag-hero__subtitle">
-          把 LightRAG 的核心问答能力收进管理端主壳，保留图增强检索与引用回看，不再把查询体验交给 iframe。
-        </p>
-      </div>
-      <div class="lightrag-hero__metrics">
-        <article v-for="item in statusCards" :key="item.label" class="lightrag-hero__metric">
-          <span>{{ item.label }}</span>
-          <strong>{{ item.value }}</strong>
-        </article>
-      </div>
-    </section>
-
     <el-alert v-if="errorMsg" :title="errorMsg" type="error" show-icon :closable="false" />
 
     <AppSectionCard
@@ -237,50 +202,6 @@ onMounted(loadOverview);
 .lightrag-page {
   gap: 20px;
 }
-
-.lightrag-hero {
-  display: grid;
-  grid-template-columns: minmax(0, 1.4fr) minmax(300px, 0.9fr);
-  gap: 18px;
-  padding: 24px 28px;
-  border: 1px solid rgba(141, 208, 208, 0.14);
-  border-radius: 28px;
-  background:
-    linear-gradient(180deg, rgba(141, 208, 208, 0.06), rgba(15, 23, 34, 0)),
-    linear-gradient(135deg, rgba(36, 87, 197, 0.14), rgba(24, 34, 49, 0.92));
-}
-
-.lightrag-hero__eyebrow {
-  display: inline-flex;
-  margin-bottom: 10px;
-  color: rgba(141, 208, 208, 0.92);
-  font-size: 12px;
-  font-weight: 700;
-  letter-spacing: 0.16em;
-  text-transform: uppercase;
-}
-
-.lightrag-hero__title {
-  margin: 0;
-  color: var(--text-primary);
-  font-size: 32px;
-  line-height: 1.1;
-}
-
-.lightrag-hero__subtitle {
-  margin: 12px 0 0;
-  max-width: 68ch;
-  color: var(--text-secondary);
-  line-height: 1.7;
-}
-
-.lightrag-hero__metrics {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
-}
-
-.lightrag-hero__metric,
 .lightrag-answer,
 .lightrag-reference-summary,
 .lightrag-reference-card,
@@ -289,24 +210,6 @@ onMounted(loadOverview);
   border-radius: 20px;
   background: rgba(24, 34, 49, 0.9);
   box-shadow: var(--shadow-md);
-}
-
-.lightrag-hero__metric {
-  padding: 16px 18px;
-  display: grid;
-  gap: 6px;
-}
-
-.lightrag-hero__metric span {
-  color: var(--text-muted);
-  font-size: 12px;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-
-.lightrag-hero__metric strong {
-  color: var(--text-primary);
-  font-size: 24px;
 }
 
 .lightrag-query-grid {
@@ -425,7 +328,6 @@ onMounted(loadOverview);
 }
 
 @media (max-width: 1180px) {
-  .lightrag-hero,
   .lightrag-query-grid {
     grid-template-columns: 1fr;
   }
@@ -436,8 +338,7 @@ onMounted(loadOverview);
 }
 
 @media (max-width: 720px) {
-  .lightrag-query-controls,
-  .lightrag-hero__metrics {
+  .lightrag-query-controls {
     grid-template-columns: 1fr;
   }
 }
