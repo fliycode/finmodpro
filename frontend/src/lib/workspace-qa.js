@@ -120,16 +120,37 @@ export function buildSessionExportDownload(payload = {}) {
   };
 }
 
-// NOTE: The boolean flags below describe chrome elements that were removed from the UI.
-// They are intentionally retained to preserve the returned shape (tests/specs rely on it)
-// and to document reserved flags for future toolbar expansion.
 export function getQaChromeState() {
   return {
     showEyebrow: false,
     showSessionState: false,
     showSessionMeta: false,
     showSessionSummary: false,
-    actions: ['history', 'memory', 'new'],
+    actions: [],
+  };
+}
+
+export function getQaMessageAvatar(role) {
+  if (role === 'assistant') {
+    return {
+      label: 'AI',
+      imageSrc: '/image/bot.png',
+      imageAlt: 'AI 助手头像',
+    };
+  }
+
+  if (role === 'user') {
+    return {
+      label: '我',
+      imageSrc: '',
+      imageAlt: '',
+    };
+  }
+
+  return {
+    label: '系统',
+    imageSrc: '',
+    imageAlt: '',
   };
 }
 

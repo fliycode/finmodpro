@@ -4,24 +4,37 @@ import assert from 'node:assert/strict';
 import {
   getSessionLoadFailureNotice,
   getQaChromeState,
+  getQaMessageAvatar,
   getCitationDisclosureLabel,
   updateMessageAt,
   shouldShowFinancialQaEmptyState,
   shouldShowQaEmptyState,
 } from '../workspace-qa.js';
 
-test('qa chrome only keeps the three primary actions', () => {
+test('qa chrome removes the retired top toolbar actions', () => {
   assert.deepEqual(getQaChromeState(), {
     showEyebrow: false,
     showSessionState: false,
     showSessionMeta: false,
     showSessionSummary: false,
-    actions: ['history', 'memory', 'new'],
+    actions: [],
   });
 });
 
-test('qa chrome action order matches the simplified toolbar', () => {
-  assert.deepEqual(getQaChromeState().actions, ['history', 'memory', 'new']);
+test('assistant avatar uses the dedicated bot image asset', () => {
+  assert.deepEqual(getQaMessageAvatar('assistant'), {
+    label: 'AI',
+    imageSrc: '/image/bot.png',
+    imageAlt: 'AI 助手头像',
+  });
+});
+
+test('user avatar remains text-only', () => {
+  assert.deepEqual(getQaMessageAvatar('user'), {
+    label: '我',
+    imageSrc: '',
+    imageAlt: '',
+  });
 });
 
 test('empty state disappears after the first real user or assistant message', () => {

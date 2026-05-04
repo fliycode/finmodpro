@@ -7,6 +7,8 @@ import { qaApi } from '../api/qa.js';
 import {
   getDefaultSessionFilters,
   getCitationDisclosureLabel,
+  getQaChromeState,
+  getQaMessageAvatar,
   getSessionLoadFailureNotice,
   normalizeDatasetId,
   normalizeHistoryItems,
@@ -52,6 +54,9 @@ const showEmptyState = computed(() => shouldShowFinancialQaEmptyState({
   currentSessionId: currentSessionId.value,
   messages: messages.value,
 }));
+const qaChromeState = getQaChromeState();
+const userAvatar = getQaMessageAvatar('user');
+const assistantAvatar = getQaMessageAvatar('assistant');
 const sessionLoadFailureNotice = computed(() =>
   getSessionLoadFailureNotice(activeSessionLoadFailed.value),
 );
@@ -381,7 +386,7 @@ const handleAsk = async () => {
 <template>
   <div class="qa-shell">
     <!-- QA Toolbar -->
-    <div class="qa-toolbar">
+    <div v-if="qaChromeState.actions.length > 0" class="qa-toolbar">
       <button
         type="button"
         class="qa-toolbar__action"
@@ -446,12 +451,28 @@ const handleAsk = async () => {
                     {{ msg.content }}
                   </div>
                 </div>
-                <div class="qa-msg__avatar qa-msg__avatar--user">我</div>
+                <div class="qa-msg__avatar qa-msg__avatar--user">
+                  <img
+                    v-if="userAvatar.imageSrc"
+                    :src="userAvatar.imageSrc"
+                    :alt="userAvatar.imageAlt"
+                    class="qa-msg__avatar-image"
+                  >
+                  <span v-else>{{ userAvatar.label }}</span>
+                </div>
               </div>
 
               <!-- Assistant Message -->
               <div v-else class="qa-msg qa-msg--assistant">
-                <div class="qa-msg__avatar qa-msg__avatar--ai">AI</div>
+                <div class="qa-msg__avatar qa-msg__avatar--ai">
+                  <img
+                    v-if="assistantAvatar.imageSrc"
+                    :src="assistantAvatar.imageSrc"
+                    :alt="assistantAvatar.imageAlt"
+                    class="qa-msg__avatar-image"
+                  >
+                  <span v-else>{{ assistantAvatar.label }}</span>
+                </div>
                 <div class="qa-msg__body">
                   <div
                     class="qa-msg__bubble qa-msg__bubble--ai"
@@ -501,7 +522,15 @@ const handleAsk = async () => {
 
             <!-- Initial loading -->
             <div v-if="isAsking && !hasStreamingAssistant" class="qa-msg qa-msg--assistant">
-              <div class="qa-msg__avatar qa-msg__avatar--ai">AI</div>
+              <div class="qa-msg__avatar qa-msg__avatar--ai">
+                <img
+                  v-if="assistantAvatar.imageSrc"
+                  :src="assistantAvatar.imageSrc"
+                  :alt="assistantAvatar.imageAlt"
+                  class="qa-msg__avatar-image"
+                >
+                <span v-else>{{ assistantAvatar.label }}</span>
+              </div>
               <div class="qa-msg__body">
                 <div class="qa-msg__bubble qa-msg__bubble--ai qa-msg__bubble--loading">
                   <div class="qa-loading">
@@ -847,13 +876,22 @@ const handleAsk = async () => {
   border: 1px solid rgba(103, 134, 255, 0.16);
 }
 
+.qa-msg__avatar-image {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: inherit;
+}
+
 .qa-msg__avatar--user {
   background: linear-gradient(135deg, rgba(41, 74, 153, 0.92), rgba(70, 42, 133, 0.92));
   color: #eff5ff;
+  overflow: hidden;
 }
 
 .qa-msg__avatar--ai {
-  background: linear-gradient(135deg, rgba(50, 90, 200, 0.55), rgba(98, 70, 220, 0.45));
+  overflow: hidden;
+  background: rgba(12, 20, 35, 0.92);
   color: #b8ccff;
 }
 
