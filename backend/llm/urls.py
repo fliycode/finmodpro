@@ -5,6 +5,7 @@ from llm.controllers.console_controller import (
     LlmConsoleObservabilityView,
     LlmConsoleSummaryView,
 )
+from llm.controllers.lightrag_controller import LightragOverviewView, LightragProxyView
 from llm.controllers.fine_tune_controller import (
     FineTuneRunCallbackView,
     FineTuneRunnerServerDetailView,
@@ -38,6 +39,10 @@ from llm.controllers.prompt_config_controller import PromptConfigListView, Promp
 
 
 urlpatterns = [
+    path("lightrag", LightragOverviewView.as_view(), name="lightrag-overview-legacy"),
+    path("lightrag/", LightragOverviewView.as_view(), name="lightrag-overview"),
+    path("lightrag/<path:upstream_path>", LightragProxyView.as_view(), name="lightrag-proxy-legacy"),
+    path("lightrag/<path:upstream_path>/", LightragProxyView.as_view(), name="lightrag-proxy"),
     # Gateway analytics
     path("llm/gateway/summary", GatewaySummaryView.as_view(), name="gateway-summary-legacy"),
     path("llm/gateway/summary/", GatewaySummaryView.as_view(), name="gateway-summary"),

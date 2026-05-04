@@ -18,6 +18,20 @@ test('admin llm navigation exposes the approved IA without fine-tune entry', () 
   );
 });
 
+test('lightrag navigation exposes child routes instead of flattening the module into one page', () => {
+  const graphItem = navigationMap.admin.find((item) => item.id === 'admin-lightrag');
+
+  assert.deepEqual(
+    graphItem.children.map((item) => item.to),
+    [
+      '/admin/lightrag/query',
+      '/admin/lightrag/graph',
+      '/admin/lightrag/documents',
+      '/admin/lightrag/governance',
+    ],
+  );
+});
+
 test('workspace and admin navigation keep separate grouping vocabularies', () => {
   const workspaceLabels = navigationMap.workspace.map((item) => item.label);
   const adminLabels = navigationMap.admin.map((item) => item.label);

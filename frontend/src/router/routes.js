@@ -128,8 +128,32 @@ export const appRoutes = [
       },
       {
         path: 'lightrag',
+        redirect: '/admin/lightrag/query',
+      },
+      {
+        path: 'lightrag/query',
+        component: () => import('../views/admin/AdminLightragQueryView.vue'),
+        meta: { title: '图谱检索 / 查询工作台', subtitle: 'LightRAG 图增强检索与原生引用回看。' },
+      },
+      {
+        path: 'lightrag/graph',
+        component: () => import('../views/admin/AdminLightragGraphView.vue'),
+        meta: { title: '图谱检索 / 图谱浏览', subtitle: '按标签浏览节点、关系与图谱结构。' },
+      },
+      {
+        path: 'lightrag/documents',
+        component: () => import('../views/admin/AdminLightragDocumentsView.vue'),
+        meta: { title: '图谱检索 / 文档管线', subtitle: '管理上传、扫描、状态统计与 track status。' },
+      },
+      {
+        path: 'lightrag/governance',
+        component: () => import('../views/admin/AdminLightragGovernanceView.vue'),
+        meta: { title: '图谱检索 / 图谱治理', subtitle: '管理实体、关系、合并与删除等高风险动作。' },
+      },
+      {
+        path: 'lightrag/legacy',
         component: () => import('../views/admin/AdminLightragView.vue'),
-        meta: { title: '图谱检索', subtitle: 'LightRAG 图增强检索与文档图谱探索' },
+        meta: { title: '图谱检索 / Legacy WebUI', subtitle: '保留旧版 LightRAG WebUI 作为应急回退入口。' },
       },
       {
         path: 'evaluation',

@@ -16,7 +16,19 @@ export const navigationMap = {
     { id: 'admin-llm-models', label: '模型路由', to: '/admin/llm/models', icon: 'sliders', group: 'admin-llm' },
     { id: 'admin-llm-observability', label: '观测与日志', to: '/admin/llm/observability', icon: 'eye', group: 'admin-llm' },
     { id: 'admin-llm-costs', label: '成本与用量', to: '/admin/llm/costs', icon: 'bar-chart', group: 'admin-llm' },
-    { id: 'admin-lightrag', label: '图谱检索', to: '/admin/lightrag', icon: 'network', group: 'admin-llm' },
+    {
+      id: 'admin-lightrag',
+      label: '图谱检索',
+      to: '/admin/lightrag',
+      icon: 'network',
+      group: 'admin-llm',
+      children: [
+        { id: 'admin-lightrag-query', label: '查询工作台', to: '/admin/lightrag/query' },
+        { id: 'admin-lightrag-graph', label: '图谱浏览', to: '/admin/lightrag/graph' },
+        { id: 'admin-lightrag-documents', label: '文档管线', to: '/admin/lightrag/documents' },
+        { id: 'admin-lightrag-governance', label: '图谱治理', to: '/admin/lightrag/governance' },
+      ],
+    },
     { id: 'admin-evaluation', label: '评测结果', to: '/admin/evaluation', icon: 'check', group: 'admin-governance' },
   ],
 };

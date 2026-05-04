@@ -12,6 +12,7 @@ from urllib.error import HTTPError, URLError
 
 from django.conf import settings
 from django.contrib.auth.models import Group
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase
 from django.test import Client, SimpleTestCase, override_settings
 
@@ -3436,6 +3437,139 @@ class LiteLLMGatewaySettingsTests(TestCase):
     def test_litellm_render_defaults_match_deploy_paths(self):
         self.assertTrue(str(settings.LITELLM_BASE_CONFIG_PATH).endswith("deploy/litellm/config.yaml"))
         self.assertTrue(str(settings.LITELLM_RENDERED_CONFIG_PATH).endswith("deploy/litellm/rendered.config.yaml"))
+        self.assertTrue(str(settings.LIGHTRAG_INTERNAL_URL).startswith("http"))
+
+
+class LightRAGBridgeApiTests(TestCase):
+    def setUp(self):
+        self.client = Client()
+        seed_roles_and_permissions()
+
+        self.admin_user = User.objects.create_user(
+            username="graph-admin",
+            password="secret123",
+            email="graph-admin@example.com",
+        )
+        self.admin_user.groups.add(Group.objects.get(name=ROLE_ADMIN))
+        self.admin_access_token = generate_access_token(self.admin_user)
+
+        self.member_user = User.objects.create_user(
+            username="graph-member",
+            password="secret123",
+            email="graph-member@example.com",
+        )
+        self.member_user.groups.add(Group.objects.get(name=ROLE_MEMBER))
+        self.member_access_token = generate_access_token(self.member_user)
+
+    @patch("llm.services.lightrag_proxy_service.requests.request")
+    def test_bridge_requires_manage_permission(self, mocked_request):
+        response = self.client.get(
+            "/api/ops/lightrag/health/",
+            HTTP_AUTHORIZATION=f"Bearer {self.member_access_token}",
+        )
+
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.json()["message"], "无权限。")
+        mocked_request.assert_not_called()
+
+    @patch("llm.services.lightrag_proxy_service.requests.request")
+    def test_bridge_proxies_get_requests_with_query_params(self, mocked_request):
+        mocked_request.return_value = self._build_response(
+            status_code=200,
+            payload={"nodes": [], "edges": [], "is_truncated": False},
+        )
+
+        response = self.client.get(
+            "/api/ops/lightrag/graphs/",
+            {"label": "流动性风险", "max_nodes": 60},
+            HTTP_AUTHORIZATION=f"Bearer {self.admin_access_token}",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["data"]["is_truncated"], False)
+        _, kwargs = mocked_request.call_args
+        self.assertEqual(kwargs["method"], "GET")
+        self.assertTrue(kwargs["url"].endswith("/graphs"))
+        self.assertEqual(kwargs["params"]["label"], "流动性风险")
+        self.assertEqual(kwargs["params"]["max_nodes"], "60")
+
+    @patch("llm.services.lightrag_proxy_service.requests.request")
+    def test_bridge_proxies_json_posts(self, mocked_request):
+        mocked_request.return_value = self._build_response(
+            status_code=200,
+            payload={"response": "No relevant context found for the query.", "references": []},
+        )
+
+        response = self.client.post(
+            "/api/ops/lightrag/query/",
+            data=json.dumps({"query": "测试问题", "mode": "hybrid"}),
+            content_type="application/json",
+            HTTP_AUTHORIZATION=f"Bearer {self.admin_access_token}",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.json()["data"]["response"],
+            "No relevant context found for the query.",
+        )
+        _, kwargs = mocked_request.call_args
+        self.assertEqual(kwargs["method"], "POST")
+        self.assertEqual(kwargs["json"], {"query": "测试问题", "mode": "hybrid"})
+
+    @patch("llm.services.lightrag_proxy_service.requests.request")
+    def test_bridge_proxies_multipart_uploads(self, mocked_request):
+        mocked_request.return_value = self._build_response(
+            status_code=200,
+            payload={"status": "success", "message": "Uploaded"},
+        )
+        upload = SimpleUploadedFile("graph.txt", b"graph payload", content_type="text/plain")
+
+        response = self.client.post(
+            "/api/ops/lightrag/documents/upload/",
+            data={"file": upload},
+            HTTP_AUTHORIZATION=f"Bearer {self.admin_access_token}",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        _, kwargs = mocked_request.call_args
+        self.assertEqual(kwargs["method"], "POST")
+        self.assertTrue(kwargs["files"])
+        self.assertEqual(kwargs["files"][0][0], "file")
+
+    @patch("llm.services.lightrag_proxy_service.requests.request")
+    def test_overview_aggregates_lightrag_summary(self, mocked_request):
+        mocked_request.side_effect = [
+            self._build_response(status_code=200, payload={"status": "healthy"}),
+            self._build_response(status_code=200, payload={"auth_mode": "disabled"}),
+            self._build_response(status_code=200, payload={"status_counts": {"all": 4}}),
+            self._build_response(status_code=200, payload=["风险", "债务"]),
+        ]
+
+        response = self.client.get(
+            "/api/ops/lightrag/",
+            HTTP_AUTHORIZATION=f"Bearer {self.admin_access_token}",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()["data"]
+        self.assertEqual(payload["health"]["status"], "healthy")
+        self.assertEqual(payload["auth_status"]["auth_mode"], "disabled")
+        self.assertEqual(payload["status_counts"]["status_counts"]["all"], 4)
+        self.assertEqual(payload["popular_labels"], ["风险", "债务"])
+
+    def _build_response(self, *, status_code, payload):
+        class _MockResponse:
+            def __init__(self, status_code, payload):
+                self.status_code = status_code
+                self.payload = payload
+                self.ok = status_code < 400
+                self.headers = {"Content-Type": "application/json"}
+                self.text = json.dumps(payload)
+
+            def json(self):
+                return self.payload
+
+        return _MockResponse(status_code, payload)
 
 
 class LiteLLMConfigRenderRegressionTests(TestCase):

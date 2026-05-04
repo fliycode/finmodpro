@@ -1,6 +1,6 @@
 <script setup>
 import { computed } from 'vue';
-import { RouterLink, useRouter } from 'vue-router';
+import { RouterLink, useRoute, useRouter } from 'vue-router';
 
 import AppIcon from './AppIcon.vue';
 import finmodproMark from '../../assets/finmodpro-mark.svg';
@@ -16,6 +16,7 @@ const props = defineProps({
   },
 });
 
+const route = useRoute();
 const router = useRouter();
 const profile = computed(() => authStorage.getProfile());
 const items = computed(() => getNavItems(props.area, profile.value));
@@ -73,6 +74,18 @@ const handleLogout = async () => {
   await authSession.logout();
   await router.replace('/login');
 };
+
+const isItemActive = (item) => {
+  if (!item?.to) {
+    return false;
+  }
+
+  if (item.children?.length) {
+    return route.path === item.to || route.path.startsWith(`${item.to}/`) || item.children.some((child) => isItemActive(child));
+  }
+
+  return route.path === item.to;
+};
 </script>
 
 <template>
@@ -103,21 +116,38 @@ const handleLogout = async () => {
           {{ group.label }}
         </p>
         <div class="app-sidebar__group-items">
-          <RouterLink
-            v-for="item in group.items"
-            :key="item.id"
-            :to="item.to"
-            class="app-sidebar__item"
-            :title="sidebarPresentation.showItemLabels ? undefined : item.label"
-            :aria-label="sidebarPresentation.showItemLabels ? undefined : item.label"
-          >
-            <span class="app-sidebar__item-icon">
-              <AppIcon :name="item.icon" />
-            </span>
-            <span v-if="sidebarPresentation.showItemLabels" class="app-sidebar__item-label">
-              {{ item.label }}
-            </span>
-          </RouterLink>
+          <div v-for="item in group.items" :key="item.id" class="app-sidebar__entry">
+            <RouterLink
+              :to="item.to"
+              :class="['app-sidebar__item', { 'app-sidebar__item--active': isItemActive(item), 'app-sidebar__item--with-children': item.children?.length }]"
+              :title="sidebarPresentation.showItemLabels ? undefined : item.label"
+              :aria-label="sidebarPresentation.showItemLabels ? undefined : item.label"
+            >
+              <span class="app-sidebar__item-icon">
+                <AppIcon :name="item.icon" />
+              </span>
+              <span v-if="sidebarPresentation.showItemLabels" class="app-sidebar__item-label">
+                {{ item.label }}
+              </span>
+              <span v-if="sidebarPresentation.showItemLabels && item.children?.length" class="app-sidebar__item-chevron">
+                <AppIcon name="chevron-right" />
+              </span>
+            </RouterLink>
+
+            <div
+              v-if="sidebarPresentation.showItemLabels && item.children?.length && isItemActive(item)"
+              class="app-sidebar__subnav"
+            >
+              <RouterLink
+                v-for="child in item.children"
+                :key="child.id"
+                :to="child.to"
+                :class="['app-sidebar__subitem', { 'app-sidebar__subitem--active': isItemActive(child) }]"
+              >
+                {{ child.label }}
+              </RouterLink>
+            </div>
+          </div>
         </div>
       </section>
     </nav>

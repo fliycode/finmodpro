@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted } from 'vue';
+import { onMounted, ref } from 'vue';
 
 const iframeSrc = '/admin/lightrag/webui/';
 const loaded = ref(false);
@@ -24,7 +24,7 @@ onMounted(() => {
       @load="loaded = true"
     />
     <div v-else class="lightrag-embed__fallback">
-      <p>LightRAG WebUI 加载失败，请确认服务已启动。</p>
+      <p>Legacy LightRAG WebUI 加载失败，请确认服务已启动。</p>
       <a :href="iframeSrc" target="_blank" rel="noopener">在新窗口中打开</a>
     </div>
   </div>

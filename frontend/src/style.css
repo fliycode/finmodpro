@@ -2140,13 +2140,19 @@ code {
   color: var(--text-secondary);
 }
 
+.app-sidebar__entry {
+  display: grid;
+  gap: 6px;
+}
+
 .app-sidebar__item:hover {
   background: var(--surface-hover);
   border-color: var(--line-soft);
   color: var(--text-primary);
 }
 
-.app-sidebar__item.router-link-active {
+.app-sidebar__item.router-link-active,
+.app-sidebar__item--active {
   background: var(--surface-2);
   border-color: var(--line-soft);
   box-shadow: inset 2px 0 0 var(--brand);
@@ -2166,6 +2172,49 @@ code {
 .router-link-active .app-sidebar__item-icon {
   background: var(--brand-soft);
   color: var(--brand);
+}
+
+.app-sidebar__item-chevron {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  color: var(--text-muted);
+  transition: transform 0.2s ease, color 0.2s ease;
+}
+
+.app-sidebar__item--active .app-sidebar__item-chevron {
+  transform: rotate(90deg);
+  color: var(--brand);
+}
+
+.app-sidebar__subnav {
+  display: grid;
+  gap: 6px;
+  margin-left: 18px;
+  padding-left: 18px;
+  border-left: 1px solid var(--line-soft);
+}
+
+.app-sidebar__subitem {
+  min-height: 34px;
+  display: flex;
+  align-items: center;
+  padding: 6px 10px;
+  border-radius: 10px;
+  color: var(--text-secondary);
+  text-decoration: none;
+  transition: background-color 0.2s ease, color 0.2s ease, transform 0.2s ease;
+}
+
+.app-sidebar__subitem:hover,
+.app-sidebar__subitem--active {
+  background: var(--surface-hover);
+  color: var(--text-primary);
+}
+
+.app-sidebar__subitem--active {
+  transform: translateX(1px);
+  box-shadow: inset 2px 0 0 var(--brand);
 }
 
 .app-sidebar__profile {
