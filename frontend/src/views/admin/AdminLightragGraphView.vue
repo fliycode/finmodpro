@@ -1,9 +1,9 @@
 <script setup>
-import { onMounted, reactive, ref } from 'vue';
+import { computed, onMounted, reactive, ref } from 'vue';
 
 import { lightragApi } from '../../api/lightrag.js';
 import { useFlash } from '../../lib/flash.js';
-import AppSectionCard from '../../components/ui/AppSectionCard.vue';
+import LightragPanel from '../../components/lightrag/LightragPanel.vue';
 
 const flash = useFlash();
 const isLoading = ref(false);
@@ -19,6 +19,13 @@ const form = reactive({
   maxDepth: 3,
   maxNodes: 80,
 });
+
+const graphStats = computed(() => ([
+  { label: '当前标签', value: form.label || '未选择' },
+  { label: '节点', value: graph.value.nodes.length },
+  { label: '关系', value: graph.value.edges.length },
+  { label: '截断', value: graph.value.isTruncated ? '是' : '否' },
+]));
 
 const loadLabels = async () => {
   isLoading.value = true;
@@ -80,19 +87,22 @@ onMounted(loadLabels);
   <div class="page-stack lightrag-page">
     <el-alert v-if="errorMsg" :title="errorMsg" type="error" show-icon :closable="false" />
 
-    <AppSectionCard
-      title="图谱取数"
-      desc="以标签为入口控制图深度与节点上限，先看结构轮廓，再看节点和关系明细。"
-      admin
-    >
-      <div class="lightrag-graph-grid">
-        <aside class="lightrag-labels">
-          <div class="lightrag-labels__toolbar">
+    <section class="lightrag-strip">
+      <article v-for="item in graphStats" :key="item.label" class="lightrag-stat">
+        <span>{{ item.label }}</span>
+        <strong>{{ item.value }}</strong>
+      </article>
+    </section>
+
+    <div class="lightrag-layout">
+      <LightragPanel title="Labels" desc="先搜标签，再加载图谱；工作流尽量贴近 LightRAG 原生浏览页。">
+        <div class="lightrag-label-stack">
+          <div class="lightrag-search-bar">
             <el-input v-model="form.search" placeholder="按标签搜索" @keyup.enter="handleLabelSearch" />
             <el-button :loading="isSearching" @click="handleLabelSearch">搜索</el-button>
           </div>
 
-          <div class="lightrag-labels__section">
+          <section class="lightrag-label-group">
             <strong>热门标签</strong>
             <div class="lightrag-chip-list">
               <button
@@ -105,27 +115,33 @@ onMounted(loadLabels);
                 {{ label }}
               </button>
             </div>
-          </div>
+          </section>
 
-          <div class="lightrag-labels__section">
+          <section class="lightrag-label-group">
             <strong>全量标签</strong>
             <div class="lightrag-label-list">
               <button
                 v-for="label in labels"
                 :key="label"
                 type="button"
-                class="lightrag-label-list__item"
+                class="lightrag-label-item"
                 @click="fetchGraph(label)"
               >
                 {{ label }}
               </button>
               <div v-if="!labels.length" class="admin-empty-state">暂无可浏览标签</div>
             </div>
-          </div>
-        </aside>
+          </section>
+        </div>
+      </LightragPanel>
 
-        <div class="lightrag-graph-controls">
-          <div class="lightrag-graph-controls__inputs">
+      <LightragPanel title="Graph request" desc="把标签、深度与节点上限收敛在一个工具栏里。">
+        <template #header>
+          <el-link href="/admin/lightrag/legacy" target="_blank" rel="noopener">Legacy WebUI</el-link>
+        </template>
+
+        <div class="lightrag-control-stack">
+          <div class="lightrag-control-grid">
             <label class="lightrag-field">
               <span>当前标签</span>
               <el-input v-model="form.label" placeholder="例如：流动性风险" />
@@ -140,16 +156,16 @@ onMounted(loadLabels);
             </label>
           </div>
 
-          <div class="lightrag-graph-controls__actions">
+          <div class="lightrag-toolbar">
             <el-button type="primary" :loading="isSearching" @click="fetchGraph()">加载图谱</el-button>
-            <el-link href="/admin/lightrag/legacy" target="_blank" rel="noopener">Legacy WebUI</el-link>
+            <p class="lightrag-note">如果没有标签，先在左侧点一个热门标签再加载。</p>
           </div>
         </div>
-      </div>
-    </AppSectionCard>
+      </LightragPanel>
+    </div>
 
-    <div class="lightrag-detail-grid">
-      <AppSectionCard title="节点清单" desc="保留节点原始属性，优先展示实体名、类型与摘要。" admin>
+    <div class="lightrag-detail-layout">
+      <LightragPanel title="Nodes" desc="保留实体名、类型与原始属性，方便人工校验。">
         <div v-if="graph.nodes.length" class="lightrag-detail-list">
           <article v-for="node in graph.nodes" :key="node.id" class="lightrag-detail-card">
             <div class="lightrag-detail-card__head">
@@ -164,9 +180,9 @@ onMounted(loadLabels);
           </article>
         </div>
         <div v-else class="admin-empty-state">当前标签还没有可展示节点。</div>
-      </AppSectionCard>
+      </LightragPanel>
 
-      <AppSectionCard title="关系清单" desc="把边信息独立展示，便于人工检查 source / target / relation 是否合理。" admin>
+      <LightragPanel title="Edges" desc="关系与 source / target 分开看，减少页面阅读噪音。">
         <div v-if="graph.edges.length" class="lightrag-detail-list">
           <article v-for="edge in graph.edges" :key="edge.id" class="lightrag-detail-card">
             <div class="lightrag-detail-card__head">
@@ -181,76 +197,77 @@ onMounted(loadLabels);
           </article>
         </div>
         <div v-else class="admin-empty-state">当前标签还没有可展示关系。</div>
-      </AppSectionCard>
+      </LightragPanel>
     </div>
   </div>
 </template>
 
 <style scoped>
 .lightrag-page,
-.lightrag-labels,
-.lightrag-labels__section,
+.lightrag-label-stack,
+.lightrag-control-stack,
 .lightrag-detail-list {
   display: grid;
   gap: 16px;
 }
 
-.lightrag-summary__item,
-.lightrag-labels,
-.lightrag-detail-card {
-  border: 1px solid var(--line-soft);
-  border-radius: 24px;
-  background: rgba(24, 34, 49, 0.92);
-  box-shadow: var(--shadow-md);
+.lightrag-strip {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
 }
 
+.lightrag-stat,
+.lightrag-detail-card,
+.lightrag-label-item {
+  border: 1px solid var(--line-soft);
+  border-radius: 16px;
+  background: var(--surface-2);
+}
+
+.lightrag-stat {
+  display: grid;
+  gap: 6px;
+  padding: 14px 16px;
+}
+
+.lightrag-stat span,
 .lightrag-field span {
-  color: rgba(141, 208, 208, 0.92);
+  color: var(--text-muted);
   font-size: 12px;
   font-weight: 700;
-  letter-spacing: 0.16em;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
 }
 
-.lightrag-summary {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 12px;
-}
-
-.lightrag-summary__item {
-  padding: 16px;
-  display: grid;
-  gap: 6px;
-}
-
-.lightrag-summary__item span {
-  color: var(--text-muted);
-}
-
-.lightrag-summary__item strong {
+.lightrag-stat strong {
   color: var(--text-primary);
-  font-size: 24px;
+  font-size: 1.2rem;
 }
 
-.lightrag-graph-grid,
-.lightrag-detail-grid {
+.lightrag-layout,
+.lightrag-detail-layout {
   display: grid;
-  grid-template-columns: minmax(280px, 0.8fr) minmax(0, 1.2fr);
+  grid-template-columns: minmax(300px, 0.8fr) minmax(0, 1.2fr);
   gap: 18px;
 }
 
-.lightrag-labels,
-.lightrag-detail-card {
-  padding: 18px;
-}
-
-.lightrag-labels__toolbar,
-.lightrag-graph-controls__actions,
-.lightrag-graph-controls__inputs {
+.lightrag-search-bar,
+.lightrag-toolbar {
   display: flex;
   flex-wrap: wrap;
   gap: 12px;
+  align-items: center;
+}
+
+.lightrag-label-group,
+.lightrag-control-grid {
+  display: grid;
+  gap: 12px;
+}
+
+.lightrag-control-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
 .lightrag-chip-list,
@@ -261,24 +278,46 @@ onMounted(loadLabels);
 }
 
 .lightrag-chip,
-.lightrag-label-list__item {
+.lightrag-label-item {
   padding: 8px 12px;
-  border-radius: 999px;
-  border: 1px solid rgba(141, 208, 208, 0.16);
-  background: rgba(15, 23, 34, 0.86);
   color: var(--text-primary);
   cursor: pointer;
+  transition: border-color 0.15s ease, color 0.15s ease, background 0.15s ease;
 }
 
-.lightrag-graph-controls {
-  display: grid;
-  gap: 16px;
+.lightrag-chip {
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  background: var(--surface-3);
+}
+
+.lightrag-label-item {
+  border: 1px solid var(--line-soft);
+}
+
+.lightrag-chip:hover,
+.lightrag-label-item:hover {
+  border-color: rgba(36, 87, 197, 0.24);
+  color: var(--brand);
+  background: var(--brand-soft);
 }
 
 .lightrag-field {
   display: grid;
   gap: 8px;
   min-width: 180px;
+}
+
+.lightrag-note,
+.lightrag-detail-card p,
+.lightrag-detail-card pre {
+  margin: 0;
+  color: var(--text-secondary);
+  line-height: 1.7;
+}
+
+.lightrag-detail-card {
+  padding: 16px 18px;
 }
 
 .lightrag-detail-card__head {
@@ -288,11 +327,9 @@ onMounted(loadLabels);
   margin-bottom: 10px;
 }
 
-.lightrag-detail-card p,
-.lightrag-detail-card pre {
-  margin: 0;
-  color: var(--text-secondary);
-  line-height: 1.7;
+.lightrag-detail-card__head strong,
+.lightrag-label-group strong {
+  color: var(--text-primary);
 }
 
 .lightrag-detail-card details {
@@ -300,14 +337,21 @@ onMounted(loadLabels);
 }
 
 @media (max-width: 1180px) {
-  .lightrag-graph-grid,
-  .lightrag-detail-grid {
+  .lightrag-layout,
+  .lightrag-detail-layout,
+  .lightrag-control-grid {
     grid-template-columns: 1fr;
   }
 }
 
-@media (max-width: 720px) {
-  .lightrag-summary {
+@media (max-width: 820px) {
+  .lightrag-strip {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 640px) {
+  .lightrag-strip {
     grid-template-columns: 1fr;
   }
 }

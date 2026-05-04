@@ -1543,6 +1543,12 @@ html[data-theme='dark'] body {
   color: var(--brand-600);
 }
 
+.flash-stack__item.is-warning {
+  background: var(--warning-50);
+  border-color: var(--warning-100);
+  color: var(--warning-600);
+}
+
 .flash-stack__item button {
   border: 0;
   background: transparent;

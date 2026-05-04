@@ -8,6 +8,7 @@ const flash = useFlash();
 const iconFor = (type) => {
   if (type === 'success') return 'check';
   if (type === 'error') return 'alert-triangle';
+  if (type === 'warning') return 'alert-triangle';
   return 'info';
 };
 </script>

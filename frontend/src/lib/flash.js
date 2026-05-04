@@ -1,9 +1,16 @@
 import { reactive, readonly } from 'vue';
-import { ElMessage } from 'element-plus';
 
 export const createFlashStore = () => reactive({ items: [] });
 
 export const appFlashStore = createFlashStore();
+export const FLASH_DURATION_MS = 2600;
+
+const dismissFlash = (store, id) => {
+  const index = store.items.findIndex((item) => item.id === id);
+  if (index >= 0) {
+    store.items.splice(index, 1);
+  }
+};
 
 export const pushFlash = (store, entry) => {
   const payload = {
@@ -13,13 +20,10 @@ export const pushFlash = (store, entry) => {
 
   store.items.push(payload);
 
-  if (payload.message) {
-    ElMessage({
-      type: payload.type || 'info',
-      message: payload.message,
-      duration: 2600,
-      showClose: true,
-    });
+  const duration = typeof payload.duration === 'number' ? payload.duration : FLASH_DURATION_MS;
+
+  if (duration > 0 && typeof globalThis.setTimeout === 'function') {
+    globalThis.setTimeout(() => dismissFlash(store, payload.id), duration);
   }
 };
 
@@ -38,9 +42,6 @@ export const useFlash = () => ({
     pushFlash(appFlashStore, { type: 'info', message });
   },
   dismiss(id) {
-    const index = appFlashStore.items.findIndex((item) => item.id === id);
-    if (index >= 0) {
-      appFlashStore.items.splice(index, 1);
-    }
+    dismissFlash(appFlashStore, id);
   },
 });
