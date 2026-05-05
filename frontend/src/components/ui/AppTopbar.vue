@@ -1,9 +1,9 @@
 <script setup>
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { RouterLink, useRouter } from 'vue-router';
 
 import AppIcon from './AppIcon.vue';
-import { getTopbarActions } from '../../config/navigation.js';
+import { getNavItems, getTopbarActions } from '../../config/navigation.js';
 import { authSession } from '../../lib/auth-session.js';
 import { AUTH_EXPIRED_MESSAGE, authStorage } from '../../lib/auth-storage.js';
 import { useFlash } from '../../lib/flash.js';
@@ -31,7 +31,9 @@ const profileInitial = computed(() => profileName.value.trim().slice(0, 1).toUpp
 const roleLabel = computed(() => (props.area === 'admin' ? '管理员端' : '用户端'));
 
 const dropdownOpen = ref(false);
-const searchQuery = ref('');
+const paletteOpen = ref(false);
+const paletteQuery = ref('');
+const paletteIndex = ref(0);
 
 const toggleDropdown = () => {
   dropdownOpen.value = !dropdownOpen.value;
@@ -58,6 +60,75 @@ const actions = computed(() => {
   return getTopbarActions(props.area, profile.value);
 });
 
+// ── Command palette ──
+const paletteItems = computed(() => {
+  const items = getNavItems(props.area, profile.value);
+  const flattened = [];
+  const walk = (list, groupLabel) => {
+    for (const item of list) {
+      if (item.children) {
+        walk(item.children, item.label);
+      } else if (item.to) {
+        flattened.push({ ...item, group: groupLabel });
+      }
+    }
+  };
+  walk(items, '');
+  return flattened;
+});
+
+const filteredPaletteItems = computed(() => {
+  const q = paletteQuery.value.toLowerCase().trim();
+  if (!q) return paletteItems.value.slice(0, 8);
+  return paletteItems.value
+    .filter((item) => item.label.toLowerCase().includes(q) || (item.group || '').toLowerCase().includes(q))
+    .slice(0, 8);
+});
+
+const openPalette = () => {
+  paletteOpen.value = true;
+  paletteQuery.value = '';
+  paletteIndex.value = 0;
+};
+
+const closePalette = () => {
+  paletteOpen.value = false;
+};
+
+const navigatePalette = (item) => {
+  closePalette();
+  if (item.to) {
+    router.push(item.to);
+  }
+};
+
+const onPaletteKeydown = (e) => {
+  if (e.key === 'ArrowDown') {
+    e.preventDefault();
+    paletteIndex.value = Math.min(paletteIndex.value + 1, filteredPaletteItems.value.length - 1);
+  } else if (e.key === 'ArrowUp') {
+    e.preventDefault();
+    paletteIndex.value = Math.max(paletteIndex.value - 1, 0);
+  } else if (e.key === 'Enter') {
+    e.preventDefault();
+    const item = filteredPaletteItems.value[paletteIndex.value];
+    if (item) navigatePalette(item);
+  } else if (e.key === 'Escape') {
+    closePalette();
+  }
+};
+
+const onKeydown = (e) => {
+  if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
+    e.preventDefault();
+    openPalette();
+  }
+};
+
+watch(paletteQuery, () => {
+  paletteIndex.value = 0;
+});
+
 const handleLogout = async () => {
   closeDropdown();
   await authSession.logout();
@@ -71,11 +142,13 @@ const handleAuthExpired = async (event) => {
 onMounted(() => {
   window.addEventListener('finmodpro:auth-expired', handleAuthExpired);
   document.addEventListener('click', handleClickOutside);
+  document.addEventListener('keydown', onKeydown);
 });
 
 onBeforeUnmount(() => {
   window.removeEventListener('finmodpro:auth-expired', handleAuthExpired);
   document.removeEventListener('click', handleClickOutside);
+  document.removeEventListener('keydown', onKeydown);
 });
 </script>
 
@@ -95,13 +168,14 @@ onBeforeUnmount(() => {
     </div>
 
     <div class="app-topbar__actions">
-      <div class="app-topbar__search">
+      <div class="app-topbar__search" @click="openPalette">
         <AppIcon name="search" class="app-topbar__search-icon" />
         <input
-          v-model="searchQuery"
           type="text"
           class="app-topbar__search-input"
-          placeholder="搜索金融资讯、知识条目..."
+          placeholder="搜索页面... (Ctrl+K)"
+          readonly
+          @focus="openPalette"
         />
       </div>
 
@@ -161,4 +235,43 @@ onBeforeUnmount(() => {
       </div>
     </div>
   </header>
+
+  <!-- Command Palette -->
+  <Teleport to="body">
+    <Transition name="fade">
+      <div v-if="paletteOpen" class="cmd-palette-overlay" @click.self="closePalette">
+        <div class="cmd-palette" @keydown="onPaletteKeydown">
+          <div class="cmd-palette__input-row">
+            <AppIcon name="search" />
+            <input
+              ref="paletteInputRef"
+              v-model="paletteQuery"
+              type="text"
+              class="cmd-palette__input"
+              placeholder="搜索导航..."
+              autofocus
+            />
+            <kbd>ESC</kbd>
+          </div>
+          <div class="cmd-palette__results">
+            <div
+              v-for="(item, index) in filteredPaletteItems"
+              :key="item.to"
+              class="cmd-palette__item"
+              :class="{ 'is-active': index === paletteIndex }"
+              @click="navigatePalette(item)"
+              @mouseenter="paletteIndex = index"
+            >
+              <AppIcon :name="item.icon || 'circle'" />
+              <span>{{ item.label }}</span>
+              <small v-if="item.group">{{ item.group }}</small>
+            </div>
+            <div v-if="filteredPaletteItems.length === 0" class="cmd-palette__empty">
+              无匹配结果
+            </div>
+          </div>
+        </div>
+      </div>
+    </Transition>
+  </Teleport>
 </template>

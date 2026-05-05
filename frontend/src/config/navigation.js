@@ -30,6 +30,7 @@ export const navigationMap = {
       ],
     },
     { id: 'admin-evaluation', label: '评测结果', to: '/admin/evaluation', icon: 'check', group: 'admin-governance' },
+    { id: 'admin-audit-logs', label: '操作审计', to: '/admin/audit-logs', icon: 'clipboard', group: 'admin-governance' },
   ],
 };
 

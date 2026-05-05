@@ -159,7 +159,7 @@ const isItemActive = (item) => {
       </section>
     </nav>
 
-    <div v-if="props.area === 'workspace'" class="app-sidebar__profile">
+    <div v-if="props.area === 'workspace' || props.area === 'admin'" class="app-sidebar__profile">
       <button class="app-sidebar__profile-trigger" type="button" :aria-label="`账号菜单：${profileName}`">
         <span class="app-sidebar__avatar">{{ profileInitial }}</span>
         <span class="app-sidebar__profile-copy">

@@ -4,6 +4,7 @@ import { ElMessage } from 'element-plus';
 
 import { dashboardApi } from '../api/dashboard.js';
 import { riskApi } from '../api/risk.js';
+import { createApiConfig } from '../api/config.js';
 import {
   buildDashboardDocumentOption,
   buildDashboardDonutOption,
@@ -18,6 +19,7 @@ import AppIcon from './ui/AppIcon.vue';
 
 const dashboardStats = ref(normalizeDashboardPayload({}));
 const audits = ref([]);
+const health = ref(null);
 const isLoading = ref(true);
 const errorMsg = ref('');
 const refreshedAt = ref('');
@@ -86,14 +88,16 @@ const fetchData = async () => {
   errorMsg.value = '';
 
   try {
-    const [statsRes, auditRes] = await Promise.all([
+    const [statsRes, auditRes, healthRes] = await Promise.all([
       dashboardApi.getStats(),
       dashboardApi.getAudits({ limit: 8 }).catch(() => null),
+      createApiConfig().fetchJson('/api/systemcheck/health/', { method: 'GET' }).catch(() => null),
     ]);
     dashboardStats.value = normalizeDashboardPayload(statsRes);
     audits.value = Array.isArray(auditRes?.audits)
       ? auditRes.audits
       : dashboardStats.value.audit_snippets;
+    health.value = healthRes?.data || healthRes || null;
     refreshedAt.value = formatTimestamp(Date.now());
   } catch (error) {
     console.error('Dashboard data fetch failed:', error);
@@ -125,9 +129,9 @@ const riskLevelRows = computed(() => {
   const total = Math.max(1, high + medium + low);
 
   return [
-    { label: '高风险', value: high, color: '#f04d5d' },
-    { label: '中风险', value: medium, color: '#f3a21b' },
-    { label: '低风险', value: low, color: '#2f74ff' },
+    { label: '高风险', value: high, color: 'var(--risk, #f04d5d)' },
+    { label: '中风险', value: medium, color: 'var(--warning, #f3a21b)' },
+    { label: '低风险', value: low, color: 'var(--brand, #2f74ff)' },
   ].map((item) => ({
     ...item,
     percent: `${(item.value / total * 100).toFixed(1)}%`,
@@ -242,6 +246,8 @@ const footerSources = computed(() => [
   '系统审计记录',
 ].join('、'));
 
+const retryingId = ref(null);
+
 const isRetryableAudit = (item) => (
   item?.status === 'failed'
   && ['risk.extract', 'risk.batch_extract'].includes(item?.action)
@@ -249,10 +255,11 @@ const isRetryableAudit = (item) => (
 );
 
 const retryAuditAction = async (item) => {
-  if (!isRetryableAudit(item)) {
+  if (!isRetryableAudit(item) || retryingId.value) {
     return;
   }
 
+  retryingId.value = item.id;
   try {
     if (item.action === 'risk.extract') {
       await riskApi.retryExtractDocument(item.target_id);
@@ -269,6 +276,8 @@ const retryAuditAction = async (item) => {
   } catch (error) {
     console.error('Failed to retry risk audit action:', error);
     ElMessage.error(error?.message || '重新触发失败，请稍后重试。');
+  } finally {
+    retryingId.value = null;
   }
 };
 </script>
@@ -303,6 +312,18 @@ const retryAuditAction = async (item) => {
       </article>
     </section>
 
+    <div v-if="health" class="ops-board__health">
+      <span class="ops-board__health-item" :class="health.checks?.database === 'ok' ? 'is-ok' : 'is-err'">
+        <span class="ops-board__health-dot" />
+        DB
+      </span>
+      <span class="ops-board__health-item" :class="health.checks?.redis === 'ok' ? 'is-ok' : 'is-err'">
+        <span class="ops-board__health-dot" />
+        Redis
+      </span>
+      <span class="ops-board__health-status">{{ health.status === 'ok' ? '系统正常' : '部分降级' }}</span>
+    </div>
+
     <section class="ops-board__grid">
       <article class="board-panel board-panel--trend">
         <div class="board-panel__header">
@@ -316,7 +337,7 @@ const retryAuditAction = async (item) => {
             <span>近90天</span>
           </div>
         </div>
-        <AdminChart :option="trendOption" height="260px" />
+        <AdminChart :option="trendOption" height="180px" />
       </article>
 
       <article class="board-panel board-panel--level">
@@ -328,7 +349,7 @@ const retryAuditAction = async (item) => {
         </div>
         <div class="risk-level-layout">
           <div class="donut-wrap">
-            <AdminChart :option="riskLevelOption" height="200px" />
+            <AdminChart :option="riskLevelOption" height="150px" />
             <div class="donut-center donut-center--level">
               <strong>{{ formatNumber(dashboardStats.risk_event_count) }}</strong>
               <span>风险信息总数</span>
@@ -353,7 +374,7 @@ const retryAuditAction = async (item) => {
         </div>
         <div class="source-layout">
           <div class="donut-wrap">
-            <AdminChart :option="sourceOption" height="200px" />
+            <AdminChart :option="sourceOption" height="150px" />
             <div class="donut-center donut-center--source">
               <strong>{{ formatNumber(dashboardStats.document_count + dashboardStats.risk_event_count) }}</strong>
               <span>核心样本量</span>
@@ -377,7 +398,7 @@ const retryAuditAction = async (item) => {
           </div>
         </div>
         <div class="event-table-wrap">
-          <table class="event-table">
+          <table v-if="topEvents.length > 0" class="event-table">
             <thead>
               <tr>
                 <th>事件标题</th>
@@ -403,14 +424,16 @@ const retryAuditAction = async (item) => {
                     v-if="isRetryableAudit(row.audit)"
                     type="button"
                     class="table-action"
+                    :disabled="retryingId === row.audit?.id"
                     @click="retryAuditAction(row.audit)"
                   >
-                    重试
+                    {{ retryingId === row.audit?.id ? '重试中...' : '重试' }}
                   </button>
                 </td>
               </tr>
             </tbody>
           </table>
+          <div v-else class="admin-empty-state">暂无高风险事项</div>
         </div>
       </article>
 
@@ -439,7 +462,7 @@ const retryAuditAction = async (item) => {
             <span>解析、切块、索引与失败状态</span>
           </div>
         </div>
-        <AdminChart :option="documentOption" height="200px" />
+        <AdminChart :option="documentOption" height="150px" />
       </article>
     </section>
 
@@ -452,71 +475,56 @@ const retryAuditAction = async (item) => {
 
 <style scoped>
 .ops-board {
-  --board-bg: #050b16;
-  --board-panel: rgba(11, 22, 43, 0.92);
-  --board-panel-2: rgba(14, 27, 51, 0.92);
-  --board-line: rgba(91, 132, 205, 0.2);
-  --board-line-strong: rgba(91, 132, 205, 0.34);
-  --board-text: #dbe7ff;
-  --board-muted: #7f8da7;
-  --board-blue: #2f74ff;
-  --board-cyan: #2fd3d0;
-  --board-red: #f04d5d;
-  --board-orange: #f3a21b;
-  --board-purple: #8758ff;
-  --board-green: #19d59a;
   display: grid;
-  gap: 14px;
-  color: var(--board-text);
+  gap: 8px;
+  color: var(--text-secondary);
 }
 
 .ops-board__actions {
   display: flex;
   flex-wrap: wrap;
-  gap: 10px;
+  gap: 8px;
   justify-content: flex-end;
 }
 
 .ops-board__chip {
-  height: 40px;
-  border: 1px solid var(--board-line);
-  border-radius: 8px;
-  background: rgba(7, 17, 34, 0.88);
-  color: #aebbd2;
+  height: 28px;
+  border: 1px solid var(--line-soft);
+  border-radius: 4px;
+  background: var(--surface-1);
+  color: var(--text-muted);
   display: inline-flex;
   align-items: center;
-  gap: 10px;
-  padding: 0 14px;
+  gap: 6px;
+  padding: 0 10px;
   font: inherit;
-  font-size: 13px;
+  font-size: 0.6875rem;
   cursor: pointer;
 }
 
 .ops-board__chip.is-primary {
-  border-color: rgba(64, 125, 255, 0.55);
-  background: #164fbf;
+  border-color: var(--brand);
+  background: var(--brand);
   color: #fff;
-  font-weight: 800;
+  font-weight: 700;
 }
 
+/* ── Summary: 1-row compact indicator strip ── */
 .ops-board__summary {
-  min-height: 80px;
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  border: 1px solid var(--board-line);
-  border-radius: 9px;
-  background:
-    linear-gradient(180deg, rgba(12, 27, 54, 0.92), rgba(7, 18, 36, 0.92));
+  border: 1px solid var(--line-soft);
+  border-radius: 4px;
+  background: var(--surface-1);
   overflow: hidden;
 }
 
 .summary-tile {
-  display: grid;
-  grid-template-columns: 32px minmax(0, 1fr);
-  gap: 10px;
+  display: flex;
   align-items: center;
-  padding: 14px 16px;
-  border-right: 1px solid rgba(91, 132, 205, 0.16);
+  gap: 8px;
+  padding: 8px 12px;
+  border-right: 1px solid var(--line-soft);
 }
 
 .summary-tile:last-child {
@@ -524,94 +532,122 @@ const retryAuditAction = async (item) => {
 }
 
 .summary-tile__icon {
-  width: 32px;
-  height: 32px;
-  border-radius: 50%;
+  width: 24px;
+  height: 24px;
+  border-radius: 4px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  color: currentColor;
-  background: rgba(47, 116, 255, 0.16);
-  box-shadow: 0 0 22px rgba(47, 116, 255, 0.22);
+  flex-shrink: 0;
+  color: var(--brand);
+  background: var(--brand-soft);
 }
 
 .summary-tile__icon :deep(.app-icon) {
-  width: 16px;
-  height: 16px;
+  width: 13px;
+  height: 13px;
 }
 
-.summary-tile.is-blue { color: #5fa4ff; }
-.summary-tile.is-red { color: #ff5265; }
-.summary-tile.is-cyan { color: #52d7e9; }
-.summary-tile.is-purple { color: #b16cff; }
-.summary-tile.is-green { color: #28d59a; }
-.summary-tile.is-orange { color: #ffad2f; }
+.summary-tile.is-blue  { color: var(--brand); }
+.summary-tile.is-red   { color: var(--risk); }
+.summary-tile.is-cyan  { color: var(--info, #52d7e9); }
+.summary-tile.is-purple{ color: var(--brand-300, #b16cff); }
+.summary-tile.is-green { color: var(--success); }
+.summary-tile.is-orange{ color: var(--warning); }
 
 .summary-tile__label {
-  display: block;
-  color: #91a0b8;
-  font-size: 13px;
-  font-weight: 800;
-  margin-bottom: 7px;
+  color: var(--text-muted);
+  font-size: 0.6875rem;
+  font-weight: 700;
+  white-space: nowrap;
 }
 
 .summary-tile strong {
-  display: block;
   color: currentColor;
-  font-size: clamp(18px, 1.5vw, 24px);
-  line-height: 1.05;
-  font-weight: 900;
+  font-size: 1.125rem;
+  line-height: 1.1;
+  font-weight: 800;
 }
 
 .summary-tile p {
-  margin: 8px 0 0;
-  color: #8391aa;
-  font-size: 12px;
-  font-weight: 700;
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 0.625rem;
 }
 
 .summary-tile em {
-  color: #19d59a;
+  color: var(--success);
   font-style: normal;
-  margin-left: 6px;
+  margin-left: 4px;
 }
 
 .summary-tile.is-red em,
 .summary-tile.is-orange em {
-  color: #ff5265;
+  color: var(--risk);
 }
 
+/* ── Health strip ── */
+.ops-board__health {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 12px;
+  border: 1px solid var(--line-soft);
+  border-radius: 4px;
+  background: var(--surface-1);
+  font-size: 0.6875rem;
+}
+
+.ops-board__health-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-weight: 700;
+}
+
+.ops-board__health-item.is-ok { color: var(--success); }
+.ops-board__health-item.is-err { color: var(--risk); }
+
+.ops-board__health-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.ops-board__health-status {
+  margin-left: auto;
+  color: var(--text-muted);
+}
+
+/* ── Chart grid: 3-col, compact ── */
 .ops-board__grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  grid-auto-rows: minmax(160px, auto);
+  grid-auto-rows: minmax(140px, auto);
   gap: 8px;
 }
 
 .board-panel {
   min-width: 0;
-  border: 1px solid var(--board-line);
-  border-radius: 9px;
-  background:
-    linear-gradient(180deg, rgba(12, 27, 54, 0.92), rgba(7, 18, 36, 0.92));
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.025),
-    0 14px 30px rgba(0, 0, 0, 0.16);
+  border: 1px solid var(--line-soft);
+  border-radius: 4px;
+  background: var(--surface-1);
   overflow: hidden;
 }
 
 .board-panel--process,
 .board-panel--documents {
-  min-height: 180px;
+  min-height: 140px;
 }
 
 .board-panel__header {
-  min-height: 48px;
+  min-height: 36px;
   display: flex;
   justify-content: space-between;
   align-items: center;
-  gap: 16px;
-  padding: 0 16px;
+  gap: 12px;
+  padding: 0 10px;
 }
 
 .board-panel__header div:first-child {
@@ -620,44 +656,43 @@ const retryAuditAction = async (item) => {
 
 .board-panel__header strong {
   display: block;
-  color: #edf4ff;
-  font-size: 16px;
-  font-weight: 900;
+  color: var(--text-primary);
+  font-size: 0.8125rem;
+  font-weight: 700;
 }
 
 .board-panel__header span {
   display: block;
-  margin-top: 3px;
-  color: #7f8da7;
-  font-size: 12px;
-  font-weight: 700;
+  color: var(--text-muted);
+  font-size: 0.6875rem;
 }
 
 .board-tabs {
   display: flex;
-  gap: 7px;
-  padding: 3px;
-  border-radius: 8px;
-  border: 1px solid rgba(91, 132, 205, 0.15);
-  background: rgba(8, 17, 35, 0.5);
+  gap: 4px;
+  padding: 2px;
+  border-radius: 4px;
+  border: 1px solid var(--line-soft);
+  background: var(--surface-2);
 }
 
 .board-tabs span {
-  min-height: 26px;
+  min-height: 22px;
   display: inline-flex;
   align-items: center;
-  padding: 0 11px;
-  border-radius: 6px;
-  color: #8190a8;
-  font-size: 12px;
-  font-weight: 800;
+  padding: 0 8px;
+  border-radius: 3px;
+  color: var(--text-muted);
+  font-size: 0.6875rem;
+  font-weight: 700;
 }
 
 .board-tabs .is-active {
   color: #fff;
-  background: #164fbf;
+  background: var(--brand);
 }
 
+/* ── Donut charts ── */
 .donut-wrap {
   position: relative;
 }
@@ -666,28 +701,27 @@ const retryAuditAction = async (item) => {
   position: absolute;
   pointer-events: none;
   text-align: center;
-  color: #edf4ff;
+  color: var(--text-primary);
 }
 
 .donut-center strong {
   display: block;
-  font-size: 22px;
+  font-size: 1rem;
   line-height: 1.1;
 }
 
 .donut-center span {
   display: block;
-  margin-top: 4px;
-  color: #a9b6ca;
-  font-size: 12px;
-  font-weight: 800;
+  margin-top: 2px;
+  color: var(--text-muted);
+  font-size: 0.625rem;
 }
 
 .donut-center--level,
 .donut-center--source {
-  left: calc(35% - 52px);
-  top: 82px;
-  width: 104px;
+  left: calc(35% - 44px);
+  top: 64px;
+  width: 88px;
 }
 
 .source-legend,
@@ -695,25 +729,25 @@ const retryAuditAction = async (item) => {
   display: flex;
   flex-direction: column;
   justify-content: center;
-  gap: 12px;
+  gap: 8px;
   min-width: 0;
-  color: #a7b5cb;
-  font-size: 12px;
-  font-weight: 800;
+  color: var(--text-secondary);
+  font-size: 0.6875rem;
+  font-weight: 700;
 }
 
 .source-legend div,
 .risk-level-legend div {
   display: grid;
-  grid-template-columns: 10px minmax(0, 1fr) auto;
+  grid-template-columns: 8px minmax(0, 1fr) auto;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
 }
 
 .source-legend span,
 .risk-level-legend span {
-  width: 10px;
-  height: 10px;
+  width: 8px;
+  height: 8px;
   border-radius: 2px;
 }
 
@@ -727,7 +761,7 @@ const retryAuditAction = async (item) => {
 
 .source-legend em,
 .risk-level-legend em {
-  color: #dbe7ff;
+  color: var(--text-primary);
   font-style: normal;
   white-space: nowrap;
 }
@@ -735,37 +769,37 @@ const retryAuditAction = async (item) => {
 .risk-level-layout,
 .source-layout {
   display: grid;
-  grid-template-columns: minmax(180px, 0.95fr) minmax(150px, 1fr);
+  grid-template-columns: minmax(160px, 0.95fr) minmax(130px, 1fr);
   align-items: center;
-  padding: 0 14px 14px;
+  padding: 0 10px 10px;
 }
 
+/* ── Event table ── */
 .event-table-wrap {
   overflow-x: auto;
-  padding: 0 12px 12px;
+  padding: 0 8px 8px;
 }
 
 .event-table {
   width: 100%;
-  min-width: 720px;
+  min-width: 640px;
   border-collapse: collapse;
-  color: #a7b5cb;
-  font-size: 12px;
+  color: var(--text-secondary);
+  font-size: 0.6875rem;
 }
 
 .event-table th {
-  height: 34px;
-  color: #74859f;
-  font-weight: 800;
+  height: 28px;
+  color: var(--text-muted);
+  font-weight: 700;
   text-align: left;
-  background: rgba(11, 27, 52, 0.75);
-  border-bottom: 1px solid rgba(91, 132, 205, 0.12);
+  border-bottom: 1px solid var(--line-soft);
 }
 
 .event-table td {
-  height: 32px;
-  max-width: 380px;
-  border-bottom: 1px solid rgba(91, 132, 205, 0.08);
+  height: 28px;
+  max-width: 320px;
+  border-bottom: 1px solid var(--line-soft);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -774,107 +808,111 @@ const retryAuditAction = async (item) => {
 .event-rank {
   display: inline-grid;
   place-items: center;
-  width: 18px;
-  height: 18px;
-  margin-right: 8px;
-  border-radius: 4px;
-  background: rgba(255, 82, 101, 0.15);
-  color: #ff5265;
-  font-size: 11px;
-  font-weight: 900;
+  width: 16px;
+  height: 16px;
+  margin-right: 6px;
+  border-radius: 3px;
+  background: var(--brand-soft);
+  color: var(--brand);
+  font-size: 0.625rem;
+  font-weight: 800;
 }
 
 .risk-tag {
   display: inline-grid;
   place-items: center;
-  width: 24px;
-  height: 22px;
-  border-radius: 5px;
-  font-size: 12px;
-  font-weight: 900;
+  width: 22px;
+  height: 18px;
+  border-radius: 3px;
+  font-size: 0.6875rem;
+  font-weight: 800;
 }
 
-.risk-tag.is-high { color: #ff5265; background: rgba(255, 82, 101, 0.15); }
-.risk-tag.is-mid { color: #f3a21b; background: rgba(243, 162, 27, 0.14); }
-.risk-tag.is-low { color: #19d59a; background: rgba(25, 213, 154, 0.14); }
+.risk-tag.is-high { color: var(--risk); background: rgba(240, 77, 93, 0.12); }
+.risk-tag.is-mid  { color: var(--warning); background: rgba(243, 162, 27, 0.12); }
+.risk-tag.is-low  { color: var(--success); background: rgba(25, 213, 154, 0.12); }
 
 .table-action {
   border: 0;
   background: transparent;
-  color: #5fa4ff;
+  color: var(--brand);
   font: inherit;
-  font-weight: 800;
+  font-weight: 700;
   cursor: pointer;
 }
 
+.table-action:disabled {
+  color: var(--text-muted);
+  cursor: not-allowed;
+}
+
+/* ── Process stats ── */
 .process-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 12px 14px;
-  padding: 8px 14px 16px;
+  gap: 6px 10px;
+  padding: 6px 10px 10px;
 }
 
 .process-item {
   display: grid;
-  grid-template-columns: 38px minmax(0, 1fr);
+  grid-template-columns: 28px minmax(0, 1fr);
   align-items: center;
-  gap: 10px;
+  gap: 8px;
 }
 
 .process-item > span {
-  width: 34px;
-  height: 34px;
-  border-radius: 50%;
-  background: rgba(47, 116, 255, 0.15);
+  width: 26px;
+  height: 26px;
+  border-radius: 4px;
+  background: var(--brand-soft);
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  color: #5fa4ff;
-  border: 1px solid rgba(95, 164, 255, 0.22);
+  color: var(--brand);
 }
 
 .process-item b {
   display: block;
-  color: #8897af;
-  font-size: 12px;
-  font-weight: 800;
+  color: var(--text-muted);
+  font-size: 0.6875rem;
+  font-weight: 700;
 }
 
 .process-item strong {
   display: block;
-  color: #5fa4ff;
-  font-size: 20px;
-  line-height: 1.25;
-  font-weight: 900;
+  color: var(--brand);
+  font-size: 1rem;
+  line-height: 1.2;
+  font-weight: 800;
 }
 
+/* ── Footer ── */
 .ops-board__footer {
-  min-height: 42px;
+  min-height: 32px;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 16px;
-  padding: 0 18px;
-  border: 1px solid var(--board-line);
-  border-radius: 9px;
-  background: rgba(7, 18, 36, 0.92);
-  color: #718199;
-  font-size: 13px;
+  gap: 12px;
+  padding: 0 12px;
+  border: 1px solid var(--line-soft);
+  border-radius: 4px;
+  background: var(--surface-1);
+  color: var(--text-muted);
+  font-size: 0.6875rem;
 }
 
+/* ── Responsive ── */
 @media (max-width: 1320px) {
   .ops-board__summary {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
-
   .summary-tile:nth-child(2n) {
     border-right: 0;
   }
-
   .ops-board__grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
-
   .board-panel--table {
     grid-column: span 2;
   }
@@ -886,28 +924,23 @@ const retryAuditAction = async (item) => {
   .source-layout {
     grid-template-columns: 1fr;
   }
-
   .ops-board__summary {
     grid-template-columns: 1fr;
   }
-
   .summary-tile {
     border-right: 0;
-    border-bottom: 1px solid rgba(91, 132, 205, 0.16);
+    border-bottom: 1px solid var(--line-soft);
   }
-
   .board-panel--table {
     grid-column: span 1;
   }
-
   .process-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
-
   .ops-board__footer {
     align-items: flex-start;
     flex-direction: column;
-    padding-block: 12px;
+    padding-block: 8px;
   }
 }
 
@@ -917,7 +950,6 @@ const retryAuditAction = async (item) => {
     align-items: stretch;
     flex-direction: column;
   }
-
   .process-grid {
     grid-template-columns: 1fr;
   }

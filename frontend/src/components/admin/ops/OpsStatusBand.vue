@@ -52,20 +52,20 @@ defineProps({
   font-weight: 700;
   letter-spacing: 0.14em;
   text-transform: uppercase;
-  color: #8aa0b8;
+  color: var(--text-muted);
 }
 
 .ops-status-band__value {
-  color: #f3f6fb;
-  font-size: 28px;
+  color: var(--text-primary);
+  font-size: 1.25rem;
   line-height: 1;
   letter-spacing: -0.04em;
 }
 
 .ops-status-band__note {
   margin: 0;
-  color: #9caec1;
-  font-size: 13px;
+  color: var(--text-secondary);
+  font-size: 0.75rem;
   line-height: 1.55;
 }
 

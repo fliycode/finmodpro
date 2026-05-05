@@ -1,14 +1,25 @@
-const BRAND = '#2457c5';
-const BRAND_SOFT = '#9db7f2';
-const RISK = '#c4493d';
-const WARNING = '#b7791f';
-const MUTED = '#7d8798';
-const SUCCESS = '#21815c';
-const BOARD_TEXT = '#dbe7ff';
-const BOARD_MUTED = '#8190aa';
-const BOARD_GRID = 'rgba(91, 132, 205, 0.12)';
-const BOARD_PANEL = 'rgba(7, 16, 32, 0.94)';
-const BOARD_LINE = 'rgba(91, 132, 205, 0.34)';
+const readCSS = (name, fallback) => {
+  try {
+    const value = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+    return value || fallback;
+  } catch {
+    return fallback;
+  }
+};
+
+const chartColors = () => ({
+  brand: readCSS('--brand', '#2457c5'),
+  brandSoft: readCSS('--brand-200', '#9db7f2'),
+  risk: readCSS('--risk', '#c4493d'),
+  warning: readCSS('--warning', '#b7791f'),
+  muted: readCSS('--text-muted', '#7d8798'),
+  success: readCSS('--success', '#21815c'),
+  textPrimary: readCSS('--text-primary', '#dbe7ff'),
+  textSecondary: readCSS('--text-secondary', '#8190aa'),
+  gridLine: readCSS('--line-soft', 'rgba(91, 132, 205, 0.12)'),
+  surfaceBg: readCSS('--surface-1', 'rgba(7, 16, 32, 0.94)'),
+  lineStrong: readCSS('--line-strong', 'rgba(91, 132, 205, 0.34)'),
+});
 
 const formatShortDate = (raw) => {
   if (!raw || typeof raw !== 'string') {
@@ -59,19 +70,20 @@ const buildWeightedRows = (total, rows) => {
   });
 };
 
-const toneByRiskLevel = {
-  low: SUCCESS,
-  medium: WARNING,
-  high: RISK,
-  critical: '#8d2f27',
+const toneByRiskLevel = () => {
+  const c = chartColors();
+  return { low: c.success, medium: c.warning, high: c.risk, critical: '#8d2f27' };
 };
 
-const toneByDocumentStatus = {
-  uploaded: MUTED,
-  parsed: BRAND_SOFT,
-  chunked: BRAND,
-  indexed: SUCCESS,
-  failed: RISK,
+const toneByDocumentStatus = () => {
+  const c = chartColors();
+  return {
+    uploaded: c.muted,
+    parsed: c.brandSoft,
+    chunked: c.brand,
+    indexed: c.success,
+    failed: c.risk,
+  };
 };
 
 export function normalizeDashboardPayload(payload) {
@@ -237,17 +249,23 @@ export function buildDashboardSourceRows(stats) {
   ];
 }
 
-const buildBoardTooltip = () => ({
-  backgroundColor: BOARD_PANEL,
-  borderColor: BOARD_LINE,
-  textStyle: { color: BOARD_TEXT },
-});
+const buildBoardTooltip = () => {
+  const c = chartColors();
+  return {
+    backgroundColor: c.surfaceBg,
+    borderColor: c.lineStrong,
+    textStyle: { color: c.textPrimary },
+  };
+};
 
-const buildBoardAxis = () => ({
-  axisLine: { lineStyle: { color: 'rgba(91, 132, 205, 0.26)' } },
-  axisTick: { show: false },
-  axisLabel: { color: BOARD_MUTED, fontWeight: 700 },
-});
+const buildBoardAxis = () => {
+  const c = chartColors();
+  return {
+    axisLine: { lineStyle: { color: 'rgba(91, 132, 205, 0.26)' } },
+    axisTick: { show: false },
+    axisLabel: { color: c.textSecondary, fontWeight: 700 },
+  };
+};
 
 const getFallbackTrendSeries = (total, days) => {
   const safeTotal = Math.max(1, toNumber(total));
@@ -285,14 +303,14 @@ export function buildDashboardTrendOption(stats) {
   const axis = buildBoardAxis();
 
   return {
-    color: ['#2f74ff', '#f04d5d', '#2fd3d0'],
+    color: [chartColors().brand, chartColors().risk, '#2fd3d0'],
     tooltip: { trigger: 'axis', ...buildBoardTooltip() },
     legend: {
       top: 0,
       left: 32,
       itemWidth: 18,
       itemHeight: 8,
-      textStyle: { color: BOARD_MUTED, fontWeight: 700 },
+      textStyle: { color: chartColors().textSecondary, fontWeight: 700 },
       data: ['问答请求', '高风险预警', '检索命中'],
     },
     grid: { left: 42, right: 34, top: 52, bottom: 28 },
@@ -306,7 +324,7 @@ export function buildDashboardTrendOption(stats) {
         type: 'value',
         minInterval: 1,
         axisLabel: axis.axisLabel,
-        splitLine: { lineStyle: { color: BOARD_GRID } },
+        splitLine: { lineStyle: { color: chartColors().gridLine } },
       },
       {
         type: 'value',
@@ -414,7 +432,7 @@ export function buildDashboardDocumentOption(stats) {
       type: 'value',
       minInterval: 1,
       axisLabel: axis.axisLabel,
-      splitLine: { lineStyle: { color: BOARD_GRID } },
+      splitLine: { lineStyle: { color: chartColors().gridLine } },
     },
     yAxis: {
       type: 'category',
@@ -526,7 +544,7 @@ export function buildTrendChartOption(stats) {
   const hits = Array.isArray(stats?.retrieval_hits_7d) ? stats.retrieval_hits_7d : [];
 
   return {
-    color: [BRAND, WARNING],
+    color: [chartColors().brand, chartColors().warning],
     tooltip: { trigger: 'axis' },
     legend: { bottom: 0, icon: 'circle' },
     grid: { left: 12, right: 18, top: 28, bottom: 44, containLabel: true },
@@ -534,12 +552,12 @@ export function buildTrendChartOption(stats) {
       type: 'category',
       data: requests.map((item) => formatShortDate(item.date)),
       axisLine: { lineStyle: { color: '#d9e1eb' } },
-      axisLabel: { color: MUTED },
+      axisLabel: { color: chartColors().muted },
     },
     yAxis: {
       type: 'value',
       minInterval: 1,
-      axisLabel: { color: MUTED },
+      axisLabel: { color: chartColors().muted },
       splitLine: { lineStyle: { color: '#e9edf3' } },
     },
     series: [
@@ -578,11 +596,11 @@ export function buildRiskDistributionOption(stats) {
         type: 'pie',
         radius: ['48%', '72%'],
         center: ['50%', '46%'],
-        label: { color: MUTED },
+        label: { color: chartColors().muted },
         data: rows.map((row) => ({
           name: row.name,
           value: toNumber(distribution[row.key]),
-          itemStyle: { color: toneByRiskLevel[row.key] },
+          itemStyle: { color: toneByRiskLevel()[row.key] },
         })),
       },
     ],
@@ -600,19 +618,19 @@ export function buildDocumentStatusOption(stats) {
   ];
 
   return {
-    color: [BRAND],
+    color: [chartColors().brand],
     tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
     grid: { left: 12, right: 18, top: 18, bottom: 18, containLabel: true },
     xAxis: {
       type: 'value',
       minInterval: 1,
-      axisLabel: { color: MUTED },
+      axisLabel: { color: chartColors().muted },
       splitLine: { lineStyle: { color: '#e9edf3' } },
     },
     yAxis: {
       type: 'category',
       data: rows.map((row) => row.label),
-      axisLabel: { color: MUTED },
+      axisLabel: { color: chartColors().muted },
       axisLine: { lineStyle: { color: '#d9e1eb' } },
     },
     series: [
@@ -621,7 +639,7 @@ export function buildDocumentStatusOption(stats) {
         barWidth: 16,
         itemStyle: {
           borderRadius: [0, 8, 8, 0],
-          color: (params) => toneByDocumentStatus[rows[params.dataIndex]?.key] || BRAND,
+          color: (params) => toneByDocumentStatus()[rows[params.dataIndex]?.key] || chartColors().brand,
         },
         data: rows.map((row) => toNumber(distribution[row.key])),
       },

@@ -1,12 +1,13 @@
 <script setup>
 import { ref, onMounted, computed } from 'vue';
+import { ElMessageBox } from 'element-plus';
 import { adminApi } from '../api/admin.js';
 import { useFlash } from '../lib/flash.js';
 import GovernanceReviewDesk from './admin/governance/GovernanceReviewDesk.vue';
 import OpsSectionFrame from './admin/ops/OpsSectionFrame.vue';
 import OpsStatusBand from './admin/ops/OpsStatusBand.vue';
+import AdminDataTable from './admin/AdminDataTable.vue';
 import AppSectionCard from './ui/AppSectionCard.vue';
-import AppToolbar from './ui/AppToolbar.vue';
 
 const users = ref([]);
 const groups = ref([]);
@@ -124,6 +125,14 @@ const userStatusItems = computed(() => ([
     note: '尚未分配角色组的用户。',
   },
 ]));
+const tableColumns = [
+  { prop: 'id', label: 'ID', width: '80' },
+  { prop: 'username', label: '用户名', minWidth: '140', sortable: true },
+  { prop: 'email', label: '邮箱', minWidth: '180' },
+  { key: 'groups', label: '角色组', minWidth: '180', slot: 'groups' },
+  { key: 'actions', label: '操作', width: '100', fixed: 'right', slot: 'actions', tooltip: false },
+];
+
 const frameMeta = computed(() => [
   `筛选结果：${filteredUsers.value.length}`,
   `待补角色：${ungroupedCount.value}`,
@@ -139,7 +148,7 @@ const groupDistribution = computed(() => groups.value
 const openEditDrawer = (user) => {
   if (!user) return;
   selectedUser.value = {
-    ...JSON.parse(JSON.stringify(user)),
+    ...structuredClone(user),
     groups: Array.isArray(user.groups) ? [...user.groups] : [],
   };
   showEditDrawer.value = true;
@@ -152,6 +161,10 @@ const closeEditDrawer = () => {
 
 const handleUpdateGroups = async () => {
   if (!selectedUser.value) return;
+  if (!selectedUser.value.groups || selectedUser.value.groups.length === 0) {
+    flash.error('请至少选择一个角色组。');
+    return;
+  }
   isUpdating.value = true;
   try {
     const groupNames = [...selectedUser.value.groups];
@@ -168,6 +181,24 @@ const handleUpdateGroups = async () => {
     flash.error(err.message || '更新失败');
   } finally {
     isUpdating.value = false;
+  }
+};
+
+const confirmAndUpdate = async () => {
+  if (!selectedUser.value) return;
+  if (!selectedUser.value.groups || selectedUser.value.groups.length === 0) {
+    flash.error('请至少选择一个角色组。');
+    return;
+  }
+  try {
+    await ElMessageBox.confirm(
+      `确认将 ${selectedUser.value.username} 的角色更新为：${selectedUser.value.groups.join('、') || '无'}？`,
+      '确认操作',
+      { confirmButtonText: '确认', cancelButtonText: '取消', type: 'warning' }
+    );
+    await handleUpdateGroups();
+  } catch {
+    // user cancelled
   }
 };
 </script>
@@ -226,28 +257,26 @@ const handleUpdateGroups = async () => {
         </AppSectionCard>
       </template>
 
-      <AppSectionCard title="用户列表" desc="支持按用户名、邮箱和角色组快速筛选，并通过抽屉修改所属角色。" admin>
-        <el-table :data="filteredUsers" stripe style="width: 100%" v-loading="isLoading">
-          <el-table-column prop="id" label="ID" width="90" />
-          <el-table-column prop="username" label="用户名" min-width="160" />
-          <el-table-column prop="email" label="邮箱" min-width="220" />
-          <el-table-column label="角色组" min-width="220">
-            <template #default="scope">
-              <div v-if="scope && scope.row && scope.row.groups && scope.row.groups.length" class="tag-list">
-                <el-tag v-for="groupName in scope.row.groups" :key="groupName" size="small">{{ groupName }}</el-tag>
-              </div>
-              <span v-else class="muted-text">无角色</span>
-            </template>
-          </el-table-column>
-          <el-table-column label="操作" width="140" fixed="right">
-            <template #default="scope">
-              <el-button type="primary" plain size="small" @click="openEditDrawer(scope && scope.row ? scope.row : null)">编辑角色</el-button>
-            </template>
-          </el-table-column>
-          <template #empty>
-            <div class="admin-empty-state">未找到匹配的用户</div>
+      <AppSectionCard title="用户列表" desc="按用户名、邮箱和角色组筛选，点击编辑修改所属角色。" admin>
+        <AdminDataTable
+          :data="filteredUsers"
+          :columns="tableColumns"
+          :loading="isLoading"
+          :error="error"
+          :show-search="false"
+          @retry="fetchData"
+        >
+          <template #groups="{ row }">
+            <div v-if="row.groups && row.groups.length" class="tag-list">
+              <el-tag v-for="groupName in row.groups" :key="groupName" size="small">{{ groupName }}</el-tag>
+            </div>
+            <span v-else class="muted-text">无角色</span>
           </template>
-        </el-table>
+
+          <template #actions="{ row }">
+            <el-button type="primary" plain size="small" @click="openEditDrawer(row)">编辑角色</el-button>
+          </template>
+        </AdminDataTable>
       </AppSectionCard>
 
       <template #decision>
@@ -295,7 +324,7 @@ const handleUpdateGroups = async () => {
       <template #footer>
         <div class="inline-actions">
           <el-button @click="closeEditDrawer" :disabled="isUpdating">取消</el-button>
-          <el-button type="primary" @click="handleUpdateGroups" :loading="isUpdating">保存更改</el-button>
+          <el-button type="primary" @click="confirmAndUpdate" :loading="isUpdating">保存更改</el-button>
         </div>
       </template>
     </el-drawer>

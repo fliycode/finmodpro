@@ -49,24 +49,24 @@ defineProps({
 
 .ops-inspector-drawer__eyebrow {
   margin: 0 0 6px;
-  font-size: 11px;
+  font-size: 0.6875rem;
   font-weight: 700;
   letter-spacing: 0.16em;
   text-transform: uppercase;
-  color: #8aa0b8;
+  color: var(--text-muted);
 }
 
 .ops-inspector-drawer__title {
   margin: 0;
-  color: #f3f6fb;
-  font-size: 22px;
+  color: var(--text-primary);
+  font-size: 1rem;
   line-height: 1.1;
   letter-spacing: -0.03em;
 }
 
 .ops-inspector-drawer__desc {
   margin: 8px 0 0;
-  color: #9caec1;
+  color: var(--text-secondary);
   line-height: 1.55;
 }
 
