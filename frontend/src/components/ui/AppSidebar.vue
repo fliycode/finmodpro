@@ -1,5 +1,5 @@
 <script setup>
-import { computed } from 'vue';
+import { computed, ref } from 'vue';
 import { RouterLink, useRoute, useRouter } from 'vue-router';
 
 import AppIcon from './AppIcon.vue';
@@ -18,6 +18,12 @@ const props = defineProps({
 
 const route = useRoute();
 const router = useRouter();
+
+const mobileOpen = ref(false);
+const toggleMobile = () => { mobileOpen.value = !mobileOpen.value; };
+const closeMobile = () => { mobileOpen.value = false; };
+
+defineExpose({ toggleMobile });
 const profile = computed(() => authStorage.getProfile());
 const items = computed(() => getNavItems(props.area, profile.value));
 const sidebarPresentation = computed(() => getSidebarPresentation(props.area));
@@ -94,6 +100,7 @@ const isItemActive = (item) => {
       'app-sidebar',
       `app-sidebar--${props.area}`,
       `app-sidebar--${sidebarPresentation.mode}`,
+      { 'app-sidebar--open': mobileOpen },
     ]"
   >
     <div

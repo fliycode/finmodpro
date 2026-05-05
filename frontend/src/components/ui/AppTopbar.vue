@@ -20,6 +20,8 @@ const props = defineProps({
   },
 });
 
+const emit = defineEmits(['toggle-sidebar']);
+
 const router = useRouter();
 const flash = useFlash();
 const profile = computed(() => authStorage.getProfile());
@@ -79,6 +81,15 @@ onBeforeUnmount(() => {
 
 <template>
   <header :class="['app-topbar', `app-topbar--${props.area}`]">
+    <button
+      type="button"
+      class="app-topbar__menu-btn"
+      aria-label="Toggle navigation"
+      @click="emit('toggle-sidebar')"
+    >
+      <AppIcon name="menu" />
+    </button>
+
     <div v-if="props.title" class="app-topbar__title-group">
       <h1 class="app-topbar__page-title">{{ props.title }}</h1>
     </div>

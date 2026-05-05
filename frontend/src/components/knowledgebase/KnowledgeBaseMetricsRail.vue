@@ -219,11 +219,11 @@ const recentActivities = computed(() =>
 }
 
 .metric-panel {
-  padding: 18px;
+  padding: 14px;
   border: 1px solid var(--line-soft);
-  border-radius: 16px;
+  border-radius: 12px;
   background: var(--surface-2);
-  box-shadow: var(--shadow-md);
+  box-shadow: none;
 }
 
 .metric-panel__header {
@@ -248,8 +248,8 @@ const recentActivities = computed(() =>
 
 .donut {
   --percent: 0;
-  width: 112px;
-  height: 112px;
+  width: 88px;
+  height: 88px;
   display: grid;
   place-items: center;
   margin: 4px auto 16px;
@@ -266,11 +266,11 @@ const recentActivities = computed(() =>
 
 .donut strong {
   color: var(--text-primary);
-  font-size: 22px;
+  font-size: 18px;
 }
 
 .donut span {
-  margin-top: 40px;
+  margin-top: 32px;
   color: var(--text-muted);
   font-size: 11px;
 }

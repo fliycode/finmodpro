@@ -131,7 +131,7 @@ const isAllChecked = () => {
 
 <style scoped>
 .kb-table {
-  overflow: hidden;
+  overflow-x: auto;
   border: 0;
   border-radius: 0;
   background: transparent;
@@ -343,18 +343,31 @@ const isAllChecked = () => {
 @media (max-width: 1160px) {
   .kb-table__header,
   .kb-table__row {
-    grid-template-columns: 34px minmax(220px, 1fr) 132px 96px 120px;
+    grid-template-columns: 34px minmax(220px, 1fr) 132px 120px 118px;
   }
 
   .kb-col-size,
-  .kb-col-vector,
+  .kb-col-vector {
+    display: none;
+  }
+}
+
+@media (max-width: 900px) {
+  .kb-table__header,
+  .kb-table__row {
+    grid-template-columns: 34px minmax(200px, 1fr) 120px 118px;
+  }
+
   .kb-col-time,
   .kb-col-status {
     display: none;
   }
+}
 
-  .kb-table__actions {
-    grid-column: 2 / -1;
+@media (max-width: 600px) {
+  .kb-table__header,
+  .kb-table__row {
+    grid-template-columns: 34px minmax(160px, 1fr) 118px;
   }
 }
 </style>

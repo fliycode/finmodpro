@@ -287,7 +287,7 @@ const retryAuditAction = async (item) => {
 
     <section class="ops-board__summary">
       <article
-        v-for="metric in summaryMetrics"
+        v-for="metric in summaryMetrics.slice(0, 4)"
         :key="metric.key"
         class="summary-tile"
         :class="`is-${metric.tone}`"
@@ -500,9 +500,9 @@ const retryAuditAction = async (item) => {
 }
 
 .ops-board__summary {
-  min-height: 118px;
+  min-height: 80px;
   display: grid;
-  grid-template-columns: repeat(6, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   border: 1px solid var(--board-line);
   border-radius: 9px;
   background:
@@ -512,10 +512,10 @@ const retryAuditAction = async (item) => {
 
 .summary-tile {
   display: grid;
-  grid-template-columns: 42px minmax(0, 1fr);
-  gap: 14px;
+  grid-template-columns: 32px minmax(0, 1fr);
+  gap: 10px;
   align-items: center;
-  padding: 22px 18px;
+  padding: 14px 16px;
   border-right: 1px solid rgba(91, 132, 205, 0.16);
 }
 
@@ -524,8 +524,8 @@ const retryAuditAction = async (item) => {
 }
 
 .summary-tile__icon {
-  width: 42px;
-  height: 42px;
+  width: 32px;
+  height: 32px;
   border-radius: 50%;
   display: inline-flex;
   align-items: center;
@@ -536,8 +536,8 @@ const retryAuditAction = async (item) => {
 }
 
 .summary-tile__icon :deep(.app-icon) {
-  width: 21px;
-  height: 21px;
+  width: 16px;
+  height: 16px;
 }
 
 .summary-tile.is-blue { color: #5fa4ff; }
@@ -558,7 +558,7 @@ const retryAuditAction = async (item) => {
 .summary-tile strong {
   display: block;
   color: currentColor;
-  font-size: clamp(22px, 1.9vw, 29px);
+  font-size: clamp(18px, 1.5vw, 24px);
   line-height: 1.05;
   font-weight: 900;
 }
@@ -584,8 +584,8 @@ const retryAuditAction = async (item) => {
 .ops-board__grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  grid-auto-rows: minmax(200px, auto);
-  gap: 10px;
+  grid-auto-rows: minmax(160px, auto);
+  gap: 8px;
 }
 
 .board-panel {
@@ -602,7 +602,7 @@ const retryAuditAction = async (item) => {
 
 .board-panel--process,
 .board-panel--documents {
-  min-height: 220px;
+  min-height: 180px;
 }
 
 .board-panel__header {
@@ -864,10 +864,10 @@ const retryAuditAction = async (item) => {
 
 @media (max-width: 1320px) {
   .ops-board__summary {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .summary-tile:nth-child(3n) {
+  .summary-tile:nth-child(2n) {
     border-right: 0;
   }
 

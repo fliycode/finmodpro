@@ -94,20 +94,29 @@ defineEmits([
 
 <style scoped>
 .kb-toolbar {
-  display: grid;
-  grid-template-columns: 150px 150px 170px minmax(220px, 1fr) auto auto;
-  gap: 12px;
-  padding: 18px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 14px;
   border: 0;
   border-radius: 0;
   box-shadow: none;
   background: transparent;
 }
 
+.kb-select {
+  min-width: 130px;
+  flex: 0 0 auto;
+}
+
+.kb-search {
+  flex: 1 1 200px;
+  min-width: 0;
+}
+
 .kb-search,
 .kb-select {
   height: 40px;
-  min-width: 0;
   border: 1px solid var(--line-strong);
   border-radius: 10px;
   padding: 0 14px;
@@ -129,6 +138,7 @@ defineEmits([
   padding: 0 18px;
   font-weight: 700;
   cursor: pointer;
+  flex: 0 0 auto;
 }
 
 .kb-primary-btn {
@@ -148,9 +158,15 @@ defineEmits([
   cursor: not-allowed;
 }
 
-@media (max-width: 980px) {
+@media (max-width: 600px) {
   .kb-toolbar {
-    grid-template-columns: 1fr;
+    flex-direction: column;
+  }
+
+  .kb-search,
+  .kb-select {
+    width: 100%;
+    flex: none;
   }
 }
 </style>

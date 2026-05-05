@@ -68,6 +68,8 @@ const iconMap = {
   'chevron-down': 'lucide:chevron-down',
   'chevron-right': 'lucide:chevron-right',
   'arrow-right': 'lucide:arrow-right',
+  // Layout
+  'menu': 'lucide:menu',
 };
 
 const resolvedIcon = iconMap[props.name] || null;
