@@ -1,9 +1,11 @@
 import json
 import shutil
 import tempfile
+from io import StringIO
 from unittest.mock import patch
 
 from django.contrib.auth.models import Group
+from django.core.management import call_command
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import Client, TestCase, override_settings
 
@@ -13,7 +15,9 @@ from common.exceptions import UpstreamRateLimitError
 from knowledgebase.models import Document, DocumentChunk
 from knowledgebase.services.document_service import create_document_from_upload, ingest_document
 from rag.models import RetrievalLog
+from rag.services.retrieval_evaluation_service import evaluate_retrieval_cases
 from rag.services.embedding_service import tokenize
+from rag.services.retrieval_service import retrieve
 from rag.services.vector_store_service import clear_store, index_document
 from rbac.services.rbac_service import ROLE_ADMIN, seed_roles_and_permissions
 
@@ -349,3 +353,65 @@ class RagRetrievalApiTests(TestCase):
         self.assertEqual(response["Retry-After"], "15")
         self.assertEqual(RetrievalLog.objects.count(), 0)
 
+
+class RetrievalEvaluationServiceTests(TestCase):
+    @patch("rag.services.retrieval_service.query_store")
+    def test_retrieve_passes_query_variants_to_query_store(self, mocked_query_store):
+        mocked_query_store.return_value = []
+
+        retrieve(
+            query="capital adequacy",
+            query_variants=["capital adequacy", "car stress scenario"],
+            top_k=5,
+        )
+
+        mocked_query_store.assert_called_once_with(
+            query="capital adequacy",
+            filters=None,
+            top_k=5,
+            query_variants=["capital adequacy", "car stress scenario"],
+        )
+
+    def test_evaluate_retrieval_cases_computes_metrics_from_chunk_ids(self):
+        result = evaluate_retrieval_cases(
+            [
+                {
+                    "name": "chunk-id-hit",
+                    "query": "capital adequacy",
+                    "top_k": 3,
+                    "relevant_chunk_ids": [11],
+                }
+            ],
+            retrieve_fn=lambda **kwargs: [
+                {
+                    "chunk_id": 11,
+                    "document_title": "Stress Test Report",
+                    "page_label": "chunk-1",
+                }
+            ],
+        )
+
+        self.assertEqual(result["total_cases"], 1)
+        self.assertEqual(result["summary"]["recall_at_k"], 1.0)
+        self.assertEqual(result["summary"]["mrr"], 1.0)
+        self.assertEqual(result["summary"]["ndcg_at_k"], 1.0)
+
+    @patch("rag.management.commands.evaluate_retrieval.evaluate_retrieval_fixture")
+    def test_evaluate_retrieval_command_prints_summary(self, mocked_evaluate_fixture):
+        mocked_evaluate_fixture.return_value = {
+            "total_cases": 1,
+            "summary": {
+                "recall_at_k": 1.0,
+                "mrr": 1.0,
+                "ndcg_at_k": 1.0,
+                "average_latency_ms": 12.5,
+            },
+            "cases": [],
+        }
+        stdout = StringIO()
+
+        call_command("evaluate_retrieval", stdout=stdout)
+
+        output = json.loads(stdout.getvalue())
+        self.assertEqual(output["total_cases"], 1)
+        self.assertEqual(output["summary"]["recall_at_k"], 1.0)

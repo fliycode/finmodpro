@@ -3,7 +3,8 @@
     "file_name": "data.json",
     "formatting": "sharegpt",
     "columns": {
-      "messages": "messages"
+      "messages": "messages",
+      "system": "system"
     },
     "tags": {
       "role_tag": "role",

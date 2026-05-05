@@ -20,6 +20,7 @@ from knowledgebase.services.chunk_service import (
 )
 from knowledgebase.services.hierarchical_chunk_service import build_hierarchical_document_chunks
 from knowledgebase.services.parser_service import parse_document_file
+from knowledgebase.services.search_text_service import build_contextual_search_text
 from knowledgebase.services.vector_service import VectorService, index_document_chunks
 
 logger = logging.getLogger(__name__)
@@ -555,6 +556,16 @@ def _build_section_chunk_metadata(document, index, parser_defaults=None):
     }
 
 
+def _enrich_child_chunk_metadata(child_metadata, section):
+    metadata = {
+        **(child_metadata or {}),
+        "section_label": section.section_label or section.metadata.get("page_label", ""),
+        "section_page_label": section.metadata.get("page_label", ""),
+        "section_path": section.section_path or "",
+    }
+    return metadata
+
+
 def _count_chunk_result_items(chunks):
     if isinstance(chunks, dict):
         return len(chunks.get("child_chunks") or [])
@@ -600,6 +611,10 @@ def chunk_document(document, parser_result):
                     section_label=section["metadata"].get("page_label", ""),
                     section_path="",
                     content=section["content"],
+                    search_text=build_contextual_search_text(
+                        content=section["content"],
+                        metadata=section["metadata"],
+                    ),
                     vector_id="",
                     metadata=section["metadata"],
                 )
@@ -618,8 +633,18 @@ def chunk_document(document, parser_result):
                     section_chunk=section_by_index[child["section_index"]],
                     chunk_index=child["chunk_index"],
                     content=child["content"],
+                    search_text=build_contextual_search_text(
+                        content=child["content"],
+                        metadata=_enrich_child_chunk_metadata(
+                            child["metadata"],
+                            section_by_index[child["section_index"]],
+                        ),
+                    ),
                     vector_id="",
-                    metadata=child["metadata"],
+                    metadata=_enrich_child_chunk_metadata(
+                        child["metadata"],
+                        section_by_index[child["section_index"]],
+                    ),
                 )
                 for child in hierarchical["child_chunks"]
             ]
@@ -643,6 +668,10 @@ def chunk_document(document, parser_result):
                 document=document,
                 chunk_index=chunk["chunk_index"],
                 content=chunk["content"],
+                search_text=build_contextual_search_text(
+                    content=chunk["content"],
+                    metadata=chunk["metadata"],
+                ),
                 vector_id="",
                 metadata=chunk["metadata"],
             )

@@ -1,0 +1,14 @@
+[
+  {
+    "name": "revenue-title-smoke",
+    "query": "revenue memo",
+    "top_k": 5,
+    "relevant_document_titles": ["Revenue memo"]
+  },
+  {
+    "name": "risk-title-smoke",
+    "query": "margin risk",
+    "top_k": 5,
+    "relevant_document_titles": ["Risk memo"]
+  }
+]

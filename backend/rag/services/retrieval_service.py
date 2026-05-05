@@ -39,17 +39,23 @@ def build_retrieval_response(*, query, results):
     }
 
 
-def retrieve(*, query, filters=None, top_k=5):
+def retrieve(*, query, filters=None, top_k=5, query_variants=None):
     normalized_top_k = _normalize_top_k(top_k)
+    normalized_query_variants = [str(item).strip() for item in (query_variants or []) if str(item).strip()]
     with trace_span(
         "rag.retrieve",
-        metadata={"top_k": normalized_top_k, "has_filters": bool(filters)},
+        metadata={
+            "top_k": normalized_top_k,
+            "has_filters": bool(filters),
+            "query_variant_count": len(normalized_query_variants) or 1,
+        },
         input_data={"query": query},
     ) as observation:
         results = query_store(
             query=query,
             filters=filters,
             top_k=normalized_top_k,
+            query_variants=normalized_query_variants,
         )
         reranked = rerank_results(results, query=query)
         for item in reranked:

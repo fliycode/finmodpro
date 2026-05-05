@@ -2,8 +2,10 @@ import json
 import logging
 import re
 import time
+import inspect
 from typing import TypedDict
 
+from django.conf import settings
 from langgraph.graph import END, START, StateGraph
 
 from chat.services.context_service import build_chat_messages
@@ -110,6 +112,7 @@ class ChatRagState(TypedDict, total=False):
     route: str
     route_guard: str
     rewritten_query: str
+    query_variants: list
     retrieval_results: list
     graded_results: list
     grading_mode: str
@@ -228,6 +231,47 @@ def _coerce_relevant_index(value):
     return int(str(value).strip())
 
 
+def _normalize_query_variants(*queries):
+    limit = max(int(getattr(settings, "RAG_MULTI_QUERY_VARIANT_COUNT", 1) or 1), 1)
+    seen = set()
+    normalized = []
+    for candidate in queries:
+        if isinstance(candidate, list):
+            for item in candidate:
+                value = str(item or "").strip()
+                if not value or value in seen:
+                    continue
+                seen.add(value)
+                normalized.append(value)
+        else:
+            value = str(candidate or "").strip()
+            if not value or value in seen:
+                continue
+            seen.add(value)
+            normalized.append(value)
+    return normalized[:limit]
+
+
+def _extract_query_variants(parsed, fallback_query):
+    if not isinstance(parsed, dict):
+        return _normalize_query_variants(fallback_query)
+    raw_variants = parsed.get("query_variants") or parsed.get("queries") or parsed.get("variants") or []
+    return _normalize_query_variants(parsed.get("rewritten_query") or fallback_query, raw_variants)
+
+
+def _retrieve_supports_query_variants(retrieve_fn):
+    try:
+        signature = inspect.signature(retrieve_fn)
+    except (TypeError, ValueError):
+        return False
+    for parameter in signature.parameters.values():
+        if parameter.name == "query_variants":
+            return True
+        if parameter.kind == inspect.Parameter.VAR_KEYWORD:
+            return True
+    return False
+
+
 def _route_question(state: ChatRagState):
     question = state["question"]
     provider = state["provider"]
@@ -268,13 +312,17 @@ def _route_question(state: ChatRagState):
 def _rewrite_query(state: ChatRagState):
     question = state["question"]
     provider = state["provider"]
+    max_query_variants = max(int(getattr(settings, "RAG_MULTI_QUERY_VARIANT_COUNT", 1) or 1), 1)
     prompt = [
         {
             "role": "system",
             "content": (
                 "你是 FinModPro 的检索查询重写器。"
                 "请把用户问题改写成更适合检索金融知识库的查询，保留关键实体、财务指标、时间范围和文档线索。"
-                "输出严格 JSON：{\"rewritten_query\":\"...\"}，不要输出额外文本。"
+                f"同时给出最多 {max_query_variants} 条高保真检索式，用于并行召回。"
+                "输出严格 JSON："
+                "{\"rewritten_query\":\"...\",\"query_variants\":[\"...\",\"...\"]}，"
+                "不要输出额外文本。"
             ),
         },
         {"role": "user", "content": question},
@@ -284,26 +332,33 @@ def _rewrite_query(state: ChatRagState):
     except Exception:
         logger.exception("chat rag rewrite provider failed; falling back to original question")
         rewritten_query = state.get("rewritten_query") or question
+        query_variants = _normalize_query_variants(rewritten_query)
     else:
         try:
             parsed = _parse_json_candidate(raw_output)
             if not isinstance(parsed, dict):
                 raise ValueError("rewrite response is not a JSON object")
             rewritten_query = str(parsed.get("rewritten_query") or "").strip() or question
+            query_variants = _extract_query_variants(parsed, rewritten_query)
         except (json.JSONDecodeError, TypeError, ValueError) as exc:
             logger.warning(
                 "chat rag rewrite returned invalid JSON; falling back to original question",
                 extra={"error": str(exc)},
             )
             rewritten_query = state.get("rewritten_query") or question
+            query_variants = _normalize_query_variants(rewritten_query)
     logger.info(
         "chat rag rewrite",
         extra={
             "question": question,
             "rewritten_query": rewritten_query,
+            "query_variants": query_variants,
         },
     )
-    return {"rewritten_query": rewritten_query}
+    return {
+        "rewritten_query": rewritten_query,
+        "query_variants": query_variants,
+    }
 
 
 def _numeric_score(item, key):
@@ -340,18 +395,22 @@ def _select_relevant_results(results, *, limit=MAX_CHAT_CITATIONS):
 
 def _retrieve_context(state: ChatRagState):
     rewritten_query = state.get("rewritten_query") or state["question"]
+    query_variants = state.get("query_variants") or _normalize_query_variants(rewritten_query)
     requested_top_k = int(state["top_k"])
     retrieval_top_k = requested_top_k
     candidate_limit = MAX_CHAT_CITATIONS
     if state.get("route_guard") == "document_lookup_intent":
         retrieval_top_k = max(requested_top_k * 4, 20)
         candidate_limit = retrieval_top_k
+    retrieve_kwargs = {
+        "query": rewritten_query,
+        "filters": state["resolved_filters"],
+        "top_k": retrieval_top_k,
+    }
+    if _retrieve_supports_query_variants(state["retrieve_fn"]):
+        retrieve_kwargs["query_variants"] = query_variants
     retrieval_results = _select_relevant_results(
-        state["retrieve_fn"](
-            query=rewritten_query,
-            filters=state["resolved_filters"],
-            top_k=retrieval_top_k,
-        ),
+        state["retrieve_fn"](**retrieve_kwargs),
         limit=candidate_limit,
     )
     logger.info(
@@ -359,6 +418,7 @@ def _retrieve_context(state: ChatRagState):
         extra={
             "question": state["question"],
             "rewritten_query": rewritten_query,
+            "query_variants": query_variants,
             "top_k": retrieval_top_k,
             "retrieved_count": len(retrieval_results),
         },
@@ -543,6 +603,8 @@ def prepare_chat_payload(*, question, filters=None, top_k=5, session=None, provi
     return {
         "question": question,
         "query": result.get("rewritten_query") or question,
+        "query_variants": result.get("query_variants")
+        or _normalize_query_variants(result.get("rewritten_query") or question),
         "messages": result["messages"],
         "citations": result["citations"],
         "answer_mode": result["answer_mode"],

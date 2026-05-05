@@ -1617,8 +1617,43 @@ class KnowledgebaseDocumentServiceTests(TestCase):
             DocumentChunk.objects.filter(document=document, section_chunk__isnull=True).count(),
             0,
         )
+        self.assertEqual(
+            DocumentSectionChunk.objects.filter(document=document, search_text="").count(),
+            0,
+        )
+        self.assertEqual(
+            DocumentChunk.objects.filter(document=document, search_text="").count(),
+            0,
+        )
         self.assertEqual(document.status, Document.STATUS_CHUNKED)
         self.assertIn("sections", chunks)
+
+    def test_chunk_document_populates_contextual_search_text_for_flat_chunks(self):
+        document = create_document_from_upload(
+            uploaded_file=SimpleUploadedFile(
+                "flat.txt",
+                b"flat document placeholder",
+                content_type="text/plain",
+            ),
+            title="Liquidity memo",
+            source_date="2026-04-28",
+            uploaded_by=self.user,
+        )
+
+        chunk_document(
+            document,
+            {
+                "parsed_text": "Liquidity remained strong and revenue improved.",
+                "elements": None,
+                "chunk_metadata_defaults": {},
+            },
+        )
+
+        chunk = DocumentChunk.objects.get(document=document, chunk_index=0)
+        self.assertIn("Liquidity memo", chunk.search_text)
+        self.assertIn("txt", chunk.search_text)
+        self.assertIn("2026-04-28", chunk.search_text)
+        self.assertIn("Liquidity remained strong", chunk.search_text)
 
 
 class RagHierarchicalRetrievalTests(TestCase):

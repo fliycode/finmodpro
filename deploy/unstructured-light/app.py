@@ -1,8 +1,8 @@
 """Lightweight document text extraction — strategy=fast only.
 
-Covers ``pdf`` (via pdfminer.six), ``docx`` (via python-docx), and
+Covers ``pdf`` (via PyMuPDF), ``docx`` (via python-docx), and
 ``txt`` (raw read).  No ``unstructured``, Detectron2, PyTorch, Tesseract,
-or LibreOffice — total image ~200 MB.
+or LibreOffice — total image ~230 MB.
 """
 
 import posixpath
@@ -47,19 +47,37 @@ STYLE_TO_ELEMENT_MAPPING = {
 
 
 def _extract_pdf(file_bytes: bytes) -> list[dict]:
-    from pdfminer.high_level import extract_text  # noqa: E402
+    import pymupdf
 
-    text = extract_text(BytesIO(file_bytes))
+    doc = pymupdf.open(stream=file_bytes, filetype="pdf")
     elements = []
-    for line in text.splitlines():
-        stripped = line.strip()
-        if stripped:
-            elements.append({"type": "Paragraph", "text": stripped, "metadata": {}})
+    for page_num, page in enumerate(doc, start=1):
+        blocks = page.get_text("dict", flags=pymupdf.TEXT_PRESERVE_WHITESPACE)["blocks"]
+        for block in blocks:
+            if block["type"] != 0:
+                continue
+            for line in block["lines"]:
+                text = "".join(span["text"] for span in line["spans"]).strip()
+                if not text:
+                    continue
+                max_size = max((span["size"] for span in line["spans"]), default=12)
+                elem_type = "Title" if max_size >= 16 else "Paragraph"
+                elements.append({
+                    "type": elem_type,
+                    "text": text,
+                    "metadata": {"page_number": page_num},
+                })
+    doc.close()
+
     if not elements:
-        # pdfminer returned nothing — basic fallback.
-        decoded = text.strip()
-        if decoded:
-            elements.append({"type": "Paragraph", "text": decoded, "metadata": {}})
+        doc = pymupdf.open(stream=file_bytes, filetype="pdf")
+        text = ""
+        for page in doc:
+            text += page.get_text()
+        doc.close()
+        text = text.strip()
+        if text:
+            elements.append({"type": "Paragraph", "text": text, "metadata": {}})
     return elements
 
 

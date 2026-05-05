@@ -1,3 +1,4 @@
+from django.conf import settings
 from django.db import DatabaseError, OperationalError, ProgrammingError
 from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
@@ -11,6 +12,8 @@ from knowledgebase.services.version_service import (
     parse_source_metadata,
 )
 from rbac.services.authz_service import permission_required
+
+_MAX_UPLOAD_BYTES = getattr(settings, "DATA_UPLOAD_MAX_MEMORY_SIZE", 50 * 1024 * 1024)
 
 
 def _build_schema_not_ready_response(exc):
@@ -46,6 +49,13 @@ def document_versions_view(request, document_id):
     uploaded_file = request.FILES.get("file")
     if uploaded_file is None:
         return JsonResponse({"message": "file 为必填项。"}, status=400)
+
+    max_mb = _MAX_UPLOAD_BYTES // (1024 * 1024)
+    if uploaded_file.size > _MAX_UPLOAD_BYTES:
+        return JsonResponse(
+            {"message": f"文件大小超出限制（最大 {max_mb} MB）。"},
+            status=413,
+        )
 
     try:
         new_document = create_new_document_version(

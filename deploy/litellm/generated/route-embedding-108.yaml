@@ -1,0 +1,5 @@
+model_list:
+  - model_name: text-embedding-v4
+    litellm_params:
+      model: openai/text-embedding-v4
+      api_base: https://dashscope.aliyuncs.com/compatible-mode/v1

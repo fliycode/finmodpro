@@ -1,9 +1,15 @@
+import logging
 from datetime import date
+
+from django.conf import settings
+from django.db import DatabaseError, connection
 
 from knowledgebase.models import DocumentChunk
 from knowledgebase.services.vector_service import VectorService
-from rag.services.embedding_service import build_embedding, cosine_similarity, tokenize
+from rag.services.embedding_service import build_embedding, tokenize
 
+
+logger = logging.getLogger(__name__)
 
 _VECTOR_STORE = {}
 
@@ -19,13 +25,14 @@ def clear_store():
 def index_document(document):
     document_vectors = []
     for chunk in DocumentChunk.objects.filter(document=document).order_by("chunk_index"):
+        searchable_text = chunk.search_text or chunk.content
         document_vectors.append(
             {
                 "document_id": document.id,
                 "chunk_id": chunk.id,
                 "content": chunk.content,
                 "metadata": chunk.metadata,
-                "embedding": build_embedding(chunk.content),
+                "embedding": build_embedding(searchable_text),
             }
         )
     _VECTOR_STORE[document.id] = document_vectors
@@ -84,6 +91,7 @@ def _serialize_chunk_result(chunk, score, *, keyword_score=0.0):
         "score": score,
         "vector_score": 0.0,
         "keyword_score": keyword_score,
+        "matched_queries": [],
     }
 
 
@@ -92,10 +100,7 @@ def _keyword_match_score(query, chunk):
     if not query_tokens:
         return 0.0
 
-    metadata = chunk.metadata or {}
-    title = (metadata.get("document_title") or chunk.document.title or "").lower()
-    content = (chunk.content or "").lower()
-    searchable_text = f"{title}\n{content}"
+    searchable_text = (chunk.search_text or chunk.content or "").lower()
     content_tokens = tokenize(searchable_text)
     if not content_tokens:
         return 0.0
@@ -109,12 +114,13 @@ def _keyword_match_score(query, chunk):
     phrase = " ".join(query_tokens)
     if phrase and phrase in searchable_text:
         score += 0.5
+    title = str((chunk.metadata or {}).get("document_title") or chunk.document.title or "").lower()
     if phrase and phrase in title:
         score += 0.5
     return score
 
 
-def _keyword_search(query, filters=None, limit=5):
+def _fallback_keyword_search(query, filters=None, limit=5):
     results = []
     queryset = DocumentChunk.objects.select_related("document").order_by("id")
     for chunk in queryset:
@@ -126,6 +132,81 @@ def _keyword_search(query, filters=None, limit=5):
         results.append(_serialize_chunk_result(chunk, keyword_score, keyword_score=keyword_score))
     results.sort(key=lambda item: item["score"], reverse=True)
     return results[: int(limit)]
+
+
+def _mysql_full_text_search(query, filters=None, limit=5):
+    if not getattr(settings, "RAG_MYSQL_FULLTEXT_ENABLED", False):
+        return []
+    if connection.vendor != "mysql":
+        return []
+
+    filters = filters or {}
+    chunk_table = DocumentChunk._meta.db_table
+    document_table = DocumentChunk._meta.get_field("document").related_model._meta.db_table
+    where_clauses = [
+        "kc.search_text <> ''",
+        "MATCH(kc.search_text) AGAINST (%s IN NATURAL LANGUAGE MODE)",
+    ]
+    params = [query, query]
+
+    document_id = filters.get("document_id")
+    if document_id not in (None, ""):
+        where_clauses.append("kc.document_id = %s")
+        params.append(int(document_id))
+
+    doc_type = filters.get("doc_type")
+    if doc_type:
+        where_clauses.append("d.doc_type = %s")
+        params.append(doc_type)
+
+    source_date_from = filters.get("source_date_from")
+    if source_date_from:
+        where_clauses.append("d.source_date >= %s")
+        params.append(source_date_from)
+
+    source_date_to = filters.get("source_date_to")
+    if source_date_to:
+        where_clauses.append("d.source_date <= %s")
+        params.append(source_date_to)
+
+    params.append(int(limit))
+
+    sql = f"""
+        SELECT
+            kc.id,
+            MATCH(kc.search_text) AGAINST (%s IN NATURAL LANGUAGE MODE) AS lexical_score
+        FROM {chunk_table} kc
+        INNER JOIN {document_table} d ON d.id = kc.document_id
+        WHERE {' AND '.join(where_clauses)}
+        ORDER BY lexical_score DESC, kc.id DESC
+        LIMIT %s
+    """
+
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute(sql, params)
+            rows = cursor.fetchall()
+    except DatabaseError:
+        logger.exception("mysql full-text retrieval failed; falling back to token keyword search")
+        return []
+
+    if not rows:
+        return []
+
+    score_by_chunk_id = {int(chunk_id): float(score or 0.0) for chunk_id, score in rows}
+    chunk_ids = list(score_by_chunk_id.keys())
+    chunks_by_id = {
+        chunk.id: chunk
+        for chunk in DocumentChunk.objects.select_related("document").filter(id__in=chunk_ids)
+    }
+    results = []
+    for chunk_id in chunk_ids:
+        chunk = chunks_by_id.get(chunk_id)
+        if chunk is None:
+            continue
+        lexical_score = score_by_chunk_id[chunk_id]
+        results.append(_serialize_chunk_result(chunk, lexical_score, keyword_score=lexical_score))
+    return results
 
 
 def _expand_section_vector_results(query, vector_results):
@@ -158,40 +239,104 @@ def _expand_section_vector_results(query, vector_results):
     return expanded_results
 
 
-def _merge_scored_results(vector_results, keyword_results):
-    merged = {}
-    for result in vector_results + keyword_results:
-        key = (result["document_id"], result["chunk_id"])
-        existing = merged.get(key)
-        if existing is None:
-            merged[key] = result
+def _normalize_queries(query, query_variants=None):
+    seen = set()
+    normalized = []
+    for candidate in [query, *(query_variants or [])]:
+        value = str(candidate or "").strip()
+        if not value or value in seen:
             continue
-        existing["vector_score"] = max(existing.get("vector_score", 0.0), result.get("vector_score", 0.0))
-        existing["keyword_score"] = max(existing.get("keyword_score", 0.0), result.get("keyword_score", 0.0))
-        existing["score"] = max(existing.get("score", 0.0), result.get("score", 0.0))
+        seen.add(value)
+        normalized.append(value)
+    return normalized or [str(query or "").strip()]
 
-    merged_results = []
-    for result in merged.values():
-        result["score"] = (result.get("vector_score", 0.0) * 0.7) + (
-            result.get("keyword_score", 0.0) * 0.3
-        )
-        merged_results.append(result)
 
+def _candidate_limit(top_k):
+    normalized_top_k = max(int(top_k), 1)
+    multiplier = max(int(getattr(settings, "RAG_RETRIEVAL_CANDIDATE_MULTIPLIER", 1) or 1), 1)
+    floor = max(int(getattr(settings, "RAG_RETRIEVAL_CANDIDATE_FLOOR", 1) or 1), 1)
+    return max(normalized_top_k * multiplier, floor)
+
+
+def _result_key(result):
+    chunk_id = result.get("chunk_id")
+    if chunk_id is not None:
+        return result["document_id"], f"chunk:{chunk_id}"
+    return result["document_id"], f"section:{result.get('section_chunk_id')}"
+
+
+def _merge_ranked_results(ranked_lists):
+    merged = {}
+    rrf_k = max(int(getattr(settings, "RAG_RRF_K", 60) or 60), 1)
+
+    for source_name, source_query, results in ranked_lists:
+        for rank, result in enumerate(results, start=1):
+            key = _result_key(result)
+            existing = merged.get(key)
+            if existing is None:
+                existing = {**result, "score": 0.0, "matched_queries": []}
+                merged[key] = existing
+
+            existing["score"] += 1.0 / (rrf_k + rank)
+            existing["fusion_score"] = existing["score"]
+            existing["vector_score"] = max(
+                float(existing.get("vector_score") or 0.0),
+                float(result.get("vector_score") or 0.0),
+            )
+            existing["keyword_score"] = max(
+                float(existing.get("keyword_score") or 0.0),
+                float(result.get("keyword_score") or 0.0),
+            )
+            if source_query not in existing["matched_queries"]:
+                existing["matched_queries"].append(source_query)
+            if source_name == "vector":
+                existing["vector_source"] = "milvus"
+            else:
+                existing.setdefault("keyword_sources", [])
+                if source_name not in existing["keyword_sources"]:
+                    existing["keyword_sources"].append(source_name)
+
+    merged_results = list(merged.values())
     merged_results.sort(
         key=lambda item: (
             item["score"],
             item.get("keyword_score", 0.0),
             item.get("vector_score", 0.0),
-            item["chunk_id"],
+            item.get("chunk_id") or item.get("section_chunk_id") or 0,
         ),
         reverse=True,
     )
     return merged_results
 
 
-def query_store(query, filters=None, top_k=5):
-    candidate_limit = max(int(top_k), 1) * 2
-    vector_results = VectorService().search(query=query, filters=filters, top_k=candidate_limit)
-    vector_results = _expand_section_vector_results(query, vector_results)
-    keyword_results = _keyword_search(query, filters=filters, limit=candidate_limit)
-    return _merge_scored_results(vector_results, keyword_results)[: int(top_k)]
+def query_store(query, filters=None, top_k=5, query_variants=None):
+    candidate_limit = _candidate_limit(top_k)
+    ranked_lists = []
+
+    for query_text in _normalize_queries(query, query_variants):
+        vector_results = VectorService().search(
+            query=query_text,
+            filters=filters,
+            top_k=candidate_limit,
+        )
+        vector_results = _expand_section_vector_results(query_text, vector_results)
+        if vector_results:
+            ranked_lists.append(("vector", query_text, vector_results))
+
+        mysql_fulltext_results = _mysql_full_text_search(
+            query_text,
+            filters=filters,
+            limit=candidate_limit,
+        )
+        if mysql_fulltext_results:
+            ranked_lists.append(("mysql_fulltext", query_text, mysql_fulltext_results))
+
+        fallback_keyword_results = _fallback_keyword_search(
+            query_text,
+            filters=filters,
+            limit=candidate_limit,
+        )
+        if fallback_keyword_results:
+            ranked_lists.append(("token_keyword", query_text, fallback_keyword_results))
+
+    return _merge_ranked_results(ranked_lists)[: int(top_k)]

@@ -3,6 +3,8 @@ from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_GET, require_http_methods
 
+from django.conf import settings
+
 from knowledgebase.models import Document
 from knowledgebase.services.document_service import (
     build_document_list_response,
@@ -11,6 +13,8 @@ from knowledgebase.services.document_service import (
     get_document_for_user,
 )
 from rbac.services.authz_service import permission_required
+
+_MAX_UPLOAD_BYTES = getattr(settings, "DATA_UPLOAD_MAX_MEMORY_SIZE", 50 * 1024 * 1024)
 
 
 def _build_schema_not_ready_response(exc):
@@ -52,6 +56,13 @@ def document_list_create_view(request):
     source_date = (request.POST.get("source_date") or "").strip()
     if uploaded_file is None:
         return JsonResponse({"message": "file 为必填项。"}, status=400)
+
+    max_mb = _MAX_UPLOAD_BYTES // (1024 * 1024)
+    if uploaded_file.size > _MAX_UPLOAD_BYTES:
+        return JsonResponse(
+            {"message": f"文件大小超出限制（最大 {max_mb} MB）。"},
+            status=413,
+        )
 
     try:
         document = create_document_from_upload(

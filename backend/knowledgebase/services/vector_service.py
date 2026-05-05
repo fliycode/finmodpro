@@ -119,7 +119,9 @@ class VectorService:
 
         for start in range(0, len(chunks), batch_size):
             chunk_batch = chunks[start:start + batch_size]
-            vectors = build_dense_embeddings([chunk.content for chunk in chunk_batch])
+            vectors = build_dense_embeddings(
+                [chunk.search_text or chunk.content for chunk in chunk_batch]
+            )
             for chunk, vector in zip(chunk_batch, vectors):
                 vector_id = int(chunk.id)
                 rows.append(
@@ -153,7 +155,9 @@ class VectorService:
 
         for start in range(0, len(sections), batch_size):
             section_batch = sections[start:start + batch_size]
-            vectors = build_dense_embeddings([section.content for section in section_batch])
+            vectors = build_dense_embeddings(
+                [section.search_text or section.content for section in section_batch]
+            )
             for section, vector in zip(section_batch, vectors):
                 vector_id = -int(section.id)
                 rows.append(

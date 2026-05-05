@@ -53,6 +53,7 @@ def _record_retrieval_log(payload):
             "route": payload.get("route"),
             "route_guard": payload.get("route_guard"),
             "rewritten_query": payload.get("query"),
+            "query_variants": payload.get("query_variants") or [],
             "grading_mode": payload.get("grading_mode"),
             "retrieved_count": payload.get("retrieved_count"),
             "citation_count": payload.get("citation_count"),

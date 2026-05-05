@@ -570,6 +570,44 @@ class ChatAskApiTests(TestCase):
         self.assertIn("chat rag rewrite", joined)
         self.assertIn("chat rag grade", joined)
 
+    def test_prepare_chat_payload_passes_query_variants_when_retriever_supports_it(self):
+        provider = ScriptedChatProvider([
+            '{"route":"retrieve","rewritten_query":"unused"}',
+            '{"rewritten_query":"capital adequacy stress test","query_variants":["capital adequacy stress test","car stress scenario"]}',
+            '{"relevant_indexes":[1]}',
+        ])
+        observed = {}
+
+        def fake_retrieve(**kwargs):
+            observed.update(kwargs)
+            return [
+                {
+                    "document_title": "Stress Test Report",
+                    "doc_type": "pdf",
+                    "source_date": "2025-02-18",
+                    "page_label": "p.3",
+                    "snippet": "capital adequacy stress test details",
+                    "score": 0.9,
+                    "rerank_score": 0.9,
+                }
+            ]
+
+        payload = prepare_chat_payload(
+            question="资本充足率压力测试结果是什么？",
+            provider=provider,
+            retrieve_fn=fake_retrieve,
+        )
+
+        self.assertEqual(observed["query"], "capital adequacy stress test")
+        self.assertEqual(
+            observed["query_variants"],
+            ["capital adequacy stress test", "car stress scenario"],
+        )
+        self.assertEqual(
+            payload["query_variants"],
+            ["capital adequacy stress test", "car stress scenario"],
+        )
+
     def test_prepare_chat_payload_forces_retrieval_for_report_title_lookup(self):
         provider = ScriptedChatProvider([
             '{"route":"direct","rewritten_query":"查一下开题报告的题目是什么"}',
@@ -710,6 +748,10 @@ class ChatAskApiTests(TestCase):
         self.assertEqual(retrieval_log.metadata["route"], "retrieve")
         self.assertEqual(retrieval_log.metadata["route_guard"], "none")
         self.assertEqual(retrieval_log.metadata["rewritten_query"], "capital adequacy stress test")
+        self.assertEqual(
+            retrieval_log.metadata["query_variants"],
+            ["capital adequacy stress test"],
+        )
         self.assertEqual(retrieval_log.metadata["grading_mode"], "llm")
         self.assertEqual(retrieval_log.metadata["retrieved_count"], 1)
         self.assertEqual(retrieval_log.metadata["citation_count"], 1)
@@ -949,6 +991,7 @@ class ChatAskApiTests(TestCase):
             query="revenue outlook",
             filters={"dataset_id": 7, "doc_type": "txt"},
             top_k=5,
+            query_variants=["revenue outlook"],
         )
         session.refresh_from_db()
         self.assertEqual(
@@ -981,6 +1024,7 @@ class ChatAskApiTests(TestCase):
             query="cash flow outlook",
             filters={"dataset_id": 11},
             top_k=5,
+            query_variants=["cash flow outlook"],
         )
         self.assertEqual(
             list(session.messages.values_list("role", "content")),
@@ -1013,6 +1057,7 @@ class ChatAskApiTests(TestCase):
             query="cash flow outlook",
             filters={"dataset_id": 7},
             top_k=5,
+            query_variants=["cash flow outlook"],
         )
         session.refresh_from_db()
         self.assertEqual(
@@ -1062,6 +1107,7 @@ class ChatAskApiTests(TestCase):
             query="cash flow outlook",
             filters={"dataset_id": 11},
             top_k=5,
+            query_variants=["cash flow outlook"],
         )
         session.refresh_from_db()
         self.assertEqual(
@@ -1120,6 +1166,7 @@ class ChatAskApiTests(TestCase):
             query="liquidity outlook",
             filters={"dataset_id": 7},
             top_k=5,
+            query_variants=["liquidity outlook"],
         )
         mocked_title_delay.assert_called_once_with(session.id)
         mocked_summary_delay.assert_called_once_with(session.id)
@@ -1153,6 +1200,7 @@ class ChatAskApiTests(TestCase):
             query="cash flow outlook",
             filters={"dataset_id": 7},
             top_k=5,
+            query_variants=["cash flow outlook"],
         )
         mocked_dispatch.assert_called_once_with(session_id=session.id)
         session.refresh_from_db()
@@ -1190,6 +1238,7 @@ class ChatAskApiTests(TestCase):
             query="cash flow outlook",
             filters={"dataset_id": 11},
             top_k=5,
+            query_variants=["cash flow outlook"],
         )
         mocked_dispatch.assert_called_once_with(session_id=session.id)
         session.refresh_from_db()
