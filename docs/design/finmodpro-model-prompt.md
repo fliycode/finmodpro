@@ -81,6 +81,7 @@ FinModPro 是一个金融风控与金融知识管理平台，前端为 Vue 3 + V
 6. Django 某些 URL 模块故意同时保留带斜杠和不带斜杠路径，不能随意删除兼容写法。
 7. 当前生产 compose 已启用 Neo4j 服务，并把 LightRAG 图存储配置为 `Neo4JStorage`；但 `settings.py` 未注入环境变量时仍保留 `NetworkXStorage` 回退值，描述环境时要区分“生产编排”和“默认回退配置”。
 8. 涉及 LightRAG、LiteLLM、知识库、模型配置的改动，通常都不是单文件问题，要检查前后端联动。
+9. 文档解析链路要区分主路径与回退路径：当前轻量解析服务中的 PDF 主解析使用 PyMuPDF，而 Django 后端失败回退仍是 `pypdf`。
 
 ## 你处理任务时的工作方式
 
