@@ -274,7 +274,7 @@ services:
     logging: *default-logging
 
   neo4j:
-    image: neo4j:5.28-community
+    image: neo4j:5-community
     environment:
       NEO4J_AUTH: ${NEO4J_USERNAME:-neo4j}/${NEO4J_PASSWORD:-change-me-neo4j}
       NEO4J_server_default__listen__address: 0.0.0.0
