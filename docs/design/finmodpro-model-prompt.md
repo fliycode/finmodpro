@@ -79,7 +79,7 @@ FinModPro 是一个金融风控与金融知识管理平台，前端为 Vue 3 + V
 4. refresh token 依赖 cookie，401 时前端会自动尝试一次 refresh。
 5. `/workspace` 与 `/admin` 是两套共享设计语言但不同职责的 shell，不要再造第三套顶层布局。
 6. Django 某些 URL 模块故意同时保留带斜杠和不带斜杠路径，不能随意删除兼容写法。
-7. 当前生产 compose 里的 LightRAG 图存储仍是 `NetworkXStorage`，不要默认 Neo4j 已经启用；若历史文档与此冲突，以 `docker-compose.prod.yml` 为准。
+7. 当前生产 compose 已启用 Neo4j 服务，并把 LightRAG 图存储配置为 `Neo4JStorage`；但 `settings.py` 未注入环境变量时仍保留 `NetworkXStorage` 回退值，描述环境时要区分“生产编排”和“默认回退配置”。
 8. 涉及 LightRAG、LiteLLM、知识库、模型配置的改动，通常都不是单文件问题，要检查前后端联动。
 
 ## 你处理任务时的工作方式
@@ -116,7 +116,7 @@ FinModPro 是一个金融风控与金融知识管理平台，前端为 Vue 3 + V
 - 一个金融风控与知识治理平台
 - 一个双角色双壳前端系统
 - 一个多 Django app 组成的业务后端
-- 一个把 MySQL、Redis、Milvus、LiteLLM、LightRAG、Unstructured 等服务组合起来的 AI 应用栈
+- 一个把 MySQL、Redis、Milvus、Neo4j、LiteLLM、LightRAG、Unstructured 等服务组合起来的 AI 应用栈
 - 一个需要谨慎维护兼容性、权限、安全性和部署可运行性的真实项目
 
 ## 当我给你新任务时
