@@ -86,7 +86,19 @@ const buildProcessStep = (document, task) => {
   const status = String(document.status || '').toLowerCase();
   const step = String(task?.current_step || '').toLowerCase();
   const taskStatus = String(task?.status || '').toLowerCase();
+  const graphSyncStatus = String(task?.graph_sync_status || '').toLowerCase();
   const hasTask = Boolean(task);
+
+  if (step === 'graph_sync' || graphSyncStatus === 'running') {
+    return {
+      code: 'graph-sync',
+      label: '图谱同步中',
+      detail: '正在将文档同步到 LightRAG / Neo4j 图谱。',
+      progress: 95,
+      isTerminal: false,
+      isSearchReady: false,
+    };
+  }
 
   if (status === 'indexed' || step === 'completed' || taskStatus === 'succeeded') {
     return {
@@ -212,13 +224,15 @@ export const normalizeDocument = (doc, fallback = {}) => {
     size: normalizeSize(doc.size || doc.file_size, fallback.fileSize),
     processStep,
     processResult: doc.process_result || processStep.detail,
-    processError: doc.error_message || latestTask?.error_message || '',
+    processError: doc.error_message || latestTask?.graph_sync_error_message || latestTask?.error_message || '',
     latestTask: latestTask ? {
       ...latestTask,
       createdAtText: formatDateTime(latestTask.created_at),
       updatedAtText: formatDateTime(latestTask.updated_at),
       startedAtText: formatDateTime(latestTask.started_at),
       finishedAtText: formatDateTime(latestTask.finished_at),
+      graphSyncStartedAtText: formatDateTime(latestTask.graph_sync_started_at),
+      graphSyncFinishedAtText: formatDateTime(latestTask.graph_sync_finished_at),
     } : null,
     chunkCount: Number(doc.chunk_count || 0),
     vectorCount: Number(doc.vector_count || 0),

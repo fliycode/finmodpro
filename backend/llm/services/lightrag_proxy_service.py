@@ -106,10 +106,24 @@ def _build_form_data(request_data, request_files):
     return form_data, files
 
 
-def proxy_lightrag_request(*, method, upstream_path, query_params=None, json_payload=None, request_data=None, request_files=None):
+def send_lightrag_request(
+    *,
+    method,
+    upstream_path,
+    query_params=None,
+    json_payload=None,
+    request_data=None,
+    request_files=None,
+    form_data=None,
+    files=None,
+    enforce_allow_list=True,
+):
     normalized_method = str(method or "").upper()
     normalized_path = str(upstream_path or "").strip().strip("/")
-    if not is_allowed_lightrag_path(method=normalized_method, upstream_path=normalized_path):
+    if enforce_allow_list and not is_allowed_lightrag_path(
+        method=normalized_method,
+        upstream_path=normalized_path,
+    ):
         raise ValueError("不支持的 LightRAG 桥接路径。")
 
     request_kwargs = {
@@ -120,11 +134,16 @@ def proxy_lightrag_request(*, method, upstream_path, query_params=None, json_pay
     }
 
     if request_files:
-        form_data, files = _build_form_data(request_data or {}, request_files)
-        request_kwargs["data"] = form_data
+        built_form_data, built_files = _build_form_data(request_data or {}, request_files)
+        request_kwargs["data"] = built_form_data
+        request_kwargs["files"] = built_files
+    elif files:
+        request_kwargs["data"] = form_data or {}
         request_kwargs["files"] = files
     elif json_payload is not None:
         request_kwargs["json"] = json_payload
+    elif form_data is not None:
+        request_kwargs["data"] = form_data
     elif request_data:
         request_kwargs["data"] = request_data
 
@@ -157,6 +176,18 @@ def proxy_lightrag_request(*, method, upstream_path, query_params=None, json_pay
     )
 
 
+def proxy_lightrag_request(*, method, upstream_path, query_params=None, json_payload=None, request_data=None, request_files=None):
+    return send_lightrag_request(
+        method=method,
+        upstream_path=upstream_path,
+        query_params=query_params,
+        json_payload=json_payload,
+        request_data=request_data,
+        request_files=request_files,
+        enforce_allow_list=True,
+    )
+
+
 def build_lightrag_overview():
     health = proxy_lightrag_request(method="GET", upstream_path="health")
     auth_status = proxy_lightrag_request(method="GET", upstream_path="auth-status")
@@ -172,4 +203,13 @@ def build_lightrag_overview():
         "auth_status": auth_status,
         "status_counts": status_counts,
         "popular_labels": labels if isinstance(labels, list) else [],
+        "configuration": {
+            "sync_enabled": bool(getattr(settings, "LIGHTRAG_SYNC_ENABLED", False)),
+            "graph_storage": str(getattr(settings, "LIGHTRAG_GRAPH_STORAGE", "") or ""),
+            "neo4j_configured": bool(
+                str(getattr(settings, "NEO4J_URI", "") or "").strip()
+                and str(getattr(settings, "NEO4J_USERNAME", "") or "").strip()
+                and str(getattr(settings, "NEO4J_PASSWORD", "") or "").strip()
+            ),
+        },
     }

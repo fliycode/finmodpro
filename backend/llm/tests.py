@@ -3556,6 +3556,7 @@ class LightRAGBridgeApiTests(TestCase):
         self.assertEqual(payload["auth_status"]["auth_mode"], "disabled")
         self.assertEqual(payload["status_counts"]["status_counts"]["all"], 4)
         self.assertEqual(payload["popular_labels"], ["风险", "债务"])
+        self.assertIn("configuration", payload)
 
     def _build_response(self, *, status_code, payload):
         class _MockResponse:

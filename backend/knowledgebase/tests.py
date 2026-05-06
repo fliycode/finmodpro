@@ -16,6 +16,7 @@ from django.utils import timezone
 
 from authentication.models import User
 from authentication.services.jwt_service import generate_access_token
+from common.exceptions import UpstreamServiceError
 from knowledgebase.models import Document, DocumentChunk, DocumentSectionChunk, IngestionTask
 from knowledgebase.services.chunk_service import build_document_chunks
 from knowledgebase.services.document_service import (
@@ -218,6 +219,94 @@ class KnowledgebaseApiTests(TestCase):
         self.assertEqual(ingestion_task.retry_count, 1)
         self.assertEqual(document.status, Document.STATUS_INDEXED)
         self.assertEqual(document.error_message, "")
+
+    @override_settings(
+        LIGHTRAG_SYNC_ENABLED=True,
+        LIGHTRAG_INTERNAL_URL="http://lightrag:9621",
+    )
+    @patch("knowledgebase.services.graph_sync_service.send_lightrag_request")
+    def test_document_ingest_tracks_graph_sync_success(self, mocked_sync):
+        mocked_sync.return_value = {"doc_id": "graph-doc-1", "track_id": "track-1"}
+
+        upload_response = self.client.post(
+            "/api/knowledgebase/documents",
+            data={
+                "title": "graph sync report",
+                "source_date": "2025-12-31",
+                "file": SimpleUploadedFile(
+                    "graph-sync.txt",
+                    b"graph sync payload",
+                    content_type="text/plain",
+                ),
+            },
+            HTTP_AUTHORIZATION=f"Bearer {self.access_token}",
+        )
+        document_id = upload_response.json()["document"]["id"]
+
+        response = self.client.post(
+            f"/api/knowledgebase/documents/{document_id}/ingest",
+            HTTP_AUTHORIZATION=f"Bearer {self.access_token}",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()["document"]
+        self.assertEqual(
+            payload["process_result"],
+            "文档已完成解析、切块、索引与图谱同步，可用于检索。",
+        )
+
+        ingestion_task = IngestionTask.objects.get(document_id=document_id)
+        self.assertEqual(ingestion_task.status, IngestionTask.STATUS_SUCCEEDED)
+        self.assertEqual(ingestion_task.current_step, IngestionTask.STEP_COMPLETED)
+        self.assertEqual(ingestion_task.graph_sync_status, IngestionTask.GRAPH_SYNC_STATUS_SUCCEEDED)
+        self.assertEqual(ingestion_task.graph_document_id, "graph-doc-1")
+        self.assertEqual(ingestion_task.graph_track_id, "track-1")
+        self.assertIsNotNone(ingestion_task.graph_sync_started_at)
+        self.assertIsNotNone(ingestion_task.graph_sync_finished_at)
+
+    @override_settings(
+        LIGHTRAG_SYNC_ENABLED=True,
+        LIGHTRAG_INTERNAL_URL="http://lightrag:9621",
+    )
+    @patch("knowledgebase.services.graph_sync_service.send_lightrag_request")
+    def test_document_ingest_keeps_document_indexed_when_graph_sync_fails(self, mocked_sync):
+        mocked_sync.side_effect = UpstreamServiceError(
+            "LightRAG 服务不可达。",
+            provider="lightrag",
+        )
+
+        upload_response = self.client.post(
+            "/api/knowledgebase/documents",
+            data={
+                "title": "graph sync failure report",
+                "source_date": "2025-12-31",
+                "file": SimpleUploadedFile(
+                    "graph-sync-failure.txt",
+                    b"graph sync payload",
+                    content_type="text/plain",
+                ),
+            },
+            HTTP_AUTHORIZATION=f"Bearer {self.access_token}",
+        )
+        document_id = upload_response.json()["document"]["id"]
+
+        response = self.client.post(
+            f"/api/knowledgebase/documents/{document_id}/ingest",
+            HTTP_AUTHORIZATION=f"Bearer {self.access_token}",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()["document"]
+        self.assertEqual(payload["status"], "indexed")
+        self.assertEqual(
+            payload["process_result"],
+            "文档已完成解析、切块与索引，但图谱同步失败，可重试。",
+        )
+
+        ingestion_task = IngestionTask.objects.get(document_id=document_id)
+        self.assertEqual(ingestion_task.status, IngestionTask.STATUS_SUCCEEDED)
+        self.assertEqual(ingestion_task.graph_sync_status, IngestionTask.GRAPH_SYNC_STATUS_FAILED)
+        self.assertIn("LightRAG 服务不可达。", ingestion_task.graph_sync_error_message)
 
     def test_dataset_create_list_detail_and_dataset_scoped_documents(self):
         create_response = self.client.post(
@@ -1565,6 +1654,10 @@ class KnowledgebaseHierarchicalModelTests(TestCase):
         field_names = {field.name for field in IngestionTask._meta.get_fields()}
 
         self.assertIn("strategy", field_names)
+        self.assertIn("graph_sync_status", field_names)
+        self.assertIn("graph_sync_error_message", field_names)
+        self.assertIn("graph_document_id", field_names)
+        self.assertIn("graph_track_id", field_names)
         self.assertIn("indexed_section_count", field_names)
         self.assertIn("total_section_count", field_names)
         self.assertIn("failed_section_count", field_names)

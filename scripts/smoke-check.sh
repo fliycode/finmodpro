@@ -4,6 +4,7 @@ set -euo pipefail
 BACKEND_HEALTH_URL="http://127.0.0.1:8000/api/health/"
 FRONTEND_URL="http://127.0.0.1:5173/"
 FRONTEND_API_HEALTH_URL="http://127.0.0.1:5173/api/health/"
+LIGHTRAG_HEALTH_URL="${LIGHTRAG_HEALTH_URL:-http://127.0.0.1:9621/health}"
 MAX_ATTEMPTS="${SMOKE_CHECK_ATTEMPTS:-20}"
 SLEEP_SECONDS="${SMOKE_CHECK_SLEEP_SECONDS:-3}"
 COMPOSE_FILE="${COMPOSE_FILE:-docker-compose.prod.yml}"
@@ -52,6 +53,17 @@ check_url "$FRONTEND_URL" "frontend root"
 check_url "$FRONTEND_API_HEALTH_URL" "frontend proxied api"
 
 if command -v docker >/dev/null 2>&1 \
+  && docker compose -f "$COMPOSE_FILE" config --services 2>/dev/null | grep -qx "lightrag"; then
+  check_url "$LIGHTRAG_HEALTH_URL" "lightrag health"
+  check_compose_service_running "lightrag"
+fi
+
+if command -v docker >/dev/null 2>&1 \
   && docker compose -f "$COMPOSE_FILE" config --services 2>/dev/null | grep -qx "celery-worker"; then
   check_compose_service_running "celery-worker"
+fi
+
+if command -v docker >/dev/null 2>&1 \
+  && docker compose -f "$COMPOSE_FILE" config --services 2>/dev/null | grep -qx "neo4j"; then
+  check_compose_service_running "neo4j"
 fi

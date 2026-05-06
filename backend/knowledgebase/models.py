@@ -128,6 +128,7 @@ class IngestionTask(models.Model):
     STEP_PARSING = "parsing"
     STEP_CHUNKING = "chunking"
     STEP_INDEXING = "indexing"
+    STEP_GRAPH_SYNC = "graph_sync"
     STEP_COMPLETED = "completed"
     STEP_FAILED = "failed"
     STEP_CHOICES = (
@@ -135,8 +136,21 @@ class IngestionTask(models.Model):
         (STEP_PARSING, "Parsing"),
         (STEP_CHUNKING, "Chunking"),
         (STEP_INDEXING, "Indexing"),
+        (STEP_GRAPH_SYNC, "Graph sync"),
         (STEP_COMPLETED, "Completed"),
         (STEP_FAILED, "Failed"),
+    )
+    GRAPH_SYNC_STATUS_PENDING = "pending"
+    GRAPH_SYNC_STATUS_RUNNING = "running"
+    GRAPH_SYNC_STATUS_SUCCEEDED = "succeeded"
+    GRAPH_SYNC_STATUS_FAILED = "failed"
+    GRAPH_SYNC_STATUS_SKIPPED = "skipped"
+    GRAPH_SYNC_STATUS_CHOICES = (
+        (GRAPH_SYNC_STATUS_PENDING, "Pending"),
+        (GRAPH_SYNC_STATUS_RUNNING, "Running"),
+        (GRAPH_SYNC_STATUS_SUCCEEDED, "Succeeded"),
+        (GRAPH_SYNC_STATUS_FAILED, "Failed"),
+        (GRAPH_SYNC_STATUS_SKIPPED, "Skipped"),
     )
     STRATEGY_FLAT = "flat"
     STRATEGY_HIERARCHICAL = "hierarchical"
@@ -166,6 +180,16 @@ class IngestionTask(models.Model):
         choices=STRATEGY_CHOICES,
         default=STRATEGY_FLAT,
     )
+    graph_sync_status = models.CharField(
+        max_length=32,
+        choices=GRAPH_SYNC_STATUS_CHOICES,
+        default=GRAPH_SYNC_STATUS_PENDING,
+    )
+    graph_sync_error_message = models.TextField(blank=True)
+    graph_sync_started_at = models.DateTimeField(blank=True, null=True)
+    graph_sync_finished_at = models.DateTimeField(blank=True, null=True)
+    graph_document_id = models.CharField(max_length=255, blank=True, db_index=True)
+    graph_track_id = models.CharField(max_length=255, blank=True, db_index=True)
     total_section_count = models.PositiveIntegerField(default=0)
     indexed_section_count = models.PositiveIntegerField(default=0)
     failed_section_count = models.PositiveIntegerField(default=0)

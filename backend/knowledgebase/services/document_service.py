@@ -11,6 +11,7 @@ from django.db.models import Q
 from django.utils import timezone
 
 from common.observability import trace_span
+from common.exceptions import ServiceConfigurationError, UpstreamServiceError
 from knowledgebase.models import Dataset, Document, DocumentChunk, DocumentSectionChunk, DocumentVersion, IngestionTask
 from knowledgebase.services.chunk_service import (
     build_document_chunks,
@@ -18,6 +19,7 @@ from knowledgebase.services.chunk_service import (
     choose_chunking_strategy,
     estimate_flat_chunk_count,
 )
+from knowledgebase.services.graph_sync_service import sync_document_to_graph_with_trace
 from knowledgebase.services.hierarchical_chunk_service import build_hierarchical_document_chunks
 from knowledgebase.services.parser_service import parse_document_file
 from knowledgebase.services.search_text_service import build_contextual_search_text
@@ -196,6 +198,16 @@ def _serialize_ingestion_task(ingestion_task):
         "status": ingestion_task.status,
         "current_step": ingestion_task.current_step,
         "strategy": ingestion_task.strategy,
+        "graph_sync_status": ingestion_task.graph_sync_status,
+        "graph_sync_error_message": ingestion_task.graph_sync_error_message or None,
+        "graph_sync_started_at": ingestion_task.graph_sync_started_at.isoformat()
+        if ingestion_task.graph_sync_started_at
+        else None,
+        "graph_sync_finished_at": ingestion_task.graph_sync_finished_at.isoformat()
+        if ingestion_task.graph_sync_finished_at
+        else None,
+        "graph_document_id": ingestion_task.graph_document_id or None,
+        "graph_track_id": ingestion_task.graph_track_id or None,
         "total_section_count": ingestion_task.total_section_count,
         "indexed_section_count": ingestion_task.indexed_section_count,
         "failed_section_count": ingestion_task.failed_section_count,
@@ -222,6 +234,13 @@ def _build_process_result(document, ingestion_task):
     if document.status == Document.STATUS_FAILED:
         return document.error_message or "文档处理失败。"
     if document.status == Document.STATUS_INDEXED:
+        if ingestion_task is not None:
+            if ingestion_task.graph_sync_status == IngestionTask.GRAPH_SYNC_STATUS_RUNNING:
+                return "文档已完成解析、切块与索引，正在同步图谱。"
+            if ingestion_task.graph_sync_status == IngestionTask.GRAPH_SYNC_STATUS_FAILED:
+                return "文档已完成解析、切块与索引，但图谱同步失败，可重试。"
+            if ingestion_task.graph_sync_status == IngestionTask.GRAPH_SYNC_STATUS_SUCCEEDED:
+                return "文档已完成解析、切块、索引与图谱同步，可用于检索。"
         return "文档已完成解析、切块与索引，可用于检索。"
     if ingestion_task is None:
         return "文档已上传，等待摄取任务执行。"
@@ -231,6 +250,7 @@ def _build_process_result(document, ingestion_task):
         IngestionTask.STEP_PARSING: "正在解析文档正文与元数据。",
         IngestionTask.STEP_CHUNKING: "正在切分文本片段。",
         IngestionTask.STEP_INDEXING: "正在写入向量索引。",
+        IngestionTask.STEP_GRAPH_SYNC: "正在同步图谱索引。",
         IngestionTask.STEP_COMPLETED: "文档摄取已完成。",
         IngestionTask.STEP_FAILED: ingestion_task.error_message or document.error_message or "文档摄取失败。",
     }
@@ -732,6 +752,7 @@ def ingest_document(document, ingestion_task=None):
         metadata={"document_id": document.id, "doc_type": document.doc_type},
         input_data={"document_title": document.title},
     ) as observation:
+        graph_sync_status = IngestionTask.GRAPH_SYNC_STATUS_SKIPPED
         try:
             parser_result = parse_document(document)
             if ingestion_task is not None:
@@ -746,13 +767,35 @@ def ingest_document(document, ingestion_task=None):
                     current_step=IngestionTask.STEP_INDEXING,
                 )
             vectorize_document(document)
+            if ingestion_task is not None and getattr(settings, "LIGHTRAG_SYNC_ENABLED", False):
+                _update_ingestion_task_step(
+                    ingestion_task,
+                    current_step=IngestionTask.STEP_GRAPH_SYNC,
+                )
+            try:
+                graph_sync_result = sync_document_to_graph_with_trace(
+                    document=document,
+                    ingestion_task=ingestion_task,
+                )
+                graph_sync_status = graph_sync_result["status"]
+            except (ServiceConfigurationError, UpstreamServiceError, OSError, ValueError) as exc:
+                graph_sync_status = IngestionTask.GRAPH_SYNC_STATUS_FAILED
+                logger.warning(
+                    "graph sync failed for document %s: %s",
+                    document.id,
+                    exc,
+                )
             if ingestion_task is not None:
                 _mark_ingestion_task_finished(
                     ingestion_task,
                     status=IngestionTask.STATUS_SUCCEEDED,
                 )
             observation.update(
-                output={"status": "succeeded", "chunk_count": _count_chunk_result_items(chunks)}
+                output={
+                    "status": "succeeded",
+                    "chunk_count": _count_chunk_result_items(chunks),
+                    "graph_sync_status": graph_sync_status,
+                }
             )
             return document
         except Exception as exc:
