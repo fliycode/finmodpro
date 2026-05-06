@@ -5,7 +5,6 @@ import { adminApi } from '../api/admin.js';
 import { useFlash } from '../lib/flash.js';
 import GovernanceReviewDesk from './admin/governance/GovernanceReviewDesk.vue';
 import OpsSectionFrame from './admin/ops/OpsSectionFrame.vue';
-import OpsStatusBand from './admin/ops/OpsStatusBand.vue';
 import AdminDataTable from './admin/AdminDataTable.vue';
 import AppSectionCard from './ui/AppSectionCard.vue';
 import AppToolbar from './ui/AppToolbar.vue';
@@ -100,32 +99,6 @@ const filteredUsers = computed(() => {
 
 const reviewQueue = computed(() => filteredUsers.value.slice(0, 6));
 const ungroupedCount = computed(() => users.value.filter((user) => user.groups.length === 0).length);
-const userStatusItems = computed(() => ([
-  {
-    key: 'users',
-    label: '用户总数',
-    value: users.value.length,
-    note: '当前纳入管理台的用户记录。',
-  },
-  {
-    key: 'groups',
-    label: '角色组',
-    value: groups.value.length,
-    note: '可分配给用户的角色组数量。',
-  },
-  {
-    key: 'filtered',
-    label: '当前筛选',
-    value: filteredUsers.value.length,
-    note: '搜索与角色过滤后的结果集。',
-  },
-  {
-    key: 'ungrouped',
-    label: '待补角色',
-    value: ungroupedCount.value,
-    note: '尚未分配角色组的用户。',
-  },
-]));
 const tableColumns = [
   { prop: 'id', label: 'ID', width: '80' },
   { prop: 'username', label: '用户名', minWidth: '140', sortable: true },
@@ -217,10 +190,6 @@ const confirmAndUpdate = async () => {
 
     <template #alerts>
       <el-alert v-if="error" :title="error" type="error" show-icon :closable="false" />
-    </template>
-
-    <template #status-band>
-      <OpsStatusBand :items="userStatusItems" />
     </template>
 
     <GovernanceReviewDesk>
