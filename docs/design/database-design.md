@@ -12,7 +12,211 @@
 | Redis | 缓存、Celery broker、Celery result backend |
 | 文件存储 | 上传原始文件、媒体文件、导出文件 |
 
-## 2. 用户与权限表
+## 2. 论文第四章可直接引用的核心表设计
+
+如果本文档用于毕业论文第四章“数据库表设计”，推荐不要把所有表逐张展开，而是优先介绍最能体现系统业务闭环的核心表。建议正文重点展示以下 8 张表：
+
+1. 用户表 `auth_user`
+2. 文档表 `knowledgebase_document`
+3. 入库任务表 `knowledgebase_ingestiontask`
+4. 文档分块表 `knowledgebase_documentchunk`
+5. 会话表 `chat_chatsession`
+6. 消息表 `chat_chatmessage`
+7. 风险事件表 `risk_riskevent`
+8. 模型配置表 `llm_modelconfig`
+
+字段设计建议统一使用下面这 6 列格式：
+
+| 字段名称 | 数据类型 | 长度 | 允许空值 | 键/约束 | 字段说明 |
+|---|---|---|---|---|---|
+
+### 2.1 用户表 `auth_user`
+
+该表为 Django 内置认证表，用于保存系统登录用户的基础身份信息，是权限控制、文档归属、会话归属和审计归属的上游主表。论文正文中可作为“平台用户主表”介绍，不必展开到 Django 所有内置字段。
+
+| 字段名称 | 数据类型 | 长度 | 允许空值 | 键/约束 | 字段说明 |
+|---|---|---|---|---|---|
+| `id` | BigAutoField | - | 否 | 主键 | 用户唯一标识 |
+| `username` | CharField | 150 | 否 | 唯一 | 登录用户名 |
+| `password` | CharField | 128 | 否 | - | 密码哈希 |
+| `email` | CharField | 254 | 是 | - | 用户邮箱 |
+| `is_active` | BooleanField | - | 否 | 默认 `true` | 账户是否启用 |
+| `is_staff` | BooleanField | - | 否 | 默认 `false` | 是否具有后台权限 |
+| `date_joined` | DateTimeField | - | 否 | - | 注册时间 |
+
+### 2.2 文档表 `knowledgebase_document`
+
+文档表是知识库模块的核心主表，用于记录上传文件、文档归属、解析状态和文本结果。系统后续的分块、向量化、风险抽取和图谱同步都以该表为起点。
+
+| 字段名称 | 数据类型 | 长度 | 允许空值 | 键/约束 | 字段说明 |
+|---|---|---|---|---|---|
+| `id` | BigAutoField | - | 否 | 主键 | 文档唯一标识 |
+| `title` | CharField | 255 | 否 | - | 文档标题 |
+| `file` | FileField | - | 否 | - | 原始文件存储路径 |
+| `filename` | CharField | 255 | 否 | - | 原始文件名 |
+| `doc_type` | CharField | 32 | 否 | - | 文档类型，如 `pdf/txt/docx` |
+| `uploaded_by_id` | ForeignKey | - | 是 | FK | 上传人 |
+| `owner_id` | ForeignKey | - | 是 | FK | 文档归属人 |
+| `dataset_id` | ForeignKey | - | 是 | FK | 所属数据集 |
+| `visibility` | CharField | 32 | 否 | 默认值 | 可见范围，`private/internal/public` |
+| `status` | CharField | 32 | 否 | 默认值 | 处理状态，`uploaded/parsed/chunked/indexed/failed` |
+| `source_date` | DateField | - | 是 | - | 文档来源日期 |
+| `parsed_text` | TextField | - | 是 | - | 解析后的正文文本 |
+| `error_message` | TextField | - | 是 | - | 失败信息 |
+| `created_at` | DateTimeField | - | 否 | 自动生成 | 创建时间 |
+| `updated_at` | DateTimeField | - | 否 | 自动更新 | 更新时间 |
+
+### 2.3 入库任务表 `knowledgebase_ingestiontask`
+
+入库任务表用于记录文档从解析、切块、向量索引到图谱同步的完整过程状态，是知识库链路可观测性的核心表。在论文中，这张表非常适合体现“系统具备异步任务与状态跟踪能力”。
+
+| 字段名称 | 数据类型 | 长度 | 允许空值 | 键/约束 | 字段说明 |
+|---|---|---|---|---|---|
+| `id` | BigAutoField | - | 否 | 主键 | 任务唯一标识 |
+| `document_id` | ForeignKey | - | 否 | FK | 目标文档 |
+| `celery_task_id` | CharField | 255 | 是 | 索引 | Celery 任务 ID |
+| `status` | CharField | 32 | 否 | 默认值 | 任务状态，`queued/running/succeeded/failed` |
+| `current_step` | CharField | 32 | 否 | 默认值 | 当前步骤，含 `parsing/chunking/indexing/graph_sync` |
+| `strategy` | CharField | 32 | 否 | 默认值 | 入库策略，`flat/hierarchical` |
+| `graph_sync_status` | CharField | 32 | 否 | 默认值 | 图谱同步状态 |
+| `graph_sync_error_message` | TextField | - | 是 | - | 图谱同步失败原因 |
+| `graph_document_id` | CharField | 255 | 是 | 索引 | 图谱侧文档 ID |
+| `graph_track_id` | CharField | 255 | 是 | 索引 | 图谱处理跟踪 ID |
+| `total_section_count` | PositiveIntegerField | - | 否 | 默认 `0` | section 总数 |
+| `indexed_section_count` | PositiveIntegerField | - | 否 | 默认 `0` | 已索引数量 |
+| `failed_section_count` | PositiveIntegerField | - | 否 | 默认 `0` | 失败数量 |
+| `error_message` | TextField | - | 是 | - | 任务失败原因 |
+| `started_at` | DateTimeField | - | 是 | - | 开始时间 |
+| `finished_at` | DateTimeField | - | 是 | - | 结束时间 |
+| `retry_count` | PositiveIntegerField | - | 否 | 默认 `0` | 重试次数 |
+| `created_at` | DateTimeField | - | 否 | 自动生成 | 创建时间 |
+| `updated_at` | DateTimeField | - | 否 | 自动更新 | 更新时间 |
+
+### 2.4 文档分块表 `knowledgebase_documentchunk`
+
+文档分块表保存知识库检索的最小文本单元，是 RAG 检索、引用回传和风险事件证据定位的主要数据来源。论文中可以把它作为“知识库语义检索核心表”展开。
+
+| 字段名称 | 数据类型 | 长度 | 允许空值 | 键/约束 | 字段说明 |
+|---|---|---|---|---|---|
+| `id` | BigAutoField | - | 否 | 主键 | chunk 唯一标识 |
+| `document_id` | ForeignKey | - | 否 | FK | 所属文档 |
+| `section_chunk_id` | ForeignKey | - | 是 | FK | 所属父 section |
+| `chunk_index` | PositiveIntegerField | - | 否 | 联合唯一 | chunk 序号 |
+| `content` | TextField | - | 否 | - | chunk 正文 |
+| `search_text` | TextField | - | 是 | 默认空串 | 检索优化文本 |
+| `vector_id` | CharField | 64 | 是 | 索引 | Milvus 向量 ID |
+| `metadata` | JSONField | - | 是 | 默认空对象 | 页码、标题、数据集等元数据 |
+| `created_at` | DateTimeField | - | 否 | 自动生成 | 创建时间 |
+
+约束说明：
+
+- `document_id + chunk_index` 联合唯一，确保同一文档内的 chunk 序号不重复。
+
+### 2.5 会话表 `chat_chatsession`
+
+会话表用于保存用户与系统交互的会话级信息，包括标题、滚动摘要、消息数量和上下文过滤条件。该表是“智能问答模块”数据库设计中的核心表。
+
+| 字段名称 | 数据类型 | 长度 | 允许空值 | 键/约束 | 字段说明 |
+|---|---|---|---|---|---|
+| `id` | BigAutoField | - | 否 | 主键 | 会话唯一标识 |
+| `user_id` | ForeignKey | - | 否 | FK | 所属用户 |
+| `title` | CharField | 255 | 否 | 默认值 | 会话标题 |
+| `title_status` | CharField | 16 | 否 | 默认值 | 标题状态，`pending/ready/failed` |
+| `title_source` | CharField | 32 | 否 | 默认值 | 标题来源，`ai/manual/system` |
+| `rolling_summary` | TextField | - | 是 | 默认空串 | 滚动摘要 |
+| `summary_updated_through_message_id` | PositiveBigIntegerField | - | 是 | - | 摘要覆盖到的消息 ID |
+| `message_count` | PositiveIntegerField | - | 否 | 默认 `0` | 消息总数 |
+| `last_message_at` | DateTimeField | - | 是 | - | 最后活跃时间 |
+| `context_filters` | JSONField | - | 是 | 默认空对象 | 会话级过滤条件 |
+| `created_at` | DateTimeField | - | 否 | 自动生成 | 创建时间 |
+| `updated_at` | DateTimeField | - | 否 | 自动更新 | 更新时间 |
+
+### 2.6 消息表 `chat_chatmessage`
+
+消息表用于保存用户消息、助手回复和系统消息，同时记录引用来源和模型元数据。在论文中，这张表可以体现系统“回答可追溯”的设计特征。
+
+| 字段名称 | 数据类型 | 长度 | 允许空值 | 键/约束 | 字段说明 |
+|---|---|---|---|---|---|
+| `id` | BigAutoField | - | 否 | 主键 | 消息唯一标识 |
+| `session_id` | ForeignKey | - | 否 | FK | 所属会话 |
+| `sequence` | PositiveIntegerField | - | 是 | 联合唯一 | 会话内序号，由系统自动补齐 |
+| `role` | CharField | 32 | 否 | - | 角色，`user/assistant/system` |
+| `message_type` | CharField | 32 | 否 | 默认值 | 消息类型 |
+| `status` | CharField | 16 | 否 | 默认值 | 消息状态，`pending/complete/failed` |
+| `citations_json` | JSONField | - | 是 | 默认空数组 | 引用来源 |
+| `model_metadata_json` | JSONField | - | 是 | 默认空对象 | 模型调用元数据 |
+| `client_message_id` | CharField | 64 | 是 | 默认空串 | 前端消息 ID |
+| `content` | TextField | - | 否 | - | 消息正文 |
+| `created_at` | DateTimeField | - | 否 | 自动生成 | 创建时间 |
+| `updated_at` | DateTimeField | - | 否 | 自动更新 | 更新时间 |
+
+约束说明：
+
+- `session_id + sequence` 联合唯一，用于保证同一会话中的消息顺序稳定。
+
+### 2.7 风险事件表 `risk_riskevent`
+
+风险事件表保存从文档中抽取出的风险信息，是风险分析模块的核心业务表。它连接知识库文档与风险报告，支持审核流和风险证据追踪。
+
+| 字段名称 | 数据类型 | 长度 | 允许空值 | 键/约束 | 字段说明 |
+|---|---|---|---|---|---|
+| `id` | BigAutoField | - | 否 | 主键 | 风险事件唯一标识 |
+| `company_name` | CharField | 255 | 否 | 索引 | 涉及公司名称 |
+| `risk_type` | CharField | 128 | 否 | 索引 | 风险类型 |
+| `risk_level` | CharField | 32 | 否 | 索引/默认值 | 风险等级 |
+| `event_time` | DateTimeField | - | 是 | 索引 | 风险事件时间 |
+| `summary` | TextField | - | 否 | - | 风险摘要 |
+| `evidence_text` | TextField | - | 否 | - | 证据文本 |
+| `confidence_score` | DecimalField | 4,3 | 否 | 取值 0~1 | 抽取置信度 |
+| `review_status` | CharField | 32 | 否 | 索引/默认值 | 审核状态 |
+| `document_id` | ForeignKey | - | 是 | FK | 来源文档 |
+| `chunk_id` | ForeignKey | - | 是 | FK | 来源 chunk |
+| `metadata` | JSONField | - | 是 | 默认空对象 | 补充元数据 |
+| `created_at` | DateTimeField | - | 否 | 自动生成 | 创建时间 |
+| `updated_at` | DateTimeField | - | 否 | 自动更新 | 更新时间 |
+
+### 2.8 模型配置表 `llm_modelconfig`
+
+模型配置表用于保存 chat、embedding 和 rerank 三类模型的接入配置，是模型中台模块的主表。在论文中，这张表可以体现系统对模型能力解耦和统一管理的设计思想。
+
+| 字段名称 | 数据类型 | 长度 | 允许空值 | 键/约束 | 字段说明 |
+|---|---|---|---|---|---|
+| `id` | BigAutoField | - | 否 | 主键 | 模型配置唯一标识 |
+| `name` | CharField | 255 | 否 | 联合唯一 | 配置名称 |
+| `capability` | CharField | 32 | 否 | 联合唯一 | 能力类型，`chat/embedding/rerank` |
+| `provider` | CharField | 32 | 否 | - | 提供方，如 `deepseek/litellm/dashscope` |
+| `model_name` | CharField | 255 | 否 | - | 上游模型名称 |
+| `endpoint` | URLField | 500 | 否 | - | 模型服务地址 |
+| `options` | JSONField | - | 是 | 默认空对象 | 模型参数配置 |
+| `is_active` | BooleanField | - | 否 | 默认 `false` | 是否启用 |
+| `created_at` | DateTimeField | - | 否 | 自动生成 | 创建时间 |
+| `updated_at` | DateTimeField | - | 否 | 自动更新 | 更新时间 |
+
+约束说明：
+
+- `capability + name` 联合唯一。
+- 同一能力类型下仅允许一个配置处于启用状态，其余配置在保存时会被自动取消启用。
+
+### 2.9 审计表 `systemcheck_auditrecord`
+
+审计表用于记录后台关键操作行为，是系统运维与治理可追踪性的基础表。论文中可将其作为“系统可靠性与安全性设计”的支撑表。
+
+| 字段名称 | 数据类型 | 长度 | 允许空值 | 键/约束 | 字段说明 |
+|---|---|---|---|---|---|
+| `id` | BigAutoField | - | 否 | 主键 | 审计记录唯一标识 |
+| `actor_id` | ForeignKey | - | 是 | FK | 操作人 |
+| `action` | CharField | 128 | 否 | 索引 | 操作类型 |
+| `target_type` | CharField | 64 | 否 | 索引 | 目标类型 |
+| `target_id` | CharField | 64 | 是 | 索引 | 目标 ID |
+| `status` | CharField | 32 | 否 | 索引 | 操作结果 |
+| `detail_payload` | JSONField | - | 是 | 默认空对象 | 操作详情 |
+| `created_at` | DateTimeField | - | 否 | 自动生成 | 创建时间 |
+
+### 2.10 论文写作建议
+
+如果学校要求数据库表设计“每张表一个小节 + 一个表格”，建议在正文中优先保留 2.1 到 2.9 这几张核心表，其余表可以放入附录或作为“补充业务表设计”简要说明。这样既能体现系统完整性，也能避免第四章因为表过多而失去重点。
+
+## 3. 用户与权限表
 
 系统使用 Django 内置认证表。
 
@@ -31,7 +235,7 @@
 - 一个角色可以绑定多个权限。
 - 管理端通过用户角色和权限判断是否允许访问后台、知识库、模型中台和 LightRAG 管理入口。
 
-## 3. 知识库表
+## 4. 知识库表
 
 ### `knowledgebase_dataset`
 
@@ -153,7 +357,7 @@
 
 - `document_id + chunk_index` 唯一。
 
-## 4. RAG 与问答表
+## 5. RAG 与问答表
 
 ### `rag_retrievallog`
 
@@ -267,7 +471,7 @@
 | `details_json` | JSONField | 操作详情 |
 | `created_at` | DateTimeField | 创建时间 |
 
-## 5. 风险分析表
+## 6. 风险分析表
 
 ### `risk_riskevent`
 
@@ -308,7 +512,7 @@
 | `created_at` | DateTimeField | 创建时间 |
 | `updated_at` | DateTimeField | 更新时间 |
 
-## 6. LLM 中台表
+## 7. LLM 中台表
 
 ### `llm_modelconfig`
 
@@ -451,7 +655,7 @@ LiteLLM 配置同步事件表。
 - `trace_id + created_at`
 - `request_id + created_at`
 
-## 7. 运维审计表
+## 8. 运维审计表
 
 ### `systemcheck_auditrecord`
 
@@ -468,7 +672,7 @@ LiteLLM 配置同步事件表。
 | `detail_payload` | JSONField | 操作详情 |
 | `created_at` | DateTimeField | 创建时间 |
 
-## 8. LightRAG / Neo4j 图谱设计
+## 9. LightRAG / Neo4j 图谱设计
 
 LightRAG 图谱数据不进入 Django ORM 表，而是由 LightRAG 自身维护 KV、Vector、Graph、Doc Status 四类存储。
 
@@ -526,7 +730,7 @@ LightRAG 图谱数据不进入 Django ORM 表，而是由 LightRAG 自身维护 
 
 这种设计让 FinModPro 可以在 MySQL 中保持清晰业务边界，在 Neo4j 中执行图谱探索和多跳关系查询，在 Milvus 中执行语义向量召回。
 
-## 9. 核心关系概览
+## 10. 核心关系概览
 
 ```text
 auth_user
