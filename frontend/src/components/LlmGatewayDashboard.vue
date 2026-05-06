@@ -169,26 +169,6 @@ onMounted(fetchSummary);
         </div>
       </AppSectionCard>
 
-      <AppSectionCard title="Top models" desc="按最近请求量排序，直接回答当前最热的 alias 在哪里。" admin>
-        <div v-if="summary.top_models.length === 0" class="admin-empty-state">近 24 小时暂无请求</div>
-        <div v-else class="rank-list">
-          <article v-for="(item, index) in summary.top_models" :key="`${item.alias}-${index}`" class="rank-list__item">
-            <div class="rank-list__main">
-              <span class="rank-list__index">{{ String(index + 1).padStart(2, '0') }}</span>
-              <div>
-                <strong>{{ item.alias }}</strong>
-                <p>{{ item.request_count }} 次请求</p>
-              </div>
-            </div>
-            <div class="rank-list__bar">
-              <span
-                class="rank-list__fill"
-                :style="{ width: `${(item.request_count / maxTopModelRequests) * 100}%` }"
-              />
-            </div>
-          </article>
-        </div>
-      </AppSectionCard>
     </OpsCommandDeck>
 
     <OpsInspectorDrawer title="错误样本" desc="只保留足够支持二次排查的错误样本，不展开整页复杂日志。">
@@ -244,21 +224,7 @@ onMounted(fetchSummary);
   gap: 16px;
 }
 
-.gateway-metric-card,
-.health-panel__status,
-.health-panel__sync,
-.rank-list__item,
-.error-list__item {
-  border: 1px solid var(--line-soft);
-  border-radius: 18px;
-  background: var(--surface-1);
-}
-
-.gateway-metric-card {
-  padding: 18px;
-}
-
-.gateway-metric-card__label,
+.section-kicker,
 .section-kicker {
   display: block;
   font-size: 12px;
@@ -268,33 +234,25 @@ onMounted(fetchSummary);
   color: var(--text-muted);
 }
 
-.gateway-metric-card__value {
-  display: block;
-  margin-top: 8px;
-  font-size: 28px;
-  color: var(--text-primary);
-}
-
-.gateway-metric-card__note {
-  margin: 8px 0 0;
-  color: var(--text-secondary);
-}
-
-.gateway-dashboard-grid {
-  display: grid;
-  grid-template-columns: minmax(0, 1.05fr) minmax(0, 0.95fr);
-  gap: 20px;
-}
-
 .health-panel {
   display: grid;
   grid-template-columns: minmax(0, 1.1fr) minmax(0, 0.9fr);
-  gap: 14px;
+  gap: 0;
+  border: 1px solid var(--line-soft);
+  border-radius: 18px;
+  overflow: hidden;
 }
 
 .health-panel__status,
 .health-panel__sync {
-  padding: 20px;
+  padding: 0 0 0 18px;
+  border-left: 1px solid var(--line-soft);
+  background: transparent;
+}
+
+.health-panel__status {
+  padding-left: 0;
+  border-left: 0;
 }
 
 .health-panel__status strong,
@@ -314,13 +272,20 @@ onMounted(fetchSummary);
 .rank-list,
 .error-list {
   display: grid;
-  gap: 12px;
+  gap: 0;
 }
 
 .rank-list__item {
   display: grid;
   gap: 14px;
-  padding: 16px 18px;
+  padding: 16px 0 0;
+  border-top: 1px solid var(--line-soft);
+}
+
+.rank-list__item:first-child,
+.error-list__item:first-child {
+  padding-top: 0;
+  border-top: 0;
 }
 
 .rank-list__main {
@@ -359,7 +324,8 @@ onMounted(fetchSummary);
 }
 
 .error-list__item {
-  padding: 16px 18px;
+  padding: 16px 0 0;
+  border-top: 1px solid var(--line-soft);
 }
 
 .error-list__headline,
@@ -414,7 +380,6 @@ onMounted(fetchSummary);
 
 @media (max-width: 1120px) {
   .gateway-metric-strip,
-  .gateway-dashboard-grid,
   .health-panel {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -422,9 +387,19 @@ onMounted(fetchSummary);
 
 @media (max-width: 768px) {
   .gateway-metric-strip,
-  .gateway-dashboard-grid,
   .health-panel {
     grid-template-columns: 1fr;
+  }
+
+  .health-panel__status,
+  .health-panel__sync {
+    padding-left: 0;
+    border-left: 0;
+    border-top: 1px solid var(--line-soft);
+  }
+
+  .health-panel__status {
+    border-top: 0;
   }
 }
 </style>

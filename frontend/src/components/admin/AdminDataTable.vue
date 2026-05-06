@@ -231,15 +231,17 @@ const paginationLayout = computed(() => {
 .admin-data-table {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 14px;
 }
 
 .admin-data-table__toolbar {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
-  min-height: 32px;
+  gap: 16px;
+  min-height: 40px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--line-soft);
 }
 
 .admin-data-table__toolbar-left,
@@ -250,7 +252,7 @@ const paginationLayout = computed(() => {
 }
 
 .admin-data-table__search {
-  width: 200px;
+  width: 240px;
 }
 
 .admin-data-table__col-toggle {
@@ -262,9 +264,11 @@ const paginationLayout = computed(() => {
   align-items: center;
   justify-content: center;
   gap: 12px;
-  padding: 32px 16px;
+  padding: 40px 16px;
   color: var(--risk);
   font-size: 0.8125rem;
+  border: 1px dashed var(--line-strong);
+  border-radius: 18px;
 }
 
 .admin-data-table__empty {
@@ -285,6 +289,36 @@ const paginationLayout = computed(() => {
 .admin-data-table__pagination {
   display: flex;
   justify-content: flex-end;
-  padding-top: 4px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line-soft);
+}
+
+.admin-data-table :deep(.el-table) {
+  --el-table-border-color: var(--line-soft);
+  --el-table-header-bg-color: transparent;
+  border: 0;
+}
+
+.admin-data-table :deep(.el-table__inner-wrapper::before) {
+  display: none;
+}
+
+.admin-data-table :deep(.el-table th.el-table__cell) {
+  height: 44px;
+  padding-block: 8px;
+  color: var(--text-muted);
+  font-size: 0.6875rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  background: transparent;
+}
+
+.admin-data-table :deep(.el-table td.el-table__cell) {
+  padding-block: 14px;
+}
+
+.admin-data-table :deep(.el-table tr) {
+  background: transparent;
 }
 </style>

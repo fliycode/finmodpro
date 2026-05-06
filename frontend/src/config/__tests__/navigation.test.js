@@ -51,6 +51,6 @@ test('admin navigation still exposes governance pages after the redesign', () =>
 
   assert.deepEqual(
     governanceItems.map((item) => item.to),
-    ['/admin/users', '/admin/evaluation'],
+    ['/admin/users', '/admin/evaluation', '/admin/audit-logs'],
   );
 });

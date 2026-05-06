@@ -8,6 +8,7 @@ import OpsSectionFrame from './admin/ops/OpsSectionFrame.vue';
 import OpsStatusBand from './admin/ops/OpsStatusBand.vue';
 import AdminDataTable from './admin/AdminDataTable.vue';
 import AppSectionCard from './ui/AppSectionCard.vue';
+import AppToolbar from './ui/AppToolbar.vue';
 
 const users = ref([]);
 const groups = ref([]);
@@ -340,14 +341,19 @@ const confirmAndUpdate = async () => {
 
 .governance-review-queue__item {
   display: grid;
-  gap: 4px;
-  padding: 12px 14px;
-  border: 1px solid rgba(127, 146, 170, 0.18);
-  border-radius: 14px;
-  background: rgba(15, 23, 34, 0.86);
-  color: #f3f6fb;
+  gap: 6px;
+  padding: 14px 0 0;
+  border: 0;
+  border-top: 1px solid var(--line-soft);
+  background: transparent;
+  color: var(--text-primary);
   text-align: left;
   cursor: pointer;
+}
+
+.governance-review-queue__item:first-child {
+  padding-top: 0;
+  border-top: 0;
 }
 
 .governance-review-decision {

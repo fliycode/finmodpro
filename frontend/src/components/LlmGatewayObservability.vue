@@ -302,16 +302,7 @@ onMounted(async () => {
   gap: 16px;
 }
 
-.gateway-metric-card,
-.analysis-list__item,
-.trace-step {
-  padding: 18px;
-  border: 1px solid var(--line-soft);
-  border-radius: 18px;
-  background: var(--surface-1);
-}
-
-.gateway-metric-card__label,
+.section-kicker,
 .section-kicker {
   display: block;
   font-size: 12px;
@@ -321,19 +312,6 @@ onMounted(async () => {
   color: var(--text-muted);
 }
 
-.gateway-metric-card__value {
-  display: block;
-  margin-top: 8px;
-  color: var(--text-primary);
-  font-size: 28px;
-}
-
-.gateway-metric-card__note {
-  margin: 8px 0 0;
-  color: var(--text-secondary);
-}
-
-.observability-grid,
 .analysis-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -345,26 +323,42 @@ onMounted(async () => {
   gap: 12px;
 }
 
+.analysis-column + .analysis-column {
+  padding-left: 18px;
+  border-left: 1px solid var(--line-soft);
+}
+
 .analysis-list,
 .latency-list,
 .trace-panel__list {
   display: grid;
-  gap: 12px;
+  gap: 0;
 }
 
 .analysis-list__item {
   display: flex;
   justify-content: space-between;
   gap: 12px;
+  padding: 14px 0 0;
+  border-top: 1px solid var(--line-soft);
 }
 
 .analysis-list__item--stack {
   display: grid;
 }
 
+.analysis-list__item:first-child,
+.latency-list__item:first-child,
+.trace-step:first-child {
+  padding-top: 0;
+  border-top: 0;
+}
+
 .latency-list__item {
   display: grid;
   gap: 8px;
+  padding: 14px 0 0;
+  border-top: 1px solid var(--line-soft);
 }
 
 .latency-list__head {
@@ -403,6 +397,11 @@ onMounted(async () => {
   gap: 4px;
 }
 
+.trace-step {
+  padding: 14px 0 0;
+  border-top: 1px solid var(--line-soft);
+}
+
 .trace-step__head {
   display: flex;
   justify-content: space-between;
@@ -415,7 +414,6 @@ onMounted(async () => {
 
 @media (max-width: 1120px) {
   .gateway-metric-strip,
-  .observability-grid,
   .analysis-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -423,9 +421,15 @@ onMounted(async () => {
 
 @media (max-width: 768px) {
   .gateway-metric-strip,
-  .observability-grid,
   .analysis-grid {
     grid-template-columns: 1fr;
+  }
+
+  .analysis-column + .analysis-column {
+    padding-left: 0;
+    border-left: 0;
+    padding-top: 18px;
+    border-top: 1px solid var(--line-soft);
   }
 }
 </style>

@@ -32,9 +32,9 @@ defineProps({
 <style scoped>
 .lightrag-panel {
   border: 1px solid var(--line-soft);
-  border-radius: 18px;
-  background: var(--surface-2);
-  box-shadow: var(--shadow-sm);
+  border-radius: 28px;
+  background: var(--surface-1);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
 }
 
 .lightrag-panel__header {
@@ -42,7 +42,7 @@ defineProps({
   align-items: flex-start;
   justify-content: space-between;
   gap: 16px;
-  padding: 18px 20px 0;
+  padding: 22px 24px 0;
 }
 
 .lightrag-panel__heading {
@@ -73,6 +73,6 @@ defineProps({
 }
 
 .lightrag-panel__body {
-  padding: 18px 20px 20px;
+  padding: 18px 24px 24px;
 }
 </style>

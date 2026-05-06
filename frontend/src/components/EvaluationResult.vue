@@ -337,12 +337,15 @@ const frameMeta = computed(() => [
 
 .governance-review-queue__item {
   display: grid;
-  gap: 4px;
-  padding: 12px 14px;
-  border: 1px solid rgba(127, 146, 170, 0.18);
-  border-radius: 14px;
-  background: rgba(15, 23, 34, 0.86);
-  color: #f3f6fb;
+  gap: 6px;
+  padding: 14px 0 0;
+  border-top: 1px solid var(--line-soft);
+  color: var(--text-primary);
+}
+
+.governance-review-queue__item:first-child {
+  padding-top: 0;
+  border-top: 0;
 }
 
 .evaluation-form {
@@ -367,17 +370,20 @@ const frameMeta = computed(() => [
 
 .comparison-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-  gap: 16px;
+  gap: 0;
 }
 
 .comparison-card {
-  border: 1px solid var(--el-border-color-light);
-  border-radius: 12px;
-  padding: 16px;
-  background: var(--el-bg-color);
+  border: 0;
+  border-top: 1px solid var(--line-soft);
+  padding: 16px 0 0;
   display: grid;
   gap: 12px;
+}
+
+.comparison-card:first-child {
+  padding-top: 0;
+  border-top: 0;
 }
 
 .comparison-card__header {

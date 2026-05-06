@@ -625,15 +625,28 @@ const retryAuditAction = async (item) => {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   grid-auto-rows: minmax(140px, auto);
-  gap: 8px;
+  gap: 0;
+  border: 1px solid var(--line-soft);
+  border-radius: 28px;
+  background: var(--surface-1);
+  overflow: hidden;
 }
 
 .board-panel {
   min-width: 0;
-  border: 1px solid var(--line-soft);
-  border-radius: 4px;
-  background: var(--surface-1);
+  padding: 18px 18px 16px;
+  border-top: 1px solid var(--line-soft);
+  border-left: 1px solid var(--line-soft);
+  background: transparent;
   overflow: hidden;
+}
+
+.board-panel:nth-child(-n + 3) {
+  border-top: 0;
+}
+
+.board-panel:nth-child(3n + 1) {
+  border-left: 0;
 }
 
 .board-panel--process,
@@ -642,12 +655,11 @@ const retryAuditAction = async (item) => {
 }
 
 .board-panel__header {
-  min-height: 36px;
+  min-height: 46px;
   display: flex;
   justify-content: space-between;
   align-items: center;
   gap: 12px;
-  padding: 0 10px;
 }
 
 .board-panel__header div:first-child {
@@ -771,13 +783,13 @@ const retryAuditAction = async (item) => {
   display: grid;
   grid-template-columns: minmax(160px, 0.95fr) minmax(130px, 1fr);
   align-items: center;
-  padding: 0 10px 10px;
+  padding: 8px 0 0;
 }
 
 /* ── Event table ── */
 .event-table-wrap {
   overflow-x: auto;
-  padding: 0 8px 8px;
+  padding: 10px 0 0;
 }
 
 .event-table {
@@ -851,7 +863,7 @@ const retryAuditAction = async (item) => {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 6px 10px;
-  padding: 6px 10px 10px;
+  padding: 12px 0 0;
 }
 
 .process-item {
@@ -913,6 +925,27 @@ const retryAuditAction = async (item) => {
   .ops-board__grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
+
+  .board-panel {
+    border-left: 1px solid var(--line-soft);
+  }
+
+  .board-panel:nth-child(-n + 3) {
+    border-top: 1px solid var(--line-soft);
+  }
+
+  .board-panel:nth-child(-n + 2) {
+    border-top: 0;
+  }
+
+  .board-panel:nth-child(3n + 1) {
+    border-left: 1px solid var(--line-soft);
+  }
+
+  .board-panel:nth-child(2n + 1) {
+    border-left: 0;
+  }
+
   .board-panel--table {
     grid-column: span 2;
   }
@@ -934,6 +967,16 @@ const retryAuditAction = async (item) => {
   .board-panel--table {
     grid-column: span 1;
   }
+
+  .board-panel {
+    border-left: 0;
+    border-top: 1px solid var(--line-soft);
+  }
+
+  .board-panel:first-child {
+    border-top: 0;
+  }
+
   .process-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }

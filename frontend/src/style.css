@@ -2849,6 +2849,151 @@ code {
 }
 
 :root[data-theme='light'] .app-shell :where(
+  .board-panel,
+  .event-table th,
+  .board-tabs
+) {
+  border-color: var(--line-soft) !important;
+  background: var(--surface-2) !important;
+  background-image: none !important;
+  color: var(--text-secondary) !important;
+  box-shadow: none !important;
+}
+
+.app-shell--admin {
+  background:
+    radial-gradient(circle at top right, rgba(141, 208, 208, 0.05), transparent 28%),
+    linear-gradient(180deg, #0b121a 0%, #111822 100%);
+}
+
+.app-shell--admin .app-topbar {
+  background: rgba(12, 17, 24, 0.78);
+  border-bottom-color: rgba(157, 173, 196, 0.12);
+  box-shadow: none;
+}
+
+.app-shell--admin .app-topbar__search-input {
+  background: rgba(255, 255, 255, 0.02);
+  border-color: rgba(157, 173, 196, 0.12);
+}
+
+.app-shell--admin .app-sidebar {
+  background: rgba(10, 15, 22, 0.92);
+  border-right-color: rgba(157, 173, 196, 0.12);
+  box-shadow: inset -1px 0 0 rgba(255, 255, 255, 0.04);
+}
+
+.app-shell--admin .app-sidebar__brand {
+  padding-bottom: 14px;
+  border-bottom-color: rgba(157, 173, 196, 0.12);
+}
+
+.app-shell--admin .app-sidebar__brand-mark {
+  background: linear-gradient(180deg, rgba(36, 87, 197, 0.18), rgba(36, 87, 197, 0.04));
+  border-color: rgba(36, 87, 197, 0.22);
+  box-shadow: none;
+}
+
+.app-shell--admin .app-sidebar__item {
+  min-height: 42px;
+  border-radius: 14px;
+  color: #dbe4f2;
+}
+
+.app-shell--admin .app-sidebar__item:hover,
+.app-shell--admin .app-sidebar__profile-trigger:hover,
+.app-shell--admin .app-sidebar__profile:focus-within .app-sidebar__profile-trigger {
+  background: rgba(255, 255, 255, 0.04);
+  border-color: rgba(157, 173, 196, 0.14);
+}
+
+.app-shell--admin .app-sidebar__item.router-link-active {
+  background: rgba(36, 87, 197, 0.18);
+  border-color: rgba(125, 160, 255, 0.24);
+  box-shadow: inset 3px 0 0 #8dd0d0;
+  color: #f3f7ff;
+}
+
+.app-shell--admin .app-sidebar__item-icon {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.admin-breadcrumb {
+  margin: 0 auto;
+  max-width: var(--shell-max-width);
+  padding: 8px var(--shell-content-padding-inline) 0;
+  color: var(--text-muted);
+  font-size: 0.6875rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.admin-frame {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.admin-frame__body {
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+  width: 100%;
+  max-width: var(--shell-max-width);
+  margin: 0 auto;
+  padding:
+    18px
+    var(--shell-content-padding-inline)
+    var(--shell-content-padding-bottom);
+  box-sizing: border-box;
+}
+
+.app-shell--admin .flash-stack {
+  padding-top: 12px;
+}
+
+.app-shell--admin .section-heading__title {
+  font-size: 1.05rem;
+  letter-spacing: -0.02em;
+}
+
+.app-shell--admin .section-heading__desc {
+  max-width: 62ch;
+  line-height: 1.65;
+}
+
+.app-shell--admin .admin-section-card,
+.app-shell--admin .lightrag-panel,
+.app-shell--admin .ops-inspector-drawer,
+.app-shell--admin .governance-review-desk__queue,
+.app-shell--admin .governance-review-desk__comparison,
+.app-shell--admin .governance-review-desk__decision {
+  box-shadow: none;
+}
+
+.app-shell--admin .el-button {
+  border-radius: 12px;
+}
+
+.app-shell--admin .el-tag {
+  border-radius: 999px;
+}
+
+.app-shell--admin .admin-empty-state,
+.app-shell--admin .admin-not-found {
+  padding: 28px 18px;
+  border: 1px dashed var(--line-soft);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.summary-tile__label,
+.summary-tile__icon,
+.board-panel__header {
+  color: inherit;
+}
+
+:root[data-theme='light'] .app-shell :where(
   .risk-doc__page h3,
   .risk-doc__page h4,
   .risk-source__info strong,

@@ -33,11 +33,13 @@ defineProps({
 .ops-inspector-drawer {
   display: flex;
   flex-direction: column;
-  gap: 14px;
-  padding: 18px;
-  border: 1px solid rgba(127, 146, 170, 0.16);
-  border-radius: 22px;
-  background: rgba(10, 16, 24, 0.96);
+  gap: 18px;
+  padding: 22px 24px;
+  border: 1px solid var(--line-soft);
+  border-radius: 28px;
+  background:
+    linear-gradient(180deg, rgba(15, 21, 30, 0.95), rgba(10, 15, 22, 0.92));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
 }
 
 .ops-inspector-drawer__header {
@@ -51,7 +53,7 @@ defineProps({
   margin: 0 0 6px;
   font-size: 0.6875rem;
   font-weight: 700;
-  letter-spacing: 0.16em;
+  letter-spacing: 0.18em;
   text-transform: uppercase;
   color: var(--text-muted);
 }
@@ -59,7 +61,7 @@ defineProps({
 .ops-inspector-drawer__title {
   margin: 0;
   color: var(--text-primary);
-  font-size: 1rem;
+  font-size: 1.15rem;
   line-height: 1.1;
   letter-spacing: -0.03em;
 }

@@ -26,58 +26,82 @@ defineProps({
 .ops-status-band {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 14px;
+  gap: 0;
+  border: 1px solid var(--line-soft);
+  border-radius: 24px;
+  background: var(--surface-1);
+  overflow: hidden;
 }
 
 .ops-status-band__item {
   display: grid;
-  gap: 8px;
-  padding: 18px;
-  border: 1px solid rgba(127, 146, 170, 0.16);
-  border-radius: 18px;
-  background: rgba(13, 21, 32, 0.94);
-  box-shadow: inset 0 1px 0 rgba(196, 208, 224, 0.04);
+  gap: 6px;
+  padding: 18px 20px;
+  min-height: 118px;
+  border-left: 1px solid var(--line-soft);
+  background: transparent;
+}
+
+.ops-status-band__item:first-child {
+  border-left: 0;
 }
 
 .ops-status-band__item.is-risk {
-  border-color: rgba(182, 83, 83, 0.24);
+  background: linear-gradient(180deg, rgba(196, 73, 61, 0.08), transparent);
 }
 
 .ops-status-band__item.is-warning {
-  border-color: rgba(191, 145, 79, 0.24);
+  background: linear-gradient(180deg, rgba(183, 121, 31, 0.08), transparent);
 }
 
 .ops-status-band__label {
   font-size: 11px;
   font-weight: 700;
-  letter-spacing: 0.14em;
+  letter-spacing: 0.16em;
   text-transform: uppercase;
   color: var(--text-muted);
 }
 
 .ops-status-band__value {
   color: var(--text-primary);
-  font-size: 1.25rem;
-  line-height: 1;
-  letter-spacing: -0.04em;
+  font-size: clamp(1.3rem, 2.1vw, 1.8rem);
+  line-height: 1.05;
+  letter-spacing: -0.05em;
 }
 
 .ops-status-band__note {
   margin: 0;
   color: var(--text-secondary);
-  font-size: 0.75rem;
-  line-height: 1.55;
+  font-size: 0.8125rem;
+  line-height: 1.7;
 }
 
 @media (max-width: 1120px) {
   .ops-status-band {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
+
+  .ops-status-band__item:nth-child(odd) {
+    border-left: 0;
+  }
+
+  .ops-status-band__item:nth-child(n + 3) {
+    border-top: 1px solid var(--line-soft);
+  }
 }
 
 @media (max-width: 720px) {
   .ops-status-band {
     grid-template-columns: 1fr;
+  }
+
+  .ops-status-band__item {
+    border-left: 0;
+    border-top: 1px solid var(--line-soft);
+  }
+
+  .ops-status-band__item:first-child {
+    border-top: 0;
   }
 }
 </style>

@@ -254,16 +254,7 @@ onMounted(async () => {
   gap: 16px;
 }
 
-.gateway-metric-card,
-.cost-breakdown-card,
-.timeseries-item {
-  padding: 18px;
-  border: 1px solid var(--line-soft);
-  border-radius: 18px;
-  background: var(--surface-1);
-}
-
-.gateway-metric-card__label,
+.section-kicker,
 .section-kicker {
   display: block;
   font-size: 12px;
@@ -273,29 +264,27 @@ onMounted(async () => {
   color: var(--text-muted);
 }
 
-.gateway-metric-card__value {
-  display: block;
-  margin-top: 8px;
-  color: var(--text-primary);
-  font-size: 28px;
-}
-
-.gateway-metric-card__note,
 .cost-breakdown-card p {
   margin: 8px 0 0;
   color: var(--text-secondary);
 }
 
-.cost-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 20px;
-}
-
 .cost-breakdown-grid,
 .timeseries-list {
   display: grid;
-  gap: 12px;
+  gap: 0;
+}
+
+.cost-breakdown-card,
+.timeseries-item {
+  padding: 16px 0 0;
+  border-top: 1px solid var(--line-soft);
+}
+
+.cost-breakdown-card:first-child,
+.timeseries-item:first-child {
+  padding-top: 0;
+  border-top: 0;
 }
 
 .cost-breakdown-card strong {
@@ -328,15 +317,13 @@ onMounted(async () => {
 }
 
 @media (max-width: 1120px) {
-  .gateway-metric-strip,
-  .cost-grid {
+  .gateway-metric-strip {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 
 @media (max-width: 768px) {
-  .gateway-metric-strip,
-  .cost-grid {
+  .gateway-metric-strip {
     grid-template-columns: 1fr;
   }
 }
