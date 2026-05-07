@@ -168,11 +168,7 @@ onMounted(loadLabels);
 </script>
 
 <template>
-  <LightragWorkspaceShell
-    title="图谱浏览"
-    summary="把标签选择、画布浏览和节点检查器放进同一张工作面。默认先看结构，再决定是否下钻原始数据。"
-    :status-items="graphStats"
-  >
+  <LightragWorkspaceShell :status-items="graphStats">
     <template #aside>
       <span>最近载入：{{ lastLoadedAt || '尚未载入图谱' }}</span>
       <a href="/admin/lightrag/legacy" target="_blank" rel="noopener">打开 Legacy WebUI</a>

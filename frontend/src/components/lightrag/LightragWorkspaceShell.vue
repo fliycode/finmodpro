@@ -3,18 +3,6 @@ import { computed } from 'vue';
 import { RouterLink, useRoute } from 'vue-router';
 
 const props = defineProps({
-  title: {
-    type: String,
-    required: true,
-  },
-  summary: {
-    type: String,
-    default: '',
-  },
-  eyebrow: {
-    type: String,
-    default: 'Graph workspace',
-  },
   statusItems: {
     type: Array,
     default: () => [],
@@ -34,14 +22,8 @@ const isActive = (item) => route.path === item.to;
 
 <template>
   <div class="page-stack lightrag-workspace-shell">
-    <section class="lightrag-workspace-shell__intro">
-      <div class="lightrag-workspace-shell__copy">
-        <span class="lightrag-workspace-shell__eyebrow">{{ eyebrow }}</span>
-        <h2 class="lightrag-workspace-shell__title">{{ title }}</h2>
-        <p v-if="summary" class="lightrag-workspace-shell__summary">{{ summary }}</p>
-      </div>
-
-      <div v-if="$slots.aside || $slots.actions" class="lightrag-workspace-shell__meta">
+    <section v-if="$slots.aside || $slots.actions" class="lightrag-workspace-shell__toolbar">
+      <div class="lightrag-workspace-shell__meta">
         <div v-if="$slots.aside" class="lightrag-workspace-shell__aside">
           <slot name="aside" />
         </div>
@@ -83,26 +65,11 @@ const isActive = (item) => route.path === item.to;
   min-width: 0;
 }
 
-.lightrag-workspace-shell__intro {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 24px;
-  padding: 28px 30px;
-  border: 1px solid var(--line-soft);
-  border-radius: 26px;
-  background:
-    linear-gradient(180deg, rgba(18, 24, 34, 0.04), rgba(18, 24, 34, 0)),
-    var(--surface-1);
-  box-shadow: var(--shadow-sm);
+.lightrag-workspace-shell__toolbar {
+  display: flex;
+  justify-content: flex-end;
 }
 
-.lightrag-workspace-shell__copy {
-  display: grid;
-  gap: 10px;
-  min-width: 0;
-}
-
-.lightrag-workspace-shell__eyebrow,
 .lightrag-workspace-shell__rail-label {
   color: var(--text-muted);
   font-size: 12px;
@@ -111,15 +78,6 @@ const isActive = (item) => route.path === item.to;
   text-transform: uppercase;
 }
 
-.lightrag-workspace-shell__title {
-  margin: 0;
-  color: var(--text-primary);
-  font-size: 1.9rem;
-  line-height: 1.1;
-  letter-spacing: -0.03em;
-}
-
-.lightrag-workspace-shell__summary,
 .lightrag-workspace-shell__rail-note {
   max-width: 72ch;
   margin: 0;
@@ -127,26 +85,30 @@ const isActive = (item) => route.path === item.to;
   line-height: 1.65;
 }
 
-.lightrag-workspace-shell__meta,
+.lightrag-workspace-shell__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  width: 100%;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.lightrag-workspace-shell__aside {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  color: var(--text-secondary);
+  font-size: 0.8125rem;
+}
+
 .lightrag-workspace-shell__actions {
   display: flex;
   flex-wrap: wrap;
   gap: 12px;
   justify-content: flex-end;
-  align-items: flex-start;
-}
-
-.lightrag-workspace-shell__meta {
-  align-content: space-between;
-}
-
-.lightrag-workspace-shell__aside {
-  display: grid;
-  gap: 8px;
-  justify-items: end;
-  color: var(--text-secondary);
-  font-size: 0.8125rem;
-  text-align: right;
+  align-items: center;
 }
 
 .lightrag-workspace-shell__nav {
@@ -197,15 +159,9 @@ const isActive = (item) => route.path === item.to;
 }
 
 @media (max-width: 1180px) {
-  .lightrag-workspace-shell__intro {
-    grid-template-columns: 1fr;
-  }
-
   .lightrag-workspace-shell__meta,
   .lightrag-workspace-shell__aside {
     justify-content: flex-start;
-    justify-items: start;
-    text-align: left;
   }
 }
 
@@ -216,12 +172,8 @@ const isActive = (item) => route.path === item.to;
 }
 
 @media (max-width: 640px) {
-  .lightrag-workspace-shell__intro {
-    padding: 24px 22px;
-  }
-
-  .lightrag-workspace-shell__title {
-    font-size: 1.55rem;
+  .lightrag-workspace-shell__meta {
+    align-items: flex-start;
   }
 
   .lightrag-workspace-shell__rail {

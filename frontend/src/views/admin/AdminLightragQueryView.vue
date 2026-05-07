@@ -107,11 +107,7 @@ onMounted(loadOverview);
 </script>
 
 <template>
-  <LightragWorkspaceShell
-    title="查询工作台"
-    summary="把问题、检索模式和证据回看放在同一视野里。默认只展示必要控件，避免一进页面就被参数淹没。"
-    :status-items="statusItems"
-  >
+  <LightragWorkspaceShell :status-items="statusItems">
     <template #aside>
       <span>最近刷新：{{ refreshedAt || '尚未刷新' }}</span>
       <a href="/admin/lightrag/legacy" target="_blank" rel="noopener">打开 Legacy WebUI</a>

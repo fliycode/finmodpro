@@ -170,11 +170,7 @@ onMounted(loadDocuments);
 </script>
 
 <template>
-  <LightragWorkspaceShell
-    title="文档管线"
-    summary="把上传、扫描、失败重跑和轨迹检查收敛到一处。先看队列，再决定是否动维护操作。"
-    :status-items="statusItems"
-  >
+  <LightragWorkspaceShell :status-items="statusItems">
     <template #aside>
       <span>最近刷新：{{ lastLoadedAt || '尚未刷新' }}</span>
       <span>当前分页：{{ pageSummary }}</span>
