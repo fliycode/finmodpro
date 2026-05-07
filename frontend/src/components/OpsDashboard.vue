@@ -3,13 +3,8 @@ import { computed, onMounted, ref } from 'vue';
 import { ElMessage } from 'element-plus';
 
 import { dashboardApi } from '../api/dashboard.js';
-import { riskApi } from '../api/risk.js';
-import { createApiConfig } from '../api/config.js';
 import {
   buildDashboardDocumentOption,
-  buildDashboardDonutOption,
-  buildDashboardRiskLevelOption,
-  buildDashboardSourceRows,
   buildDashboardSummaryMetrics,
   buildDashboardTrendOption,
   normalizeDashboardPayload,
@@ -18,30 +13,12 @@ import AdminChart from './admin/AdminChart.vue';
 import AppIcon from './ui/AppIcon.vue';
 
 const dashboardStats = ref(normalizeDashboardPayload({}));
-const audits = ref([]);
-const health = ref(null);
 const isLoading = ref(true);
 const errorMsg = ref('');
-const refreshedAt = ref('');
 
 const numberFormatter = new Intl.NumberFormat('zh-CN');
 
 const formatNumber = (value) => numberFormatter.format(Math.max(0, Math.round(Number(value) || 0)));
-
-const formatTimestamp = (value) => {
-  if (!value) {
-    return '未更新';
-  }
-
-  return new Intl.DateTimeFormat('zh-CN', {
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: false,
-  }).format(new Date(value));
-};
 
 const formatShortTime = (value) => {
   if (!value) {
@@ -66,8 +43,8 @@ const formatStatus = (status) => {
     pending: '待处理',
     approved: '已通过',
     rejected: '已驳回',
-    hit: '命中',
-    miss: '未命中',
+    retried: '已重试',
+    skipped: '已跳过',
   };
 
   return labels[status] || status || '状态';
@@ -80,6 +57,7 @@ const formatAuditAction = (action) => {
     'risk.batch_extract': '批量提取',
     'risk.sentiment': '舆情分析',
   };
+
   return labels[action] || action || '审计事件';
 };
 
@@ -88,17 +66,8 @@ const fetchData = async () => {
   errorMsg.value = '';
 
   try {
-    const [statsRes, auditRes, healthRes] = await Promise.all([
-      dashboardApi.getStats(),
-      dashboardApi.getAudits({ limit: 8 }).catch(() => null),
-      createApiConfig().fetchJson('/api/systemcheck/health/', { method: 'GET' }).catch(() => null),
-    ]);
+    const statsRes = await dashboardApi.getStats();
     dashboardStats.value = normalizeDashboardPayload(statsRes);
-    audits.value = Array.isArray(auditRes?.audits)
-      ? auditRes.audits
-      : dashboardStats.value.audit_snippets;
-    health.value = healthRes?.data || healthRes || null;
-    refreshedAt.value = formatTimestamp(Date.now());
   } catch (error) {
     console.error('Dashboard data fetch failed:', error);
     errorMsg.value = '加载数据看板失败，请稍后重试。';
@@ -111,890 +80,485 @@ const fetchData = async () => {
 onMounted(fetchData);
 
 const summaryMetrics = computed(() => buildDashboardSummaryMetrics(dashboardStats.value));
-const sourceRows = computed(() => buildDashboardSourceRows({
-  ...dashboardStats.value,
-  audit_snippets: audits.value,
-}));
-
 const trendOption = computed(() => buildDashboardTrendOption(dashboardStats.value));
-const riskLevelOption = computed(() => buildDashboardRiskLevelOption(dashboardStats.value));
-const sourceOption = computed(() => buildDashboardDonutOption(sourceRows.value, ['36%', '50%']));
 const documentOption = computed(() => buildDashboardDocumentOption(dashboardStats.value));
 
-const riskLevelRows = computed(() => {
-  const distribution = dashboardStats.value.risk_level_distribution || {};
-  const high = Number(distribution.high || 0) + Number(distribution.critical || 0);
-  const medium = Number(distribution.medium || 0);
-  const low = Number(distribution.low || 0);
-  const total = Math.max(1, high + medium + low);
+const auditRows = computed(() => dashboardStats.value.audit_snippets.slice(0, 4).map((item, index) => ({
+  id: item.id || `audit-${index}`,
+  title: formatAuditAction(item.action),
+  actor: item.actor_name || '系统',
+  status: formatStatus(item.status),
+  statusTone: item.status === 'failed' ? 'is-risk' : 'is-neutral',
+  time: formatShortTime(item.created_at),
+  summary: item.summary || `${formatAuditAction(item.action)} · ${formatStatus(item.status)}`,
+})));
 
-  return [
-    { label: '高风险', value: high, color: 'var(--risk, #f04d5d)' },
-    { label: '中风险', value: medium, color: 'var(--warning, #f3a21b)' },
-    { label: '低风险', value: low, color: 'var(--brand, #2f74ff)' },
-  ].map((item) => ({
-    ...item,
-    percent: `${(item.value / total * 100).toFixed(1)}%`,
-  }));
-});
-
-const processStats = computed(() => [
+const documentHighlights = computed(() => ([
   {
-    label: '文档总量',
-    value: formatNumber(dashboardStats.value.document_count),
-    icon: 'file-text',
+    label: '处理中',
+    value: formatNumber(dashboardStats.value.processing_document_count),
   },
   {
-    label: '已索引文档',
-    value: formatNumber(dashboardStats.value.indexed_document_count),
-    icon: 'database',
-  },
-  {
-    label: '知识库入口',
-    value: formatNumber(dashboardStats.value.knowledgebase_count),
-    icon: 'layers',
-  },
-  {
-    label: '近 24h 问答',
-    value: formatNumber(dashboardStats.value.chat_request_count_24h),
-    icon: 'message-square',
+    label: '失败',
+    value: formatNumber(dashboardStats.value.failed_document_count),
   },
   {
     label: '可重试入库',
     value: formatNumber(dashboardStats.value.retryable_ingestion_count),
-    icon: 'refresh',
   },
-  {
-    label: '审计记录',
-    value: formatNumber(audits.value.length),
-    icon: 'clipboard',
-  },
-]);
-
-const topEvents = computed(() => {
-  const riskActivityRows = dashboardStats.value.recent_activity
-    .filter((item) => item.type === 'risk')
-    .slice(0, 5)
-    .map((item, index) => {
-      const [company = '风险样本'] = String(item.message || '').split(' 产生 ');
-      const isHigh = item.tone === 'risk';
-
-      return {
-        id: `risk-${index}`,
-        title: item.message || '风险事件待核查',
-        company,
-        level: isHigh ? '高' : '中',
-        levelClass: isHigh ? 'is-high' : 'is-mid',
-        value: isHigh ? '重点' : '观察',
-        time: formatShortTime(item.timestamp),
-      };
-    });
-
-  const failureRows = dashboardStats.value.recent_failures.slice(0, 3).map((item, index) => ({
-    id: `failure-${item.id || index}`,
-    title: `文档处理失败：${item.document_title || '未命名文档'}`,
-    company: '知识库',
-    level: '中',
-    levelClass: 'is-mid',
-    value: `重试 ${item.retry_count ?? 0}`,
-    time: formatShortTime(item.updated_at),
-  }));
-
-  const auditRows = audits.value.slice(0, 4).map((item, index) => ({
-    id: `audit-${item.id || index}`,
-    title: item.summary || formatAuditAction(item.action),
-    company: item.actor_name || '系统',
-    level: item.status === 'failed' ? '高' : '低',
-    levelClass: item.status === 'failed' ? 'is-high' : 'is-low',
-    value: formatStatus(item.status),
-    time: formatShortTime(item.created_at || item.timestamp),
-    audit: item,
-  }));
-
-  const rows = [...riskActivityRows, ...failureRows, ...auditRows].slice(0, 10);
-
-  if (rows.length > 0) {
-    return rows;
-  }
-
-  return [
-    {
-      id: 'pending-risk',
-      title: '待审核风险事件池',
-      company: '风险中台',
-      level: '高',
-      levelClass: 'is-high',
-      value: formatNumber(dashboardStats.value.pending_risk_event_count),
-      time: '实时',
-    },
-    {
-      id: 'failed-docs',
-      title: '失败入库影响知识召回',
-      company: '知识库',
-      level: '中',
-      levelClass: 'is-mid',
-      value: formatNumber(dashboardStats.value.failed_document_count),
-      time: '实时',
-    },
-  ];
-});
-
-const footerSources = computed(() => [
-  '知识库文档',
-  '风险提取结果',
-  'RAG 检索日志',
-  '系统审计记录',
-].join('、'));
-
-const retryingId = ref(null);
-
-const isRetryableAudit = (item) => (
-  item?.status === 'failed'
-  && ['risk.extract', 'risk.batch_extract'].includes(item?.action)
-  && String(item?.target_id || '').trim() !== ''
-);
-
-const retryAuditAction = async (item) => {
-  if (!isRetryableAudit(item) || retryingId.value) {
-    return;
-  }
-
-  retryingId.value = item.id;
-  try {
-    if (item.action === 'risk.extract') {
-      await riskApi.retryExtractDocument(item.target_id);
-    } else {
-      const documentIds = String(item.target_id)
-        .split(',')
-        .map((value) => Number.parseInt(value.trim(), 10))
-        .filter((value) => Number.isInteger(value) && value > 0);
-      await riskApi.retryBatchExtract(documentIds);
-    }
-
-    ElMessage.success('已重新触发风险提取任务。');
-    await fetchData();
-  } catch (error) {
-    console.error('Failed to retry risk audit action:', error);
-    ElMessage.error(error?.message || '重新触发失败，请稍后重试。');
-  } finally {
-    retryingId.value = null;
-  }
-};
+]));
 </script>
 
 <template>
   <section class="ops-board" v-loading="isLoading">
-    <div class="ops-board__actions">
-      <button type="button" class="ops-board__chip">{{ refreshedAt || '等待刷新' }}</button>
-      <button type="button" class="ops-board__chip is-primary" @click="fetchData">
-        <AppIcon name="refresh" />
-        刷新
-      </button>
-    </div>
-
     <el-alert v-if="errorMsg" :title="errorMsg" type="error" show-icon :closable="false" />
 
     <section class="ops-board__summary">
       <article
-        v-for="metric in summaryMetrics.slice(0, 4)"
+        v-for="metric in summaryMetrics"
         :key="metric.key"
         class="summary-tile"
         :class="`is-${metric.tone}`"
       >
-        <span class="summary-tile__icon">
-          <AppIcon :name="metric.icon" />
-        </span>
-        <div>
+        <div class="summary-tile__head">
           <span class="summary-tile__label">{{ metric.label }}</span>
-          <strong>{{ metric.value }}</strong>
-          <p>{{ metric.note }} <em>{{ metric.delta }}</em></p>
+          <span class="summary-tile__icon">
+            <AppIcon :name="metric.icon" />
+          </span>
         </div>
+
+        <div class="summary-tile__value-row">
+          <strong>{{ metric.value }}</strong>
+          <em
+            class="summary-tile__delta"
+            :class="{
+              'is-up': metric.deltaTone === 'up',
+              'is-down': metric.deltaTone === 'down',
+              'is-neutral': metric.deltaTone === 'neutral',
+            }"
+          >
+            {{ metric.delta }}
+          </em>
+        </div>
+
+        <p>{{ metric.note }}</p>
       </article>
     </section>
 
-    <div v-if="health" class="ops-board__health">
-      <span class="ops-board__health-item" :class="health.checks?.database === 'ok' ? 'is-ok' : 'is-err'">
-        <span class="ops-board__health-dot" />
-        DB
-      </span>
-      <span class="ops-board__health-item" :class="health.checks?.redis === 'ok' ? 'is-ok' : 'is-err'">
-        <span class="ops-board__health-dot" />
-        Redis
-      </span>
-      <span class="ops-board__health-status">{{ health.status === 'ok' ? '系统正常' : '部分降级' }}</span>
-    </div>
+    <section class="ops-board__hero">
+      <header class="ops-board__hero-header">
+        <div>
+          <span class="ops-board__eyebrow">近 7 天主视图</span>
+          <h2>模型调用趋势</h2>
+          <p>这一屏只保留调用量主轴，辅以审计操作节奏，避免把低价值模块挤进核心视野。</p>
+        </div>
 
-    <section class="ops-board__grid">
-      <article class="board-panel board-panel--trend">
-        <div class="board-panel__header">
-          <div>
-            <strong>风险趋势分析</strong>
-            <span>近 7 天请求、命中与高风险预警</span>
+        <div class="ops-board__hero-aside">
+          <div class="ops-board__hero-stat">
+            <span>调用总量</span>
+            <strong>{{ formatNumber(dashboardStats.model_invocation_count_7d) }}</strong>
           </div>
-          <div class="board-tabs">
-            <span class="is-active">近7天</span>
-            <span>近30天</span>
-            <span>近90天</span>
+          <div class="ops-board__hero-stat">
+            <span>审计操作</span>
+            <strong>{{ formatNumber(dashboardStats.audit_operation_count_7d) }}</strong>
           </div>
         </div>
-        <AdminChart :option="trendOption" height="180px" />
-      </article>
+      </header>
 
-      <article class="board-panel board-panel--level">
-        <div class="board-panel__header">
-          <div>
-            <strong>风险等级分布</strong>
-            <span>来自后端风险事件等级聚合</span>
-          </div>
-        </div>
-        <div class="risk-level-layout">
-          <div class="donut-wrap">
-            <AdminChart :option="riskLevelOption" height="150px" />
-            <div class="donut-center donut-center--level">
-              <strong>{{ formatNumber(dashboardStats.risk_event_count) }}</strong>
-              <span>风险信息总数</span>
-            </div>
-          </div>
-          <div class="risk-level-legend">
-            <div v-for="row in riskLevelRows" :key="row.label">
-              <span :style="{ background: row.color }" />
-              <b>{{ row.label }}</b>
-              <em>{{ formatNumber(row.value) }}（{{ row.percent }}）</em>
-            </div>
-          </div>
-        </div>
-      </article>
+      <AdminChart :option="trendOption" height="320px" />
+    </section>
 
-      <article class="board-panel board-panel--source">
-        <div class="board-panel__header">
-          <div>
-            <strong>数据来源分布</strong>
-            <span>当前平台真实数据面来源</span>
-          </div>
-        </div>
-        <div class="source-layout">
-          <div class="donut-wrap">
-            <AdminChart :option="sourceOption" height="150px" />
-            <div class="donut-center donut-center--source">
-              <strong>{{ formatNumber(dashboardStats.document_count + dashboardStats.risk_event_count) }}</strong>
-              <span>核心样本量</span>
-            </div>
-          </div>
-          <div class="source-legend">
-            <div v-for="row in sourceRows" :key="row.label">
-              <span :style="{ background: row.color }" />
-              <b>{{ row.label }}</b>
-              <em>{{ formatNumber(row.value) }}</em>
-            </div>
-          </div>
-        </div>
-      </article>
-
-      <article class="board-panel board-panel--table">
-        <div class="board-panel__header">
-          <div>
-            <strong>高风险事项 TOP10</strong>
-            <span>风险活动、失败任务与关键审计合并排序</span>
-          </div>
-        </div>
-        <div class="event-table-wrap">
-          <table v-if="topEvents.length > 0" class="event-table">
-            <thead>
-              <tr>
-                <th>事件标题</th>
-                <th>涉及对象</th>
-                <th>风险等级</th>
-                <th>指标</th>
-                <th>时间</th>
-                <th />
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-for="(row, index) in topEvents" :key="row.id">
-                <td>
-                  <span class="event-rank">{{ index + 1 }}</span>
-                  {{ row.title }}
-                </td>
-                <td>{{ row.company }}</td>
-                <td><span class="risk-tag" :class="row.levelClass">{{ row.level }}</span></td>
-                <td>{{ row.value }}</td>
-                <td>{{ row.time }}</td>
-                <td>
-                  <button
-                    v-if="isRetryableAudit(row.audit)"
-                    type="button"
-                    class="table-action"
-                    :disabled="retryingId === row.audit?.id"
-                    @click="retryAuditAction(row.audit)"
-                  >
-                    {{ retryingId === row.audit?.id ? '重试中...' : '重试' }}
-                  </button>
-                </td>
-              </tr>
-            </tbody>
-          </table>
-          <div v-else class="admin-empty-state">暂无高风险事项</div>
-        </div>
-      </article>
-
-      <article class="board-panel board-panel--process">
-        <div class="board-panel__header">
-          <div>
-            <strong>数据处理统计</strong>
-            <span>知识入库、检索和审计处理状态</span>
-          </div>
-        </div>
-        <div class="process-grid">
-          <div v-for="item in processStats" :key="item.label" class="process-item">
-            <span><AppIcon :name="item.icon" /></span>
-            <div>
-              <b>{{ item.label }}</b>
-              <strong>{{ item.value }}</strong>
-            </div>
-          </div>
-        </div>
-      </article>
-
-      <article class="board-panel board-panel--documents">
-        <div class="board-panel__header">
+    <section class="ops-board__secondary">
+      <article class="board-panel">
+        <header class="board-panel__header">
           <div>
             <strong>文档处理状态</strong>
-            <span>解析、切块、索引与失败状态</span>
+            <span>只保留入库管线当前状态，用来判断知识资产是否拖慢调用链路。</span>
+          </div>
+        </header>
+
+        <AdminChart :option="documentOption" height="220px" />
+
+        <div class="board-panel__metrics">
+          <div v-for="item in documentHighlights" :key="item.label" class="board-panel__metric">
+            <span>{{ item.label }}</span>
+            <strong>{{ item.value }}</strong>
           </div>
         </div>
-        <AdminChart :option="documentOption" height="150px" />
+      </article>
+
+      <article class="board-panel">
+        <header class="board-panel__header">
+          <div>
+            <strong>最近审计操作</strong>
+            <span>把近期治理动作压成一列，保留行动上下文，不再混排成通用 TOP 列表。</span>
+          </div>
+        </header>
+
+        <div v-if="auditRows.length > 0" class="audit-feed">
+          <article v-for="row in auditRows" :key="row.id" class="audit-feed__item">
+            <div class="audit-feed__copy">
+              <strong>{{ row.title }}</strong>
+              <p>{{ row.actor }} · {{ row.summary }}</p>
+            </div>
+            <div class="audit-feed__meta">
+              <span class="audit-feed__status" :class="row.statusTone">{{ row.status }}</span>
+              <time>{{ row.time }}</time>
+            </div>
+          </article>
+        </div>
+        <div v-else class="admin-empty-state">近 7 天暂无审计操作</div>
       </article>
     </section>
-
-    <footer class="ops-board__footer">
-      <span>数据来源：{{ footerSources }}</span>
-      <span>最后更新：{{ refreshedAt || '未更新' }}</span>
-    </footer>
   </section>
 </template>
 
 <style scoped>
 .ops-board {
   display: grid;
-  gap: 8px;
+  gap: 24px;
   color: var(--text-secondary);
 }
 
-.ops-board__actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  justify-content: flex-end;
-}
-
-.ops-board__chip {
-  height: 28px;
-  border: 1px solid var(--line-soft);
-  border-radius: 4px;
-  background: var(--surface-1);
-  color: var(--text-muted);
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 0 10px;
-  font: inherit;
-  font-size: 0.6875rem;
-  cursor: pointer;
-}
-
-.ops-board__chip.is-primary {
-  border-color: var(--brand);
-  background: var(--brand);
-  color: #fff;
-  font-weight: 700;
-}
-
-/* ── Summary: 1-row compact indicator strip ── */
 .ops-board__summary {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  border: 1px solid var(--line-soft);
-  border-radius: 4px;
-  background: var(--surface-1);
-  overflow: hidden;
+  gap: 16px;
 }
 
 .summary-tile {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 12px;
-  border-right: 1px solid var(--line-soft);
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+  min-height: 154px;
+  padding: 22px 22px 20px;
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius-card);
+  background: var(--surface-1);
+  box-shadow: var(--shadow-md);
 }
 
-.summary-tile:last-child {
-  border-right: 0;
+.summary-tile__head,
+.summary-tile__value-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.summary-tile__label {
+  color: var(--text-primary);
+  font-size: 0.8125rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
 }
 
 .summary-tile__icon {
-  width: 24px;
-  height: 24px;
-  border-radius: 4px;
+  width: 34px;
+  height: 34px;
+  border-radius: 12px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
-  color: var(--brand);
   background: var(--brand-soft);
 }
 
 .summary-tile__icon :deep(.app-icon) {
-  width: 13px;
-  height: 13px;
-}
-
-.summary-tile.is-blue  { color: var(--brand); }
-.summary-tile.is-red   { color: var(--risk); }
-.summary-tile.is-cyan  { color: var(--info, #52d7e9); }
-.summary-tile.is-purple{ color: var(--brand-300, #b16cff); }
-.summary-tile.is-green { color: var(--success); }
-.summary-tile.is-orange{ color: var(--warning); }
-
-.summary-tile__label {
-  color: var(--text-muted);
-  font-size: 0.6875rem;
-  font-weight: 700;
-  white-space: nowrap;
+  width: 16px;
+  height: 16px;
 }
 
 .summary-tile strong {
-  color: currentColor;
-  font-size: 1.125rem;
-  line-height: 1.1;
-  font-weight: 800;
+  color: var(--text-primary);
+  font-family: var(--heading);
+  font-size: 2rem;
+  line-height: 1;
+  font-weight: 600;
 }
 
 .summary-tile p {
   margin: 0;
   color: var(--text-muted);
-  font-size: 0.625rem;
+  font-size: 0.8125rem;
+  line-height: 1.6;
 }
 
-.summary-tile em {
-  color: var(--success);
+.summary-tile__delta {
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;
+  padding: 0 10px;
+  border-radius: var(--radius-pill);
+  font-size: 0.75rem;
   font-style: normal;
-  margin-left: 4px;
-}
-
-.summary-tile.is-red em,
-.summary-tile.is-orange em {
-  color: var(--risk);
-}
-
-/* ── Health strip ── */
-.ops-board__health {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 6px 12px;
-  border: 1px solid var(--line-soft);
-  border-radius: 4px;
-  background: var(--surface-1);
-  font-size: 0.6875rem;
-}
-
-.ops-board__health-item {
-  display: flex;
-  align-items: center;
-  gap: 4px;
   font-weight: 700;
+  white-space: nowrap;
 }
 
-.ops-board__health-item.is-ok { color: var(--success); }
-.ops-board__health-item.is-err { color: var(--risk); }
-
-.ops-board__health-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: currentColor;
+.summary-tile__delta.is-up {
+  color: var(--success);
+  background: rgba(33, 129, 92, 0.12);
 }
 
-.ops-board__health-status {
-  margin-left: auto;
+.summary-tile__delta.is-down {
+  color: var(--risk);
+  background: rgba(196, 73, 61, 0.12);
+}
+
+.summary-tile__delta.is-neutral {
   color: var(--text-muted);
+  background: rgba(125, 135, 152, 0.12);
 }
 
-/* ── Chart grid: 3-col, compact ── */
-.ops-board__grid {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  grid-auto-rows: minmax(140px, auto);
-  gap: 0;
+.summary-tile.is-blue .summary-tile__icon {
+  color: var(--brand);
+}
+
+.summary-tile.is-orange .summary-tile__icon {
+  color: var(--warning);
+  background: rgba(183, 121, 31, 0.12);
+}
+
+.summary-tile.is-cyan .summary-tile__icon {
+  color: #5d9fe6;
+  background: rgba(93, 159, 230, 0.12);
+}
+
+.summary-tile.is-green .summary-tile__icon {
+  color: var(--success);
+  background: rgba(33, 129, 92, 0.12);
+}
+
+.ops-board__hero,
+.board-panel {
+  padding: 28px;
   border: 1px solid var(--line-soft);
-  border-radius: 28px;
+  border-radius: var(--radius-card);
   background: var(--surface-1);
-  overflow: hidden;
+  box-shadow: var(--shadow-md);
+}
+
+.ops-board__hero {
+  display: grid;
+  gap: 18px;
+}
+
+.ops-board__hero-header,
+.board-panel__header {
+  display: flex;
+  justify-content: space-between;
+  gap: 20px;
+}
+
+.ops-board__hero-header h2 {
+  margin: 6px 0 8px;
+  color: var(--text-primary);
+  font-family: var(--heading);
+  font-size: 1.75rem;
+  line-height: 1.15;
+  font-weight: 600;
+}
+
+.ops-board__hero-header p,
+.board-panel__header span {
+  margin: 0;
+  max-width: 62ch;
+  color: var(--text-muted);
+  font-size: 0.875rem;
+  line-height: 1.6;
+}
+
+.ops-board__eyebrow {
+  color: var(--brand);
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+}
+
+.ops-board__hero-aside {
+  display: grid;
+  gap: 12px;
+  min-width: 168px;
+}
+
+.ops-board__hero-stat {
+  padding: 14px 16px;
+  border-radius: var(--radius-lg);
+  background: rgba(36, 87, 197, 0.08);
+}
+
+.ops-board__hero-stat span {
+  display: block;
+  color: var(--text-muted);
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+.ops-board__hero-stat strong {
+  display: block;
+  margin-top: 6px;
+  color: var(--text-primary);
+  font-size: 1.5rem;
+  line-height: 1.1;
+  font-weight: 600;
+}
+
+.ops-board__secondary {
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(0, 0.9fr);
+  gap: 16px;
 }
 
 .board-panel {
-  min-width: 0;
-  padding: 18px 18px 16px;
-  border-top: 1px solid var(--line-soft);
-  border-left: 1px solid var(--line-soft);
-  background: transparent;
-  overflow: hidden;
-}
-
-.board-panel:nth-child(-n + 3) {
-  border-top: 0;
-}
-
-.board-panel:nth-child(3n + 1) {
-  border-left: 0;
-}
-
-.board-panel--process,
-.board-panel--documents {
-  min-height: 140px;
-}
-
-.board-panel__header {
-  min-height: 46px;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 12px;
-}
-
-.board-panel__header div:first-child {
-  min-width: 0;
+  display: grid;
+  gap: 18px;
 }
 
 .board-panel__header strong {
   display: block;
+  margin-bottom: 6px;
   color: var(--text-primary);
-  font-size: 0.8125rem;
+  font-size: 1rem;
   font-weight: 700;
 }
 
-.board-panel__header span {
-  display: block;
-  color: var(--text-muted);
-  font-size: 0.6875rem;
+.board-panel__metrics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
 }
 
-.board-tabs {
-  display: flex;
-  gap: 4px;
-  padding: 2px;
-  border-radius: 4px;
-  border: 1px solid var(--line-soft);
+.board-panel__metric {
+  padding: 14px 16px;
+  border-radius: var(--radius-lg);
   background: var(--surface-2);
 }
 
-.board-tabs span {
-  min-height: 22px;
-  display: inline-flex;
-  align-items: center;
-  padding: 0 8px;
-  border-radius: 3px;
-  color: var(--text-muted);
-  font-size: 0.6875rem;
-  font-weight: 700;
-}
-
-.board-tabs .is-active {
-  color: #fff;
-  background: var(--brand);
-}
-
-/* ── Donut charts ── */
-.donut-wrap {
-  position: relative;
-}
-
-.donut-center {
-  position: absolute;
-  pointer-events: none;
-  text-align: center;
-  color: var(--text-primary);
-}
-
-.donut-center strong {
+.board-panel__metric span {
   display: block;
-  font-size: 1rem;
+  color: var(--text-muted);
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+.board-panel__metric strong {
+  display: block;
+  margin-top: 6px;
+  color: var(--text-primary);
+  font-size: 1.25rem;
   line-height: 1.1;
+  font-weight: 600;
 }
 
-.donut-center span {
+.audit-feed {
+  display: grid;
+  gap: 12px;
+}
+
+.audit-feed__item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 16px;
+  align-items: center;
+  padding: 16px 18px;
+  border-radius: var(--radius-lg);
+  background: var(--surface-2);
+}
+
+.audit-feed__copy {
+  min-width: 0;
+}
+
+.audit-feed__copy strong {
   display: block;
-  margin-top: 2px;
-  color: var(--text-muted);
-  font-size: 0.625rem;
-}
-
-.donut-center--level,
-.donut-center--source {
-  left: calc(35% - 44px);
-  top: 64px;
-  width: 88px;
-}
-
-.source-legend,
-.risk-level-legend {
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  gap: 8px;
-  min-width: 0;
-  color: var(--text-secondary);
-  font-size: 0.6875rem;
-  font-weight: 700;
-}
-
-.source-legend div,
-.risk-level-legend div {
-  display: grid;
-  grid-template-columns: 8px minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 6px;
-}
-
-.source-legend span,
-.risk-level-legend span {
-  width: 8px;
-  height: 8px;
-  border-radius: 2px;
-}
-
-.source-legend b,
-.risk-level-legend b {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.source-legend em,
-.risk-level-legend em {
   color: var(--text-primary);
-  font-style: normal;
-  white-space: nowrap;
-}
-
-.risk-level-layout,
-.source-layout {
-  display: grid;
-  grid-template-columns: minmax(160px, 0.95fr) minmax(130px, 1fr);
-  align-items: center;
-  padding: 8px 0 0;
-}
-
-/* ── Event table ── */
-.event-table-wrap {
-  overflow-x: auto;
-  padding: 10px 0 0;
-}
-
-.event-table {
-  width: 100%;
-  min-width: 640px;
-  border-collapse: collapse;
-  color: var(--text-secondary);
-  font-size: 0.6875rem;
-}
-
-.event-table th {
-  height: 28px;
-  color: var(--text-muted);
+  font-size: 0.9375rem;
   font-weight: 700;
-  text-align: left;
-  border-bottom: 1px solid var(--line-soft);
 }
 
-.event-table td {
-  height: 28px;
-  max-width: 320px;
-  border-bottom: 1px solid var(--line-soft);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.event-rank {
-  display: inline-grid;
-  place-items: center;
-  width: 16px;
-  height: 16px;
-  margin-right: 6px;
-  border-radius: 3px;
-  background: var(--brand-soft);
-  color: var(--brand);
-  font-size: 0.625rem;
-  font-weight: 800;
-}
-
-.risk-tag {
-  display: inline-grid;
-  place-items: center;
-  width: 22px;
-  height: 18px;
-  border-radius: 3px;
-  font-size: 0.6875rem;
-  font-weight: 800;
-}
-
-.risk-tag.is-high { color: var(--risk); background: rgba(240, 77, 93, 0.12); }
-.risk-tag.is-mid  { color: var(--warning); background: rgba(243, 162, 27, 0.12); }
-.risk-tag.is-low  { color: var(--success); background: rgba(25, 213, 154, 0.12); }
-
-.table-action {
-  border: 0;
-  background: transparent;
-  color: var(--brand);
-  font: inherit;
-  font-weight: 700;
-  cursor: pointer;
-}
-
-.table-action:disabled {
+.audit-feed__copy p {
+  margin: 6px 0 0;
   color: var(--text-muted);
-  cursor: not-allowed;
+  font-size: 0.8125rem;
+  line-height: 1.5;
 }
 
-/* ── Process stats ── */
-.process-grid {
+.audit-feed__meta {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 6px 10px;
-  padding: 12px 0 0;
-}
-
-.process-item {
-  display: grid;
-  grid-template-columns: 28px minmax(0, 1fr);
-  align-items: center;
+  justify-items: end;
   gap: 8px;
 }
 
-.process-item > span {
-  width: 26px;
-  height: 26px;
-  border-radius: 4px;
-  background: var(--brand-soft);
+.audit-feed__meta time {
+  color: var(--text-muted);
+  font-size: 0.75rem;
+}
+
+.audit-feed__status {
   display: inline-flex;
   align-items: center;
-  justify-content: center;
-  color: var(--brand);
-}
-
-.process-item b {
-  display: block;
-  color: var(--text-muted);
-  font-size: 0.6875rem;
+  min-height: 28px;
+  padding: 0 10px;
+  border-radius: var(--radius-pill);
+  font-size: 0.75rem;
   font-weight: 700;
 }
 
-.process-item strong {
-  display: block;
-  color: var(--brand);
-  font-size: 1rem;
-  line-height: 1.2;
-  font-weight: 800;
+.audit-feed__status.is-risk {
+  color: var(--risk);
+  background: rgba(196, 73, 61, 0.12);
 }
 
-/* ── Footer ── */
-.ops-board__footer {
-  min-height: 32px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 0 12px;
-  border: 1px solid var(--line-soft);
-  border-radius: 4px;
-  background: var(--surface-1);
-  color: var(--text-muted);
-  font-size: 0.6875rem;
+.audit-feed__status.is-neutral {
+  color: var(--text-secondary);
+  background: rgba(125, 135, 152, 0.12);
 }
 
-/* ── Responsive ── */
 @media (max-width: 1320px) {
   .ops-board__summary {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
-  .summary-tile:nth-child(2n) {
-    border-right: 0;
-  }
-  .ops-board__grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
 
-  .board-panel {
-    border-left: 1px solid var(--line-soft);
-  }
-
-  .board-panel:nth-child(-n + 3) {
-    border-top: 1px solid var(--line-soft);
-  }
-
-  .board-panel:nth-child(-n + 2) {
-    border-top: 0;
-  }
-
-  .board-panel:nth-child(3n + 1) {
-    border-left: 1px solid var(--line-soft);
-  }
-
-  .board-panel:nth-child(2n + 1) {
-    border-left: 0;
-  }
-
-  .board-panel--table {
-    grid-column: span 2;
+  .ops-board__secondary {
+    grid-template-columns: 1fr;
   }
 }
 
 @media (max-width: 900px) {
-  .ops-board__grid,
-  .risk-level-layout,
-  .source-layout {
-    grid-template-columns: 1fr;
+  .ops-board {
+    gap: 16px;
   }
+
   .ops-board__summary {
     grid-template-columns: 1fr;
   }
-  .summary-tile {
-    border-right: 0;
-    border-bottom: 1px solid var(--line-soft);
-  }
-  .board-panel--table {
-    grid-column: span 1;
-  }
 
+  .ops-board__hero,
   .board-panel {
-    border-left: 0;
-    border-top: 1px solid var(--line-soft);
+    padding: 20px;
   }
 
-  .board-panel:first-child {
-    border-top: 0;
-  }
-
-  .process-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-  .ops-board__footer {
-    align-items: flex-start;
-    flex-direction: column;
-    padding-block: 8px;
-  }
-}
-
-@media (max-width: 560px) {
-  .ops-board__actions,
-  .board-panel__header {
-    align-items: stretch;
-    flex-direction: column;
-  }
-  .process-grid {
+  .ops-board__hero-header,
+  .board-panel__header,
+  .audit-feed__item {
     grid-template-columns: 1fr;
+  }
+
+  .ops-board__hero-header,
+  .board-panel__header {
+    display: grid;
+  }
+
+  .ops-board__hero-aside,
+  .board-panel__metrics {
+    grid-template-columns: 1fr;
+  }
+
+  .audit-feed__meta {
+    justify-items: start;
   }
 }
 </style>

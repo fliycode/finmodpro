@@ -48,6 +48,32 @@ const parsePercentage = (value) => {
   return Number.isFinite(numeric) ? numeric : 0;
 };
 
+const formatWeekOverWeekDelta = (currentValue, previousValue) => {
+  const current = toNumber(currentValue);
+  const previous = toNumber(previousValue);
+
+  if (previous <= 0) {
+    if (current <= 0) {
+      return { label: '较上周持平', tone: 'neutral' };
+    }
+
+    return { label: '本周开始有记录', tone: 'up' };
+  }
+
+  const delta = ((current - previous) / previous) * 100;
+  const rounded = `${delta > 0 ? '+' : ''}${delta.toFixed(1)}%`;
+
+  if (delta > 0) {
+    return { label: `较上周 ${rounded}`, tone: 'up' };
+  }
+
+  if (delta < 0) {
+    return { label: `较上周 ${rounded}`, tone: 'down' };
+  }
+
+  return { label: '较上周持平', tone: 'neutral' };
+};
+
 const sumObjectValues = (value) => (
   Object.values(value || {}).reduce((total, item) => total + toNumber(item), 0)
 );
@@ -100,10 +126,20 @@ export function normalizeDashboardPayload(payload) {
     high_risk_event_count: toNumber(data.high_risk_event_count),
     active_model_count: toNumber(data.active_model_count),
     chat_request_count_24h: toNumber(data.chat_request_count_24h),
+    model_invocation_count_7d: toNumber(data.model_invocation_count_7d),
+    model_invocation_count_prev_7d: toNumber(data.model_invocation_count_prev_7d),
+    audit_operation_count_7d: toNumber(data.audit_operation_count_7d),
+    audit_operation_count_prev_7d: toNumber(data.audit_operation_count_prev_7d),
+    document_added_count_7d: toNumber(data.document_added_count_7d),
+    document_added_count_prev_7d: toNumber(data.document_added_count_prev_7d),
+    indexed_document_completed_count_7d: toNumber(data.indexed_document_completed_count_7d),
+    indexed_document_completed_count_prev_7d: toNumber(data.indexed_document_completed_count_prev_7d),
     retryable_ingestion_count: toNumber(data.retryable_ingestion_count),
     retrieval_hit_rate_7d: String(data.retrieval_hit_rate_7d ?? '0.0%'),
     chat_requests_7d: Array.isArray(data.chat_requests_7d) ? data.chat_requests_7d : [],
     retrieval_hits_7d: Array.isArray(data.retrieval_hits_7d) ? data.retrieval_hits_7d : [],
+    model_invocations_7d: Array.isArray(data.model_invocations_7d) ? data.model_invocations_7d : [],
+    audit_operations_7d: Array.isArray(data.audit_operations_7d) ? data.audit_operations_7d : [],
     risk_level_distribution: {
       low: toNumber(data?.risk_level_distribution?.low),
       medium: toNumber(data?.risk_level_distribution?.medium),
@@ -124,62 +160,63 @@ export function normalizeDashboardPayload(payload) {
 }
 
 export function buildDashboardSummaryMetrics(stats) {
-  const hitRate = parsePercentage(stats?.retrieval_hit_rate_7d);
+  const modelDelta = formatWeekOverWeekDelta(
+    stats?.model_invocation_count_7d,
+    stats?.model_invocation_count_prev_7d,
+  );
+  const auditDelta = formatWeekOverWeekDelta(
+    stats?.audit_operation_count_7d,
+    stats?.audit_operation_count_prev_7d,
+  );
+  const documentDelta = formatWeekOverWeekDelta(
+    stats?.document_added_count_7d,
+    stats?.document_added_count_prev_7d,
+  );
+  const indexedDelta = formatWeekOverWeekDelta(
+    stats?.indexed_document_completed_count_7d,
+    stats?.indexed_document_completed_count_prev_7d,
+  );
 
   return [
     {
-      key: 'risk-total',
-      label: '风险信息总数',
-      value: formatInteger(stats?.risk_event_count),
-      note: `待审 ${formatInteger(stats?.pending_risk_event_count)} 条`,
-      icon: 'layers',
+      key: 'model-invocations',
+      label: '模型调用量',
+      value: formatInteger(stats?.model_invocation_count_7d),
+      note: `近 7 天累计，上一周 ${formatInteger(stats?.model_invocation_count_prev_7d)} 次`,
+      icon: 'brain-circuit',
       tone: 'blue',
-      delta: '+18.7%',
+      delta: modelDelta.label,
+      deltaTone: modelDelta.tone,
     },
     {
-      key: 'high-risk',
-      label: '高风险事件',
-      value: formatInteger(stats?.high_risk_event_count),
-      note: `待处理 ${formatInteger(stats?.pending_risk_event_count)} 条`,
-      icon: 'alert-triangle',
-      tone: 'red',
-      delta: '+12.3%',
+      key: 'audit-operations',
+      label: '审计操作量',
+      value: formatInteger(stats?.audit_operation_count_7d),
+      note: `近 7 天累计，上一周 ${formatInteger(stats?.audit_operation_count_prev_7d)} 次`,
+      icon: 'mouse-pointer-click',
+      tone: 'orange',
+      delta: auditDelta.label,
+      deltaTone: auditDelta.tone,
     },
     {
       key: 'documents',
       label: '知识文档总量',
       value: formatInteger(stats?.document_count),
-      note: `${formatInteger(stats?.failed_document_count)} 份失败`,
+      note: `近 7 天新增 ${formatInteger(stats?.document_added_count_7d)} 份`,
       icon: 'file-text',
       tone: 'cyan',
-      delta: '+8.6%',
+      delta: documentDelta.label,
+      deltaTone: documentDelta.tone,
     },
     {
       key: 'indexed',
       label: '已索引文档',
       value: formatInteger(stats?.indexed_document_count),
-      note: `${formatInteger(stats?.processing_document_count)} 份处理中`,
+      note: `近 7 天完成 ${formatInteger(stats?.indexed_document_completed_count_7d)} 份`,
       icon: 'database',
-      tone: 'purple',
-      delta: '+15.2%',
-    },
-    {
-      key: 'chat',
-      label: '近 24h 问答',
-      value: formatInteger(stats?.chat_request_count_24h),
-      note: `7 日命中率 ${stats?.retrieval_hit_rate_7d || '0.0%'}`,
-      icon: 'message-square',
-      tone: hitRate >= 70 ? 'green' : 'orange',
-      delta: '+22.1%',
-    },
-    {
-      key: 'models',
-      label: '启用模型',
-      value: formatInteger(stats?.active_model_count),
-      note: `${formatInteger(stats?.knowledgebase_count)} 个知识入口`,
-      icon: 'brain-circuit',
-      tone: 'orange',
-      delta: '+17.4%',
+      tone: 'green',
+      delta: indexedDelta.label,
+      deltaTone: indexedDelta.tone,
     },
   ];
 }
@@ -277,46 +314,26 @@ const getFallbackTrendSeries = (total, days) => {
 };
 
 export function buildDashboardTrendOption(stats) {
-  const requestRows = Array.isArray(stats?.chat_requests_7d) ? stats.chat_requests_7d : [];
-  const hitRows = Array.isArray(stats?.retrieval_hits_7d) ? stats.retrieval_hits_7d : [];
-  const hasRequests = requestRows.some((item) => toNumber(item.value) > 0);
-  const baseRows = requestRows.length > 0
-    ? requestRows
-    : getFallbackTrendSeries(stats?.risk_event_count || stats?.document_count, [
-      { date: 'day-1' },
-      { date: 'day-2' },
-      { date: 'day-3' },
-      { date: 'day-4' },
-      { date: 'day-5' },
-      { date: 'day-6' },
-      { date: 'day-7' },
-    ]);
-  const requests = hasRequests
-    ? requestRows
-    : getFallbackTrendSeries(stats?.chat_request_count_24h || stats?.risk_event_count, baseRows);
-  const hits = hitRows.some((item) => toNumber(item.value) > 0)
-    ? hitRows
-    : requests.map((item, index) => ({ ...item, value: Math.round(toNumber(item.value) * [0.72, 0.68, 0.62, 0.74, 0.7, 0.79, 0.76][index]) }));
-  const riskLine = requests.map((item, index) => (
-    Math.max(1, Math.round(toNumber(item.value) * [0.08, 0.06, 0.09, 0.13, 0.07, 0.1, 0.08][index]))
-  ));
+  const requestRows = Array.isArray(stats?.model_invocations_7d) ? stats.model_invocations_7d : [];
+  const auditRows = Array.isArray(stats?.audit_operations_7d) ? stats.audit_operations_7d : [];
+  const dates = requestRows.length > 0 ? requestRows.map((item) => item.date) : auditRows.map((item) => item.date);
   const axis = buildBoardAxis();
 
   return {
-    color: [chartColors().brand, chartColors().risk, '#2fd3d0'],
+    color: [chartColors().brand, chartColors().warning],
     tooltip: { trigger: 'axis', ...buildBoardTooltip() },
     legend: {
       top: 0,
-      left: 32,
+      left: 0,
       itemWidth: 18,
       itemHeight: 8,
       textStyle: { color: chartColors().textSecondary, fontWeight: 700 },
-      data: ['问答请求', '高风险预警', '检索命中'],
+      data: ['模型调用', '审计操作'],
     },
-    grid: { left: 42, right: 34, top: 52, bottom: 28 },
+    grid: { left: 42, right: 22, top: 48, bottom: 28 },
     xAxis: {
       type: 'category',
-      data: requests.map((item) => formatShortDate(item.date)),
+      data: dates.map((item) => formatShortDate(item)),
       ...axis,
     },
     yAxis: [
@@ -335,31 +352,22 @@ export function buildDashboardTrendOption(stats) {
     ],
     series: [
       {
-        name: '问答请求',
+        name: '模型调用',
         type: 'bar',
-        barWidth: 18,
-        data: requests.map((item) => toNumber(item.value)),
-        itemStyle: { color: '#2f74ff', borderRadius: [4, 4, 0, 0] },
+        barWidth: 22,
+        data: requestRows.map((item) => toNumber(item.value)),
+        itemStyle: { color: chartColors().brand, borderRadius: [8, 8, 0, 0] },
       },
       {
-        name: '高风险预警',
+        name: '审计操作',
         type: 'line',
         smooth: true,
-        symbolSize: 8,
+        symbolSize: 7,
         yAxisIndex: 1,
-        data: riskLine,
-        lineStyle: { width: 2, color: '#f04d5d' },
-        itemStyle: { color: '#f04d5d' },
-      },
-      {
-        name: '检索命中',
-        type: 'line',
-        smooth: true,
-        symbolSize: 8,
-        data: hits.map((item) => toNumber(item.value)),
-        lineStyle: { width: 3, color: '#2fd3d0' },
-        itemStyle: { color: '#2fd3d0' },
-        areaStyle: { color: 'rgba(47, 211, 208, 0.12)' },
+        data: auditRows.map((item) => toNumber(item.value)),
+        lineStyle: { width: 3, color: chartColors().warning },
+        itemStyle: { color: chartColors().warning },
+        areaStyle: { color: 'rgba(183, 121, 31, 0.12)' },
       },
     ],
   };

@@ -48,6 +48,7 @@ const iconMap = {
   'settings': 'lucide:settings',
   'filter': 'lucide:list-filter',
   'refresh': 'lucide:refresh-cw',
+  'mouse-pointer-click': 'lucide:mouse-pointer-click',
   'copy': 'lucide:copy',
   'tag': 'lucide:tag',
   'book-open': 'lucide:book-open',

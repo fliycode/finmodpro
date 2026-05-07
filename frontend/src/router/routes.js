@@ -45,6 +45,11 @@ export const appRoutes = [
         meta: { title: '知识检索与文档管理', subtitle: '多源金融文档的统一检索、解析与知识库管理。' },
       },
       {
+        path: 'knowledge/documents/:id',
+        component: () => import('../views/workspace/WorkspaceKnowledgeDetailView.vue'),
+        meta: { title: '文档详情' },
+      },
+      {
         path: 'history',
         component: () => import('../views/workspace/WorkspaceHistoryView.vue'),
         meta: { title: '历史会话', subtitle: '检索、回看、导出真实会话记录' },
@@ -81,7 +86,7 @@ export const appRoutes = [
       {
         path: 'overview',
         component: () => import('../views/admin/AdminOverviewView.vue'),
-        meta: { title: '数据看板', subtitle: '全局风险态势感知，联动知识库、问答链路、风险提取与系统审计。', breadcrumb: [{ label: '数据看板' }] },
+        meta: { title: '数据看板', subtitle: '聚焦模型调用、审计操作与知识资产入库节奏。', breadcrumb: [{ label: '数据看板' }] },
       },
       {
         path: 'users',
@@ -91,7 +96,12 @@ export const appRoutes = [
       {
         path: 'knowledge',
         component: () => import('../views/admin/AdminKnowledgeView.vue'),
-        meta: { title: '知识库管理', subtitle: '管理员视角查看知识资产、入库链路、存储和向量资源指标。', breadcrumb: [{ label: '风险看板' }, { label: '知识库管理' }] },
+        meta: { title: '知识库管理', subtitle: '管理员视角查看知识资产、入库链路、存储和向量资源指标。', breadcrumb: [] },
+      },
+      {
+        path: 'knowledge/documents/:id',
+        component: () => import('../views/admin/AdminKnowledgeDetailView.vue'),
+        meta: { title: '文档详情', breadcrumb: [{ label: '知识库管理', to: '/admin/knowledge' }, { label: '文档详情' }] },
       },
       {
         path: 'llm',

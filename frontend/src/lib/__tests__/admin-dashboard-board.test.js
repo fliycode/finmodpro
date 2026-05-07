@@ -2,58 +2,66 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
-  buildDashboardIndustryRows,
-  buildDashboardRegionRows,
-  buildDashboardSourceRows,
   buildDashboardSummaryMetrics,
+  buildDashboardTrendOption,
   normalizeDashboardPayload,
 } from '../admin-dashboard.js';
 
-test('dashboard board exposes six headline metrics from real admin aggregates', () => {
+test('dashboard board exposes four headline metrics backed by real week-over-week aggregates', () => {
   const stats = normalizeDashboardPayload({
-    document_count: 126580,
-    indexed_document_count: 8432,
-    risk_event_count: 32812,
-    pending_risk_event_count: 128,
-    high_risk_event_count: 128,
-    active_model_count: 3,
-    chat_request_count_24h: 2843,
-    retrieval_hit_rate_7d: '86.4%',
+    model_invocation_count_7d: 2843,
+    model_invocation_count_prev_7d: 2390,
+    audit_operation_count_7d: 188,
+    audit_operation_count_prev_7d: 160,
+    document_count: 15,
+    document_added_count_7d: 4,
+    document_added_count_prev_7d: 2,
+    indexed_document_count: 10,
+    indexed_document_completed_count_7d: 3,
+    indexed_document_completed_count_prev_7d: 2,
   });
 
   const metrics = buildDashboardSummaryMetrics(stats);
 
   assert.deepEqual(metrics.map((item) => item.label), [
-    '风险信息总数',
-    '高风险事件',
+    '模型调用量',
+    '审计操作量',
     '知识文档总量',
     '已索引文档',
-    '近 24h 问答',
-    '启用模型',
   ]);
-  assert.equal(metrics[0].value, '32,812');
-  assert.equal(metrics[1].value, '128');
-  assert.equal(metrics[3].value, '8,432');
+  assert.equal(metrics[0].value, '2,843');
+  assert.equal(metrics[0].delta, '较上周 +19.0%');
+  assert.equal(metrics[1].value, '188');
+  assert.equal(metrics[2].note, '近 7 天新增 4 份');
+  assert.equal(metrics[3].delta, '较上周 +50.0%');
 });
 
-test('dashboard board provides stable placeholder dimensions for future industry and region data', () => {
+test('dashboard trend chart uses real model invocation and audit operation series', () => {
   const stats = normalizeDashboardPayload({
-    risk_event_count: 1000,
-    high_risk_event_count: 100,
-    pending_risk_event_count: 80,
-    document_count: 500,
-    indexed_document_count: 420,
-    chat_request_count_24h: 60,
+    model_invocations_7d: [
+      { date: '2026-05-01', value: 10 },
+      { date: '2026-05-02', value: 12 },
+      { date: '2026-05-03', value: 8 },
+      { date: '2026-05-04', value: 14 },
+      { date: '2026-05-05', value: 16 },
+      { date: '2026-05-06', value: 20 },
+      { date: '2026-05-07', value: 18 },
+    ],
+    audit_operations_7d: [
+      { date: '2026-05-01', value: 2 },
+      { date: '2026-05-02', value: 1 },
+      { date: '2026-05-03', value: 3 },
+      { date: '2026-05-04', value: 4 },
+      { date: '2026-05-05', value: 3 },
+      { date: '2026-05-06', value: 5 },
+      { date: '2026-05-07', value: 4 },
+    ],
   });
 
-  const industries = buildDashboardIndustryRows(stats);
-  const regions = buildDashboardRegionRows(stats);
-  const sources = buildDashboardSourceRows(stats);
+  const option = buildDashboardTrendOption(stats);
 
-  assert.equal(industries.length, 6);
-  assert.equal(regions.length, 8);
-  assert.equal(sources.length, 4);
-  assert.ok(industries.every((item) => item.value > 0));
-  assert.ok(regions[0].value >= regions.at(-1).value);
-  assert.equal(sources[0].label, '知识文档');
+  assert.deepEqual(option.legend.data, ['模型调用', '审计操作']);
+  assert.deepEqual(option.xAxis.data, ['05-01', '05-02', '05-03', '05-04', '05-05', '05-06', '05-07']);
+  assert.deepEqual(option.series[0].data, [10, 12, 8, 14, 16, 20, 18]);
+  assert.deepEqual(option.series[1].data, [2, 1, 3, 4, 3, 5, 4]);
 });

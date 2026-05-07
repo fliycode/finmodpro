@@ -11,9 +11,10 @@ from django.utils import timezone
 from authentication.models import User
 from authentication.services.jwt_service import generate_access_token
 from knowledgebase.models import Document, IngestionTask
-from llm.models import EvalRecord, ModelConfig
+from llm.models import EvalRecord, ModelConfig, ModelInvocationLog
 from rag.models import RetrievalLog
 from rbac.services.rbac_service import ROLE_ADMIN, seed_roles_and_permissions
+from systemcheck.models import AuditRecord
 from systemcheck.services.audit_service import record_audit_event
 from risk.models import RiskEvent
 
@@ -87,9 +88,13 @@ class DashboardStatsApiTests(TestCase):
         )
 
     def test_dashboard_stats_returns_real_admin_aggregate_payload(self):
-        indexed_document = self.create_document(title="已索引文档", filename="indexed.pdf")
-        indexed_document.status = Document.STATUS_INDEXED
-        indexed_document.save(update_fields=["status", "updated_at"])
+        indexed_document_old = self.create_document(title="历史已索引文档", filename="indexed-old.pdf")
+        indexed_document_old.status = Document.STATUS_INDEXED
+        indexed_document_old.save(update_fields=["status", "updated_at"])
+
+        indexed_document_current = self.create_document(title="新近已索引文档", filename="indexed-current.pdf")
+        indexed_document_current.status = Document.STATUS_INDEXED
+        indexed_document_current.save(update_fields=["status", "updated_at"])
 
         processing_document = self.create_document(title="处理中文档", filename="processing.pdf")
         processing_document.status = Document.STATUS_CHUNKED
@@ -101,7 +106,7 @@ class DashboardStatsApiTests(TestCase):
         failed_document.save(update_fields=["status", "error_message", "updated_at"])
 
         pending_risk = self.create_risk_event(
-            document=indexed_document,
+            document=indexed_document_current,
             review_status=RiskEvent.STATUS_PENDING,
         )
         pending_risk.risk_level = RiskEvent.LEVEL_HIGH
@@ -139,7 +144,10 @@ class DashboardStatsApiTests(TestCase):
             is_active=False,
         )
 
+        chat_model = ModelConfig.objects.get(name="chat-active")
+
         now = timezone.now()
+        Document.objects.filter(id=indexed_document_old.id).update(created_at=now - timedelta(days=8))
         for days_ago, result_count in [
             (0, 2),
             (1, 1),
@@ -165,6 +173,42 @@ class DashboardStatsApiTests(TestCase):
         )
         RetrievalLog.objects.filter(id=stale_log.id).update(created_at=now - timedelta(days=10))
 
+        for days_ago in [0, 1, 4, 6, 7, 10]:
+            invocation = ModelInvocationLog.objects.create(
+                model_config=chat_model,
+                capability=ModelConfig.CAPABILITY_CHAT,
+                provider=chat_model.provider,
+                alias=chat_model.name,
+                upstream_model=chat_model.model_name,
+                status=ModelInvocationLog.STATUS_SUCCESS,
+                latency_ms=180,
+                request_tokens=120,
+                response_tokens=60,
+            )
+            ModelInvocationLog.objects.filter(id=invocation.id).update(created_at=now - timedelta(days=days_ago))
+
+        previous_success_task = IngestionTask.objects.create(
+            document=indexed_document_old,
+            status=IngestionTask.STATUS_SUCCEEDED,
+            current_step=IngestionTask.STEP_COMPLETED,
+            finished_at=now - timedelta(days=8),
+        )
+        IngestionTask.objects.filter(id=previous_success_task.id).update(
+            created_at=now - timedelta(days=8),
+            finished_at=now - timedelta(days=8),
+        )
+
+        current_success_task = IngestionTask.objects.create(
+            document=indexed_document_current,
+            status=IngestionTask.STATUS_SUCCEEDED,
+            current_step=IngestionTask.STEP_COMPLETED,
+            finished_at=now - timedelta(days=1),
+        )
+        IngestionTask.objects.filter(id=current_success_task.id).update(
+            created_at=now - timedelta(days=1),
+            finished_at=now - timedelta(days=1),
+        )
+
         task = IngestionTask.objects.create(
             document=failed_document,
             status=IngestionTask.STATUS_FAILED,
@@ -181,6 +225,23 @@ class DashboardStatsApiTests(TestCase):
             status="failed",
             detail_payload={"error": "vector insert failed"},
         )
+        record_audit_event(
+            actor=self.admin_user,
+            action="risk.extract",
+            target_type="document",
+            target_id=indexed_document_current.id,
+            status="succeeded",
+            detail_payload={"source": "dashboard-test"},
+        )
+        previous_audit = record_audit_event(
+            actor=self.admin_user,
+            action="risk.sentiment",
+            target_type="dataset",
+            target_id="previous-window",
+            status="succeeded",
+            detail_payload={"source": "dashboard-test"},
+        )
+        AuditRecord.objects.filter(id=previous_audit.id).update(created_at=now - timedelta(days=9))
 
         eval_record = EvalRecord.objects.create(
             task_type=EvalRecord.TASK_QA,
@@ -202,8 +263,8 @@ class DashboardStatsApiTests(TestCase):
 
         data = payload["data"]
         self.assertEqual(data["knowledgebase_count"], 1)
-        self.assertEqual(data["document_count"], 3)
-        self.assertEqual(data["indexed_document_count"], 1)
+        self.assertEqual(data["document_count"], 4)
+        self.assertEqual(data["indexed_document_count"], 2)
         self.assertEqual(data["processing_document_count"], 1)
         self.assertEqual(data["failed_document_count"], 1)
         self.assertEqual(data["risk_event_count"], 2)
@@ -211,14 +272,24 @@ class DashboardStatsApiTests(TestCase):
         self.assertEqual(data["high_risk_event_count"], 2)
         self.assertEqual(data["active_model_count"], 3)
         self.assertEqual(data["chat_request_count_24h"], 1)
+        self.assertEqual(data["model_invocation_count_7d"], 4)
+        self.assertEqual(data["model_invocation_count_prev_7d"], 2)
+        self.assertEqual(data["audit_operation_count_7d"], 2)
+        self.assertEqual(data["audit_operation_count_prev_7d"], 1)
+        self.assertEqual(data["document_added_count_7d"], 3)
+        self.assertEqual(data["document_added_count_prev_7d"], 1)
+        self.assertEqual(data["indexed_document_completed_count_7d"], 1)
+        self.assertEqual(data["indexed_document_completed_count_prev_7d"], 1)
         self.assertEqual(data["retrieval_hit_rate_7d"], "60.0%")
         self.assertEqual(data["retryable_ingestion_count"], 1)
         self.assertEqual(len(data["recent_failures"]), 1)
         self.assertEqual(data["recent_failures"][0]["document_id"], failed_document.id)
-        self.assertEqual(len(data["audit_snippets"]), 1)
-        self.assertEqual(data["audit_snippets"][0]["action"], "knowledgebase.ingest")
+        self.assertEqual(len(data["audit_snippets"]), 3)
+        self.assertEqual(data["audit_snippets"][0]["action"], "risk.extract")
         self.assertEqual(len(data["chat_requests_7d"]), 7)
         self.assertEqual(len(data["retrieval_hits_7d"]), 7)
+        self.assertEqual(len(data["model_invocations_7d"]), 7)
+        self.assertEqual(len(data["audit_operations_7d"]), 7)
         self.assertEqual(
             data["risk_level_distribution"],
             {"low": 0, "medium": 0, "high": 1, "critical": 1},
@@ -229,7 +300,7 @@ class DashboardStatsApiTests(TestCase):
                 "uploaded": 0,
                 "parsed": 0,
                 "chunked": 1,
-                "indexed": 1,
+                "indexed": 2,
                 "failed": 1,
             },
         )
@@ -322,10 +393,10 @@ class AuditLogsApiTests(TestCase):
         self.assertEqual(payload["code"], 0)
         self.assertEqual(payload["message"], "ok")
         self.assertEqual(payload["data"]["total"], 2)
-        self.assertEqual(len(payload["data"]["audits"]), 2)
-        self.assertEqual(payload["data"]["audits"][0]["action"], "risk.sentiment")
-        self.assertEqual(payload["data"]["audits"][0]["status"], "failed")
-        self.assertEqual(payload["data"]["audits"][1]["action"], "knowledgebase.ingest")
+        self.assertEqual(len(payload["data"]["results"]), 2)
+        self.assertEqual(payload["data"]["results"][0]["action"], "risk.sentiment")
+        self.assertEqual(payload["data"]["results"][0]["status"], "failed")
+        self.assertEqual(payload["data"]["results"][1]["action"], "knowledgebase.ingest")
 
     def test_audit_logs_require_permission(self):
         stranger = User.objects.create_user(

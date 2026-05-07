@@ -4,8 +4,9 @@ from django.db.models import Count, Q
 from django.utils import timezone
 
 from knowledgebase.models import Document, IngestionTask
-from llm.models import EvalRecord, ModelConfig
+from llm.models import EvalRecord, ModelConfig, ModelInvocationLog
 from rag.models import RetrievalLog
+from systemcheck.models import AuditRecord
 from systemcheck.services.audit_service import list_audit_records
 from risk.models import RiskEvent
 
@@ -33,6 +34,35 @@ def _build_daily_series(*, days, values_by_day):
             }
         )
     return series
+
+
+def _build_window_summary(*, queryset, date_field, days=7):
+    today = timezone.localdate()
+    current_start_day = today - timedelta(days=days - 1)
+    previous_start_day = current_start_day - timedelta(days=days)
+
+    current_filter = {f"{date_field}__date__gte": current_start_day}
+    previous_filter = {
+        f"{date_field}__date__gte": previous_start_day,
+        f"{date_field}__date__lt": current_start_day,
+    }
+    series_key = f"{date_field}__date"
+
+    current_rows = (
+        queryset.filter(**current_filter)
+        .values(series_key)
+        .annotate(value=Count("id"))
+    )
+    values_by_day = {
+        row[series_key]: row["value"]
+        for row in current_rows
+    }
+
+    return {
+        "current_count": queryset.filter(**current_filter).count(),
+        "previous_count": queryset.filter(**previous_filter).count(),
+        "series": _build_daily_series(days=days, values_by_day=values_by_day),
+    }
 
 
 def _get_recent_activity(limit=8):
@@ -143,6 +173,23 @@ def get_dashboard_stats():
     )
     hit_logs = recent_logs.filter(result_count__gt=0)
 
+    model_invocation_summary = _build_window_summary(
+        queryset=ModelInvocationLog.objects.all(),
+        date_field="created_at",
+    )
+    audit_operation_summary = _build_window_summary(
+        queryset=AuditRecord.objects.all(),
+        date_field="created_at",
+    )
+    document_addition_summary = _build_window_summary(
+        queryset=Document.objects.all(),
+        date_field="created_at",
+    )
+    indexed_document_completion_summary = _build_window_summary(
+        queryset=IngestionTask.objects.filter(status=IngestionTask.STATUS_SUCCEEDED),
+        date_field="finished_at",
+    )
+
     chat_requests_by_day = {
         row["created_at__date"]: row["value"]
         for row in recent_logs.values("created_at__date").annotate(value=Count("id"))
@@ -184,6 +231,16 @@ def get_dashboard_stats():
         "high_risk_event_count": risk_counts["high_risk_event_count"],
         "active_model_count": active_model_count,
         "chat_request_count_24h": chat_request_count_24h,
+        "model_invocation_count_7d": model_invocation_summary["current_count"],
+        "model_invocation_count_prev_7d": model_invocation_summary["previous_count"],
+        "model_invocations_7d": model_invocation_summary["series"],
+        "audit_operation_count_7d": audit_operation_summary["current_count"],
+        "audit_operation_count_prev_7d": audit_operation_summary["previous_count"],
+        "audit_operations_7d": audit_operation_summary["series"],
+        "document_added_count_7d": document_addition_summary["current_count"],
+        "document_added_count_prev_7d": document_addition_summary["previous_count"],
+        "indexed_document_completed_count_7d": indexed_document_completion_summary["current_count"],
+        "indexed_document_completed_count_prev_7d": indexed_document_completion_summary["previous_count"],
         "retrieval_hit_rate_7d": _format_percentage(hit_logs.count(), recent_logs.count()),
         "chat_requests_7d": _build_daily_series(days=7, values_by_day=chat_requests_by_day),
         "retrieval_hits_7d": _build_daily_series(days=7, values_by_day=retrieval_hits_by_day),
