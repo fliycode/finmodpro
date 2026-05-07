@@ -187,49 +187,6 @@ export const createLightragApi = (overrides = {}) => {
         }),
       }));
     },
-
-    async entityExists(name) {
-      return unwrap(await fetchJson(`/api/ops/lightrag/graph/entity/exists/${buildQuery({ name })}`, {
-        method: 'GET',
-        auth: true,
-      }));
-    },
-
-    async createEntity(payload) {
-      return unwrap(await postJson('/api/ops/lightrag/graph/entity/create/', payload));
-    },
-
-    async updateEntity(payload) {
-      return unwrap(await postJson('/api/ops/lightrag/graph/entity/edit/', payload));
-    },
-
-    async mergeEntities(payload) {
-      return unwrap(await postJson('/api/ops/lightrag/graph/entities/merge/', payload));
-    },
-
-    async deleteEntity(entityName) {
-      return unwrap(await fetchJson('/api/ops/lightrag/documents/delete_entity/', {
-        method: 'DELETE',
-        auth: true,
-        body: JSON.stringify({ entity_name: entityName }),
-      }));
-    },
-
-    async createRelation(payload) {
-      return unwrap(await postJson('/api/ops/lightrag/graph/relation/create/', payload));
-    },
-
-    async updateRelation(payload) {
-      return unwrap(await postJson('/api/ops/lightrag/graph/relation/edit/', payload));
-    },
-
-    async deleteRelation(payload) {
-      return unwrap(await fetchJson('/api/ops/lightrag/documents/delete_relation/', {
-        method: 'DELETE',
-        auth: true,
-        body: JSON.stringify(payload),
-      }));
-    },
   };
 };
 

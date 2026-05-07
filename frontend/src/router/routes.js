@@ -135,27 +135,22 @@ export const appRoutes = [
       {
         path: 'lightrag/query',
         component: () => import('../views/admin/AdminLightragQueryView.vue'),
-        meta: { title: '图谱检索 / 查询工作台', subtitle: 'LightRAG 图增强检索与原生引用回看。', breadcrumb: [{ label: 'Gateway Ops' }, { label: '图谱检索' }, { label: '查询工作台' }] },
+        meta: { title: '图谱工作台 / 查询工作台', subtitle: '先发起问题，再用图谱证据回看结论。', breadcrumb: [{ label: 'Gateway Ops' }, { label: '图谱工作台' }, { label: '查询工作台' }] },
       },
       {
         path: 'lightrag/graph',
         component: () => import('../views/admin/AdminLightragGraphView.vue'),
-        meta: { title: '图谱检索 / 图谱浏览', subtitle: '按标签浏览节点、关系与图谱结构。', breadcrumb: [{ label: 'Gateway Ops' }, { label: '图谱检索' }, { label: '图谱浏览' }] },
+        meta: { title: '图谱工作台 / 图谱浏览', subtitle: '在同一张画布上看结构、筛选和检查细节。', breadcrumb: [{ label: 'Gateway Ops' }, { label: '图谱工作台' }, { label: '图谱浏览' }] },
       },
       {
         path: 'lightrag/documents',
         component: () => import('../views/admin/AdminLightragDocumentsView.vue'),
-        meta: { title: '图谱检索 / 文档管线', subtitle: '管理上传、扫描、状态统计与 track status。', breadcrumb: [{ label: 'Gateway Ops' }, { label: '图谱检索' }, { label: '文档管线' }] },
-      },
-      {
-        path: 'lightrag/governance',
-        component: () => import('../views/admin/AdminLightragGovernanceView.vue'),
-        meta: { title: '图谱检索 / 图谱治理', subtitle: '管理实体、关系、合并与删除等高风险动作。', breadcrumb: [{ label: 'Gateway Ops' }, { label: '图谱检索' }, { label: '图谱治理' }] },
+        meta: { title: '图谱工作台 / 文档管线', subtitle: '把上传、入库和失败队列收敛到一处处理。', breadcrumb: [{ label: 'Gateway Ops' }, { label: '图谱工作台' }, { label: '文档管线' }] },
       },
       {
         path: 'lightrag/legacy',
         component: () => import('../views/admin/AdminLightragView.vue'),
-        meta: { title: '图谱检索 / Legacy WebUI', subtitle: '保留旧版 LightRAG WebUI 作为应急回退入口。', breadcrumb: [{ label: 'Gateway Ops' }, { label: '图谱检索' }, { label: 'Legacy WebUI' }] },
+        meta: { title: '图谱工作台 / Legacy WebUI', subtitle: '保留旧版 LightRAG WebUI 作为应急回退入口。', breadcrumb: [{ label: 'Gateway Ops' }, { label: '图谱工作台' }, { label: 'Legacy WebUI' }] },
       },
       {
         path: 'evaluation',

@@ -18,7 +18,7 @@ export const navigationMap = {
     { id: 'admin-llm-costs', label: '成本与用量', to: '/admin/llm/costs', icon: 'bar-chart', group: 'admin-llm' },
     {
       id: 'admin-lightrag',
-      label: '图谱检索',
+      label: '图谱工作台',
       to: '/admin/lightrag',
       icon: 'network',
       group: 'admin-llm',
@@ -26,7 +26,6 @@ export const navigationMap = {
         { id: 'admin-lightrag-query', label: '查询工作台', to: '/admin/lightrag/query' },
         { id: 'admin-lightrag-graph', label: '图谱浏览', to: '/admin/lightrag/graph' },
         { id: 'admin-lightrag-documents', label: '文档管线', to: '/admin/lightrag/documents' },
-        { id: 'admin-lightrag-governance', label: '图谱治理', to: '/admin/lightrag/governance' },
       ],
     },
     { id: 'admin-evaluation', label: '评测结果', to: '/admin/evaluation', icon: 'check', group: 'admin-governance' },

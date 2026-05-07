@@ -37,14 +37,14 @@ test('createLightragApi targets the bridge endpoints', async () => {
 
   await api.getOverview();
   await api.listDocuments({ page: 2, pageSize: 15 });
-  await api.deleteRelation({ source_entity: 'A', target_entity: 'B' });
+  await api.deleteDocument(['doc-1'], { deleteFile: true });
 
   assert.deepEqual(
     calls.map((call) => ({ path: call.path, method: call.options.method })),
     [
       { path: '/api/ops/lightrag/', method: 'GET' },
       { path: '/api/ops/lightrag/documents/paginated/', method: 'POST' },
-      { path: '/api/ops/lightrag/documents/delete_relation/', method: 'DELETE' },
+      { path: '/api/ops/lightrag/documents/delete_document/', method: 'DELETE' },
     ],
   );
 });

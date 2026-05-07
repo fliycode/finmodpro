@@ -1,9 +1,11 @@
 <script setup>
-import { computed, onMounted, reactive, ref } from 'vue';
+import { computed, onMounted, reactive, ref, watch } from 'vue';
 
 import { lightragApi } from '../../api/lightrag.js';
+import LightragWorkspaceShell from '../../components/lightrag/LightragWorkspaceShell.vue';
+import AppSectionCard from '../../components/ui/AppSectionCard.vue';
+import { getLightragStatusTone } from '../../lib/lightrag-workspace.js';
 import { useFlash } from '../../lib/flash.js';
-import LightragPanel from '../../components/lightrag/LightragPanel.vue';
 
 const flash = useFlash();
 const errorMsg = ref('');
@@ -11,6 +13,8 @@ const isLoading = ref(false);
 const isUploading = ref(false);
 const isRunningAction = ref(false);
 const selectedFile = ref(null);
+const selectedDocumentId = ref('');
+const lastLoadedAt = ref('');
 const documents = ref([]);
 const statusCounts = ref({});
 const trackStatus = ref(null);
@@ -29,6 +33,22 @@ const statusItems = computed(() => ([
   { label: '失败', value: statusCounts.value.failed ?? 0 },
   { label: '已完成', value: statusCounts.value.processed ?? 0 },
 ]));
+const selectedDocument = computed(() => documents.value.find((row) => row.id === selectedDocumentId.value) || null);
+const pageSummary = computed(() => {
+  const totalPages = Math.max(1, Math.ceil((pager.total || 0) / pager.pageSize));
+  return `${pager.page} / ${totalPages}`;
+});
+const trackDocuments = computed(() => (Array.isArray(trackStatus.value?.documents) ? trackStatus.value.documents : []));
+
+watch(documents, (rows) => {
+  if (!rows.length) {
+    selectedDocumentId.value = '';
+    return;
+  }
+  if (!rows.some((row) => row.id === selectedDocumentId.value)) {
+    selectedDocumentId.value = rows[0].id;
+  }
+}, { immediate: true });
 
 const loadDocuments = async () => {
   isLoading.value = true;
@@ -41,6 +61,7 @@ const loadDocuments = async () => {
     statusCounts.value = counts.status_counts || {};
     documents.value = page.documents;
     pager.total = page.pagination.total_count || 0;
+    lastLoadedAt.value = new Date().toLocaleString();
   } catch (error) {
     errorMsg.value = error.message || '加载图谱文档管线失败。';
   } finally {
@@ -101,6 +122,15 @@ const handleTrackStatus = async () => {
   }
 };
 
+const inspectSelectedTrack = async () => {
+  if (!selectedDocument.value?.trackId) {
+    flash.warning('当前文档没有可追踪的 track id。');
+    return;
+  }
+  trackId.value = selectedDocument.value.trackId;
+  await handleTrackStatus();
+};
+
 const deleteDocument = async (row) => {
   const docId = row.docId || row.raw?.doc_id;
   if (!docId) {
@@ -113,201 +143,345 @@ const deleteDocument = async (row) => {
   );
 };
 
+const selectDocument = (row) => {
+  selectedDocumentId.value = row.id;
+};
+
+const handlePageChange = async (page) => {
+  pager.page = page;
+  await loadDocuments();
+};
+
+const handleMaintenanceCommand = async (command) => {
+  if (command === 'reprocess') {
+    await runAction(() => lightragApi.reprocessFailedDocuments(), '已重新触发失败任务。');
+    return;
+  }
+  if (command === 'clear-cache') {
+    await runAction(() => lightragApi.clearCache(), '已清理 LightRAG 缓存。');
+    return;
+  }
+  if (command === 'cancel') {
+    await runAction(() => lightragApi.cancelPipeline(), '已发出取消管线请求。');
+  }
+};
+
 onMounted(loadDocuments);
 </script>
 
 <template>
-  <div class="page-stack lightrag-page">
+  <LightragWorkspaceShell
+    title="文档管线"
+    summary="把上传、扫描、失败重跑和轨迹检查收敛到一处。先看队列，再决定是否动维护操作。"
+    :status-items="statusItems"
+  >
+    <template #aside>
+      <span>最近刷新：{{ lastLoadedAt || '尚未刷新' }}</span>
+      <span>当前分页：{{ pageSummary }}</span>
+    </template>
+    <template #actions>
+      <el-button :loading="isLoading" @click="loadDocuments">刷新队列</el-button>
+    </template>
+
     <el-alert v-if="errorMsg" :title="errorMsg" type="error" show-icon :closable="false" />
 
-    <section class="lightrag-strip">
-      <article v-for="item in statusItems" :key="item.label" class="lightrag-stat">
-        <span>{{ item.label }}</span>
-        <strong>{{ item.value }}</strong>
-      </article>
-    </section>
-
-    <LightragPanel title="Pipeline actions" desc="上传、扫描、重跑、清缓存与取消管线集中在一条工具区。">
-      <div class="lightrag-actions">
-        <div class="lightrag-upload">
+    <AppSectionCard title="入库动作" desc="上传和扫描保留在前台，维护动作收进二级入口，避免工具区变成按钮墙。" admin>
+      <div class="lightrag-documents__toolbar">
+        <label class="lightrag-documents__file-picker">
           <input type="file" @change="handleFileChange" />
-          <el-button type="primary" :loading="isUploading" @click="handleUpload">上传到 LightRAG</el-button>
-        </div>
+          <span>{{ selectedFile?.name || '选择待入库文件' }}</span>
+        </label>
 
-        <div class="lightrag-button-row">
-          <el-button :loading="isRunningAction" @click="runAction(() => lightragApi.scanDocuments(), '已触发目录扫描。')">扫描新文档</el-button>
-          <el-button :loading="isRunningAction" @click="runAction(() => lightragApi.reprocessFailedDocuments(), '已重新触发失败任务。')">重跑失败任务</el-button>
-          <el-button :loading="isRunningAction" @click="runAction(() => lightragApi.clearCache(), '已清理 LightRAG 缓存。')">清理缓存</el-button>
-          <el-button :loading="isRunningAction" @click="runAction(() => lightragApi.cancelPipeline(), '已发出取消管线请求。')">取消当前管线</el-button>
+        <div class="lightrag-documents__toolbar-actions">
+          <el-button type="primary" :loading="isUploading" @click="handleUpload">上传文档</el-button>
+          <el-button :loading="isRunningAction" @click="runAction(() => lightragApi.scanDocuments(), '已触发目录扫描。')">扫描目录</el-button>
+          <el-dropdown @command="handleMaintenanceCommand">
+            <el-button>维护操作</el-button>
+            <template #dropdown>
+              <el-dropdown-menu>
+                <el-dropdown-item command="reprocess">重跑失败任务</el-dropdown-item>
+                <el-dropdown-item command="clear-cache">清理缓存</el-dropdown-item>
+                <el-dropdown-item command="cancel">取消当前管线</el-dropdown-item>
+              </el-dropdown-menu>
+            </template>
+          </el-dropdown>
         </div>
       </div>
-    </LightragPanel>
+    </AppSectionCard>
 
-    <div class="lightrag-layout">
-      <LightragPanel title="Documents" :desc="`当前分页已载入 ${documents.length} 条，LightRAG 返回总数 ${pager.total}。`">
-        <div v-if="documents.length" class="lightrag-document-list">
-          <article v-for="row in documents" :key="row.id" class="lightrag-document-card">
-            <div class="lightrag-document-card__head">
-              <div>
+    <div class="lightrag-documents">
+      <AppSectionCard title="文档队列" :desc="`当前分页已载入 ${documents.length} 条，LightRAG 返回总数 ${pager.total}。`" admin>
+        <el-table
+          v-if="documents.length"
+          :data="documents"
+          row-key="id"
+          highlight-current-row
+          :current-row-key="selectedDocumentId"
+          @row-click="selectDocument"
+        >
+          <el-table-column label="文档" min-width="260">
+            <template #default="{ row }">
+              <div class="lightrag-documents__title-cell">
                 <strong>{{ row.title }}</strong>
                 <p>{{ row.summary || '当前文档未返回额外摘要。' }}</p>
               </div>
-              <span class="lightrag-status-pill">{{ row.status }}</span>
-            </div>
-            <div class="lightrag-document-card__meta">
-              <span>doc_id：{{ row.docId || '未提供' }}</span>
-              <span>track_id：{{ row.trackId || '未提供' }}</span>
-              <span>更新时间：{{ row.updatedAt || '未提供' }}</span>
-            </div>
-            <div class="lightrag-document-card__actions">
-              <el-button text @click="deleteDocument(row)">删除文档</el-button>
-            </div>
-          </article>
-        </div>
+            </template>
+          </el-table-column>
+          <el-table-column label="状态" width="120">
+            <template #default="{ row }">
+              <span :class="['lightrag-documents__status-pill', `lightrag-documents__status-pill--${getLightragStatusTone(row.status)}`]">
+                {{ row.status }}
+              </span>
+            </template>
+          </el-table-column>
+          <el-table-column label="Track ID" min-width="140">
+            <template #default="{ row }">
+              <span class="mono-text">{{ row.trackId || '未提供' }}</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="更新时间" min-width="160">
+            <template #default="{ row }">
+              <span>{{ row.updatedAt || '未提供' }}</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="操作" width="90" align="right">
+            <template #default="{ row }">
+              <el-button text @click.stop="deleteDocument(row)">删除</el-button>
+            </template>
+          </el-table-column>
+        </el-table>
         <div v-else class="admin-empty-state">当前还没有进入 LightRAG 的文档。</div>
-      </LightragPanel>
 
-      <LightragPanel title="Track status" desc="按 track id 追踪上传或扫描任务，像原生页那样单独查看处理结果。">
-        <div class="lightrag-track">
-          <div class="lightrag-track__toolbar">
+        <div class="lightrag-documents__pagination">
+          <el-pagination
+            layout="prev, pager, next"
+            :current-page="pager.page"
+            :page-size="pager.pageSize"
+            :total="pager.total"
+            @current-change="handlePageChange"
+          />
+        </div>
+      </AppSectionCard>
+
+      <AppSectionCard title="任务检查器" desc="先选一条文档，再按 track id 看它卡在哪一步。" admin>
+        <div class="lightrag-documents__inspector">
+          <div class="lightrag-documents__track-search">
             <el-input v-model="trackId" placeholder="输入 track id" />
-            <el-button :loading="isRunningAction" @click="handleTrackStatus">查询</el-button>
+            <el-button :loading="isRunningAction" @click="handleTrackStatus">查询轨迹</el-button>
           </div>
 
-          <div v-if="trackStatus" class="lightrag-track__result">
-            <div class="lightrag-track__summary">
-              <span>关联文档数：{{ trackStatus.total_count }}</span>
+          <div v-if="selectedDocument" class="lightrag-documents__document-summary">
+            <div class="lightrag-documents__document-head">
+              <strong>{{ selectedDocument.title }}</strong>
+              <span :class="['lightrag-documents__status-pill', `lightrag-documents__status-pill--${getLightragStatusTone(selectedDocument.status)}`]">
+                {{ selectedDocument.status }}
+              </span>
+            </div>
+            <p>{{ selectedDocument.summary || '当前文档没有返回额外摘要。' }}</p>
+            <dl class="lightrag-documents__facts">
+              <div>
+                <dt>doc_id</dt>
+                <dd>{{ selectedDocument.docId || '未提供' }}</dd>
+              </div>
+              <div>
+                <dt>track_id</dt>
+                <dd>{{ selectedDocument.trackId || '未提供' }}</dd>
+              </div>
+              <div>
+                <dt>更新时间</dt>
+                <dd>{{ selectedDocument.updatedAt || '未提供' }}</dd>
+              </div>
+            </dl>
+            <div class="lightrag-documents__document-actions">
+              <el-button @click="inspectSelectedTrack">查看处理轨迹</el-button>
+            </div>
+          </div>
+
+          <div v-if="trackStatus" class="lightrag-documents__track-result">
+            <div class="lightrag-documents__track-summary">
+              <span>关联文档：{{ trackStatus.total_count || 0 }}</span>
               <span>状态摘要：{{ JSON.stringify(trackStatus.status_summary || {}) }}</span>
             </div>
-            <div class="lightrag-track__documents">
-              <article v-for="(item, index) in trackStatus.documents || []" :key="index" class="lightrag-track__document">
-                <strong>{{ item.file_path || item.file_name || item.doc_id || `文档 ${index + 1}` }}</strong>
-                <p>{{ item.status || '未知状态' }}</p>
-                <pre>{{ JSON.stringify(item, null, 2) }}</pre>
+
+            <div class="lightrag-documents__track-documents">
+              <article
+                v-for="(item, index) in trackDocuments"
+                :key="index"
+                class="lightrag-documents__track-card"
+              >
+                <div class="lightrag-documents__track-card-head">
+                  <strong>{{ item.file_path || item.file_name || item.doc_id || `文档 ${index + 1}` }}</strong>
+                  <span>{{ item.status || '未知状态' }}</span>
+                </div>
+                <p>{{ item.message || item.error_msg || item.summary || '当前任务没有返回额外说明。' }}</p>
               </article>
             </div>
           </div>
-          <div v-else class="admin-empty-state">输入 track id 后即可查看任务明细。</div>
         </div>
-      </LightragPanel>
+      </AppSectionCard>
     </div>
-  </div>
+  </LightragWorkspaceShell>
 </template>
 
 <style scoped>
-.lightrag-page,
-.lightrag-actions,
-.lightrag-document-list,
-.lightrag-track,
-.lightrag-track__documents {
+.lightrag-documents,
+.lightrag-documents__inspector,
+.lightrag-documents__document-summary,
+.lightrag-documents__track-documents {
   display: grid;
   gap: 16px;
 }
 
-.lightrag-strip {
+.lightrag-documents {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 12px;
-}
-
-.lightrag-stat,
-.lightrag-document-card,
-.lightrag-track__document {
-  border: 1px solid var(--line-soft);
-  border-radius: 16px;
-  background: var(--surface-2);
-}
-
-.lightrag-stat {
-  display: grid;
-  gap: 6px;
-  padding: 14px 16px;
-}
-
-.lightrag-stat span {
-  color: var(--text-muted);
-  font-size: 12px;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-
-.lightrag-stat strong {
-  color: var(--text-primary);
-  font-size: 1.2rem;
-}
-
-.lightrag-layout {
-  display: grid;
-  grid-template-columns: minmax(0, 1.15fr) minmax(320px, 0.85fr);
+  grid-template-columns: minmax(0, 1.25fr) minmax(320px, 0.85fr);
   gap: 18px;
 }
 
-.lightrag-upload,
-.lightrag-button-row,
-.lightrag-track__toolbar,
-.lightrag-track__summary,
-.lightrag-document-card__head,
-.lightrag-document-card__meta,
-.lightrag-document-card__actions {
+.lightrag-documents__toolbar,
+.lightrag-documents__toolbar-actions,
+.lightrag-documents__track-search,
+.lightrag-documents__track-summary,
+.lightrag-documents__document-head,
+.lightrag-documents__document-actions,
+.lightrag-documents__track-card-head {
   display: flex;
   flex-wrap: wrap;
   gap: 12px;
   align-items: center;
 }
 
-.lightrag-document-card,
-.lightrag-track__document {
-  padding: 16px 18px;
-}
-
-.lightrag-document-card__head {
+.lightrag-documents__toolbar {
   justify-content: space-between;
-  align-items: flex-start;
 }
 
-.lightrag-document-card__head strong,
-.lightrag-track__document strong {
+.lightrag-documents__file-picker {
+  display: inline-flex;
+  align-items: center;
+  min-height: 40px;
+  padding: 0 14px;
+  border: 1px dashed var(--line-strong);
+  border-radius: 12px;
+  background: var(--surface-3);
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.lightrag-documents__file-picker input {
+  display: none;
+}
+
+.lightrag-documents__title-cell {
+  display: grid;
+  gap: 4px;
+}
+
+.lightrag-documents__title-cell strong,
+.lightrag-documents__document-head strong,
+.lightrag-documents__track-card-head strong {
   color: var(--text-primary);
 }
 
-.lightrag-document-card__head p,
-.lightrag-track__document p,
-.lightrag-track__document pre {
-  margin: 6px 0 0;
+.lightrag-documents__title-cell p,
+.lightrag-documents__document-summary p,
+.lightrag-documents__track-card p {
+  margin: 0;
   color: var(--text-secondary);
-  line-height: 1.7;
+  line-height: 1.6;
 }
 
-.lightrag-status-pill {
+.lightrag-documents__pagination {
+  display: flex;
+  justify-content: flex-end;
+  padding-top: 8px;
+}
+
+.lightrag-documents__status-pill {
   display: inline-flex;
-  min-height: 30px;
   align-items: center;
-  padding: 0 12px;
+  min-height: 28px;
+  padding: 0 10px;
   border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+
+.lightrag-documents__status-pill--success {
+  background: var(--success-50);
+  color: var(--success);
+}
+
+.lightrag-documents__status-pill--brand {
   background: var(--brand-soft);
   color: var(--brand);
 }
 
-.lightrag-track__document pre {
-  white-space: pre-wrap;
+.lightrag-documents__status-pill--warning {
+  background: var(--warning-50);
+  color: var(--warning);
 }
 
-@media (max-width: 1180px) {
-  .lightrag-layout {
+.lightrag-documents__status-pill--risk {
+  background: var(--risk-50);
+  color: var(--risk);
+}
+
+.lightrag-documents__status-pill--muted {
+  background: var(--surface-3);
+  color: var(--text-muted);
+}
+
+.lightrag-documents__facts {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+}
+
+.lightrag-documents__facts div {
+  display: grid;
+  gap: 2px;
+}
+
+.lightrag-documents__facts dt {
+  color: var(--text-muted);
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.lightrag-documents__facts dd {
+  margin: 0;
+  color: var(--text-primary);
+}
+
+.lightrag-documents__track-result,
+.lightrag-documents__track-card {
+  display: grid;
+  gap: 12px;
+}
+
+.lightrag-documents__track-card {
+  padding: 14px 16px;
+  border: 1px solid var(--line-soft);
+  border-radius: 16px;
+  background: var(--surface-2);
+}
+
+.lightrag-documents__track-summary {
+  color: var(--text-secondary);
+  font-size: 0.8125rem;
+}
+
+@media (max-width: 1200px) {
+  .lightrag-documents {
     grid-template-columns: 1fr;
   }
 }
 
-@media (max-width: 820px) {
-  .lightrag-strip {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-}
-
-@media (max-width: 640px) {
-  .lightrag-strip {
-    grid-template-columns: 1fr;
+@media (max-width: 720px) {
+  .lightrag-documents__toolbar {
+    align-items: stretch;
   }
 }
 </style>

@@ -17,7 +17,6 @@ test('admin route tree splits the lightrag module into child pages', () => {
   assert.ok(childPaths.includes('lightrag/query'));
   assert.ok(childPaths.includes('lightrag/graph'));
   assert.ok(childPaths.includes('lightrag/documents'));
-  assert.ok(childPaths.includes('lightrag/governance'));
 });
 
 test('admin route tree keeps governance pages mounted under admin shell', () => {

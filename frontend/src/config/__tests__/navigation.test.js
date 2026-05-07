@@ -27,7 +27,6 @@ test('lightrag navigation exposes child routes instead of flattening the module 
       '/admin/lightrag/query',
       '/admin/lightrag/graph',
       '/admin/lightrag/documents',
-      '/admin/lightrag/governance',
     ],
   );
 });

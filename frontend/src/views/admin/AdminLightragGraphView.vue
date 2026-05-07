@@ -1,9 +1,16 @@
 <script setup>
-import { computed, onMounted, reactive, ref } from 'vue';
+import { computed, onMounted, reactive, ref, watch } from 'vue';
 
 import { lightragApi } from '../../api/lightrag.js';
+import LightragGraphCanvas from '../../components/lightrag/LightragGraphCanvas.vue';
+import LightragWorkspaceShell from '../../components/lightrag/LightragWorkspaceShell.vue';
+import AppSectionCard from '../../components/ui/AppSectionCard.vue';
+import {
+  buildLightragGraphFacets,
+  filterLightragGraph,
+  searchLightragGraphNodes,
+} from '../../lib/lightrag-workspace.js';
 import { useFlash } from '../../lib/flash.js';
-import LightragPanel from '../../components/lightrag/LightragPanel.vue';
 
 const flash = useFlash();
 const isLoading = ref(false);
@@ -12,20 +19,54 @@ const errorMsg = ref('');
 const labels = ref([]);
 const popularLabels = ref([]);
 const graph = ref({ nodes: [], edges: [], isTruncated: false });
+const lastLoadedAt = ref('');
+const activeNodeTypes = ref([]);
+const activeRelationLabels = ref([]);
+const selectedNodeId = ref('');
+const selectedEdgeId = ref('');
 
 const form = reactive({
   label: '',
-  search: '',
+  labelSearch: '',
+  nodeSearch: '',
   maxDepth: 3,
   maxNodes: 80,
 });
 
+const graphFacets = computed(() => buildLightragGraphFacets(graph.value.nodes, graph.value.edges));
+const filteredGraph = computed(() => filterLightragGraph(graph.value, {
+  activeNodeTypes: activeNodeTypes.value,
+  activeRelationLabels: activeRelationLabels.value,
+}));
+const matchedNodeIds = computed(() => searchLightragGraphNodes(filteredGraph.value.nodes, form.nodeSearch));
+const selectedNode = computed(() => filteredGraph.value.nodes.find((node) => node.id === selectedNodeId.value) || null);
+const selectedEdge = computed(() => filteredGraph.value.edges.find((edge) => edge.id === selectedEdgeId.value) || null);
+const selectedNodeRelations = computed(() => {
+  if (!selectedNode.value) {
+    return [];
+  }
+  return filteredGraph.value.edges.filter((edge) => edge.source === selectedNode.value.id || edge.target === selectedNode.value.id);
+});
 const graphStats = computed(() => ([
   { label: '当前标签', value: form.label || '未选择' },
-  { label: '节点', value: graph.value.nodes.length },
-  { label: '关系', value: graph.value.edges.length },
+  { label: '可见节点', value: filteredGraph.value.nodes.length },
+  { label: '可见关系', value: filteredGraph.value.edges.length },
   { label: '截断', value: graph.value.isTruncated ? '是' : '否' },
 ]));
+
+watch(graphFacets, (facets) => {
+  activeNodeTypes.value = facets.nodeTypes.map((item) => item.label);
+  activeRelationLabels.value = facets.relationLabels.map((item) => item.label);
+}, { deep: true });
+
+watch(filteredGraph, (nextGraph) => {
+  if (!nextGraph.nodes.some((node) => node.id === selectedNodeId.value)) {
+    selectedNodeId.value = '';
+  }
+  if (!nextGraph.edges.some((edge) => edge.id === selectedEdgeId.value)) {
+    selectedEdgeId.value = '';
+  }
+}, { deep: true });
 
 const loadLabels = async () => {
   isLoading.value = true;
@@ -57,6 +98,9 @@ const fetchGraph = async (label = form.label) => {
       maxDepth: form.maxDepth,
       maxNodes: form.maxNodes,
     });
+    selectedNodeId.value = graph.value.nodes[0]?.id || '';
+    selectedEdgeId.value = '';
+    lastLoadedAt.value = new Date().toLocaleString();
   } catch (error) {
     errorMsg.value = error.message || '加载图谱失败。';
   } finally {
@@ -65,14 +109,14 @@ const fetchGraph = async (label = form.label) => {
 };
 
 const handleLabelSearch = async () => {
-  if (!form.search.trim()) {
+  if (!form.labelSearch.trim()) {
     await loadLabels();
     return;
   }
   isSearching.value = true;
   errorMsg.value = '';
   try {
-    labels.value = await lightragApi.searchLabels(form.search.trim(), 20);
+    labels.value = await lightragApi.searchLabels(form.labelSearch.trim(), 20);
   } catch (error) {
     errorMsg.value = error.message || '搜索标签失败。';
   } finally {
@@ -80,159 +124,293 @@ const handleLabelSearch = async () => {
   }
 };
 
+const toggleFilter = (collectionRef, value) => {
+  const set = new Set(collectionRef.value);
+  if (set.has(value)) {
+    set.delete(value);
+  } else {
+    set.add(value);
+  }
+  collectionRef.value = [...set];
+};
+
+const focusFirstMatch = () => {
+  if (!matchedNodeIds.value.length) {
+    flash.warning('当前画布里没有匹配的节点。');
+    return;
+  }
+  selectedNodeId.value = matchedNodeIds.value[0];
+  selectedEdgeId.value = '';
+};
+
+const clearSelection = () => {
+  selectedNodeId.value = '';
+  selectedEdgeId.value = '';
+};
+
+const resetFilters = () => {
+  activeNodeTypes.value = graphFacets.value.nodeTypes.map((item) => item.label);
+  activeRelationLabels.value = graphFacets.value.relationLabels.map((item) => item.label);
+  form.nodeSearch = '';
+};
+
+const selectNode = (nodeId) => {
+  selectedNodeId.value = nodeId;
+  selectedEdgeId.value = '';
+};
+
+const selectEdge = (edgeId) => {
+  selectedEdgeId.value = edgeId;
+  selectedNodeId.value = '';
+};
+
 onMounted(loadLabels);
 </script>
 
 <template>
-  <div class="page-stack lightrag-page">
+  <LightragWorkspaceShell
+    title="图谱浏览"
+    summary="把标签选择、画布浏览和节点检查器放进同一张工作面。默认先看结构，再决定是否下钻原始数据。"
+    :status-items="graphStats"
+  >
+    <template #aside>
+      <span>最近载入：{{ lastLoadedAt || '尚未载入图谱' }}</span>
+      <a href="/admin/lightrag/legacy" target="_blank" rel="noopener">打开 Legacy WebUI</a>
+    </template>
+    <template #actions>
+      <el-button :loading="isLoading" @click="loadLabels">刷新标签</el-button>
+    </template>
+
     <el-alert v-if="errorMsg" :title="errorMsg" type="error" show-icon :closable="false" />
 
-    <section class="lightrag-strip">
-      <article v-for="item in graphStats" :key="item.label" class="lightrag-stat">
-        <span>{{ item.label }}</span>
-        <strong>{{ item.value }}</strong>
-      </article>
-    </section>
+    <div class="lightrag-graph">
+      <div class="lightrag-graph__sidebar">
+        <AppSectionCard title="图谱范围" desc="先选标签，再控制深度和节点上限。" admin>
+          <div class="lightrag-graph__sidebar-stack">
+            <div class="lightrag-graph__search-row">
+              <el-input
+                v-model="form.labelSearch"
+                placeholder="按标签搜索"
+                @keyup.enter="handleLabelSearch"
+              />
+              <el-button :loading="isSearching" @click="handleLabelSearch">搜索</el-button>
+            </div>
 
-    <div class="lightrag-layout">
-      <LightragPanel title="Labels" desc="先搜标签，再加载图谱；工作流尽量贴近 LightRAG 原生浏览页。">
-        <div class="lightrag-label-stack">
-          <div class="lightrag-search-bar">
-            <el-input v-model="form.search" placeholder="按标签搜索" @keyup.enter="handleLabelSearch" />
-            <el-button :loading="isSearching" @click="handleLabelSearch">搜索</el-button>
+            <div class="lightrag-graph__field-grid">
+              <label class="lightrag-graph__field">
+                <span>当前标签</span>
+                <el-input v-model="form.label" placeholder="例如：流动性风险" />
+              </label>
+              <label class="lightrag-graph__field">
+                <span>最大深度</span>
+                <el-input-number v-model="form.maxDepth" :min="1" :max="6" />
+              </label>
+              <label class="lightrag-graph__field">
+                <span>最大节点数</span>
+                <el-input-number v-model="form.maxNodes" :min="10" :max="300" :step="10" />
+              </label>
+            </div>
+
+            <div class="lightrag-graph__actions">
+              <el-button type="primary" :loading="isSearching" @click="fetchGraph()">加载图谱</el-button>
+            </div>
+
+            <section class="lightrag-graph__facet-group">
+              <strong>热门标签</strong>
+              <div class="lightrag-graph__chip-list">
+                <button
+                  v-for="label in popularLabels"
+                  :key="label"
+                  type="button"
+                  class="lightrag-graph__chip"
+                  @click="fetchGraph(label)"
+                >
+                  {{ label }}
+                </button>
+              </div>
+            </section>
+
+            <section class="lightrag-graph__facet-group">
+              <strong>可选标签</strong>
+              <div class="lightrag-graph__label-list">
+                <button
+                  v-for="label in labels"
+                  :key="label"
+                  type="button"
+                  :class="['lightrag-graph__label-item', { 'lightrag-graph__label-item--active': form.label === label }]"
+                  @click="form.label = label"
+                >
+                  {{ label }}
+                </button>
+                <div v-if="!labels.length" class="admin-empty-state">暂无可浏览标签。</div>
+              </div>
+            </section>
           </div>
+        </AppSectionCard>
 
-          <section class="lightrag-label-group">
-            <strong>热门标签</strong>
-            <div class="lightrag-chip-list">
-              <button
-                v-for="label in popularLabels"
-                :key="label"
-                type="button"
-                class="lightrag-chip"
-                @click="fetchGraph(label)"
-              >
-                {{ label }}
-              </button>
+        <AppSectionCard title="画布筛选" desc="筛掉不关心的类型，只保留当前需要看的结构。" admin>
+          <div class="lightrag-graph__sidebar-stack">
+            <div class="lightrag-graph__search-row">
+              <el-input
+                v-model="form.nodeSearch"
+                placeholder="高亮节点名称、类型或描述"
+                @keyup.enter="focusFirstMatch"
+              />
+              <el-button @click="focusFirstMatch">定位</el-button>
             </div>
-          </section>
 
-          <section class="lightrag-label-group">
-            <strong>全量标签</strong>
-            <div class="lightrag-label-list">
-              <button
-                v-for="label in labels"
-                :key="label"
-                type="button"
-                class="lightrag-label-item"
-                @click="fetchGraph(label)"
-              >
-                {{ label }}
-              </button>
-              <div v-if="!labels.length" class="admin-empty-state">暂无可浏览标签</div>
-            </div>
-          </section>
-        </div>
-      </LightragPanel>
+            <section class="lightrag-graph__facet-group">
+              <div class="lightrag-graph__facet-head">
+                <strong>实体类型</strong>
+                <button type="button" class="lightrag-graph__text-button" @click="resetFilters">重置</button>
+              </div>
+              <div class="lightrag-graph__chip-list">
+                <button
+                  v-for="item in graphFacets.nodeTypes"
+                  :key="item.label"
+                  type="button"
+                  :class="['lightrag-graph__chip', { 'lightrag-graph__chip--active': activeNodeTypes.includes(item.label) }]"
+                  @click="toggleFilter(activeNodeTypes, item.label)"
+                >
+                  {{ item.label }} · {{ item.count }}
+                </button>
+              </div>
+            </section>
 
-      <LightragPanel title="Graph request" desc="把标签、深度与节点上限收敛在一个工具栏里。">
+            <section class="lightrag-graph__facet-group">
+              <strong>关系类型</strong>
+              <div class="lightrag-graph__chip-list">
+                <button
+                  v-for="item in graphFacets.relationLabels"
+                  :key="item.label"
+                  type="button"
+                  :class="['lightrag-graph__chip', { 'lightrag-graph__chip--active': activeRelationLabels.includes(item.label) }]"
+                  @click="toggleFilter(activeRelationLabels, item.label)"
+                >
+                  {{ item.label }} · {{ item.count }}
+                </button>
+              </div>
+            </section>
+          </div>
+        </AppSectionCard>
+      </div>
+
+      <AppSectionCard class="lightrag-graph__canvas-card" title="图谱画布" desc="拖拽、缩放和选中节点，结构会比列表更先暴露问题。" admin>
         <template #header>
-          <el-link href="/admin/lightrag/legacy" target="_blank" rel="noopener">Legacy WebUI</el-link>
+          <div class="lightrag-graph__canvas-actions">
+            <span v-if="form.nodeSearch.trim()" class="lightrag-graph__match-note">
+              匹配 {{ matchedNodeIds.length }} 个节点
+            </span>
+            <el-button text @click="clearSelection">清除选中</el-button>
+          </div>
         </template>
 
-        <div class="lightrag-control-stack">
-          <div class="lightrag-control-grid">
-            <label class="lightrag-field">
-              <span>当前标签</span>
-              <el-input v-model="form.label" placeholder="例如：流动性风险" />
-            </label>
-            <label class="lightrag-field">
-              <span>最大深度</span>
-              <el-input-number v-model="form.maxDepth" :min="1" :max="6" />
-            </label>
-            <label class="lightrag-field">
-              <span>最大节点数</span>
-              <el-input-number v-model="form.maxNodes" :min="10" :max="300" :step="10" />
-            </label>
+        <div v-if="filteredGraph.nodes.length" class="lightrag-graph__canvas">
+          <LightragGraphCanvas
+            :nodes="filteredGraph.nodes"
+            :edges="filteredGraph.edges"
+            :selected-node-id="selectedNodeId"
+            :selected-edge-id="selectedEdgeId"
+            :highlight-node-ids="matchedNodeIds"
+            @select-node="selectNode"
+            @select-edge="selectEdge"
+          />
+        </div>
+        <div v-else class="admin-empty-state">
+          先加载一个标签，或者检查筛选条件是否把当前画布全部隐藏了。
+        </div>
+      </AppSectionCard>
+
+      <AppSectionCard title="检查器" desc="点一个节点或关系，再决定是否继续查原始返回。" admin>
+        <div v-if="selectedNode" class="lightrag-graph__inspector">
+          <div class="lightrag-graph__inspector-head">
+            <strong>{{ selectedNode.label }}</strong>
+            <span>{{ selectedNode.type }}</span>
           </div>
+          <p>{{ selectedNode.description || '当前节点没有返回描述。' }}</p>
 
-          <div class="lightrag-toolbar">
-            <el-button type="primary" :loading="isSearching" @click="fetchGraph()">加载图谱</el-button>
-            <p class="lightrag-note">如果没有标签，先在左侧点一个热门标签再加载。</p>
+          <section class="lightrag-graph__facet-group">
+            <strong>关联关系</strong>
+            <div class="lightrag-graph__relation-list">
+              <button
+                v-for="edge in selectedNodeRelations"
+                :key="edge.id"
+                type="button"
+                class="lightrag-graph__relation-item"
+                @click="selectEdge(edge.id)"
+              >
+                <span>{{ edge.label }}</span>
+                <strong>{{ edge.source === selectedNode.id ? edge.target : edge.source }}</strong>
+              </button>
+            </div>
+          </section>
+
+          <details>
+            <summary>原始数据</summary>
+            <pre>{{ JSON.stringify(selectedNode.raw, null, 2) }}</pre>
+          </details>
+        </div>
+
+        <div v-else-if="selectedEdge" class="lightrag-graph__inspector">
+          <div class="lightrag-graph__inspector-head">
+            <strong>{{ selectedEdge.label }}</strong>
+            <span>{{ selectedEdge.source }} → {{ selectedEdge.target }}</span>
           </div>
-        </div>
-      </LightragPanel>
-    </div>
+          <p>{{ selectedEdge.description || '当前关系没有返回额外描述。' }}</p>
 
-    <div class="lightrag-detail-layout">
-      <LightragPanel title="Nodes" desc="保留实体名、类型与原始属性，方便人工校验。">
-        <div v-if="graph.nodes.length" class="lightrag-detail-list">
-          <article v-for="node in graph.nodes" :key="node.id" class="lightrag-detail-card">
-            <div class="lightrag-detail-card__head">
-              <strong>{{ node.label }}</strong>
-              <span>{{ node.type }}</span>
-            </div>
-            <p>{{ node.description || '当前节点没有返回描述。' }}</p>
-            <details>
-              <summary>原始数据</summary>
-              <pre>{{ JSON.stringify(node.raw, null, 2) }}</pre>
-            </details>
-          </article>
+          <details>
+            <summary>原始数据</summary>
+            <pre>{{ JSON.stringify(selectedEdge.raw, null, 2) }}</pre>
+          </details>
         </div>
-        <div v-else class="admin-empty-state">当前标签还没有可展示节点。</div>
-      </LightragPanel>
 
-      <LightragPanel title="Edges" desc="关系与 source / target 分开看，减少页面阅读噪音。">
-        <div v-if="graph.edges.length" class="lightrag-detail-list">
-          <article v-for="edge in graph.edges" :key="edge.id" class="lightrag-detail-card">
-            <div class="lightrag-detail-card__head">
-              <strong>{{ edge.label }}</strong>
-              <span>{{ edge.source }} → {{ edge.target }}</span>
-            </div>
-            <p>{{ edge.description || '当前关系没有返回额外描述。' }}</p>
-            <details>
-              <summary>原始数据</summary>
-              <pre>{{ JSON.stringify(edge.raw, null, 2) }}</pre>
-            </details>
-          </article>
+        <div v-else class="admin-empty-state">
+          先在画布里选中一个节点或关系，这里再展开对应细节。
         </div>
-        <div v-else class="admin-empty-state">当前标签还没有可展示关系。</div>
-      </LightragPanel>
+      </AppSectionCard>
     </div>
-  </div>
+  </LightragWorkspaceShell>
 </template>
 
 <style scoped>
-.lightrag-page,
-.lightrag-label-stack,
-.lightrag-control-stack,
-.lightrag-detail-list {
+.lightrag-graph,
+.lightrag-graph__sidebar,
+.lightrag-graph__sidebar-stack,
+.lightrag-graph__field-grid,
+.lightrag-graph__inspector,
+.lightrag-graph__relation-list {
   display: grid;
   gap: 16px;
 }
 
-.lightrag-strip {
+.lightrag-graph {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: minmax(280px, 0.88fr) minmax(0, 1.45fr) minmax(300px, 0.9fr);
+  gap: 18px;
+}
+
+.lightrag-graph__search-row,
+.lightrag-graph__actions,
+.lightrag-graph__facet-head,
+.lightrag-graph__canvas-actions,
+.lightrag-graph__inspector-head {
+  display: flex;
+  flex-wrap: wrap;
   gap: 12px;
+  align-items: center;
 }
 
-.lightrag-stat,
-.lightrag-detail-card,
-.lightrag-label-item {
-  border: 1px solid var(--line-soft);
-  border-radius: 16px;
-  background: var(--surface-2);
+.lightrag-graph__facet-head,
+.lightrag-graph__inspector-head {
+  justify-content: space-between;
 }
 
-.lightrag-stat {
+.lightrag-graph__field {
   display: grid;
-  gap: 6px;
-  padding: 14px 16px;
+  gap: 8px;
 }
 
-.lightrag-stat span,
-.lightrag-field span {
+.lightrag-graph__field span {
   color: var(--text-muted);
   font-size: 12px;
   font-weight: 700;
@@ -240,118 +418,109 @@ onMounted(loadLabels);
   text-transform: uppercase;
 }
 
-.lightrag-stat strong {
+.lightrag-graph__facet-group {
+  display: grid;
+  gap: 10px;
+}
+
+.lightrag-graph__facet-group strong,
+.lightrag-graph__inspector-head strong {
   color: var(--text-primary);
-  font-size: 1.2rem;
 }
 
-.lightrag-layout,
-.lightrag-detail-layout {
-  display: grid;
-  grid-template-columns: minmax(300px, 0.8fr) minmax(0, 1.2fr);
-  gap: 18px;
-}
-
-.lightrag-search-bar,
-.lightrag-toolbar {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 12px;
-  align-items: center;
-}
-
-.lightrag-label-group,
-.lightrag-control-grid {
-  display: grid;
-  gap: 12px;
-}
-
-.lightrag-control-grid {
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-}
-
-.lightrag-chip-list,
-.lightrag-label-list {
+.lightrag-graph__chip-list,
+.lightrag-graph__label-list {
   display: flex;
   flex-wrap: wrap;
   gap: 10px;
 }
 
-.lightrag-chip,
-.lightrag-label-item {
-  padding: 8px 12px;
-  color: var(--text-primary);
-  cursor: pointer;
-  transition: border-color 0.15s ease, color 0.15s ease, background 0.15s ease;
-}
-
-.lightrag-chip {
-  border: 1px solid var(--line-strong);
-  border-radius: 999px;
-  background: var(--surface-3);
-}
-
-.lightrag-label-item {
+.lightrag-graph__chip,
+.lightrag-graph__label-item,
+.lightrag-graph__relation-item {
   border: 1px solid var(--line-soft);
-}
-
-.lightrag-chip:hover,
-.lightrag-label-item:hover {
-  border-color: rgba(36, 87, 197, 0.24);
-  color: var(--brand);
-  background: var(--brand-soft);
-}
-
-.lightrag-field {
-  display: grid;
-  gap: 8px;
-  min-width: 180px;
-}
-
-.lightrag-note,
-.lightrag-detail-card p,
-.lightrag-detail-card pre {
-  margin: 0;
+  background: var(--surface-2);
   color: var(--text-secondary);
-  line-height: 1.7;
+  cursor: pointer;
+  transition: border-color 0.18s ease, color 0.18s ease, background 0.18s ease;
 }
 
-.lightrag-detail-card {
-  padding: 16px 18px;
+.lightrag-graph__chip,
+.lightrag-graph__label-item {
+  min-height: 38px;
+  padding: 0 14px;
+  border-radius: 999px;
 }
 
-.lightrag-detail-card__head {
+.lightrag-graph__chip:hover,
+.lightrag-graph__chip--active,
+.lightrag-graph__label-item:hover,
+.lightrag-graph__label-item--active,
+.lightrag-graph__relation-item:hover {
+  border-color: rgba(36, 87, 197, 0.24);
+  background: var(--brand-soft);
+  color: var(--brand);
+}
+
+.lightrag-graph__canvas-card {
+  min-width: 0;
+}
+
+.lightrag-graph__canvas {
+  border: 1px solid var(--line-soft);
+  border-radius: 22px;
+  background:
+    radial-gradient(circle at top, rgba(36, 87, 197, 0.08), transparent 42%),
+    #111822;
+}
+
+.lightrag-graph__match-note {
+  color: var(--text-muted);
+  font-size: 0.75rem;
+}
+
+.lightrag-graph__text-button {
+  border: none;
+  padding: 0;
+  background: none;
+  color: var(--brand);
+  cursor: pointer;
+}
+
+.lightrag-graph__relation-item {
   display: flex;
   justify-content: space-between;
   gap: 12px;
-  margin-bottom: 10px;
+  width: 100%;
+  padding: 12px 14px;
+  border-radius: 16px;
+  text-align: left;
 }
 
-.lightrag-detail-card__head strong,
-.lightrag-label-group strong {
-  color: var(--text-primary);
+.lightrag-graph__relation-item strong {
+  color: inherit;
 }
 
-.lightrag-detail-card details {
-  margin-top: 12px;
+.lightrag-graph__inspector p,
+.lightrag-graph__inspector pre {
+  margin: 0;
+  color: var(--text-secondary);
+  line-height: 1.7;
+  white-space: pre-wrap;
 }
 
-@media (max-width: 1180px) {
-  .lightrag-layout,
-  .lightrag-detail-layout,
-  .lightrag-control-grid {
-    grid-template-columns: 1fr;
+@media (max-width: 1360px) {
+  .lightrag-graph {
+    grid-template-columns: minmax(260px, 0.8fr) minmax(0, 1.2fr);
+  }
+
+  .lightrag-graph__canvas-card {
+    grid-column: span 1;
   }
 }
 
-@media (max-width: 820px) {
-  .lightrag-strip {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-}
-
-@media (max-width: 640px) {
-  .lightrag-strip {
+@media (max-width: 1120px) {
+  .lightrag-graph {
     grid-template-columns: 1fr;
   }
 }
