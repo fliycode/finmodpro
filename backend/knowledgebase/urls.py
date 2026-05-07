@@ -9,6 +9,7 @@ from knowledgebase.controllers import (
     document_detail_view,
     document_ingest_view,
     document_list_create_view,
+    document_stats_view,
     document_versions_view,
 )
 
@@ -21,6 +22,11 @@ urlpatterns = [
         name="knowledgebase-dataset-detail",
     ),
     path("documents", document_list_create_view, name="knowledgebase-document-list-create"),
+    path(
+        "documents/stats",
+        document_stats_view,
+        name="knowledgebase-document-stats",
+    ),
     path(
         "documents/batch/ingest",
         document_batch_ingest_view,

@@ -1,5 +1,8 @@
 <script setup>
-defineProps({
+import { computed, onMounted, onUnmounted, reactive, ref } from 'vue';
+import AppIcon from '../ui/AppIcon.vue';
+
+const props = defineProps({
   searchKeyword: {
     type: String,
     default: '',
@@ -26,7 +29,7 @@ defineProps({
   },
 });
 
-defineEmits([
+const emit = defineEmits([
   'update:searchKeyword',
   'update:statusFilter',
   'update:timeRange',
@@ -34,59 +37,123 @@ defineEmits([
   'upload',
   'create-dataset',
 ]);
+
+const toolbarRef = ref(null);
+
+const statusOptions = [
+  { value: 'all', label: '全部状态' },
+  { value: 'processing', label: '处理中' },
+  { value: 'indexed', label: '已入库' },
+  { value: 'failed', label: '失败' },
+];
+
+const timeOptions = [
+  { value: 'all', label: '全部时间' },
+  { value: '7d', label: '近 7 天' },
+  { value: '30d', label: '近 30 天' },
+];
+
+const datasetOptions = computed(() => [
+  { value: 'all', label: '全部数据集' },
+  ...props.datasets.map((ds) => ({ value: ds.id, label: ds.name })),
+]);
+
+const controls = reactive([
+  {
+    id: 'status',
+    options: statusOptions,
+    emitName: 'update:statusFilter',
+    open: false,
+  },
+  {
+    id: 'time',
+    options: timeOptions,
+    emitName: 'update:timeRange',
+    open: false,
+  },
+  {
+    id: 'dataset',
+    options: datasetOptions,
+    emitName: 'update:selectedDatasetId',
+    open: false,
+  },
+]);
+
+const selectedLabels = computed(() => ({
+  status: statusOptions.find((o) => o.value === props.statusFilter)?.label || '全部状态',
+  time: timeOptions.find((o) => o.value === props.timeRange)?.label || '全部时间',
+  dataset: datasetOptions.value.find((o) => String(o.value) === String(props.selectedDatasetId))?.label || '全部数据集',
+}));
+
+const toggleDropdown = (control) => {
+  controls.forEach((c) => {
+    if (c.id !== control.id) c.open = false;
+  });
+  control.open = !control.open;
+};
+
+const selectOption = (control, value) => {
+  emit(control.emitName, value);
+  control.open = false;
+};
+
+const handleClickOutside = (event) => {
+  if (toolbarRef.value && !toolbarRef.value.contains(event.target)) {
+    controls.forEach((c) => { c.open = false; });
+  }
+};
+
+onMounted(() => {
+  document.addEventListener('click', handleClickOutside);
+});
+
+onUnmounted(() => {
+  document.removeEventListener('click', handleClickOutside);
+});
 </script>
 
 <template>
-  <section class="kb-toolbar ui-card">
-    <select
-      class="kb-select"
-      :value="statusFilter"
-      @change="$emit('update:statusFilter', $event.target.value)"
+  <section ref="toolbarRef" class="kb-toolbar ui-card">
+    <div
+      v-for="control in controls"
+      :key="control.id"
+      class="kb-custom-select"
+      :class="{ 'is-open': control.open }"
     >
-      <option value="all">全部状态</option>
-      <option value="processing">处理中</option>
-      <option value="indexed">已入库</option>
-      <option value="failed">失败</option>
-    </select>
-
-    <select
-      class="kb-select"
-      :value="timeRange"
-      @change="$emit('update:timeRange', $event.target.value)"
-    >
-      <option value="all">全部时间</option>
-      <option value="7d">近 7 天</option>
-      <option value="30d">近 30 天</option>
-    </select>
-
-    <select
-      class="kb-select"
-      :value="selectedDatasetId"
-      @change="$emit('update:selectedDatasetId', $event.target.value)"
-    >
-      <option value="all">全部数据集</option>
-      <option
-        v-for="dataset in datasets"
-        :key="dataset.id"
-        :value="dataset.id"
+      <button
+        type="button"
+        class="kb-custom-select__trigger"
+        @click.stop="toggleDropdown(control)"
       >
-        {{ dataset.name }}
-      </option>
-    </select>
+        <span>{{ selectedLabels[control.id] }}</span>
+        <AppIcon name="chevron-down" :width="12" :height="12" />
+      </button>
+      <div v-if="control.open" class="kb-custom-select__dropdown">
+        <button
+          v-for="option in control.options"
+          :key="option.value"
+          type="button"
+          :class="['kb-custom-select__option', { active: String(option.value) === String(control.id === 'dataset' ? selectedDatasetId : control.id === 'status' ? statusFilter : timeRange) }]"
+          @click.stop="selectOption(control, option.value)"
+        >
+          {{ option.label }}
+        </button>
+      </div>
+    </div>
 
     <input
       :value="searchKeyword"
       class="kb-search"
       type="text"
       placeholder="搜索知识库、文档、上传者..."
-      @input="$emit('update:searchKeyword', $event.target.value)"
+      @input="emit('update:searchKeyword', $event.target.value)"
     />
 
-    <button class="kb-secondary-btn" @click="$emit('create-dataset')">
+    <button class="kb-secondary-btn" @click="emit('create-dataset')">
       新建数据集
     </button>
 
-    <button class="kb-primary-btn" :disabled="isUploading" @click="$emit('upload')">
+    <button class="kb-primary-btn" :disabled="isUploading" @click="emit('upload')">
       {{ isUploading ? '上传中...' : '上传文档' }}
     </button>
   </section>
@@ -102,31 +169,91 @@ defineEmits([
   border-radius: 0;
   box-shadow: none;
   background: transparent;
+  align-items: center;
 }
 
-.kb-select {
+.kb-custom-select {
+  position: relative;
   min-width: 130px;
   flex: 0 0 auto;
+}
+
+.kb-custom-select__trigger {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  height: 40px;
+  padding: 0 14px;
+  border: 1px solid var(--line-strong);
+  border-radius: 12px;
+  background: var(--surface-3);
+  color: var(--text-primary);
+  cursor: pointer;
+  font-size: 14px;
+  font-family: inherit;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.kb-custom-select__trigger:focus,
+.kb-custom-select.is-open .kb-custom-select__trigger {
+  border-color: var(--brand);
+  box-shadow: 0 0 0 3px var(--brand-soft);
+  outline: none;
+}
+
+.kb-custom-select__dropdown {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 50;
+  min-width: 200px;
+  max-height: 260px;
+  overflow-y: auto;
+  border: 1px solid var(--line-soft);
+  border-radius: 14px;
+  background: var(--surface-2);
+  box-shadow: var(--shadow-md);
+  padding: 4px;
+}
+
+.kb-custom-select__option {
+  display: block;
+  width: 100%;
+  padding: 8px 12px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-primary);
+  text-align: left;
+  cursor: pointer;
+  font-size: 13px;
+  font-family: inherit;
+  transition: background 0.12s ease;
+}
+
+.kb-custom-select__option:hover,
+.kb-custom-select__option.active {
+  background: var(--brand-soft);
+  color: var(--brand);
 }
 
 .kb-search {
   flex: 1 1 200px;
   min-width: 0;
-}
-
-.kb-search,
-.kb-select {
   height: 40px;
   border: 1px solid var(--line-strong);
-  border-radius: 10px;
+  border-radius: 12px;
   padding: 0 14px;
   background: var(--surface-3);
   color: var(--text-primary);
+  font-family: inherit;
   outline: none;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
 
-.kb-search:focus,
-.kb-select:focus {
+.kb-search:focus {
   border-color: var(--brand);
   box-shadow: 0 0 0 3px var(--brand-soft);
 }
@@ -134,11 +261,13 @@ defineEmits([
 .kb-primary-btn,
 .kb-secondary-btn {
   height: 40px;
-  border-radius: 10px;
+  border-radius: 12px;
   padding: 0 18px;
+  font-size: 14px;
   font-weight: 700;
   cursor: pointer;
   flex: 0 0 auto;
+  font-family: inherit;
 }
 
 .kb-primary-btn {
@@ -164,7 +293,7 @@ defineEmits([
   }
 
   .kb-search,
-  .kb-select {
+  .kb-custom-select {
     width: 100%;
     flex: none;
   }

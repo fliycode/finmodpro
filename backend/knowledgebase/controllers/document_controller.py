@@ -9,7 +9,9 @@ from knowledgebase.models import Document
 from knowledgebase.services.document_service import (
     build_document_list_response,
     build_document_response,
+    build_stats_response,
     create_document_from_upload,
+    delete_document_with_vectors,
     get_document_for_user,
 )
 from rbac.services.authz_service import permission_required
@@ -80,7 +82,8 @@ def document_list_create_view(request):
     return JsonResponse(build_document_response(document), status=201)
 
 
-@require_GET
+@csrf_exempt
+@require_http_methods(["GET", "DELETE"])
 @permission_required("auth.view_document")
 def document_detail_view(request, document_id):
     try:
@@ -90,9 +93,27 @@ def document_detail_view(request, document_id):
     except (OperationalError, ProgrammingError, DatabaseError) as exc:
         return _build_schema_not_ready_response(exc)
 
+    if request.method == "DELETE":
+        if not request.user.has_perm("auth.delete_document"):
+            return JsonResponse({"message": "无权限。"}, status=403)
+        try:
+            delete_document_with_vectors(document)
+            return JsonResponse({"message": "文档已删除。"})
+        except (OperationalError, ProgrammingError, DatabaseError) as exc:
+            return _build_schema_not_ready_response(exc)
+
     try:
         return JsonResponse(
             build_document_response(document, include_content_preview=True)
         )
+    except (OperationalError, ProgrammingError, DatabaseError) as exc:
+        return _build_schema_not_ready_response(exc)
+
+
+@require_GET
+@permission_required("auth.view_document")
+def document_stats_view(request):
+    try:
+        return JsonResponse(build_stats_response(request.user))
     except (OperationalError, ProgrammingError, DatabaseError) as exc:
         return _build_schema_not_ready_response(exc)

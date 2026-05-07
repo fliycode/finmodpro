@@ -1,19 +1,15 @@
 <script setup>
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
+import { useRouter } from 'vue-router';
 
 import { kbApi } from '../api/knowledgebase.js';
-import KnowledgeBaseDetailPanel from './knowledgebase/KnowledgeBaseDetailPanel.vue';
-import KnowledgeBaseMetricsRail from './knowledgebase/KnowledgeBaseMetricsRail.vue';
-import KnowledgeBasePreviewModal from './knowledgebase/KnowledgeBasePreviewModal.vue';
 import KnowledgeBaseTable from './knowledgebase/KnowledgeBaseTable.vue';
 import KnowledgeBaseToolbar from './knowledgebase/KnowledgeBaseToolbar.vue';
+import AppIcon from './ui/AppIcon.vue';
 import { useFlash } from '../lib/flash.js';
-import { getDocumentRowActions, getIngestionAction, isIngestionInFlight } from '../lib/knowledgebase-actions.js';
+import { isIngestionInFlight } from '../lib/knowledgebase-actions.js';
 import {
-  buildChunkExpansionState,
-  buildEmptyDetailState,
   buildNextSelection,
-  buildPreviewState,
   buildSelectionAfterBatchDelete,
   summarizeBatchResult,
 } from '../lib/knowledgebase-workspace.js';
@@ -25,40 +21,45 @@ const props = defineProps({
   },
 });
 
+const router = useRouter();
+
+const detailRoutePrefix = computed(() =>
+  props.showAdminMetrics ? '/admin/knowledge' : '/workspace/knowledge',
+);
+
 const items = ref([]);
 const isLoading = ref(false);
 const isUploading = ref(false);
-const isUploadingVersion = ref(false);
 const isSubmittingTask = ref(false);
 const isLoadingDatasets = ref(false);
 const isCreatingDataset = ref(false);
 const isDatasetComposerOpen = ref(false);
-const selectedDocumentId = ref('');
-const selectedDocumentDetail = ref(null);
-const isLoadingDetail = ref(false);
 const selectedDatasetId = ref('all');
 const searchKeyword = ref('');
 const statusFilter = ref('all');
 const timeRange = ref('all');
 const checkedDocumentIds = ref([]);
 const fileInput = ref(null);
-const versionFileInput = ref(null);
 const currentPage = ref(1);
 const pagination = ref({ total: 0, page: 1, pageSize: 10, totalPages: 0 });
-const isPreviewOpen = ref(false);
-const activeTab = ref('processing');
 const datasets = ref([]);
-const versionHistory = ref([]);
-const isLoadingVersions = ref(false);
-const chunks = ref([]);
-const isLoadingChunks = ref(false);
-const expandedChunkIds = ref([]);
+const stats = ref({
+  total_datasets: 0,
+  total_documents: 0,
+  total_vectors: 0,
+  total_storage_bytes: 0,
+  total_storage_formatted: '0 B',
+  indexed_count: 0,
+  failed_count: 0,
+  processing_count: 0,
+  ready_rate: '0%',
+});
+const isLoadingStats = ref(false);
 const datasetForm = ref({
   name: '',
   description: '',
 });
 const flash = useFlash();
-const emptyDetailState = buildEmptyDetailState();
 
 let pollInterval = null;
 
@@ -72,162 +73,59 @@ const statusTone = {
   failed: 'danger',
 };
 
-const parseSizeToBytes = (value) => {
-  const match = String(value || '').match(/^([\d.]+)\s*(B|KB|MB|GB)$/i);
-  if (!match) {
-    return 0;
-  }
-
-  const amount = Number(match[1]);
-  const unit = match[2].toUpperCase();
-  const multiplier = {
-    B: 1,
-    KB: 1024,
-    MB: 1024 ** 2,
-    GB: 1024 ** 3,
-  }[unit] || 1;
-
-  return Number.isFinite(amount) ? amount * multiplier : 0;
-};
-
-const formatBytes = (bytes) => {
-  if (!Number.isFinite(bytes) || bytes <= 0) {
-    return '0 B';
-  }
-
-  if (bytes >= 1024 ** 3) {
-    return `${(bytes / 1024 ** 3).toFixed(1)} GB`;
-  }
-
-  if (bytes >= 1024 ** 2) {
-    return `${(bytes / 1024 ** 2).toFixed(1)} MB`;
-  }
-
-  if (bytes >= 1024) {
-    return `${(bytes / 1024).toFixed(1)} KB`;
-  }
-
-  return `${Math.round(bytes)} B`;
-};
-
 const decoratedItems = computed(() =>
   items.value.map((item) => ({
     ...item,
     statusTone: statusTone[item.processStep?.code] || 'neutral',
-    rowActions: getDocumentRowActions(item),
   })),
 );
-
-const selectedDocument = computed(() => {
-  if (selectedDocumentDetail.value?.id === selectedDocumentId.value) {
-    return {
-      ...selectedDocumentDetail.value,
-      statusTone: statusTone[selectedDocumentDetail.value.processStep?.code] || 'neutral',
-    };
-  }
-
-  const item = items.value.find((entry) => entry.id === selectedDocumentId.value);
-  return item
-    ? { ...item, statusTone: statusTone[item.processStep?.code] || 'neutral' }
-    : null;
-});
-
-const selectedIngestionAction = computed(() => getIngestionAction(selectedDocument.value));
-const previewState = computed(() => buildPreviewState(selectedDocument.value));
 
 const activeProcessingCount = computed(() =>
   items.value.filter((item) => isIngestionInFlight(item)).length,
 );
 
-const indexedCount = computed(() =>
-  items.value.filter((item) => item.isSearchReady).length,
-);
-
-const failedCount = computed(() =>
-  items.value.filter((item) => item.status === 'failed').length,
-);
-
-const totalVectorCount = computed(() =>
-  items.value.reduce((sum, item) => sum + Number(item.vectorCount || 0), 0),
-);
-
-const totalStorageBytes = computed(() =>
-  items.value.reduce((sum, item) => sum + parseSizeToBytes(item.size), 0),
-);
-
-const readyRate = computed(() => {
-  if (decoratedItems.value.length === 0) {
-    return '0%';
-  }
-
-  return `${Math.round((indexedCount.value / decoratedItems.value.length) * 100)}%`;
-});
-
 const summaryCards = computed(() => [
   {
     id: 'datasets',
-    label: '知识库总数',
-    value: datasets.value.length,
-    delta: isLoadingDatasets.value ? '同步中' : '数据集',
+    label: '数据集总数',
+    value: stats.value.total_datasets,
     tone: 'violet',
+    icon: 'layers',
   },
   {
     id: 'documents',
     label: '文档总数',
-    value: pagination.value.total,
-    delta: `${decoratedItems.value.length} 条当前页`,
+    value: stats.value.total_documents,
     tone: 'blue',
+    icon: 'file-text',
   },
   {
     id: 'storage',
     label: '数据总量',
-    value: formatBytes(totalStorageBytes.value),
-    delta: '当前筛选估算',
+    value: stats.value.total_storage_formatted,
     tone: 'green',
+    icon: 'database',
   },
   {
     id: 'vectors',
     label: '向量总数',
-    value: totalVectorCount.value.toLocaleString('zh-CN'),
-    delta: '当前页向量',
+    value: Number(stats.value.total_vectors || 0).toLocaleString('zh-CN'),
     tone: 'amber',
+    icon: 'zap',
   },
   {
     id: 'ready',
     label: '可检索率',
-    value: readyRate.value,
-    delta: `${failedCount.value} 个失败`,
+    value: stats.value.ready_rate,
+    delta: `${stats.value.failed_count} 个失败`,
     tone: 'purple',
+    icon: 'check',
   },
 ]);
 
 const activeDataset = computed(() =>
   datasets.value.find((dataset) => String(dataset.id) === String(selectedDatasetId.value)) || null,
 );
-
-const taskHintText = computed(() => {
-  if (isIngestionInFlight(selectedDocument.value)) {
-    return '任务已启动，后台正在执行解析、切块和向量写入，完成后列表与详情会自动刷新。';
-  }
-
-  return `上传只保存原始文件；点击“${selectedIngestionAction.value?.label || '启动入库'}”后，后台才会异步完成解析、切块和写入向量库。`;
-});
-
-const syncSelectionWithPage = () => {
-  if (!selectedDocumentId.value) {
-    selectedDocumentDetail.value = null;
-    versionHistory.value = [];
-    return;
-  }
-
-  if (!items.value.some((item) => item.id === selectedDocumentId.value)) {
-    selectedDocumentId.value = '';
-    selectedDocumentDetail.value = null;
-    versionHistory.value = [];
-    chunks.value = [];
-    expandedChunkIds.value = [];
-  }
-};
 
 const fetchDatasets = async () => {
   isLoadingDatasets.value = true;
@@ -245,6 +143,17 @@ const fetchDatasets = async () => {
     flash.error(`加载数据集失败：${error.message || '未知错误'}`);
   } finally {
     isLoadingDatasets.value = false;
+  }
+};
+
+const fetchStats = async () => {
+  isLoadingStats.value = true;
+  try {
+    stats.value = await kbApi.getStats();
+  } catch (error) {
+    console.error('加载统计数据失败:', error);
+  } finally {
+    isLoadingStats.value = false;
   }
 };
 
@@ -269,7 +178,6 @@ const fetchDocuments = async () => {
     };
     currentPage.value = pagination.value.page;
     checkedDocumentIds.value = checkedDocumentIds.value.filter((id) => items.value.some((item) => item.id === id));
-    syncSelectionWithPage();
   } catch (error) {
     console.error('加载知识库失败:', error);
     flash.error(`加载知识库失败：${error.message || '未知错误'}`);
@@ -278,95 +186,35 @@ const fetchDocuments = async () => {
   }
 };
 
-const refreshSelectedDocument = async () => {
-  if (!selectedDocumentId.value) {
-    selectedDocumentDetail.value = null;
-    return;
-  }
-  isLoadingDetail.value = true;
-  try {
-    selectedDocumentDetail.value = await kbApi.getDocumentDetail(selectedDocumentId.value);
-  } catch (error) {
-    console.error('加载文档详情失败:', error);
-    selectedDocumentDetail.value = items.value.find((item) => item.id === selectedDocumentId.value) || null;
-  } finally {
-    isLoadingDetail.value = false;
-  }
-};
-
-const refreshSelectedChunks = async () => {
-  if (!selectedDocumentId.value) {
-    chunks.value = [];
-    return;
-  }
-
-  isLoadingChunks.value = true;
-  try {
-    chunks.value = await kbApi.getDocumentChunks(selectedDocumentId.value);
-  } catch (error) {
-    console.error('加载切块详情失败:', error);
-    chunks.value = [];
-  } finally {
-    isLoadingChunks.value = false;
-  }
-};
-
-const refreshSelectedVersions = async () => {
-  if (!selectedDocument.value?.rootDocumentId) {
-    versionHistory.value = [];
-    return;
-  }
-
-  isLoadingVersions.value = true;
-  try {
-    const payload = await kbApi.listDocumentVersions(selectedDocument.value.rootDocumentId);
-    versionHistory.value = payload.versions || [];
-  } catch (error) {
-    console.error('加载版本记录失败:', error);
-    versionHistory.value = [];
-  } finally {
-    isLoadingVersions.value = false;
-  }
+const navigateToDetail = (item) => {
+  router.push(`${detailRoutePrefix.value}/documents/${item.id}`);
 };
 
 const triggerUpload = () => {
   fileInput.value?.click();
 };
 
-const triggerVersionUpload = () => {
-  if (!selectedDocument.value) {
-    flash.error('请先选择一个文档后再上传新版本。');
-    return;
-  }
-  versionFileInput.value?.click();
-};
-
 const handleFileChange = async (event) => {
   const file = event.target.files?.[0];
-  if (!file) {
-    return;
-  }
+  if (!file) return;
 
   isUploading.value = true;
   try {
     const uploadResult = await kbApi.uploadDocument(file, {
       datasetId: selectedDatasetId.value,
     });
-    if (uploadResult.document?.id) {
-      selectedDocumentId.value = uploadResult.document.id;
-      selectedDocumentDetail.value = uploadResult.document;
-      activeTab.value = 'processing';
-    }
     flash.success(
       selectedDatasetId.value !== 'all'
-        ? `文件已上传到“${activeDataset.value?.name || '当前数据集'}”。请启动入库任务。`
+        ? `文件已上传到"${activeDataset.value?.name || '当前数据集'}"。请启动入库任务。`
         : '文件已上传。请启动入库任务，后台会异步完成解析、切块和向量化。',
     );
+    if (uploadResult.document?.id) {
+      router.push(`${detailRoutePrefix.value}/documents/${uploadResult.document.id}`);
+      return;
+    }
     await fetchDatasets();
     await fetchDocuments();
-    await refreshSelectedDocument();
-    await refreshSelectedVersions();
-    await refreshSelectedChunks();
+    await fetchStats();
   } catch (error) {
     console.error('上传文档失败:', error);
     flash.error(`上传失败：${error.message || '未知错误'}`);
@@ -374,85 +222,6 @@ const handleFileChange = async (event) => {
     isUploading.value = false;
     event.target.value = '';
   }
-};
-
-const handleVersionFileChange = async (event) => {
-  const file = event.target.files?.[0];
-  if (!file || !selectedDocument.value) {
-    return;
-  }
-
-  isUploadingVersion.value = true;
-  try {
-    const result = await kbApi.uploadNewVersion(
-      selectedDocument.value.rootDocumentId,
-      file,
-      {
-        title: file.name,
-        sourceLabel: file.name,
-        sourceMetadata: {
-          replaced_document_id: selectedDocument.value.id,
-          dataset_id: selectedDocument.value.dataset?.id || null,
-        },
-      },
-    );
-    if (result.document?.id) {
-      selectedDocumentId.value = result.document.id;
-      selectedDocumentDetail.value = result.document;
-      activeTab.value = 'versions';
-    }
-    flash.success(result.message || '新版本已上传。');
-    await fetchDatasets();
-    await fetchDocuments();
-    await refreshSelectedDocument();
-    await refreshSelectedVersions();
-    await refreshSelectedChunks();
-  } catch (error) {
-    console.error('上传新版本失败:', error);
-    flash.error(`上传新版本失败：${error.message || '未知错误'}`);
-  } finally {
-    isUploadingVersion.value = false;
-    event.target.value = '';
-  }
-};
-
-const startIngestionForDocument = async (documentId) => {
-  if (!documentId || isSubmittingTask.value) {
-    return;
-  }
-
-  isSubmittingTask.value = true;
-  try {
-    const ingestResult = await kbApi.ingestDocument(documentId);
-    if (documentId === selectedDocumentId.value && ingestResult.document) {
-      selectedDocumentDetail.value = ingestResult.document;
-    }
-    flash.success(ingestResult.message || '入库任务已提交。');
-    await fetchDocuments();
-    if (documentId === selectedDocumentId.value) {
-      await refreshSelectedDocument();
-      await refreshSelectedChunks();
-    }
-  } catch (error) {
-    console.error('启动入库任务失败:', error);
-    flash.error(`启动入库失败：${error.message || '未知错误'}`);
-  } finally {
-    isSubmittingTask.value = false;
-  }
-};
-
-const selectDocument = async (item) => {
-  if (!item?.id) {
-    return;
-  }
-
-  selectedDocumentId.value = item.id;
-  selectedDocumentDetail.value = item;
-  activeTab.value = 'processing';
-  expandedChunkIds.value = [];
-  await refreshSelectedDocument();
-  await refreshSelectedVersions();
-  await refreshSelectedChunks();
 };
 
 const createDataset = async () => {
@@ -464,13 +233,14 @@ const createDataset = async () => {
   isCreatingDataset.value = true;
   try {
     const dataset = await kbApi.createDataset(datasetForm.value);
-    flash.success(`数据集“${dataset.name}”已创建。`);
+    flash.success(`数据集"${dataset.name}"已创建。`);
     datasetForm.value = { name: '', description: '' };
     isDatasetComposerOpen.value = false;
     await fetchDatasets();
     selectedDatasetId.value = String(dataset.id);
     currentPage.value = 1;
     await fetchDocuments();
+    await fetchStats();
   } catch (error) {
     console.error('创建数据集失败:', error);
     flash.error(`创建数据集失败：${error.message || '未知错误'}`);
@@ -479,23 +249,40 @@ const createDataset = async () => {
   }
 };
 
-const openLink = (url) => {
-  if (!url) {
-    flash.error('当前文档没有可访问的文件链接。');
-    return;
+const startIngestionForDocument = async (documentId) => {
+  if (!documentId || isSubmittingTask.value) return;
+
+  isSubmittingTask.value = true;
+  try {
+    const ingestResult = await kbApi.ingestDocument(documentId);
+    flash.success(ingestResult.message || '入库任务已提交。');
+    await fetchDocuments();
+  } catch (error) {
+    console.error('启动入库任务失败:', error);
+    flash.error(`启动入库失败：${error.message || '未知错误'}`);
+  } finally {
+    isSubmittingTask.value = false;
   }
-  window.open(url, '_blank', 'noopener');
 };
 
 const handleRowAction = async ({ item, action }) => {
-  if (action.id === 'retry') {
+  if (action === 'view-detail') {
+    navigateToDetail(item);
+    return;
+  }
+  if (action === 'reingest') {
     await startIngestionForDocument(item.id);
     return;
   }
-
-  if (action.id === 'view-error') {
-    await selectDocument(item);
-    activeTab.value = 'errors';
+  if (action === 'delete') {
+    try {
+      await kbApi.deleteDocument(item.id);
+      flash.success(`文档"${item.title}"已删除。`);
+      await fetchDocuments();
+      await fetchStats();
+    } catch (error) {
+      flash.error(`删除失败：${error.message || '未知错误'}`);
+    }
   }
 };
 
@@ -523,15 +310,12 @@ const changePage = async (page) => {
 };
 
 const handleBatchIngest = async () => {
-  if (checkedDocumentIds.value.length === 0) {
-    return;
-  }
+  if (checkedDocumentIds.value.length === 0) return;
 
   try {
     const payload = await kbApi.batchIngestDocuments(checkedDocumentIds.value);
     flash.success(summarizeBatchResult(payload, '批量重新入库'));
     await fetchDocuments();
-    await refreshSelectedDocument();
   } catch (error) {
     console.error('批量入库失败:', error);
     flash.error(`批量入库失败：${error.message || '未知错误'}`);
@@ -539,9 +323,7 @@ const handleBatchIngest = async () => {
 };
 
 const handleBatchDelete = async () => {
-  if (checkedDocumentIds.value.length === 0) {
-    return;
-  }
+  if (checkedDocumentIds.value.length === 0) return;
 
   try {
     const payload = await kbApi.batchDeleteDocuments(checkedDocumentIds.value);
@@ -550,12 +332,8 @@ const handleBatchDelete = async () => {
       .filter((item) => item.status === 'deleted')
       .map((item) => item.document_id);
     checkedDocumentIds.value = buildSelectionAfterBatchDelete(checkedDocumentIds.value, deletedIds);
-    if (deletedIds.includes(selectedDocumentId.value)) {
-      selectedDocumentId.value = '';
-      selectedDocumentDetail.value = null;
-      chunks.value = [];
-    }
     await fetchDocuments();
+    await fetchStats();
   } catch (error) {
     console.error('批量删除失败:', error);
     flash.error(`批量删除失败：${error.message || '未知错误'}`);
@@ -564,15 +342,10 @@ const handleBatchDelete = async () => {
 
 const startPolling = () => {
   pollInterval = setInterval(async () => {
-    if (activeProcessingCount.value === 0) {
-      return;
-    }
+    if (activeProcessingCount.value === 0) return;
     try {
       await fetchDocuments();
-      if (selectedDocumentId.value) {
-        await refreshSelectedDocument();
-        await refreshSelectedChunks();
-      }
+      await fetchStats();
     } catch (error) {
       console.error('轮询知识库失败:', error);
     }
@@ -587,6 +360,7 @@ watch([searchKeyword, statusFilter, timeRange, selectedDatasetId], async () => {
 onMounted(async () => {
   await fetchDatasets();
   await fetchDocuments();
+  await fetchStats();
   startPolling();
 });
 
@@ -600,7 +374,6 @@ onUnmounted(() => {
 <template>
   <div :class="['kb-page', { 'kb-page--admin': showAdminMetrics }]">
     <input ref="fileInput" type="file" hidden @change="handleFileChange" />
-    <input ref="versionFileInput" type="file" hidden @change="handleVersionFileChange" />
 
     <section class="kb-overview">
       <div class="kb-overview__stats">
@@ -609,149 +382,96 @@ onUnmounted(() => {
           :key="card.id"
           :class="['stat-card', `stat-card--${card.tone}`]"
         >
-          <span class="stat-card__icon" aria-hidden="true"></span>
-          <div>
+          <span class="stat-card__icon" aria-hidden="true">
+            <AppIcon :name="card.icon" :width="20" :height="20" />
+          </span>
+          <div class="stat-card__body">
             <span class="stat-label">{{ card.label }}</span>
             <strong>{{ card.value }}</strong>
-            <small>{{ card.delta }}</small>
+            <small v-if="card.delta">{{ card.delta }}</small>
           </div>
         </article>
       </div>
     </section>
 
-    <div class="kb-command-grid">
-      <main class="kb-command-grid__main">
-        <section class="kb-ledger-panel">
-          <div class="kb-tabs">
-            <button class="kb-tab active" type="button">知识库列表</button>
-            <button class="kb-tab" type="button">数据源管理</button>
-          </div>
-
-          <KnowledgeBaseToolbar
-            :search-keyword="searchKeyword"
-            :status-filter="statusFilter"
-            :time-range="timeRange"
-            :datasets="datasets"
-            :selected-dataset-id="selectedDatasetId"
-            :is-uploading="isUploading"
-            @update:search-keyword="searchKeyword = $event"
-            @update:status-filter="statusFilter = $event"
-            @update:time-range="timeRange = $event"
-            @update:selected-dataset-id="selectedDatasetId = $event"
-            @create-dataset="isDatasetComposerOpen = !isDatasetComposerOpen"
-            @upload="triggerUpload"
-          />
-
-          <section v-if="isDatasetComposerOpen" class="kb-dataset-composer">
-            <div class="kb-dataset-composer__copy">
-              <p class="eyebrow">Dataset composer</p>
-              <h3>创建一个新的知识数据集</h3>
-              <p>
-                用于组织上传文档、限定检索范围，并为后续问答与风险抽取提供稳定的数据边界。
-              </p>
-            </div>
-            <div class="kb-dataset-composer__form">
-              <input
-                v-model="datasetForm.name"
-                class="kb-search"
-                type="text"
-                placeholder="例如：2025 年报数据集"
-              />
-              <textarea
-                v-model="datasetForm.description"
-                class="kb-textarea"
-                rows="3"
-                placeholder="补充该数据集的用途、来源或适用场景"
-              />
-              <div class="kb-dataset-composer__actions">
-                <button
-                  class="kb-secondary-btn"
-                  :disabled="isCreatingDataset"
-                  @click="isDatasetComposerOpen = false"
-                >
-                  取消
-                </button>
-                <button
-                  class="kb-primary-btn"
-                  :disabled="isCreatingDataset"
-                  @click="createDataset"
-                >
-                  {{ isCreatingDataset ? '创建中...' : '创建数据集' }}
-                </button>
-              </div>
-            </div>
-          </section>
-
-          <div v-if="checkedDocumentIds.length > 0" class="kb-batchbar">
-            <span>已选择 {{ checkedDocumentIds.length }} 个文档</span>
-            <div class="kb-batchbar__actions">
-              <button class="kb-secondary-btn" @click="handleBatchIngest">批量重新入库</button>
-              <button class="kb-danger-btn" @click="handleBatchDelete">批量删除</button>
-            </div>
-          </div>
-
-          <KnowledgeBaseTable
-            :items="decoratedItems"
-            :checked-ids="checkedDocumentIds"
-            :selected-document-id="selectedDocumentId"
-            :is-loading="isLoading"
-            :page="pagination.page"
-            :total-pages="pagination.totalPages"
-            :total="pagination.total"
-            @select="selectDocument"
-            @toggle-row="toggleRow"
-            @toggle-all="toggleAll"
-            @row-action="handleRowAction"
-            @change-page="changePage"
-          />
-        </section>
-
-        <section class="kb-detail-panel">
-          <header class="kb-detail-panel__header">
-            <div>
-              <p class="eyebrow">Document inspector</p>
-              <h3>文档详情与切块</h3>
-            </div>
-            <span>{{ selectedDocument ? selectedDocument.processStep.label : '未选择文档' }}</span>
-          </header>
-          <KnowledgeBaseDetailPanel
-            :document="selectedDocument"
-            :primary-action="selectedIngestionAction"
-            :active-tab="activeTab"
-            :task-hint-text="taskHintText"
-            :is-submitting-task="isSubmittingTask"
-            :versions="versionHistory"
-            :is-loading-versions="isLoadingVersions"
-            :is-uploading-version="isUploadingVersion"
-            :chunks="chunks"
-            :expanded-chunk-ids="expandedChunkIds"
-            :is-loading-chunks="isLoadingChunks"
-            :empty-state="emptyDetailState"
-            @ingest="startIngestionForDocument(selectedDocument?.id)"
-            @upload-version="triggerVersionUpload"
-            @preview="isPreviewOpen = true"
-            @open-original="openLink(selectedDocument?.originalUrl)"
-            @change-tab="activeTab = $event"
-            @toggle-chunk="expandedChunkIds = buildChunkExpansionState(expandedChunkIds, $event)"
-          />
-        </section>
-      </main>
-
-      <KnowledgeBaseMetricsRail
-        v-if="showAdminMetrics"
-        :documents="decoratedItems"
+    <section class="kb-ledger-panel">
+      <KnowledgeBaseToolbar
+        :search-keyword="searchKeyword"
+        :status-filter="statusFilter"
+        :time-range="timeRange"
         :datasets="datasets"
-        :total-documents="pagination.total"
-        :active-count="activeProcessingCount"
-        :indexed-count="indexedCount"
-        :failed-count="failedCount"
+        :selected-dataset-id="selectedDatasetId"
+        :is-uploading="isUploading"
+        @update:search-keyword="searchKeyword = $event"
+        @update:status-filter="statusFilter = $event"
+        @update:time-range="timeRange = $event"
+        @update:selected-dataset-id="selectedDatasetId = $event"
+        @create-dataset="isDatasetComposerOpen = !isDatasetComposerOpen"
+        @upload="triggerUpload"
       />
-    </div>
 
-    <KnowledgeBasePreviewModal
-      v-model="isPreviewOpen"
-      :preview-state="previewState"
-    />
+      <section v-if="isDatasetComposerOpen" class="kb-dataset-composer">
+        <div class="kb-dataset-composer__copy">
+          <p class="eyebrow">Dataset composer</p>
+          <h3>创建一个新的知识数据集</h3>
+          <p>
+            用于组织上传文档、限定检索范围，并为后续问答与风险抽取提供稳定的数据边界。
+          </p>
+        </div>
+        <div class="kb-dataset-composer__form">
+          <input
+            v-model="datasetForm.name"
+            class="kb-search"
+            type="text"
+            placeholder="例如：2025 年报数据集"
+          />
+          <textarea
+            v-model="datasetForm.description"
+            class="kb-textarea"
+            rows="3"
+            placeholder="补充该数据集的用途、来源或适用场景"
+          />
+          <div class="kb-dataset-composer__actions">
+            <button
+              class="kb-secondary-btn"
+              :disabled="isCreatingDataset"
+              @click="isDatasetComposerOpen = false"
+            >
+              取消
+            </button>
+            <button
+              class="kb-primary-btn"
+              :disabled="isCreatingDataset"
+              @click="createDataset"
+            >
+              {{ isCreatingDataset ? '创建中...' : '创建数据集' }}
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <div v-if="checkedDocumentIds.length > 0" class="kb-batchbar">
+        <span>已选择 {{ checkedDocumentIds.length }} 个文档</span>
+        <div class="kb-batchbar__actions">
+          <button class="kb-secondary-btn" @click="handleBatchIngest">批量重新入库</button>
+          <button class="kb-danger-btn" @click="handleBatchDelete">批量删除</button>
+        </div>
+      </div>
+
+      <KnowledgeBaseTable
+        :items="decoratedItems"
+        :checked-ids="checkedDocumentIds"
+        :is-loading="isLoading"
+        :page="pagination.page"
+        :total-pages="pagination.totalPages"
+        :total="pagination.total"
+        @navigate="navigateToDetail"
+        @toggle-row="toggleRow"
+        @toggle-all="toggleAll"
+        @row-action="handleRowAction"
+        @change-page="changePage"
+      />
+    </section>
   </div>
 </template>
 
@@ -759,19 +479,9 @@ onUnmounted(() => {
 .kb-page {
   display: flex;
   flex-direction: column;
-  gap: 18px;
+  gap: 16px;
   min-height: 0;
   color: var(--text-secondary);
-}
-
-.kb-overview,
-.kb-dataset-composer,
-.kb-batchbar,
-.kb-ledger-panel,
-.kb-detail-panel {
-  border: 1px solid var(--line-soft);
-  background: var(--surface-2);
-  box-shadow: var(--shadow-md);
 }
 
 .kb-overview {
@@ -798,7 +508,6 @@ onUnmounted(() => {
   letter-spacing: -0.02em;
 }
 
-.kb-overview__text,
 .kb-dataset-composer p {
   margin: 10px 0 0;
   color: var(--text-secondary);
@@ -808,113 +517,83 @@ onUnmounted(() => {
 .kb-overview__stats {
   display: grid;
   grid-template-columns: repeat(5, minmax(0, 1fr));
-  gap: 14px;
+  gap: 12px;
 }
 
 .stat-card {
   display: flex;
   align-items: center;
-  gap: 14px;
-  min-height: 104px;
-  padding: 18px;
+  gap: 12px;
+  min-height: 72px;
+  padding: 12px 16px;
   border: 1px solid var(--line-soft);
   border-radius: 16px;
   background: color-mix(in srgb, var(--surface-2) 88%, var(--brand-soft));
 }
 
 .stat-card__icon {
-  width: 48px;
-  height: 48px;
+  width: 36px;
+  height: 36px;
   flex: 0 0 auto;
-  border-radius: 15px;
-  background: linear-gradient(135deg, #2457c5, #7ca6f2);
-  box-shadow: 0 16px 30px -24px rgba(36, 87, 197, 0.65);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 10px;
+  background: var(--surface-3);
+  color: var(--brand);
 }
 
 .stat-card--violet .stat-card__icon {
-  background: linear-gradient(135deg, #44318d, #7f63f4);
+  background: rgba(68, 49, 141, 0.1);
+  color: #44318d;
 }
 
 .stat-card--green .stat-card__icon {
-  background: linear-gradient(135deg, #1f7a64, #58c896);
+  background: rgba(31, 122, 100, 0.1);
+  color: #1f7a64;
 }
 
 .stat-card--amber .stat-card__icon {
-  background: linear-gradient(135deg, #8a5a20, #d99731);
+  background: rgba(138, 90, 32, 0.1);
+  color: #8a5a20;
 }
 
 .stat-card--purple .stat-card__icon {
-  background: linear-gradient(135deg, #4b357e, #9a78f4);
+  background: rgba(75, 53, 126, 0.1);
+  color: #4b357e;
+}
+
+.stat-card__body {
+  min-width: 0;
 }
 
 .stat-label {
   display: block;
   color: var(--text-muted);
   font-size: 12px;
-  margin-bottom: 6px;
+  margin-bottom: 4px;
 }
 
 .stat-card strong {
   display: block;
   color: var(--text-primary);
-  font-size: clamp(20px, 2vw, 26px);
-  line-height: 1.1;
+  font-size: clamp(17px, 1.8vw, 20px);
+  line-height: 1.15;
 }
 
 .stat-card small {
   display: block;
-  margin-top: 8px;
-  color: var(--success);
-  font-size: 12px;
-}
-
-.kb-command-grid {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  gap: 18px;
-  align-items: start;
-  min-height: 0;
-}
-
-.kb-page--admin .kb-command-grid {
-  grid-template-columns: minmax(0, 1fr) 286px;
-}
-
-.kb-command-grid__main {
-  display: flex;
-  flex-direction: column;
-  gap: 18px;
-  min-width: 0;
-}
-
-.kb-ledger-panel,
-.kb-detail-panel {
-  border-radius: 18px;
-  overflow: hidden;
-}
-
-.kb-tabs {
-  display: flex;
-  align-items: flex-end;
-  gap: 24px;
-  min-height: 50px;
-  padding: 0 18px;
-  border-bottom: 1px solid var(--line-soft);
-}
-
-.kb-tab {
-  height: 50px;
-  border: 0;
-  border-bottom: 3px solid transparent;
-  background: transparent;
+  margin-top: 4px;
   color: var(--text-muted);
-  font-weight: 700;
-  cursor: pointer;
+  font-size: 11px;
 }
 
-.kb-tab.active {
-  border-bottom-color: var(--brand);
-  color: var(--brand);
+.kb-ledger-panel {
+  border: 1px solid var(--line-soft);
+  border-radius: 18px;
+  background: var(--surface-2);
+  box-shadow: var(--shadow-md);
+  overflow: hidden;
 }
 
 .kb-dataset-composer {
@@ -923,7 +602,10 @@ onUnmounted(() => {
   gap: 20px;
   margin: 0 18px 18px;
   padding: 18px;
+  border: 1px solid var(--line-soft);
   border-radius: 16px;
+  background: var(--surface-2);
+  box-shadow: var(--shadow-md);
 }
 
 .kb-dataset-composer__form {
@@ -962,22 +644,27 @@ onUnmounted(() => {
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  padding: 14px 18px;
-  margin: 0 18px 16px;
-  border-radius: 14px;
+  padding: 12px 16px;
+  margin: 0 16px 14px;
+  border: 1px solid var(--line-soft);
+  border-radius: 12px;
+  background: var(--surface-2);
+  box-shadow: var(--shadow-sm);
 }
 
 .kb-batchbar span {
   color: var(--text-primary);
   font-weight: 700;
+  font-size: 13px;
 }
 
 .kb-primary-btn,
 .kb-secondary-btn,
 .kb-danger-btn {
-  min-height: 40px;
+  min-height: 36px;
   padding: 0 16px;
   border-radius: 10px;
+  font-size: 13px;
   font-weight: 700;
   cursor: pointer;
 }
@@ -1000,37 +687,7 @@ onUnmounted(() => {
   color: #9b3131;
 }
 
-.kb-detail-panel {
-  padding: 18px;
-}
-
-.kb-detail-panel__header {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 14px;
-  margin-bottom: 14px;
-}
-
-.kb-detail-panel__header h3 {
-  margin: 0;
-  color: var(--text-primary);
-}
-
-.kb-detail-panel__header span {
-  display: inline-flex;
-  align-items: center;
-  min-height: 30px;
-  padding: 0 10px;
-  border-radius: 999px;
-  background: var(--brand-soft);
-  color: var(--brand);
-  font-size: 12px;
-  font-weight: 700;
-}
-
 @media (max-width: 1180px) {
-  .kb-page--admin .kb-command-grid,
   .kb-dataset-composer {
     grid-template-columns: 1fr;
   }

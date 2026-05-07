@@ -412,6 +412,20 @@ export const kbApi = {
     });
   },
 
+  async getStats() {
+    return apiConfig.fetchJson('/api/knowledgebase/documents/stats', {
+      method: 'GET',
+      auth: true,
+    });
+  },
+
+  async deleteDocument(documentId) {
+    return apiConfig.fetchJson(`/api/knowledgebase/documents/${documentId}`, {
+      method: 'DELETE',
+      auth: true,
+    });
+  },
+
   isProcessingStatus(status) {
     return ['queued', 'parsing', 'chunking', 'indexing', 'running'].includes(
       String(status || '').toLowerCase(),

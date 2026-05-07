@@ -7,7 +7,7 @@ from pathlib import Path
 from django.contrib.auth import get_user_model
 from django.conf import settings
 from django.db import DatabaseError, OperationalError, ProgrammingError, transaction
-from django.db.models import Q
+from django.db.models import Q, Count, Sum
 from django.utils import timezone
 
 from common.observability import trace_span
@@ -282,6 +282,7 @@ def serialize_document(document, include_content_preview=False, include_content=
         "doc_type": document.doc_type,
         "status": document.status,
         "visibility": document.visibility,
+        "file_size": document.file_size,
         "dataset": _serialize_dataset_summary(getattr(document, "dataset", None)),
         "uploader": _serialize_user(getattr(document, "uploaded_by", None)),
         "uploaded_by": _serialize_user(getattr(document, "uploaded_by", None)),
@@ -419,6 +420,45 @@ def build_document_list_response(
     }
 
 
+def build_stats_response(user):
+    queryset = get_visible_documents_queryset(user).filter(
+        Q(version_record__is_current=True) | Q(version_record__isnull=True)
+    )
+    total_documents = queryset.count()
+    indexed_count = queryset.filter(status=Document.STATUS_INDEXED).count()
+    failed_count = queryset.filter(status=Document.STATUS_FAILED).count()
+    processing_count = total_documents - indexed_count - failed_count
+    storage_agg = queryset.aggregate(total_bytes=Sum("file_size"))
+    total_storage_bytes = storage_agg["total_bytes"] or 0
+    total_vectors = DocumentChunk.objects.exclude(vector_id="").count()
+    total_datasets = Dataset.objects.count()
+    ready_rate = f"{round((indexed_count / total_documents) * 100)}%" if total_documents else "0%"
+
+    return {
+        "total_datasets": total_datasets,
+        "total_documents": total_documents,
+        "total_vectors": total_vectors,
+        "total_storage_bytes": total_storage_bytes,
+        "total_storage_formatted": _format_bytes(total_storage_bytes),
+        "indexed_count": indexed_count,
+        "failed_count": failed_count,
+        "processing_count": processing_count,
+        "ready_rate": ready_rate,
+    }
+
+
+def _format_bytes(value):
+    if not value or value <= 0:
+        return "0 B"
+    if value >= 1024 ** 3:
+        return f"{value / 1024 ** 3:.1f} GB"
+    if value >= 1024 ** 2:
+        return f"{value / 1024 ** 2:.1f} MB"
+    if value >= 1024:
+        return f"{value / 1024:.1f} KB"
+    return f"{value} B"
+
+
 def serialize_chunk(chunk):
     metadata = chunk.metadata or {}
     return {
@@ -477,6 +517,7 @@ def create_document_from_upload(
     document = Document.objects.create(
         title=title or Path(filename).stem,
         file=uploaded_file,
+        file_size=uploaded_file.size,
         filename=filename,
         doc_type=doc_type,
         uploaded_by=uploaded_by,

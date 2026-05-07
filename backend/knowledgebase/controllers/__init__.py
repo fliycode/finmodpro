@@ -1,6 +1,7 @@
 from knowledgebase.controllers.document_controller import (
     document_detail_view,
     document_list_create_view,
+    document_stats_view,
 )
 from knowledgebase.controllers.batch_controller import (
     document_batch_delete_view,
@@ -24,5 +25,6 @@ __all__ = [
     "document_chunks_view",
     "document_ingest_view",
     "document_list_create_view",
+    "document_stats_view",
     "document_versions_view",
 ]

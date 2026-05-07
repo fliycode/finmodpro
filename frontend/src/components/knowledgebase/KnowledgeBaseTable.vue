@@ -1,4 +1,6 @@
 <script setup>
+import AppIcon from '../ui/AppIcon.vue';
+
 const props = defineProps({
   items: {
     type: Array,
@@ -7,10 +9,6 @@ const props = defineProps({
   checkedIds: {
     type: Array,
     default: () => [],
-  },
-  selectedDocumentId: {
-    type: [String, Number],
-    default: '',
   },
   isLoading: {
     type: Boolean,
@@ -31,7 +29,7 @@ const props = defineProps({
 });
 
 const emit = defineEmits([
-  'select',
+  'navigate',
   'toggle-row',
   'toggle-all',
   'row-action',
@@ -43,6 +41,11 @@ const isAllChecked = () => {
     return false;
   }
   return props.items.every((item) => props.checkedIds.includes(item.id));
+};
+
+const showReingest = (item) => {
+  const code = item.processStep?.code || '';
+  return code !== 'indexing' && code !== 'parsing' && code !== 'chunking' && code !== 'queued';
 };
 </script>
 
@@ -68,8 +71,8 @@ const isAllChecked = () => {
       v-for="item in items"
       :key="item.id"
       type="button"
-      :class="['kb-table__row', { active: item.id === selectedDocumentId }]"
-      @click="emit('select', item)"
+      class="kb-table__row"
+      @click="emit('navigate', item)"
     >
       <label class="kb-checkbox" @click.stop>
         <input
@@ -80,40 +83,53 @@ const isAllChecked = () => {
       </label>
 
       <div class="kb-table__title">
-        <strong>{{ item.title }}</strong>
-        <span :title="item.filename">{{ item.filename }}</span>
+        <strong :title="item.title">{{ item.title }}</strong>
+        <span class="kb-table__filename" :title="item.filename">{{ item.filename }}</span>
         <span class="kb-table__meta">
-          {{ item.uploaderName }} · v{{ item.currentVersion }}
+          {{ item.uploaderName }}&nbsp;·&nbsp;v{{ item.currentVersion }}
         </span>
       </div>
 
       <div class="kb-table__cell">
-        <span class="kb-table__tag">{{ item.datasetName }}</span>
+        <span class="kb-table__tag" :title="item.datasetName">{{ item.datasetName }}</span>
       </div>
 
       <div class="kb-table__cell kb-col-size">{{ item.size }}</div>
 
       <div class="kb-table__cell kb-col-vector">{{ Number(item.vectorCount || 0).toLocaleString('zh-CN') }}</div>
 
-      <div class="kb-table__cell kb-col-time">{{ item.updateTime }}</div>
+      <div class="kb-table__cell kb-col-time" :title="item.updateTime">{{ item.updateTime }}</div>
 
       <div class="kb-table__status kb-col-status">
         <span :class="['kb-status-dot', `tone-${item.statusTone || 'neutral'}`]"></span>
         <span>{{ item.processStep.label }}</span>
-        <div v-if="!item.processStep.isTerminal" class="kb-inline-progress">
-          <span :style="{ width: `${item.processStep.progress}%` }"></span>
-        </div>
       </div>
 
       <div class="kb-table__actions">
         <button
-          v-for="action in item.rowActions"
-          :key="action.id"
           type="button"
-          class="kb-link-btn"
-          @click.stop="emit('row-action', { item, action })"
+          class="kb-icon-btn"
+          title="查看详情"
+          @click.stop="emit('row-action', { item, action: 'view-detail' })"
         >
-          {{ action.label }}
+          <AppIcon name="eye" :width="15" :height="15" />
+        </button>
+        <button
+          v-if="showReingest(item)"
+          type="button"
+          class="kb-icon-btn"
+          title="重新入库"
+          @click.stop="emit('row-action', { item, action: 'reingest' })"
+        >
+          <AppIcon name="refresh" :width="15" :height="15" />
+        </button>
+        <button
+          type="button"
+          class="kb-icon-btn kb-icon-btn--danger"
+          title="删除"
+          @click.stop="emit('row-action', { item, action: 'delete' })"
+        >
+          <AppIcon name="trash" :width="15" :height="15" />
         </button>
       </div>
     </button>
@@ -141,10 +157,10 @@ const isAllChecked = () => {
 .kb-table__header,
 .kb-table__row {
   display: grid;
-  grid-template-columns: 34px minmax(220px, 1.7fr) 132px 96px 120px 136px 136px 118px;
-  gap: 12px;
+  grid-template-columns: 30px minmax(180px, 1.5fr) 108px 78px 96px 108px 110px 120px;
+  gap: 8px;
   align-items: center;
-  padding: 13px 18px;
+  padding: 10px 14px;
 }
 
 .kb-table__header {
@@ -152,8 +168,9 @@ const isAllChecked = () => {
   border-bottom: 1px solid var(--line-soft);
   background: var(--surface-3);
   color: var(--text-muted);
-  font-size: 12px;
-  letter-spacing: 0.08em;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
 }
 
@@ -165,12 +182,11 @@ const isAllChecked = () => {
   color: var(--text-secondary);
   text-align: left;
   cursor: pointer;
-  transition: background 0.18s ease;
+  transition: background 0.15s ease;
 }
 
-.kb-table__row:hover,
-.kb-table__row.active {
-  background: color-mix(in srgb, var(--brand-soft) 55%, transparent);
+.kb-table__row:hover {
+  background: color-mix(in srgb, var(--brand-soft) 40%, transparent);
 }
 
 .kb-checkbox {
@@ -182,7 +198,7 @@ const isAllChecked = () => {
   display: flex;
   min-width: 0;
   flex-direction: column;
-  gap: 3px;
+  gap: 2px;
 }
 
 .kb-table__title strong {
@@ -190,6 +206,7 @@ const isAllChecked = () => {
   color: var(--text-primary);
   text-overflow: ellipsis;
   white-space: nowrap;
+  font-size: 14px;
 }
 
 .kb-table__title span,
@@ -200,93 +217,91 @@ const isAllChecked = () => {
   white-space: nowrap;
 }
 
-.kb-table__meta {
+.kb-table__filename {
   font-size: 12px;
+}
+
+.kb-table__meta {
+  font-size: 11px;
+  color: var(--text-muted) !important;
 }
 
 .kb-table__tag {
   display: inline-flex;
   max-width: 100%;
-  padding: 5px 9px;
-  border-radius: 8px;
+  padding: 3px 7px;
+  border-radius: 6px;
   background: var(--surface-3);
   color: var(--text-secondary);
-  font-size: 12px;
-  font-weight: 700;
+  font-size: 11px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .kb-table__status {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   min-width: 0;
   color: var(--text-primary);
-  font-size: 13px;
-  font-weight: 700;
+  font-size: 12px;
+  font-weight: 600;
 }
 
 .kb-status-dot {
-  width: 8px;
-  height: 8px;
+  width: 7px;
+  height: 7px;
   flex: 0 0 auto;
   border-radius: 50%;
   background: var(--text-muted);
-  box-shadow: 0 0 0 4px color-mix(in srgb, var(--text-muted) 14%, transparent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--text-muted) 14%, transparent);
 }
 
 .kb-status-dot.tone-accent {
   background: var(--brand);
-  box-shadow: 0 0 0 4px var(--brand-soft);
+  box-shadow: 0 0 0 3px var(--brand-soft);
 }
 
 .kb-status-dot.tone-success {
   background: var(--success);
-  box-shadow: 0 0 0 4px var(--success-50);
+  box-shadow: 0 0 0 3px var(--success-50);
 }
 
 .kb-status-dot.tone-danger {
   background: var(--risk);
-  box-shadow: 0 0 0 4px var(--risk-50);
-}
-
-.kb-inline-progress {
-  width: 52px;
-  height: 6px;
-  overflow: hidden;
-  border-radius: 999px;
-  background: var(--surface-3);
-}
-
-.kb-inline-progress span {
-  display: block;
-  height: 100%;
-  border-radius: inherit;
-  background: var(--brand);
+  box-shadow: 0 0 0 3px var(--risk-50);
 }
 
 .kb-table__actions {
   display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
+  gap: 4px;
+  align-items: center;
 }
 
-.kb-link-btn,
-.kb-secondary-btn {
-  border: 1px solid var(--line-strong);
-  border-radius: 10px;
+.kb-icon-btn {
+  width: 30px;
+  height: 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--line-soft);
+  border-radius: 7px;
   background: var(--surface-2);
-  color: var(--text-primary);
+  color: var(--text-muted);
   cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease;
 }
 
-.kb-link-btn {
-  padding: 6px 10px;
-  font-size: 12px;
+.kb-icon-btn:hover {
+  background: var(--brand-soft);
+  color: var(--brand);
 }
 
-.kb-secondary-btn {
-  height: 36px;
-  padding: 0 14px;
+.kb-icon-btn--danger:hover {
+  background: rgba(181, 58, 58, 0.1);
+  color: #b53a3a;
 }
 
 .kb-pagination {
@@ -294,8 +309,9 @@ const isAllChecked = () => {
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  padding: 16px 18px;
+  padding: 12px 14px;
   color: var(--text-muted);
+  font-size: 13px;
 }
 
 .kb-pagination__controls {
@@ -304,46 +320,27 @@ const isAllChecked = () => {
   gap: 10px;
 }
 
-.kb-empty {
-  padding: 32px 24px;
-  color: var(--text-secondary);
-}
-
-.status-chip {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 72px;
-  padding: 6px 10px;
-  border-radius: 999px;
+.kb-secondary-btn {
+  height: 32px;
+  padding: 0 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  background: var(--surface-2);
+  color: var(--text-primary);
   font-size: 12px;
-  font-weight: 700;
+  cursor: pointer;
 }
 
-.tone-neutral {
-  background: #eef2f7;
-  color: #516176;
-}
-
-.tone-accent {
-  background: rgba(36, 87, 197, 0.12);
-  color: #2457c5;
-}
-
-.tone-success {
-  background: rgba(35, 138, 86, 0.12);
-  color: #238a56;
-}
-
-.tone-danger {
-  background: rgba(204, 61, 61, 0.12);
-  color: #b53a3a;
+.kb-empty {
+  padding: 28px 20px;
+  color: var(--text-secondary);
+  font-size: 13px;
 }
 
 @media (max-width: 1160px) {
   .kb-table__header,
   .kb-table__row {
-    grid-template-columns: 34px minmax(220px, 1fr) 132px 120px 118px;
+    grid-template-columns: 30px minmax(160px, 1fr) 108px 96px 110px;
   }
 
   .kb-col-size,
@@ -355,7 +352,7 @@ const isAllChecked = () => {
 @media (max-width: 900px) {
   .kb-table__header,
   .kb-table__row {
-    grid-template-columns: 34px minmax(200px, 1fr) 120px 118px;
+    grid-template-columns: 30px minmax(140px, 1fr) 96px 110px;
   }
 
   .kb-col-time,
@@ -367,7 +364,7 @@ const isAllChecked = () => {
 @media (max-width: 600px) {
   .kb-table__header,
   .kb-table__row {
-    grid-template-columns: 34px minmax(160px, 1fr) 118px;
+    grid-template-columns: 30px minmax(120px, 1fr) 110px;
   }
 }
 </style>
