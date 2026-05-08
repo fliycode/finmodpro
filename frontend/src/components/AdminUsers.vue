@@ -64,12 +64,12 @@ const hasRowActions = computed(() => canChangeUser.value || canAssignRole.value 
 
 const columns = ref([
   { key: 'id', label: 'ID', prop: 'id', width: 72, minWidth: 72, sortable: true, visible: true },
-  { key: 'username', label: '用户名', prop: 'username', minWidth: 132, sortable: true, visible: true },
-  { key: 'email', label: '邮箱', prop: 'email', minWidth: 220, sortable: true, visible: true },
+  { key: 'username', label: '用户名', prop: 'username', minWidth: 156, sortable: true, visible: true },
+  { key: 'email', label: '邮箱', prop: 'email', minWidth: 236, sortable: true, visible: true },
   { key: 'status', label: '状态', prop: 'status', minWidth: 104, sortable: true, visible: true },
-  { key: 'groups', label: '角色组', prop: 'groups', minWidth: 180, sortable: true, visible: true },
-  { key: 'accountType', label: '身份', prop: 'accountType', minWidth: 132, sortable: true, visible: true },
-  { key: 'joinedAt', label: '创建时间', prop: 'joinedAt', minWidth: 146, sortable: true, visible: true },
+  { key: 'groups', label: '角色组', prop: 'groups', minWidth: 188, sortable: true, visible: true },
+  { key: 'accountType', label: '身份', prop: 'accountType', minWidth: 140, sortable: true, visible: true },
+  { key: 'joinedAt', label: '创建时间', prop: 'joinedAt', minWidth: 184, sortable: true, visible: true },
   { key: 'actions', label: '操作', prop: 'actions', width: 104, minWidth: 104, visible: true },
 ]);
 
@@ -107,15 +107,16 @@ const normalizeGroups = (payload) => {
   });
 };
 
+const padDatePart = (value) => String(value).padStart(2, '0');
+
 const formatJoinedAt = (value) => {
   if (!value) return '--';
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return '--';
-  return new Intl.DateTimeFormat('zh-CN', {
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  }).format(date);
+  return [
+    `${date.getFullYear()}/${padDatePart(date.getMonth() + 1)}/${padDatePart(date.getDate())}`,
+    `${padDatePart(date.getHours())}:${padDatePart(date.getMinutes())}:${padDatePart(date.getSeconds())}`,
+  ].join(' ');
 };
 
 const normalizeUserRecord = (user, index) => ({
@@ -587,6 +588,8 @@ onMounted(fetchData);
           :show-overflow-tooltip="column.key !== 'actions'"
           :header-align="column.key === 'actions' ? 'right' : 'left'"
           :align="column.key === 'actions' ? 'right' : 'left'"
+          :label-class-name="column.key === 'actions' ? 'users-page__header-cell is-actions' : 'users-page__header-cell'"
+          :class-name="column.key === 'actions' ? 'users-page__body-cell is-actions' : 'users-page__body-cell'"
         >
           <template #default="{ row }">
             <template v-if="column.key === 'status'">
@@ -963,9 +966,45 @@ onMounted(fetchData);
   border-bottom-color: var(--line-soft);
 }
 
-.users-page :deep(.el-table th.el-table__cell .cell),
-.users-page :deep(.el-table td.el-table__cell .cell) {
-  padding-inline: 12px;
+.users-page :deep(.users-page__header-cell .cell),
+.users-page :deep(.users-page__body-cell .cell) {
+  min-height: 24px;
+  padding-inline: 14px;
+}
+
+.users-page :deep(.users-page__header-cell .cell) {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.users-page :deep(th.users-page__header-cell.is-sortable .cell) {
+  width: 100%;
+}
+
+.users-page :deep(th.users-page__header-cell .caret-wrapper) {
+  position: static;
+  display: inline-flex;
+  width: auto;
+  height: auto;
+  margin-left: 2px;
+  flex-direction: column;
+  justify-content: center;
+}
+
+.users-page :deep(th.users-page__header-cell .sort-caret.ascending),
+.users-page :deep(th.users-page__header-cell .sort-caret.descending) {
+  position: static;
+}
+
+.users-page :deep(.users-page__body-cell .cell) {
+  display: flex;
+  align-items: center;
+}
+
+.users-page :deep(.users-page__header-cell.is-actions .cell),
+.users-page :deep(.users-page__body-cell.is-actions .cell) {
+  justify-content: flex-end;
 }
 
 .users-page :deep(.el-tag) {

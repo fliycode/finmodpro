@@ -34,23 +34,30 @@ const actionLabels = {
 const formatAction = (action) => actionLabels[action] || action || '--';
 
 const statusLabels = { succeeded: '成功', failed: '失败', pending: '待处理' };
-const statusTypes = { succeeded: 'success', failed: 'danger', pending: 'info' };
+const statusTypes = { succeeded: 'success', failed: 'danger', pending: 'info', retried: 'warning' };
+statusLabels.retried = '已重试';
 
 const statusItems = computed(() => [
   {
     key: 'total',
     label: '操作记录',
     value: total.value || audits.value.length,
+    icon: 'clipboard',
+    tone: 'brand',
   },
   {
     key: 'failed',
     label: '失败记录',
     value: audits.value.filter((item) => item.status === 'failed').length,
+    icon: 'alert-triangle',
+    tone: 'risk',
   },
   {
     key: 'actors',
     label: '操作人员',
     value: new Set(audits.value.map((item) => item.actor_name).filter(Boolean)).size,
+    icon: 'users',
+    tone: 'accent',
   },
 ]);
 
@@ -95,13 +102,9 @@ onMounted(fetchData);
 </script>
 
 <template>
-  <OpsSectionFrame
-    eyebrow="Governance / Audit"
-    title="操作日志"
-    summary=""
-  >
+  <OpsSectionFrame>
     <template #status-band>
-      <OpsStatusBand :items="statusItems" :style="{ '--band-columns': '3' }" />
+      <OpsStatusBand :items="statusItems" compact :style="{ '--band-columns': '3' }" />
     </template>
 
     <AppSectionCard title="审计流水" admin>

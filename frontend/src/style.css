@@ -1192,7 +1192,8 @@ html[data-theme='dark'] body {
   align-items: baseline;
   gap: 14px;
   min-width: 0;
-  flex-shrink: 1;
+  flex: 0 1 auto;
+  padding-right: 8px;
 }
 
 .app-topbar__title-spacer {
@@ -1217,7 +1218,7 @@ html[data-theme='dark'] body {
 /* Search ─────────────────────────────────────────── */
 .app-topbar__search {
   position: relative;
-  width: clamp(160px, 20vw, 280px);
+  width: clamp(220px, 24vw, 340px);
   flex-shrink: 1;
   min-width: 0;
 }
@@ -1260,7 +1261,7 @@ html[data-theme='dark'] body {
 .app-topbar__actions {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 14px;
   margin-left: auto;
   justify-content: flex-end;
   flex: 1 1 auto;
@@ -1271,7 +1272,7 @@ html[data-theme='dark'] body {
 .app-topbar__utility-group {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 12px;
   margin-left: auto;
 }
 
