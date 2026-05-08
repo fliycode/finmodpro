@@ -9,6 +9,46 @@ MIN_FREE_DISK_MB="${DEPLOY_MIN_FREE_DISK_MB:-4096}"
 
 cd "$APP_DIR"
 
+load_env_files() {
+  for env_file in .env .env.backend .env.frontend .env.deploy; do
+    if [ -f "$env_file" ]; then
+      set -a
+      # shellcheck disable=SC1090
+      . "$env_file"
+      set +a
+    fi
+  done
+}
+
+require_non_empty_env() {
+  local name="$1"
+  if [ -z "${!name:-}" ]; then
+    echo "Deploy aborted: required environment variable $name is not set. Define it in .env, .env.backend, .env.frontend, or .env.deploy, or export it before running deploy.sh." >&2
+    exit 1
+  fi
+}
+
+require_not_placeholder_env() {
+  local name="$1"
+  local placeholder="$2"
+  if [ "${!name:-}" = "$placeholder" ]; then
+    echo "Deploy aborted: environment variable $name is still using the placeholder value '$placeholder'." >&2
+    exit 1
+  fi
+}
+
+validate_runtime_env() {
+  require_non_empty_env DJANGO_SECRET_KEY
+  require_not_placeholder_env DJANGO_SECRET_KEY "change-me-in-.env.backend"
+  require_non_empty_env JWT_SECRET_KEY
+  require_not_placeholder_env JWT_SECRET_KEY "change-me-jwt-in-.env.backend"
+  require_non_empty_env LITELLM_MASTER_KEY
+  require_not_placeholder_env LITELLM_MASTER_KEY "change-me-litellm"
+  require_non_empty_env DEEPSEEK_API_KEY
+  require_non_empty_env DASHSCOPE_API_KEY
+  require_non_empty_env NEO4J_PASSWORD
+}
+
 free_disk_mb() {
   df -Pm "$APP_DIR" | awk 'NR==2 {print $4}'
 }
@@ -45,14 +85,8 @@ ensure_disk_headroom() {
   fi
 }
 
-for env_file in .env.backend .env.frontend .env.deploy; do
-  if [ -f "$env_file" ]; then
-    set -a
-    # shellcheck disable=SC1090
-    . "$env_file"
-    set +a
-  fi
-done
+load_env_files
+validate_runtime_env
 
 printf '%s\n' "$(git rev-parse HEAD)" > "$LAST_DEPLOY_FILE"
 

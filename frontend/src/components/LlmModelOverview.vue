@@ -12,9 +12,6 @@ const flash = useFlash();
 
 const providerOptions = [
   { label: 'LiteLLM', value: 'litellm' },
-  { label: 'DeepSeek', value: 'deepseek' },
-  { label: 'DashScope', value: 'dashscope' },
-  { label: 'Ollama', value: 'ollama' },
 ];
 
 const capabilityOptions = [
@@ -55,6 +52,9 @@ const defaultFormState = () => ({
   provider: 'litellm',
   parameter_scale: '',
   endpoint: 'http://localhost:4000',
+  api_base: 'https://api.deepseek.com',
+  upstream_provider: 'deepseek',
+  upstream_model: 'deepseek-chat',
   description: '',
   api_key: '',
   temperature: 0.2,
@@ -64,10 +64,35 @@ const defaultFormState = () => ({
   api_key_masked: '',
 });
 
+function getCapabilityRouteDefaults(capability = 'chat') {
+  if (capability === 'embedding') {
+    return {
+      model_name: 'embed-default',
+      api_base: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+      upstream_provider: 'dashscope',
+      upstream_model: 'text-embedding-v4',
+    };
+  }
+  if (capability === 'rerank') {
+    return {
+      model_name: 'rerank-default',
+      api_base: 'https://dashscope.aliyuncs.com/api/v1/services/rerank/text-rerank/text-rerank',
+      upstream_provider: 'dashscope',
+      upstream_model: 'qwen3-vl-rerank',
+    };
+  }
+  return {
+    model_name: 'chat-default',
+    api_base: 'https://api.deepseek.com',
+    upstream_provider: 'deepseek',
+    upstream_model: 'deepseek-chat',
+  };
+}
+
 const form = reactive(defaultFormState());
 
 const drawerTitle = computed(() => (editingId.value ? '编辑模型' : '新增模型'));
-const supportsTokenOptions = computed(() => ['deepseek', 'litellm', 'dashscope'].includes(form.provider));
+const supportsTokenOptions = computed(() => true);
 const capabilityCounts = computed(() => capabilityOptions.map((item) => ({
   ...item,
   count: configs.value.filter((config) => config.capability === item.value).length,
@@ -205,6 +230,7 @@ function resetForm() {
 
 function openCreate() {
   resetForm();
+  Object.assign(form, getCapabilityRouteDefaults(form.capability));
   drawerVisible.value = true;
 }
 
@@ -220,6 +246,9 @@ function openEdit(config) {
   form.provider = config.provider;
   form.parameter_scale = config.parameter_scale || '';
   form.endpoint = config.endpoint;
+  form.api_base = config.options?.api_base || config.endpoint;
+  form.upstream_provider = config.upstream_provider || 'deepseek';
+  form.upstream_model = config.upstream_model || config.model_name;
   form.description = config.description || '';
   form.is_active = Boolean(config.is_active);
   form.temperature = Number(config.options?.temperature ?? 0.2);
@@ -230,7 +259,14 @@ function openEdit(config) {
 }
 
 function buildPayload() {
-  const options = { ...originalOptions.value };
+  const options = {
+    ...originalOptions.value,
+    api_base: String(form.api_base || '').trim(),
+    litellm: {
+      upstream_provider: form.upstream_provider,
+      upstream_model: String(form.upstream_model || '').trim(),
+    },
+  };
   const apiKey = String(form.api_key || '').trim();
 
   if (apiKey) {
@@ -248,7 +284,7 @@ function buildPayload() {
     name: String(form.name || '').trim(),
     model_name: String(form.model_name || '').trim(),
     capability: form.capability,
-    provider: form.provider,
+    provider: 'litellm',
     parameter_scale: String(form.parameter_scale || '').trim(),
     endpoint: String(form.endpoint || '').trim(),
     description: String(form.description || '').trim(),
@@ -256,6 +292,21 @@ function buildPayload() {
     is_active: Boolean(form.is_active),
   };
 }
+
+watch(
+  () => form.capability,
+  (capability) => {
+    if (!drawerVisible.value || editingId.value) {
+      return;
+    }
+    Object.assign(form, {
+      ...getCapabilityRouteDefaults(capability),
+      capability,
+      provider: 'litellm',
+      endpoint: 'http://localhost:4000',
+    });
+  },
+);
 
 async function fetchConfigs() {
   isLoading.value = true;
@@ -470,11 +521,11 @@ onMounted(fetchConfigs);
       <el-form label-position="top" class="model-form">
         <div class="model-form__grid">
           <el-form-item label="模型名称">
-            <el-input v-model="form.name" placeholder="例如：deepseek-primary" />
+            <el-input v-model="form.name" placeholder="例如：chat-primary-route" />
           </el-form-item>
 
-          <el-form-item label="模型标识">
-            <el-input v-model="form.model_name" placeholder="例如：deepseek-chat" />
+          <el-form-item label="LiteLLM 路由名">
+            <el-input v-model="form.model_name" placeholder="例如：chat-default / embed-default / rerank-default" />
           </el-form-item>
 
           <el-form-item label="模型类型">
@@ -484,17 +535,33 @@ onMounted(fetchConfigs);
           </el-form-item>
 
           <el-form-item label="Provider">
-            <el-select v-model="form.provider">
-              <el-option v-for="item in providerOptions" :key="item.value" :label="item.label" :value="item.value" />
-            </el-select>
+            <el-input model-value="LiteLLM" disabled />
           </el-form-item>
 
           <el-form-item label="参数规模">
             <el-input v-model="form.parameter_scale" placeholder="例如：7B / 32B / 671B" />
           </el-form-item>
 
-          <el-form-item label="接入地址">
-            <el-input v-model="form.endpoint" placeholder="https://api.example.com/v1" />
+          <el-form-item label="LiteLLM 地址">
+            <el-input v-model="form.endpoint" placeholder="http://localhost:4000" />
+          </el-form-item>
+        </div>
+
+        <div class="model-form__grid">
+          <el-form-item label="上游 Provider">
+            <el-select v-model="form.upstream_provider">
+              <el-option label="DeepSeek" value="deepseek" />
+              <el-option label="DashScope" value="dashscope" />
+              <el-option label="OpenAI Compatible" value="openai" />
+            </el-select>
+          </el-form-item>
+
+          <el-form-item label="上游模型">
+            <el-input v-model="form.upstream_model" placeholder="例如：deepseek-chat / text-embedding-v4 / qwen3-vl-rerank" />
+          </el-form-item>
+
+          <el-form-item label="上游 API Base">
+            <el-input v-model="form.api_base" placeholder="https://api.deepseek.com" />
           </el-form-item>
         </div>
 
