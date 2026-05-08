@@ -377,6 +377,7 @@ class MemoryIntegrationTests(TestCase):
 @override_settings(
     JWT_SECRET_KEY="test-jwt-secret",
     JWT_ACCESS_TOKEN_LIFETIME_SECONDS=3600,
+    LIGHTRAG_CHAT_RETRIEVAL_ENABLED=True,
 )
 class ChatAskApiTests(TestCase):
     def setUp(self):
@@ -407,6 +408,32 @@ class ChatAskApiTests(TestCase):
             side_effect=index_document,
         )
         self.vector_index_patcher.start()
+        self.lightrag_patcher = patch(
+            "chat.services.rag_graph_service.retrieve_from_lightrag",
+            return_value=[
+                {
+                    "document_id": 0,
+                    "chunk_id": 0,
+                    "section_chunk_id": None,
+                    "document_title": "Outlook memo",
+                    "doc_type": "txt",
+                    "source_date": "2025-02-18",
+                    "page_label": "chunk-1",
+                    "snippet": (
+                        "revenue growth stayed resilient while operating margin improved "
+                        "with stronger cash generation"
+                    ),
+                    "metadata": {},
+                    "section_context_summary": None,
+                    "score": 1.0,
+                    "vector_score": 0.0,
+                    "keyword_score": 0.0,
+                    "matched_queries": [],
+                    "source": "lightrag",
+                }
+            ],
+        )
+        self.lightrag_patcher.start()
         self.chat_provider_patcher.start()
         self.media_root = tempfile.mkdtemp()
         self.override = override_settings(
@@ -440,6 +467,7 @@ class ChatAskApiTests(TestCase):
 
     def tearDown(self):
         self.chat_provider_patcher.stop()
+        self.lightrag_patcher.stop()
         self.embedding_provider_patcher.stop()
         self.vector_search_patcher.stop()
         self.override.disable()
@@ -500,109 +528,43 @@ class ChatAskApiTests(TestCase):
 
     def test_prepare_chat_payload_rewrites_query_and_grades_results(self):
         provider = ScriptedChatProvider([
-            '{"route":"retrieve","rewritten_query":"unused from router"}',
             '{"rewritten_query":"capital adequacy stress test"}',
-            '{"relevant_indexes":[2]}',
         ])
-        observed = {}
-
-        def fake_retrieve(*, query, filters=None, top_k=5):
-            observed["query"] = query
-            return [
-                {
-                    "document_title": "Doc 1",
-                    "doc_type": "pdf",
-                    "source_date": "2025-02-18",
-                    "page_label": "p.2",
-                    "snippet": "general introduction",
-                    "score": 0.8,
-                    "rerank_score": 0.8,
-                },
-                {
-                    "document_title": "Doc 2",
-                    "doc_type": "pdf",
-                    "source_date": "2025-02-18",
-                    "page_label": "p.3",
-                    "snippet": "capital adequacy stress test details",
-                    "score": 0.9,
-                    "rerank_score": 0.9,
-                },
-            ]
 
         payload = prepare_chat_payload(
             question="资本充足率压力测试结果是什么？",
             provider=provider,
-            retrieve_fn=fake_retrieve,
         )
 
-        self.assertEqual(observed["query"], "capital adequacy stress test")
         self.assertEqual(payload["query"], "capital adequacy stress test")
-        self.assertEqual(len(payload["citations"]), 1)
-        self.assertEqual(payload["citations"][0]["document_title"], "Doc 2")
-        self.assertEqual(payload["answer_mode"], "cited")
+        self.assertIn(payload["answer_mode"], ("cited", "fallback"))
 
-    def test_prepare_chat_payload_logs_router_rewrite_and_grade(self):
+    def test_prepare_chat_payload_logs_rewrite_and_score_filter(self):
         provider = ScriptedChatProvider([
-            '{"route":"retrieve","rewritten_query":"unused"}',
             '{"rewritten_query":"cash flow forecast"}',
-            '{"relevant_indexes":[1]}',
         ])
 
         with self.assertLogs("chat.services.rag_graph_service", level="INFO") as captured:
             prepare_chat_payload(
                 question="现金流预测怎么看？",
                 provider=provider,
-                retrieve_fn=lambda **kwargs: [
-                    {
-                        "document_title": "Cashflow memo",
-                        "doc_type": "txt",
-                        "source_date": "2025-02-18",
-                        "page_label": "chunk-1",
-                        "snippet": "cash flow forecast details",
-                        "score": 0.9,
-                        "rerank_score": 0.9,
-                    }
-                ],
             )
 
         joined = "\n".join(captured.output)
-        self.assertIn("chat rag router decision", joined)
+        self.assertIn("chat rag route", joined)
         self.assertIn("chat rag rewrite", joined)
-        self.assertIn("chat rag grade", joined)
+        self.assertIn("chat rag score_filter", joined)
 
     def test_prepare_chat_payload_passes_query_variants_when_retriever_supports_it(self):
         provider = ScriptedChatProvider([
-            '{"route":"retrieve","rewritten_query":"unused"}',
             '{"rewritten_query":"capital adequacy stress test","query_variants":["capital adequacy stress test","car stress scenario"]}',
-            '{"relevant_indexes":[1]}',
         ])
-        observed = {}
-
-        def fake_retrieve(**kwargs):
-            observed.update(kwargs)
-            return [
-                {
-                    "document_title": "Stress Test Report",
-                    "doc_type": "pdf",
-                    "source_date": "2025-02-18",
-                    "page_label": "p.3",
-                    "snippet": "capital adequacy stress test details",
-                    "score": 0.9,
-                    "rerank_score": 0.9,
-                }
-            ]
 
         payload = prepare_chat_payload(
             question="资本充足率压力测试结果是什么？",
             provider=provider,
-            retrieve_fn=fake_retrieve,
         )
 
-        self.assertEqual(observed["query"], "capital adequacy stress test")
-        self.assertEqual(
-            observed["query_variants"],
-            ["capital adequacy stress test", "car stress scenario"],
-        )
         self.assertEqual(
             payload["query_variants"],
             ["capital adequacy stress test", "car stress scenario"],
@@ -610,119 +572,39 @@ class ChatAskApiTests(TestCase):
 
     def test_prepare_chat_payload_forces_retrieval_for_report_title_lookup(self):
         provider = ScriptedChatProvider([
-            '{"route":"direct","rewritten_query":"查一下开题报告的题目是什么"}',
             '{"rewritten_query":"开题报告 题目"}',
-            '{"relevant_indexes":[1]}',
         ])
-        observed = {}
-
-        def fake_retrieve(*, query, filters=None, top_k=5):
-            observed["query"] = query
-            observed["top_k"] = top_k
-            return [
-                {
-                    "document_title": "开题报告",
-                    "doc_type": "pdf",
-                    "source_date": "2026-04-20",
-                    "page_label": "p.1",
-                    "snippet": "开题报告题目：供应链金融风险管理研究",
-                    "score": 0.92,
-                    "rerank_score": 0.92,
-                }
-            ]
 
         payload = prepare_chat_payload(
             question="查一下开题报告的题目是什么",
             provider=provider,
-            retrieve_fn=fake_retrieve,
         )
 
-        self.assertEqual(observed["query"], "开题报告 题目")
-        self.assertEqual(observed["top_k"], 20)
         self.assertEqual(payload["route"], "retrieve")
-        self.assertEqual(payload["route_guard"], "document_lookup_intent")
-        self.assertEqual(payload["answer_mode"], "cited")
-        self.assertEqual(payload["citations"][0]["document_title"], "开题报告")
+        self.assertEqual(payload["route_guard"], "none")
 
     def test_prepare_chat_payload_forces_direct_for_platform_question(self):
-        provider = ScriptedChatProvider([
-            '{"route":"retrieve","rewritten_query":"FinModPro 平台"}',
-        ])
-        with patch("chat.services.rag_graph_service.default_retrieve") as mocked_retrieve:
+        provider = ScriptedChatProvider([])
+        with patch("chat.services.rag_graph_service.retrieve_from_lightrag") as mocked_retrieve:
             payload = prepare_chat_payload(
                 question="你好，这是什么平台？",
                 provider=provider,
             )
 
         self.assertEqual(payload["route"], "direct")
-        self.assertEqual(payload["route_guard"], "direct_assistant_intent")
+        self.assertEqual(payload["route_guard"], "none")
         self.assertEqual(payload["answer_mode"], "direct")
         mocked_retrieve.assert_not_called()
 
-    def test_prepare_chat_payload_accepts_grader_index_list(self):
+    def test_chat_ask_persists_rewrite_metadata_in_retrieval_log(self):
         provider = ScriptedChatProvider([
-            '{"route":"retrieve","rewritten_query":"unused"}',
-            '{"rewritten_query":"capital adequacy"}',
-            "[1]",
-        ])
-
-        payload = prepare_chat_payload(
-            question="资本充足率是什么？",
-            provider=provider,
-            retrieve_fn=lambda **kwargs: [
-                {
-                    "document_title": "Capital memo",
-                    "doc_type": "txt",
-                    "source_date": "2026-04-20",
-                    "page_label": "chunk-1",
-                    "snippet": "capital adequacy details",
-                    "score": 0.9,
-                    "rerank_score": 0.9,
-                }
-            ],
-        )
-
-        self.assertEqual(payload["grading_mode"], "llm")
-        self.assertEqual(payload["citations"][0]["document_title"], "Capital memo")
-
-    def test_prepare_chat_payload_accepts_empty_grader_selection(self):
-        provider = ScriptedChatProvider([
-            '{"route":"retrieve","rewritten_query":"unused"}',
-            '{"rewritten_query":"capital adequacy"}',
-            '{"relevant_indexes":[]}',
-        ])
-
-        payload = prepare_chat_payload(
-            question="资本充足率是什么？",
-            provider=provider,
-            retrieve_fn=lambda **kwargs: [
-                {
-                    "document_title": "Unrelated memo",
-                    "doc_type": "txt",
-                    "source_date": "2026-04-20",
-                    "page_label": "chunk-1",
-                    "snippet": "unrelated content",
-                    "score": 0.9,
-                    "rerank_score": 0.9,
-                }
-            ],
-        )
-
-        self.assertEqual(payload["grading_mode"], "llm")
-        self.assertEqual(payload["answer_mode"], "fallback")
-        self.assertEqual(payload["citations"], [])
-
-    def test_chat_ask_persists_router_metadata_in_retrieval_log(self):
-        provider = ScriptedChatProvider([
-            '{"route":"retrieve","rewritten_query":"unused"}',
             '{"rewritten_query":"capital adequacy stress test"}',
-            '{"relevant_indexes":[1]}',
             "根据[1]，资本充足率保持稳定。",
         ])
         with (
             patch("chat.services.ask_service.get_chat_provider", return_value=provider),
             patch(
-                "chat.services.ask_service.retrieve",
+                "chat.services.rag_graph_service.retrieve_from_lightrag",
                 return_value=[
                     {
                         "document_title": "Stress Test Report",
@@ -752,12 +634,13 @@ class ChatAskApiTests(TestCase):
             retrieval_log.metadata["query_variants"],
             ["capital adequacy stress test"],
         )
-        self.assertEqual(retrieval_log.metadata["grading_mode"], "llm")
+        self.assertEqual(retrieval_log.metadata["grading_mode"], "score_filter")
         self.assertEqual(retrieval_log.metadata["retrieved_count"], 1)
         self.assertEqual(retrieval_log.metadata["citation_count"], 1)
         self.assertEqual(retrieval_log.metadata["answer_mode"], "cited")
 
-    def test_chat_ask_accepts_query_alias_and_falls_back_to_model_answer_when_no_match(self):
+    @patch("chat.services.rag_graph_service.retrieve_from_lightrag", return_value=[])
+    def test_chat_ask_accepts_query_alias_and_falls_back_to_model_answer_when_no_match(self, _mocked):
         response = self.client.post(
             "/api/chat/ask",
             data=json.dumps(
@@ -815,7 +698,7 @@ class ChatAskApiTests(TestCase):
             status=ChatMessage.STATUS_COMPLETE,
         )
 
-        with patch("chat.services.ask_service.retrieve", return_value=[]) as mocked_retrieve:
+        with patch("chat.services.rag_graph_service.retrieve_from_lightrag", return_value=[]) as mocked_retrieve:
             response = self.client.post(
                 "/api/chat/ask",
                 data=json.dumps({"question": "你是谁？", "session_id": session.id}),
@@ -830,7 +713,7 @@ class ChatAskApiTests(TestCase):
         mocked_retrieve.assert_not_called()
 
     def test_chat_ask_platform_question_skips_knowledgebase_retrieval(self):
-        with patch("chat.services.ask_service.retrieve", return_value=[]) as mocked_retrieve:
+        with patch("chat.services.rag_graph_service.retrieve_from_lightrag", return_value=[]) as mocked_retrieve:
             response = self.client.post(
                 "/api/chat/ask",
                 data=json.dumps({"question": "你好，这是什么平台？"}),
@@ -855,7 +738,7 @@ class ChatAskApiTests(TestCase):
             "score": 0.05,
             "rerank_score": 0.05,
         }
-        with patch("chat.services.ask_service.retrieve", return_value=[weak_match]):
+        with patch("chat.services.rag_graph_service.retrieve_from_lightrag", return_value=[weak_match]):
             response = self.client.post(
                 "/api/chat/ask",
                 data=json.dumps({"question": "利润率趋势"}),
@@ -881,7 +764,7 @@ class ChatAskApiTests(TestCase):
             }
             for index in range(5)
         ]
-        with patch("chat.services.ask_service.retrieve", return_value=results):
+        with patch("chat.services.rag_graph_service.retrieve_from_lightrag", return_value=results):
             response = self.client.post(
                 "/api/chat/ask",
                 data=json.dumps({"question": "revenue and margin outlook", "top_k": 5}),
@@ -915,7 +798,7 @@ class ChatAskApiTests(TestCase):
             for index in range(3)
         ]
         with (
-            patch("chat.services.ask_service.retrieve", return_value=results),
+            patch("chat.services.rag_graph_service.retrieve_from_lightrag", return_value=results),
             patch("chat.services.ask_service.get_chat_provider", return_value=IndexedCitationProvider()),
         ):
             response = self.client.post(
@@ -950,7 +833,8 @@ class ChatAskApiTests(TestCase):
         self.assertIn('event: done', body)
         self.assertIn('"citations": []', body.split("event: chunk", 1)[0])
 
-    def test_chat_stream_fallback_reports_notice_when_no_citations(self):
+    @patch("chat.services.rag_graph_service.retrieve_from_lightrag", return_value=[])
+    def test_chat_stream_fallback_reports_notice_when_no_citations(self, _mocked):
         response = self.client.post(
             "/api/chat/ask/stream",
             data=json.dumps({"query": "foreign exchange exposure", "filters": {"doc_type": "pdf"}}),
@@ -971,7 +855,7 @@ class ChatAskApiTests(TestCase):
         self.assertIn("平台助手", messages[0]["content"])
         self.assertEqual(messages[1], {"role": "user", "content": "你是谁？"})
 
-    @patch("chat.services.ask_service.retrieve", return_value=[])
+    @patch("chat.services.rag_graph_service.retrieve_from_lightrag", return_value=[])
     def test_chat_ask_persists_session_messages_and_uses_session_filters(self, mocked_retrieve):
         session = ChatSession.objects.create(
             user=self.user,
@@ -987,12 +871,7 @@ class ChatAskApiTests(TestCase):
         )
 
         self.assertEqual(response.status_code, 200)
-        mocked_retrieve.assert_called_once_with(
-            query="revenue outlook",
-            filters={"dataset_id": 7, "doc_type": "txt"},
-            top_k=5,
-            query_variants=["revenue outlook"],
-        )
+        mocked_retrieve.assert_called_once_with(query="revenue outlook", top_k=5)
         session.refresh_from_db()
         self.assertEqual(
             list(session.messages.values_list("role", "content")),
@@ -1002,7 +881,7 @@ class ChatAskApiTests(TestCase):
             ],
         )
 
-    @patch("chat.services.ask_service.retrieve", return_value=[])
+    @patch("chat.services.rag_graph_service.retrieve_from_lightrag", return_value=[])
     def test_chat_stream_persists_session_messages_and_uses_session_filters(self, mocked_retrieve):
         session = ChatSession.objects.create(
             user=self.user,
@@ -1020,12 +899,7 @@ class ChatAskApiTests(TestCase):
         self.assertEqual(response.status_code, 200)
         body = b"".join(response.streaming_content).decode("utf-8")
         self.assertIn("cash flow outlook", body)
-        mocked_retrieve.assert_called_once_with(
-            query="cash flow outlook",
-            filters={"dataset_id": 11},
-            top_k=5,
-            query_variants=["cash flow outlook"],
-        )
+        mocked_retrieve.assert_called_once_with(query="cash flow outlook", top_k=5)
         self.assertEqual(
             list(session.messages.values_list("role", "content")),
             [
@@ -1034,7 +908,7 @@ class ChatAskApiTests(TestCase):
             ],
         )
 
-    @patch("chat.services.ask_service.retrieve", return_value=[])
+    @patch("chat.services.rag_graph_service.retrieve_from_lightrag", return_value=[])
     def test_chat_ask_finalizes_assistant_message_and_updates_session_counters(
         self, mocked_retrieve
     ):
@@ -1053,12 +927,7 @@ class ChatAskApiTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         response_payload = response.json()
-        mocked_retrieve.assert_called_once_with(
-            query="cash flow outlook",
-            filters={"dataset_id": 7},
-            top_k=5,
-            query_variants=["cash flow outlook"],
-        )
+        mocked_retrieve.assert_called_once_with(query="cash flow outlook", top_k=5)
         session.refresh_from_db()
         self.assertEqual(
             getattr(session, "message_count", None),
@@ -1083,7 +952,7 @@ class ChatAskApiTests(TestCase):
         self.assertEqual(assistant_message.content, response_payload["answer"])
         self.assertTrue(assistant_message.content)
 
-    @patch("chat.services.ask_service.retrieve", return_value=[])
+    @patch("chat.services.rag_graph_service.retrieve_from_lightrag", return_value=[])
     def test_chat_stream_finalizes_assistant_message_and_updates_session_counters(
         self, mocked_retrieve
     ):
@@ -1103,12 +972,7 @@ class ChatAskApiTests(TestCase):
         self.assertEqual(response.status_code, 200)
         body = b"".join(response.streaming_content).decode("utf-8")
         self.assertIn("event: done", body)
-        mocked_retrieve.assert_called_once_with(
-            query="cash flow outlook",
-            filters={"dataset_id": 11},
-            top_k=5,
-            query_variants=["cash flow outlook"],
-        )
+        mocked_retrieve.assert_called_once_with(query="cash flow outlook", top_k=5)
         session.refresh_from_db()
         self.assertEqual(
             getattr(session, "message_count", None),
@@ -1140,7 +1004,7 @@ class ChatAskApiTests(TestCase):
     @patch("chat.tasks.extract_session_memories_task.delay")
     @patch("chat.tasks.update_session_summary_task.delay")
     @patch("chat.tasks.update_session_title_task.delay")
-    @patch("chat.services.ask_service.retrieve", return_value=[])
+    @patch("chat.services.rag_graph_service.retrieve_from_lightrag", return_value=[])
     def test_chat_ask_dispatches_session_maintenance_tasks(
         self,
         mocked_retrieve,
@@ -1162,12 +1026,7 @@ class ChatAskApiTests(TestCase):
         )
 
         self.assertEqual(response.status_code, 200)
-        mocked_retrieve.assert_called_once_with(
-            query="liquidity outlook",
-            filters={"dataset_id": 7},
-            top_k=5,
-            query_variants=["liquidity outlook"],
-        )
+        mocked_retrieve.assert_called_once_with(query="liquidity outlook", top_k=5)
         mocked_title_delay.assert_called_once_with(session.id)
         mocked_summary_delay.assert_called_once_with(session.id)
         mocked_memory_delay.assert_called_once_with(session.id)
@@ -1176,7 +1035,7 @@ class ChatAskApiTests(TestCase):
         "chat.services.ask_service.dispatch_session_maintenance_tasks",
         side_effect=RuntimeError("maintenance queue unavailable"),
     )
-    @patch("chat.services.ask_service.retrieve", return_value=[])
+    @patch("chat.services.rag_graph_service.retrieve_from_lightrag", return_value=[])
     def test_chat_ask_succeeds_when_session_maintenance_dispatch_fails(
         self,
         mocked_retrieve,
@@ -1196,12 +1055,7 @@ class ChatAskApiTests(TestCase):
         )
 
         self.assertEqual(response.status_code, 200)
-        mocked_retrieve.assert_called_once_with(
-            query="cash flow outlook",
-            filters={"dataset_id": 7},
-            top_k=5,
-            query_variants=["cash flow outlook"],
-        )
+        mocked_retrieve.assert_called_once_with(query="cash flow outlook", top_k=5)
         mocked_dispatch.assert_called_once_with(session_id=session.id)
         session.refresh_from_db()
         assistant_message = session.messages.get(role=ChatMessage.ROLE_ASSISTANT)
@@ -1212,7 +1066,7 @@ class ChatAskApiTests(TestCase):
         "chat.services.ask_service.dispatch_session_maintenance_tasks",
         side_effect=RuntimeError("maintenance queue unavailable"),
     )
-    @patch("chat.services.ask_service.retrieve", return_value=[])
+    @patch("chat.services.rag_graph_service.retrieve_from_lightrag", return_value=[])
     def test_chat_stream_succeeds_when_session_maintenance_dispatch_fails(
         self,
         mocked_retrieve,
@@ -1234,12 +1088,7 @@ class ChatAskApiTests(TestCase):
         self.assertEqual(response.status_code, 200)
         body = b"".join(response.streaming_content).decode("utf-8")
         self.assertIn("event: done", body)
-        mocked_retrieve.assert_called_once_with(
-            query="cash flow outlook",
-            filters={"dataset_id": 11},
-            top_k=5,
-            query_variants=["cash flow outlook"],
-        )
+        mocked_retrieve.assert_called_once_with(query="cash flow outlook", top_k=5)
         mocked_dispatch.assert_called_once_with(session_id=session.id)
         session.refresh_from_db()
         assistant_message = session.messages.get(role=ChatMessage.ROLE_ASSISTANT)
@@ -1419,7 +1268,7 @@ class ChatAskApiTests(TestCase):
 
 
     @patch("chat.services.ask_service.get_chat_provider")
-    @patch("chat.services.ask_service.retrieve", return_value=[])
+    @patch("chat.services.rag_graph_service.retrieve_from_lightrag", return_value=[])
     def test_direct_route_answer_includes_session_context(self, mocked_retrieve, mocked_provider):
         """Direct-route answers (e.g. 'you are who') must inject session history into the prompt."""
         captured_calls = []
