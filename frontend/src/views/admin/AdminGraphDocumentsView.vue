@@ -13,6 +13,7 @@ const isRunningAction = ref(false);
 const errorMsg = ref('');
 const documents = ref([]);
 const selectedFile = ref(null);
+const fileInputRef = ref(null);
 const statusCounts = ref({});
 const sortField = ref('updated_at');
 const sortDirection = ref('desc');
@@ -65,11 +66,21 @@ const handleSortChange = ({ prop, order }) => {
 
 const handleFileChange = (event) => {
   selectedFile.value = event.target.files?.[0] || null;
+  if (selectedFile.value) {
+    uploadFile();
+  }
 };
 
-const handleUpload = async () => {
+const handleUploadClick = () => {
   if (!selectedFile.value) {
-    flash.warning('请先选择要上传的文件。');
+    fileInputRef.value?.click();
+    return;
+  }
+  uploadFile();
+};
+
+const uploadFile = async () => {
+  if (!selectedFile.value) {
     return;
   }
   isUploading.value = true;
@@ -138,10 +149,10 @@ onMounted(loadDocuments);
             <el-button :loading="isRunningAction" @click="runAction(() => lightragApi.scanDocuments(), '已触发目录扫描。')">扫描</el-button>
             <el-button :loading="isRunningAction" @click="runAction(() => lightragApi.reprocessFailedDocuments(), '已重新触发失败任务。')">重试</el-button>
             <el-button @click="runAction(() => lightragApi.clearCache(), '已清理缓存。')">清空</el-button>
-            <label class="graph-documents__upload-btn">
-              <input type="file" @change="handleFileChange" />
-              <el-button type="primary" :loading="isUploading" @click="handleUpload">上传</el-button>
-            </label>
+            <input ref="fileInputRef" type="file" style="display: none;" @change="handleFileChange" />
+            <el-button type="primary" :loading="isUploading" @click="handleUploadClick">
+              {{ selectedFile ? '上传' : '选择文件' }}
+            </el-button>
           </div>
         </div>
       </template>
@@ -263,14 +274,6 @@ onMounted(loadDocuments);
   flex-wrap: wrap;
   gap: 8px;
   align-items: center;
-}
-
-.graph-documents__upload-btn {
-  cursor: pointer;
-}
-
-.graph-documents__upload-btn input {
-  display: none;
 }
 
 .graph-documents__title-cell {
