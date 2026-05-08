@@ -15,12 +15,12 @@ const total = ref(0);
 const searchQuery = ref('');
 
 const columns = [
-  { prop: 'id', label: 'ID', width: '64' },
-  { prop: 'actor_name', label: '操作人', width: '120' },
-  { key: 'action', label: '操作', width: '140', slot: 'action' },
-  { prop: 'target_type', label: '目标类型', width: '112' },
-  { key: 'status', label: '状态', width: '72', slot: 'status' },
-  { key: 'created_at', label: '时间', width: '176', slot: 'created_at', prop: 'created_at' },
+  { prop: 'id', label: 'ID', width: '72' },
+  { prop: 'actor_name', label: '操作人', minWidth: '120' },
+  { key: 'action', label: '操作', minWidth: '140', slot: 'action' },
+  { prop: 'target_type', label: '目标类型', minWidth: '120' },
+  { key: 'status', label: '状态', width: '90', slot: 'status' },
+  { key: 'created_at', label: '时间', minWidth: '180', slot: 'created_at', prop: 'created_at' },
 ];
 
 const actionLabels = {
@@ -107,7 +107,7 @@ onMounted(fetchData);
       <OpsStatusBand :items="statusItems" compact :style="{ '--band-columns': '3' }" />
     </template>
 
-    <AppSectionCard title="审计流水" admin>
+    <AppSectionCard admin>
       <AdminDataTable
         :data="audits"
         :columns="columns"

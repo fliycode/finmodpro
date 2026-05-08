@@ -106,19 +106,6 @@ const paginationLayout = computed(() => {
     <!-- Toolbar -->
     <div v-if="showSearch || $slots.toolbar" class="admin-data-table__toolbar">
       <div class="admin-data-table__toolbar-left">
-        <slot name="toolbar" />
-        <el-tag
-          v-if="selectedRows.length > 0"
-          type="info"
-          size="small"
-          closable
-          @close="clearSelection"
-        >
-          已选 {{ selectedRows.length }} 项
-        </el-tag>
-      </div>
-
-      <div class="admin-data-table__toolbar-right">
         <el-input
           v-if="showSearch"
           v-model="searchInput"
@@ -133,6 +120,19 @@ const paginationLayout = computed(() => {
           </template>
         </el-input>
 
+        <slot name="toolbar" />
+        <el-tag
+          v-if="selectedRows.length > 0"
+          type="info"
+          size="small"
+          closable
+          @close="clearSelection"
+        >
+          已选 {{ selectedRows.length }} 项
+        </el-tag>
+      </div>
+
+      <div class="admin-data-table__toolbar-right">
         <el-popover
           v-if="columns.length > 2"
           placement="bottom-end"
