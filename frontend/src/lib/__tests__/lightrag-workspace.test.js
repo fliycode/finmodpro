@@ -2,8 +2,11 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
+  buildLightragGraphNeighbors,
   buildLightragGraphFacets,
+  filterLightragGraphLabels,
   filterLightragGraph,
+  findLightragGraphMatches,
   getLightragStatusTone,
   searchLightragGraphNodes,
 } from '../lightrag-workspace.js';
@@ -65,6 +68,54 @@ test('searchLightragGraphNodes matches across label, type, and description', () 
   );
 
   assert.deepEqual(ids, ['bank']);
+});
+
+test('findLightragGraphMatches ranks label matches ahead of description matches', () => {
+  const matches = findLightragGraphMatches(
+    [
+      { id: 'bank', label: '流动性风险', type: '主题', description: '监管口径' },
+      { id: 'memo', label: '季度纪要', type: '文档', description: '包含流动性风险相关描述' },
+    ],
+    '流动性风险',
+  );
+
+  assert.deepEqual(matches.map((item) => item.id), ['bank', 'memo']);
+});
+
+test('filterLightragGraphLabels narrows the visible label list without changing order', () => {
+  const labels = filterLightragGraphLabels(
+    ['流动性风险', '资本结构', '风险抽取'],
+    '风险',
+  );
+
+  assert.deepEqual(labels, ['流动性风险', '风险抽取']);
+});
+
+test('buildLightragGraphNeighbors returns connected node summaries for an active node', () => {
+  const neighbors = buildLightragGraphNeighbors(
+    {
+      nodes: [
+        { id: 'company', label: '招商银行', type: '公司' },
+        { id: 'event', label: '流动性风险', type: '事件' },
+      ],
+      edges: [
+        { id: 'edge-1', source: 'company', target: 'event', label: '涉及' },
+      ],
+    },
+    'company',
+  );
+
+  assert.deepEqual(neighbors, [
+    {
+      id: 'event',
+      label: '流动性风险',
+      type: '事件',
+      description: '',
+      edgeId: 'edge-1',
+      edgeLabel: '涉及',
+      direction: 'outgoing',
+    },
+  ]);
 });
 
 test('getLightragStatusTone maps known statuses into semantic tones', () => {

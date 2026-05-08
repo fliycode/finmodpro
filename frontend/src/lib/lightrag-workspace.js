@@ -23,6 +23,29 @@ const compareFacetRows = (left, right) => {
   return left.label.localeCompare(right.label, 'zh-CN');
 };
 
+const buildNodeSearchText = (node = {}) => [
+  node.label,
+  node.id,
+  node.type,
+  node.description,
+]
+  .filter(Boolean)
+  .join(' ')
+  .toLowerCase();
+
+const normalizeSearchTokens = (query = '') => String(query || '')
+  .trim()
+  .toLowerCase()
+  .split(/\s+/)
+  .filter(Boolean);
+
+const compareSearchMatches = (left, right) => {
+  if (right.score !== left.score) {
+    return right.score - left.score;
+  }
+  return (left.label || '').localeCompare(right.label || '', 'zh-CN');
+};
+
 export const getLightragStatusTone = (status) => {
   const normalized = String(status || '').trim().toLowerCase();
   return statusToneMap[normalized] || 'muted';
@@ -77,24 +100,93 @@ export const filterLightragGraph = (
   return { nodes, edges };
 };
 
-export const searchLightragGraphNodes = (nodes = [], query = '') => {
+export const filterLightragGraphLabels = (labels = [], query = '') => {
   const normalizedQuery = String(query || '').trim().toLowerCase();
   if (!normalizedQuery) {
+    return [...labels];
+  }
+
+  return labels.filter((label) => String(label || '').toLowerCase().includes(normalizedQuery));
+};
+
+export const findLightragGraphMatches = (nodes = [], query = '', limit = 12) => {
+  const tokens = normalizeSearchTokens(query);
+  if (!tokens.length) {
     return [];
   }
 
   return nodes
-    .filter((node) => {
-      const haystack = [
-        node.label,
-        node.id,
-        node.type,
-        node.description,
-      ]
-        .filter(Boolean)
-        .join(' ')
-        .toLowerCase();
-      return haystack.includes(normalizedQuery);
+    .map((node) => {
+      const searchText = buildNodeSearchText(node);
+      if (!tokens.every((token) => searchText.includes(token))) {
+        return null;
+      }
+
+      const label = String(node.label || '').toLowerCase();
+      const type = String(node.type || '').toLowerCase();
+      const description = String(node.description || '').toLowerCase();
+
+      const score = tokens.reduce((total, token) => {
+        let tokenScore = 1;
+        if (label === token) {
+          tokenScore += 6;
+        } else if (label.startsWith(token)) {
+          tokenScore += 4;
+        } else if (label.includes(token)) {
+          tokenScore += 3;
+        }
+
+        if (type.includes(token)) {
+          tokenScore += 2;
+        }
+
+        if (description.includes(token)) {
+          tokenScore += 1;
+        }
+
+        return total + tokenScore;
+      }, 0);
+
+      return {
+        ...node,
+        score,
+      };
     })
-    .map((node) => node.id);
+    .filter(Boolean)
+    .sort(compareSearchMatches)
+    .slice(0, limit);
+};
+
+export const searchLightragGraphNodes = (nodes = [], query = '') => {
+  return findLightragGraphMatches(nodes, query).map((node) => node.id);
+};
+
+export const buildLightragGraphNeighbors = (
+  graph = { nodes: [], edges: [] },
+  nodeId = '',
+  limit = 8,
+) => {
+  if (!nodeId) {
+    return [];
+  }
+
+  const nodeById = new Map((graph.nodes || []).map((node) => [node.id, node]));
+
+  return (graph.edges || [])
+    .filter((edge) => edge.source === nodeId || edge.target === nodeId)
+    .map((edge) => {
+      const isOutgoing = edge.source === nodeId;
+      const relatedNode = nodeById.get(isOutgoing ? edge.target : edge.source);
+
+      return {
+        id: relatedNode?.id || `${edge.id}-neighbor`,
+        label: relatedNode?.label || (isOutgoing ? edge.target : edge.source),
+        type: relatedNode?.type || '未分类',
+        description: relatedNode?.description || '',
+        edgeId: edge.id,
+        edgeLabel: edge.label || '关联',
+        direction: isOutgoing ? 'outgoing' : 'incoming',
+      };
+    })
+    .slice(0, limit);
 };

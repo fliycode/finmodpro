@@ -34,20 +34,90 @@ export const normalizeLightragDocument = (row = {}) => ({
   raw: row,
 });
 
+const readGraphText = (value) => {
+  if (value === undefined || value === null) {
+    return '';
+  }
+
+  if (typeof value === 'string') {
+    return value.trim();
+  }
+
+  if (typeof value === 'number' || typeof value === 'boolean') {
+    return String(value);
+  }
+
+  if (Array.isArray(value)) {
+    return value.map((item) => readGraphText(item)).find(Boolean) || '';
+  }
+
+  if (typeof value === 'object') {
+    for (const key of ['label', 'name', 'title', 'entity_name', 'entity_id', 'id', 'value']) {
+      const nested = readGraphText(value[key]);
+      if (nested) {
+        return nested;
+      }
+    }
+  }
+
+  return '';
+};
+
 export const normalizeGraphNode = (row = {}) => ({
-  id: row.id || row.entity_id || row.entity_name || row.label || 'unknown',
-  label: row.label || row.entity_name || row.id || '未命名节点',
-  type: row.entity_type || row.type || '未分类',
-  description: row.description || row.summary || '',
+  id: readGraphText(row.id)
+    || readGraphText(row.entity_id)
+    || readGraphText(row.properties?.entity_id)
+    || readGraphText(row.properties?.id)
+    || readGraphText(row.label)
+    || readGraphText(row.entity_name)
+    || 'unknown',
+  label: readGraphText(row.label)
+    || readGraphText(row.entity_name)
+    || readGraphText(row.name)
+    || readGraphText(row.title)
+    || readGraphText(row.labels)
+    || readGraphText(row.properties?.label)
+    || readGraphText(row.properties?.entity_name)
+    || readGraphText(row.properties?.entity_id)
+    || readGraphText(row.id)
+    || '未命名节点',
+  type: readGraphText(row.entity_type)
+    || readGraphText(row.type)
+    || readGraphText(row.properties?.entity_type)
+    || readGraphText(row.properties?.type)
+    || '未分类',
+  description: readGraphText(row.description)
+    || readGraphText(row.summary)
+    || readGraphText(row.properties?.description)
+    || readGraphText(row.properties?.summary)
+    || '',
+  properties: row.properties || {},
   raw: row,
 });
 
 export const normalizeGraphEdge = (row = {}) => ({
-  id: row.id || `${row.source || row.source_id || row.source_entity || 'source'}-${row.target || row.target_id || row.target_entity || 'target'}`,
-  source: row.source || row.source_id || row.source_entity || '未提供',
-  target: row.target || row.target_id || row.target_entity || '未提供',
-  label: row.label || row.relation || row.relation_type || '关联',
-  description: row.description || '',
+  id: readGraphText(row.id)
+    || `${readGraphText(row.source) || readGraphText(row.source_id) || readGraphText(row.source_entity) || 'source'}-${readGraphText(row.target) || readGraphText(row.target_id) || readGraphText(row.target_entity) || 'target'}`,
+  source: readGraphText(row.source)
+    || readGraphText(row.source_id)
+    || readGraphText(row.source_entity)
+    || '未提供',
+  target: readGraphText(row.target)
+    || readGraphText(row.target_id)
+    || readGraphText(row.target_entity)
+    || '未提供',
+  label: readGraphText(row.label)
+    || readGraphText(row.relation)
+    || readGraphText(row.relation_type)
+    || readGraphText(row.properties?.label)
+    || readGraphText(row.properties?.relation)
+    || readGraphText(row.properties?.relation_type)
+    || (readGraphText(row.type) === 'DIRECTED' ? '' : readGraphText(row.type))
+    || '关联',
+  description: readGraphText(row.description)
+    || readGraphText(row.properties?.description)
+    || '',
+  properties: row.properties || {},
   raw: row,
 });
 

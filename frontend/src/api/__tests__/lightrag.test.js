@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { createLightragApi, normalizeGraphNode, normalizeLightragDocument } from '../lightrag.js';
+import { createLightragApi, normalizeGraphEdge, normalizeGraphNode, normalizeLightragDocument } from '../lightrag.js';
 
 test('normalizeLightragDocument maps mixed document payloads into stable rows', () => {
   const row = normalizeLightragDocument({
@@ -24,6 +24,41 @@ test('normalizeGraphNode preserves human-readable node labels', () => {
 
   assert.equal(node.label, '流动性风险');
   assert.equal(node.type, 'risk');
+});
+
+test('normalizeGraphNode reads nested LightRAG graph properties', () => {
+  const node = normalizeGraphNode({
+    id: 'Baseline Probe Observations',
+    labels: ['Baseline Probe Observations'],
+    properties: {
+      entity_type: 'data',
+      description: 'A record of agent behavior before the skill is installed.',
+      entity_id: 'Baseline Probe Observations',
+      file_path: 'baseline-observations.txt',
+    },
+  });
+
+  assert.equal(node.label, 'Baseline Probe Observations');
+  assert.equal(node.type, 'data');
+  assert.equal(node.description, 'A record of agent behavior before the skill is installed.');
+  assert.equal(node.properties.file_path, 'baseline-observations.txt');
+});
+
+test('normalizeGraphEdge reads nested LightRAG edge properties', () => {
+  const edge = normalizeGraphEdge({
+    id: '0',
+    type: 'DIRECTED',
+    source: 'A',
+    target: 'B',
+    properties: {
+      description: 'A points to B.',
+      keywords: 'document date',
+    },
+  });
+
+  assert.equal(edge.label, '关联');
+  assert.equal(edge.description, 'A points to B.');
+  assert.equal(edge.properties.keywords, 'document date');
 });
 
 test('createLightragApi targets the bridge endpoints', async () => {

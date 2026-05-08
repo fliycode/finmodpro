@@ -1,6 +1,5 @@
 <script setup>
 import { onBeforeUnmount, onMounted, ref, watch } from 'vue';
-import * as echarts from 'echarts';
 
 const props = defineProps({
   nodes: {
@@ -34,6 +33,15 @@ const emit = defineEmits(['select-node', 'select-edge']);
 const palette = ['#2457c5', '#21815c', '#b7791f', '#c4493d', '#5d4db8', '#2d8a94', '#7b8798'];
 const containerRef = ref(null);
 let chartInstance = null;
+let echartsModulePromise = null;
+let renderVersion = 0;
+
+const loadEcharts = async () => {
+  if (!echartsModulePromise) {
+    echartsModulePromise = import('echarts');
+  }
+  return echartsModulePromise;
+};
 
 const buildColorMap = () => {
   const typeMap = new Map();
@@ -45,8 +53,14 @@ const buildColorMap = () => {
   return typeMap;
 };
 
-const renderChart = () => {
+const renderChart = async () => {
+  const currentRenderVersion = ++renderVersion;
   if (!containerRef.value) {
+    return;
+  }
+
+  const echarts = await loadEcharts();
+  if (currentRenderVersion !== renderVersion || !containerRef.value) {
     return;
   }
 
@@ -74,6 +88,8 @@ const renderChart = () => {
     const isHighlighted = highlightSet.has(node.id);
     return {
       ...node,
+      name: node.label,
+      displayLabel: node.label,
       symbolSize: isSelected ? 28 : isHighlighted ? 22 : 18,
       itemStyle: {
         color: colorMap.get(node.type) || palette[palette.length - 1],
@@ -130,7 +146,7 @@ const renderChart = () => {
             ].join('');
           }
           return [
-            `<strong>${params.data.label}</strong>`,
+            `<strong>${params.data.displayLabel || params.data.name || params.data.id}</strong>`,
             params.data.type ? `<br/>${params.data.type}` : '',
             params.data.description ? `<br/>${params.data.description}` : '',
           ].join('');
@@ -190,17 +206,18 @@ watch(
     props.highlightNodeIds,
   ],
   () => {
-    renderChart();
+    void renderChart();
   },
   { deep: true },
 );
 
 onMounted(() => {
-  renderChart();
+  void renderChart();
   window.addEventListener('resize', handleResize);
 });
 
 onBeforeUnmount(() => {
+  renderVersion += 1;
   window.removeEventListener('resize', handleResize);
   if (chartInstance) {
     chartInstance.dispose();
