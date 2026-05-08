@@ -1,0 +1,158 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-04-29T12:00:00.000Z",
+  "title": "Design System: FinModPro",
+  "extensions": {
+    "colorMeta": {
+      "command-blue":        { "role": "primary",  "displayName": "Command Blue",    "canonical": "oklch(48% 0.21 270)",  "tonalRamp": ["oklch(96% 0.005 270)", "oklch(88% 0.02 270)", "oklch(78% 0.06 270)", "oklch(66% 0.11 270)", "oklch(54% 0.16 270)", "oklch(48% 0.21 270)", "oklch(40% 0.18 270)", "oklch(28% 0.12 270)"] },
+      "navy-ink":            { "role": "neutral",  "displayName": "Navy Ink",         "canonical": "oklch(28% 0.03 262)",  "tonalRamp": ["oklch(95% 0.005 262)", "oklch(86% 0.01 262)", "oklch(74% 0.02 262)", "oklch(60% 0.03 262)", "oklch(46% 0.03 262)", "oklch(36% 0.03 262)", "oklch(28% 0.03 262)", "oklch(18% 0.02 262)"] },
+      "warm-white":          { "role": "neutral",  "displayName": "Warm White",       "canonical": "oklch(97% 0.005 260)",  "tonalRamp": ["oklch(99% 0.003 260)", "oklch(97% 0.005 260)", "oklch(93% 0.005 260)", "oklch(88% 0.005 260)", "oklch(80% 0.005 260)", "oklch(70% 0.005 260)", "oklch(58% 0.005 260)", "oklch(44% 0.005 260)"] },
+      "parchment":           { "role": "neutral",  "displayName": "Parchment",        "canonical": "oklch(94% 0.015 85)",   "tonalRamp": ["oklch(98% 0.008 85)", "oklch(94% 0.015 85)", "oklch(88% 0.018 85)", "oklch(80% 0.020 85)", "oklch(70% 0.022 85)", "oklch(58% 0.020 85)", "oklch(44% 0.015 85)", "oklch(28% 0.010 85)"] },
+      "ochre-amber":         { "role": "accent",   "displayName": "Ochre Amber",      "canonical": "oklch(52% 0.12 70)",    "tonalRamp": ["oklch(94% 0.02 70)", "oklch(86% 0.04 70)", "oklch(76% 0.07 70)", "oklch(64% 0.10 70)", "oklch(52% 0.12 70)", "oklch(42% 0.10 70)", "oklch(32% 0.08 70)", "oklch(22% 0.05 70)"] },
+      "war-room-navy":       { "role": "neutral",  "displayName": "War Room Navy",    "canonical": "oklch(12% 0.02 260)",   "tonalRamp": ["oklch(92% 0.005 260)", "oklch(82% 0.01 260)", "oklch(70% 0.02 260)", "oklch(56% 0.02 260)", "oklch(42% 0.02 260)", "oklch(28% 0.02 260)", "oklch(18% 0.02 260)", "oklch(12% 0.02 260)"] },
+      "brass":               { "role": "accent",   "displayName": "Brass",            "canonical": "oklch(72% 0.13 85)",    "tonalRamp": ["oklch(95% 0.02 85)", "oklch(88% 0.05 85)", "oklch(80% 0.09 85)", "oklch(72% 0.13 85)", "oklch(60% 0.12 85)", "oklch(48% 0.10 85)", "oklch(36% 0.07 85)", "oklch(24% 0.04 85)"] },
+      "signal-teal":         { "role": "accent",   "displayName": "Signal Teal",      "canonical": "oklch(78% 0.08 200)",   "tonalRamp": ["oklch(95% 0.02 200)", "oklch(88% 0.04 200)", "oklch(82% 0.06 200)", "oklch(78% 0.08 200)", "oklch(66% 0.08 200)", "oklch(52% 0.06 200)", "oklch(38% 0.04 200)", "oklch(24% 0.02 200)"] },
+      "risk-red":            { "role": "semantic", "displayName": "Risk Red",         "canonical": "oklch(48% 0.18 25)",    "tonalRamp": ["oklch(95% 0.02 25)", "oklch(86% 0.04 25)", "oklch(74% 0.08 25)", "oklch(60% 0.14 25)", "oklch(48% 0.18 25)", "oklch(38% 0.16 25)", "oklch(28% 0.12 25)", "oklch(18% 0.06 25)"] },
+      "clearance-green":     { "role": "semantic", "displayName": "Clearance Green",  "canonical": "oklch(52% 0.14 165)",   "tonalRamp": ["oklch(94% 0.03 165)", "oklch(86% 0.06 165)", "oklch(74% 0.10 165)", "oklch(62% 0.14 165)", "oklch(52% 0.14 165)", "oklch(42% 0.12 165)", "oklch(32% 0.08 165)", "oklch(20% 0.04 165)"] }
+    },
+    "typographyMeta": {
+      "display": { "displayName": "Display", "purpose": "Page heroes and dashboard titles. Once per view at most." },
+      "headline": { "displayName": "Headline", "purpose": "Section headers, card titles, major content divisions." },
+      "title":    { "displayName": "Title",    "purpose": "Subsection headers, dialog titles, prominent labels." },
+      "body":     { "displayName": "Body",     "purpose": "Running text, descriptions, table content. 68ch max line length." },
+      "label":    { "displayName": "Label",    "purpose": "Form labels, metadata, eyebrow text. Uppercase variant at 11px / 0.16em tracking." },
+      "mono":     { "displayName": "Mono",     "purpose": "Code, token values, model IDs, technical data." }
+    },
+    "shadows": [
+      { "name": "ambient-xs", "value": "0 1px 2px rgba(16, 24, 40, 0.04)", "purpose": "Subtle lift on hover rows, tooltips." },
+      { "name": "ambient-sm", "value": "0 2px 8px -2px rgba(16, 24, 40, 0.08)", "purpose": "Dropdowns, popovers, light card hover." },
+      { "name": "ambient-md", "value": "0 8px 24px -8px rgba(16, 24, 40, 0.12)", "purpose": "Default card elevation. The workhorse shadow." },
+      { "name": "ambient-lg", "value": "0 18px 44px -30px rgba(16, 24, 40, 0.22)", "purpose": "Elevated cards, dialogs. Rare." },
+      { "name": "ambient-xl", "value": "0 28px 64px -40px rgba(16, 24, 40, 0.32)", "purpose": "Modal overlays only. Reserved." }
+    ],
+    "motion": [
+      { "name": "ease-standard", "value": "cubic-bezier(0.16, 1, 0.3, 1)", "purpose": "Default transition for interactive elements (hover, focus, active)." },
+      { "name": "ease-theme", "value": "0.28s ease", "purpose": "Theme-switch transition on background-color, border-color, box-shadow, color." },
+      { "name": "duration-card", "value": "0.25s", "purpose": "Card shadow and border transitions." },
+      { "name": "duration-nav", "value": "0.24s", "purpose": "Navigation item transitions (transform, background)." }
+    ],
+    "breakpoints": [
+      { "name": "mobile-min", "value": "320px" },
+      { "name": "tablet", "value": "1024px" }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "The single cross-mode call-to-action. Used for form submission, primary actions, and confirmations. Appears at most once per visible area.",
+      "html": "<button class=\"ds-btn-primary\">Run Analysis</button>",
+      "css": ".ds-btn-primary {\n  display: inline-flex;\n  align-items: center;\n  justify-content: center;\n  gap: 8px;\n  height: 36px;\n  padding: 10px 24px;\n  background: var(--brand-500);\n  color: #ffffff;\n  font-family: var(--font-body);\n  font-size: var(--fs-sm);\n  font-weight: 600;\n  line-height: 1;\n  border: none;\n  border-radius: 12px;\n  cursor: pointer;\n  transition: background-color 0.2s ease, transform 0.16s cubic-bezier(0.16, 1, 0.3, 1);\n}\n.ds-btn-primary:hover {\n  background: var(--brand-600);\n}\n.ds-btn-primary:active {\n  background: var(--brand-700);\n  transform: scale(0.98);\n}\n.ds-btn-primary:focus-visible {\n  outline: 2px solid var(--brand-500);\n  outline-offset: 2px;\n}\n.ds-btn-primary:disabled {\n  opacity: 0.4;\n  cursor: not-allowed;\n  pointer-events: none;\n}"
+    },
+    {
+      "name": "Ghost Button",
+      "kind": "button",
+      "refersTo": "button-ghost",
+      "description": "Secondary actions, toolbar buttons, and inline controls. Transparent at rest, reveals surface on hover.",
+      "html": "<button class=\"ds-btn-ghost\"><svg class=\"ds-icon\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.8\" stroke-linecap=\"round\" stroke-linejoin=\"round\" width=\"18\" height=\"18\"><path d=\"M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z\"/></svg>Edit</button>",
+      "css": ".ds-btn-ghost {\n  display: inline-flex;\n  align-items: center;\n  justify-content: center;\n  gap: 6px;\n  height: 36px;\n  padding: 10px 16px;\n  background: transparent;\n  color: var(--text-secondary);\n  font-family: var(--font-body);\n  font-size: var(--fs-sm);\n  font-weight: 500;\n  line-height: 1;\n  border: 1px solid var(--line-soft);\n  border-radius: 12px;\n  cursor: pointer;\n  transition: background-color 0.2s ease, color 0.2s ease, border-color 0.2s ease;\n}\n.ds-btn-ghost:hover {\n  background: var(--surface-3);\n  color: var(--text-primary);\n  border-color: var(--line-strong);\n}\n.ds-btn-ghost:focus-visible {\n  outline: 2px solid var(--brand-500);\n  outline-offset: 2px;\n}\n.ds-icon {\n  flex-shrink: 0;\n  width: 18px;\n  height: 18px;\n}"
+    },
+    {
+      "name": "Card",
+      "kind": "card",
+      "refersTo": "card-default",
+      "description": "Primary content container. Generous radius, soft ambient shadow, subtle border. The workhorse surface.",
+      "html": "<div class=\"ds-card\"><div class=\"ds-card-header\"><h3 class=\"ds-card-title\">Risk Summary</h3><p class=\"ds-card-desc\">Aggregated exposure across monitored portfolios.</p></div><div class=\"ds-card-body\">Content area with default 24px padding.</div></div>",
+      "css": ".ds-card {\n  background: var(--surface-2);\n  border: 1px solid var(--line-soft);\n  border-radius: 24px;\n  box-shadow: 0 8px 24px -8px rgba(16, 24, 40, 0.12);\n  transition: box-shadow 0.25s ease, border-color 0.25s ease;\n}\n.ds-card:hover {\n  box-shadow: 0 18px 44px -30px rgba(16, 24, 40, 0.22);\n  border-color: var(--line-strong);\n}\n.ds-card-header {\n  padding: 24px 24px 0;\n  display: flex;\n  align-items: flex-start;\n  justify-content: space-between;\n  gap: 16px;\n}\n.ds-card-title {\n  margin: 0;\n  font-family: var(--font-display);\n  font-size: var(--fs-xl);\n  font-weight: 600;\n  line-height: var(--lh-snug);\n  color: var(--text-primary);\n  letter-spacing: -0.01em;\n}\n.ds-card-desc {\n  margin: 4px 0 0;\n  font-size: var(--fs-sm);\n  color: var(--text-secondary);\n  line-height: var(--lh-normal);\n}\n.ds-card-body {\n  padding: 24px;\n}"
+    },
+    {
+      "name": "Text Input",
+      "kind": "input",
+      "refersTo": "input-default",
+      "description": "Standard text field. Clean border, focused ring treatment, contextual error state.",
+      "html": "<div class=\"ds-field\"><label class=\"ds-field-label\" for=\"ds-input-demo\">Portfolio Name</label><input class=\"ds-input\" id=\"ds-input-demo\" type=\"text\" placeholder=\"e.g. APAC Credit Fund\" value=\"\" /></div>",
+      "css": ".ds-field {\n  display: flex;\n  flex-direction: column;\n  gap: 6px;\n}\n.ds-field-label {\n  font-size: var(--fs-xs);\n  font-weight: 500;\n  color: var(--text-secondary);\n  letter-spacing: 0.02em;\n}\n.ds-input {\n  height: 36px;\n  padding: 8px 12px;\n  background: var(--surface-2);\n  color: var(--text-primary);\n  font-family: var(--font-body);\n  font-size: var(--fs-sm);\n  line-height: var(--lh-normal);\n  border: 1px solid var(--line-strong);\n  border-radius: 12px;\n  outline: none;\n  transition: border-color 0.2s ease, box-shadow 0.2s ease;\n}\n.ds-input::placeholder {\n  color: var(--text-muted);\n}\n.ds-input:focus {\n  border-color: var(--brand-500);\n  box-shadow: 0 0 0 2px rgba(36, 87, 197, 0.2);\n}\n.ds-input.ds-input--error {\n  border-color: #c4493d;\n}\n.ds-input.ds-input--error:focus {\n  box-shadow: 0 0 0 2px rgba(196, 73, 61, 0.2);\n}"
+    },
+    {
+      "name": "Sidebar Nav Item",
+      "kind": "nav",
+      "refersTo": "app-sidebar-item",
+      "description": "Primary navigation element. Icon + label, three visual states (default, hover, active), smooth transition.",
+      "html": "<a class=\"ds-nav-item ds-nav-item--active\" href=\"#\"><svg class=\"ds-nav-icon\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.8\" stroke-linecap=\"round\" stroke-linejoin=\"round\" width=\"18\" height=\"18\"><path d=\"m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48\"/></svg><span class=\"ds-nav-label\">Risk Analysis</span></a>",
+      "css": ".ds-nav-item {\n  display: flex;\n  align-items: center;\n  gap: 10px;\n  padding: 11px 12px;\n  border-radius: 10px;\n  color: inherit;\n  text-decoration: none;\n  font-size: var(--fs-sm);\n  font-weight: 500;\n  line-height: 1.35;\n  cursor: pointer;\n  transition: transform 0.24s cubic-bezier(0.16, 1, 0.3, 1), background-color 0.2s ease, color 0.2s ease;\n}\n.ds-nav-item:hover {\n  background: var(--surface-hover);\n}\n.ds-nav-item--active {\n  background: var(--surface-3);\n  color: var(--brand-500);\n  font-weight: 600;\n}\n.ds-nav-item:focus-visible {\n  outline: 2px solid var(--brand-500);\n  outline-offset: -2px;\n}\n.ds-nav-icon {\n  flex-shrink: 0;\n  width: 18px;\n  height: 18px;\n  opacity: 0.72;\n}\n.ds-nav-item--active .ds-nav-icon {\n  opacity: 1;\n}"
+    },
+    {
+      "name": "Sidebar Nav Group",
+      "kind": "nav",
+      "refersTo": "app-sidebar-group",
+      "description": "Labeled group of nav items with optional border-top divider between groups.",
+      "html": "<div class=\"ds-nav-group\"><span class=\"ds-nav-group-label\">Core Workspace</span><div class=\"ds-nav-group-items\"><!-- nav items here --></div></div>",
+      "css": ".ds-nav-group {\n  display: flex;\n  flex-direction: column;\n  gap: 10px;\n}\n.ds-nav-group + .ds-nav-group {\n  padding-top: 14px;\n  border-top: 1px solid var(--line-soft);\n}\n.ds-nav-group-label {\n  padding: 0 10px;\n  font-size: 10px;\n  font-weight: 700;\n  letter-spacing: 0.18em;\n  text-transform: uppercase;\n  color: var(--text-muted);\n}\n.ds-nav-group-items {\n  display: flex;\n  flex-direction: column;\n  gap: 8px;\n}"
+    },
+    {
+      "name": "Meta Chip",
+      "kind": "chip",
+      "refersTo": "meta-chip",
+      "description": "Small pill-shaped metadata indicator. Used for status, categories, and inline data points.",
+      "html": "<span class=\"ds-chip\">High Risk</span><span class=\"ds-chip ds-chip--risk\">Critical</span><span class=\"ds-chip ds-chip--success\">Resolved</span>",
+      "css": ".ds-chip {\n  display: inline-flex;\n  align-items: center;\n  padding: 3px 7px;\n  font-size: 11px;\n  font-weight: 500;\n  color: var(--text-secondary);\n  background: var(--surface-3);\n  border-radius: 999px;\n  line-height: 1.4;\n  white-space: nowrap;\n}\n.ds-chip--risk {\n  color: #a9392f;\n  background: #fef2f1;\n}\n.ds-chip--success {\n  color: #1a6849;\n  background: #effaf5;\n}\n.ds-chip--warning {\n  color: #9a6218;\n  background: #fdf9ef;\n}"
+    },
+    {
+      "name": "Workspace Utility Bar",
+      "kind": "custom",
+      "refersTo": "workspace-frame-utility",
+      "description": "Sticky top bar for the workspace shell. Frosted glass effect with context breadcrumb. The single place glassmorphism is permitted.",
+      "html": "<div class=\"ds-workspace-utility\"><div class=\"ds-workspace-utility-copy\"><span class=\"ds-workspace-eyebrow\">Case-led flow</span><strong>Dossier workspace</strong></div></div>",
+      "css": ".ds-workspace-utility {\n  position: sticky;\n  top: 0;\n  z-index: 12;\n  display: flex;\n  align-items: center;\n  justify-content: space-between;\n  gap: 16px;\n  padding: 20px 28px 14px;\n  background: linear-gradient(180deg, rgba(248, 241, 229, 0.96), rgba(248, 241, 229, 0.82));\n  backdrop-filter: blur(12px);\n  border-bottom: 1px solid rgba(95, 69, 35, 0.16);\n}\n.ds-workspace-utility-copy {\n  display: flex;\n  flex-direction: column;\n  gap: 4px;\n}\n.ds-workspace-eyebrow {\n  margin: 0;\n  font-size: 11px;\n  font-weight: 700;\n  letter-spacing: 0.16em;\n  text-transform: uppercase;\n  color: #7e6850;\n}\n.ds-workspace-utility-copy strong {\n  font-size: 16px;\n  line-height: 1.35;\n  letter-spacing: -0.02em;\n  color: #2f2418;\n}"
+    },
+    {
+      "name": "Theme Toggle",
+      "kind": "button",
+      "refersTo": "theme-toggle",
+      "description": "Light/dark mode switch. Moon icon when in light mode, sun icon when in dark. Instant theme swap with smooth CSS transition.",
+      "html": "<button class=\"ds-theme-toggle\" aria-label=\"Toggle theme\"><svg viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.8\" stroke-linecap=\"round\" stroke-linejoin=\"round\" width=\"18\" height=\"18\"><path d=\"M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z\"/></svg></button>",
+      "css": ".ds-theme-toggle {\n  display: inline-flex;\n  align-items: center;\n  justify-content: center;\n  width: 36px;\n  height: 36px;\n  background: transparent;\n  color: var(--text-secondary);\n  border: 1px solid var(--line-soft);\n  border-radius: 10px;\n  cursor: pointer;\n  transition: background-color 0.2s ease, color 0.2s ease;\n}\n.ds-theme-toggle:hover {\n  background: var(--surface-3);\n  color: var(--text-primary);\n}\n.ds-theme-toggle:focus-visible {\n  outline: 2px solid var(--brand-500);\n  outline-offset: 2px;\n}"
+    }
+  ],
+  "narrative": {
+    "northStar": "The War Room & The Study",
+    "overview": "FinModPro speaks with the voice of a composed expert. It is neither playful nor tense — it is deliberate, restrained, and quietly authoritative. The interface serves two postures of the same disciplined mind: the analyst bent over a warm-lit desk, pulling threads through evidence, and the operator scanning live telemetry in a darkened room. The workspace shell wraps the analyst in paper tones — parchment, ink, ochre. It is a study: warm, focused, unhurried. The admin shell surrounds the operator in deep navy, brass, and signal teal. It is a war room: technical, alert, precise. These two modes are visually distinct but structurally coherent. The same grid, the same sidebar anatomy, the same typographic hierarchy carries across both. The transition between them feels intentional, not jarring. This system explicitly rejects the standard SaaS dashboard template — no blue-white gradient heroes, no icon-card grids, no decorative glass. Every surface, shadow, and tint exists because it serves the user's work. Nothing is decorative.",
+    "keyCharacteristics": [
+      "Dual-mode visual identity: warm parchment study for analysts, dark navy war room for operators",
+      "Tinted neutrals throughout — no pure black or white anywhere",
+      "Soft ambient elevation with large-blur, low-opacity shadows",
+      "Restrained color strategy: one blue accent at ≤10% surface coverage",
+      "DM Sans for headings, PingFang SC for body — bilingual Chinese/English ready"
+    ],
+    "rules": [
+      { "name": "The Two-Desk Rule", "body": "Workspace surfaces use warm tones (parchment, ink, ochre). Admin surfaces use cool tones (navy, brass, teal). Never mix warm workspace colors into admin or vice versa — the boundary is absolute. Command Blue is the only color that crosses both modes.", "section": "colors" },
+      { "name": "The One Accent Rule", "body": "Command Blue appears on ≤10% of any given screen. If a screen feels blue, it has too much accent. The accent's power comes from restraint.", "section": "colors" },
+      { "name": "The Scale Jump Rule", "body": "Adjacent type steps differ by ≥1.25×. No 14px/15px pairs. If two sizes look almost the same, one is wrong.", "section": "typography" },
+      { "name": "The Length Cap Rule", "body": "Body text lines never exceed 68ch. If a line runs longer, the container is too wide or the column needs subdivision.", "section": "typography" },
+      { "name": "The Flat-By-Default Rule", "body": "Surfaces are flat at rest. Shadows appear only as a response to state (hover, elevation, focus). A card sitting on the page with a heavy shadow is an error.", "section": "elevation" },
+      { "name": "The No Nested Cards Rule", "body": "Cards inside cards are prohibited. A card is a terminal container. If content needs subdivision, use a section heading, a divider, or whitespace.", "section": "components" }
+    ],
+    "dos": [
+      "Do use workspace tokens (parchment, dossier ink, ochre) exclusively within workspace shells and admin tokens (war room navy, brass, signal teal) exclusively within admin shells.",
+      "Do cap body text at 68ch line length. Use max-width on prose containers.",
+      "Do keep Command Blue to ≤10% of any screen. It is the punctuation, not the paragraph.",
+      "Do use the 24px card radius consistently for all card-like containers.",
+      "Do prefer transparent/surface-hover backgrounds for interactive items at rest. Reserve shadows for elevated states.",
+      "Do use the type scale as defined — never interpolate sizes between steps."
+    ],
+    "donts": [
+      "Don't use the standard SaaS blue-white dashboard template — gradient hero stats, icon-card grids, or decorative glass panels.",
+      "Don't use pure black (#000) or pure white (#fff). Every neutral is tinted toward the brand hue.",
+      "Don't use border-left or border-right greater than 1px as a colored accent stripe.",
+      "Don't apply gradient text (background-clip: text). Use a single solid color.",
+      "Don't nest cards inside cards. A card is a terminal container.",
+      "Don't use glassmorphism except in the workspace utility bar.",
+      "Don't animate layout properties (width, height, top, left). Use transform and opacity only.",
+      "Don't use bounce or elastic easings. Ease-out-quart or expo curves only.",
+      "Don't use em dashes.",
+      "Don't use identical card grids with icon + heading + text repeated endlessly.",
+      "Don't default to modals. Exhaust inline expansion, drawers, or progressive disclosure first."
+    ]
+  }
+}

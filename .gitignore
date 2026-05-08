@@ -44,3 +44,4 @@ pnpm-debug.log*
 backend/milvus.db
 
 backend/milvus.db
+.superpowers/
