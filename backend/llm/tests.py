@@ -6,13 +6,14 @@ import sys
 import tempfile
 from datetime import timedelta
 from decimal import Decimal
-from io import BytesIO
+from io import BytesIO, StringIO
 from pathlib import Path
 from unittest.mock import patch
 from urllib.error import HTTPError, URLError
 
 from django.conf import settings
 from django.contrib.auth.models import Group
+from django.core.management import call_command
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase
 from django.test import Client, SimpleTestCase, override_settings
@@ -28,7 +29,7 @@ from llm.services.model_config_service import get_active_model_config
 from llm.services.fine_tune_service import create_fine_tune_run
 from llm.services.fine_tune_runner_client import build_llamafactory_command
 from llm.services.prompt_service import load_prompt_template, render_prompt
-from llm.services.litellm_alias_service import sync_litellm_route_for_config
+from llm.services.litellm_alias_service import sync_litellm_route_for_config, sync_litellm_routes
 from llm.services.litellm_config_render_service import build_rendered_litellm_config
 from llm.services.providers.litellm_provider import LiteLLMChatProvider, LiteLLMEmbeddingProvider
 from llm.services.runtime_service import (
@@ -3406,6 +3407,7 @@ class LiteLLMAliasYamlRegressionTests(TestCase):
     def setUp(self):
         seed_roles_and_permissions()
         self.sync_litellm_route_for_config = sync_litellm_route_for_config
+        self.sync_litellm_routes = sync_litellm_routes
         self.temp_dir = Path(tempfile.mkdtemp(dir=Path.cwd()))
         self.admin_user = User.objects.create_user(
             username="alias-test-admin",
@@ -3488,6 +3490,80 @@ class LiteLLMAliasYamlRegressionTests(TestCase):
         yaml_text = self._sync_and_read_yaml(model_config)
 
         self.assertIn("api_key: sk-upstream", yaml_text)
+
+    def test_sync_routes_prunes_stale_route_snippets(self):
+        base_config_path = self.temp_dir / "base.yaml"
+        rendered_config_path = self.temp_dir / "rendered.yaml"
+        base_config_path.write_text(
+            "model_list:\n"
+            "litellm_settings:\n"
+            "  drop_params: true\n",
+            encoding="utf-8",
+        )
+        (self.temp_dir / "route-chat-999.yaml").write_text(
+            "model_list:\n"
+            "  - model_name: stale-chat\n"
+            "    litellm_params:\n"
+            "      model: openai/stale-chat\n"
+            "      api_base: http://stale\n",
+            encoding="utf-8",
+        )
+        (self.temp_dir / "fine-tune-alias.yaml").write_text(
+            "model_list:\n"
+            "  - model_name: tuned-chat\n"
+            "    litellm_params:\n"
+            "      model: openai/tuned-chat\n"
+            "      api_base: http://fine-tune\n",
+            encoding="utf-8",
+        )
+        model_config = self._make_litellm_model_config(upstream_model="deepseek/deepseek-chat")
+
+        with override_settings(
+            LITELLM_GENERATED_CONFIG_ROOT=str(self.temp_dir),
+            LITELLM_BASE_CONFIG_PATH=str(base_config_path),
+            LITELLM_RENDERED_CONFIG_PATH=str(rendered_config_path),
+        ):
+            result = self.sync_litellm_routes(triggered_by=self.admin_user)
+
+        route_key = f"route-{model_config.capability}-{model_config.id}.yaml"
+        self.assertEqual(result["route_count"], 1)
+        self.assertFalse((self.temp_dir / "route-chat-999.yaml").exists())
+        self.assertTrue((self.temp_dir / route_key).exists())
+        self.assertTrue((self.temp_dir / "fine-tune-alias.yaml").exists())
+        rendered = rendered_config_path.read_text(encoding="utf-8")
+        self.assertIn("model_name: my-route", rendered)
+        self.assertIn("model_name: tuned-chat", rendered)
+
+
+class SyncLiteLLMRoutesCommandTests(TestCase):
+    def setUp(self):
+        self.temp_dir = Path(tempfile.mkdtemp(dir=Path.cwd()))
+
+    def tearDown(self):
+        shutil.rmtree(self.temp_dir, ignore_errors=True)
+
+    def test_command_rebuilds_routes_and_rendered_config(self):
+        base_config_path = self.temp_dir / "base.yaml"
+        rendered_config_path = self.temp_dir / "rendered.yaml"
+        base_config_path.write_text(
+            "model_list:\n"
+            "litellm_settings:\n"
+            "  drop_params: true\n",
+            encoding="utf-8",
+        )
+        stdout = StringIO()
+
+        with override_settings(
+            LITELLM_GENERATED_CONFIG_ROOT=str(self.temp_dir),
+            LITELLM_BASE_CONFIG_PATH=str(base_config_path),
+            LITELLM_RENDERED_CONFIG_PATH=str(rendered_config_path),
+        ):
+            call_command("sync_litellm_routes", stdout=stdout)
+
+        output = stdout.getvalue()
+        self.assertIn('"migrated_capabilities"', output)
+        self.assertTrue(rendered_config_path.exists())
+        self.assertTrue(any(path.name.startswith("route-chat-") for path in self.temp_dir.glob("route-*.yaml")))
 
 
 class LiteLLMGatewaySettingsTests(TestCase):

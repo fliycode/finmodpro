@@ -46,6 +46,11 @@ def provision_litellm_alias(*, fine_tune_run):
     }
 
 
+def _prune_generated_route_snippets(generated_root):
+    for route_path in generated_root.glob("route-*.yaml"):
+        route_path.unlink(missing_ok=True)
+
+
 def sync_litellm_route_for_config(model_config, *, triggered_by):
     """Write a YAML snippet for a single model config and record a sync event."""
     generated_root = Path(settings.LITELLM_GENERATED_CONFIG_ROOT)
@@ -101,6 +106,7 @@ def sync_litellm_routes(*, triggered_by):
     generated_root = Path(settings.LITELLM_GENERATED_CONFIG_ROOT)
     try:
         generated_root.mkdir(parents=True, exist_ok=True)
+        _prune_generated_route_snippets(generated_root)
         for route in active_routes:
             route_key = f"route-{route.capability}-{route.id}"
             config_path = generated_root / f"{route_key}.yaml"

@@ -65,6 +65,7 @@ python3 "$APP_DIR/scripts/render_litellm_config.py"
 ensure_disk_headroom
 docker compose -f "$COMPOSE_FILE" up -d --build --remove-orphans
 docker compose -f "$COMPOSE_FILE" exec -T backend python manage.py migrate
+docker compose -f "$COMPOSE_FILE" exec -T backend python manage.py sync_litellm_routes
 docker compose -f "$COMPOSE_FILE" up -d --force-recreate litellm
 
 "$APP_DIR/scripts/smoke-check.sh"
