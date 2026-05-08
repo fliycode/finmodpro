@@ -198,3 +198,47 @@ def replace_user_groups(user, group_names):
     user.groups.set(groups)
     user.refresh_from_db()
     return serialize_admin_user_row(user)
+
+
+def create_admin_user(*, username, email, password, group_names=None):
+    if User.objects.filter(username=username).exists():
+        raise ValueError("用户名已存在。")
+
+    user = User.objects.create_user(
+        username=username,
+        email=email,
+        password=password,
+    )
+
+    if group_names:
+        return replace_user_groups(user, group_names)
+
+    assign_default_member_group(user)
+    user.refresh_from_db()
+    return serialize_admin_user_row(user)
+
+
+def update_admin_user(user, *, username, email, password="", group_names=None):
+    duplicate_username_exists = (
+        User.objects.filter(username=username)
+        .exclude(id=user.id)
+        .exists()
+    )
+    if duplicate_username_exists:
+        raise ValueError("用户名已存在。")
+
+    user.username = username
+    user.email = email
+    if password:
+        user.set_password(password)
+    user.save()
+
+    if group_names is not None:
+        return replace_user_groups(user, group_names)
+
+    user.refresh_from_db()
+    return serialize_admin_user_row(user)
+
+
+def delete_admin_user(user):
+    user.delete()

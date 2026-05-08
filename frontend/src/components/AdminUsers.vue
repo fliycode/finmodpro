@@ -1,25 +1,76 @@
 <script setup>
-import { ref, onMounted, computed } from 'vue';
+import { computed, onMounted, reactive, ref, watch } from 'vue';
 import { ElMessageBox } from 'element-plus';
+
 import { adminApi } from '../api/admin.js';
+import { authStorage } from '../lib/auth-storage.js';
 import { useFlash } from '../lib/flash.js';
-import GovernanceReviewDesk from './admin/governance/GovernanceReviewDesk.vue';
-import OpsSectionFrame from './admin/ops/OpsSectionFrame.vue';
-import AdminDataTable from './admin/AdminDataTable.vue';
+import { permissionHelper } from '../lib/permission.js';
+import AppIcon from './ui/AppIcon.vue';
 import AppSectionCard from './ui/AppSectionCard.vue';
-import AppToolbar from './ui/AppToolbar.vue';
+
+const flash = useFlash();
 
 const users = ref([]);
 const groups = ref([]);
 const isLoading = ref(false);
+const isSaving = ref(false);
 const error = ref('');
-const searchQuery = ref('');
-const filterGroup = ref('');
 
-const selectedUser = ref(null);
-const showEditDrawer = ref(false);
-const isUpdating = ref(false);
-const flash = useFlash();
+const filterExpanded = ref(false);
+const draftFilters = reactive({
+  keyword: '',
+  group: '',
+  userId: '',
+  accountType: '',
+  groupStatus: '',
+});
+const appliedFilters = reactive({
+  keyword: '',
+  group: '',
+  userId: '',
+  accountType: '',
+  groupStatus: '',
+});
+
+const pagination = reactive({
+  page: 1,
+  pageSize: 10,
+});
+
+const sortState = reactive({
+  prop: 'id',
+  order: 'ascending',
+});
+
+const dialogVisible = ref(false);
+const dialogMode = ref('create');
+const userForm = reactive({
+  id: null,
+  username: '',
+  email: '',
+  password: '',
+  groups: [],
+});
+
+const currentProfile = computed(() => authStorage.getProfile());
+const currentUserId = computed(() => currentProfile.value?.user?.id ?? null);
+
+const canCreateUser = computed(() => permissionHelper.hasPermission('add_user'));
+const canChangeUser = computed(() => permissionHelper.hasPermission('change_user'));
+const canDeleteUser = computed(() => permissionHelper.hasPermission('delete_user'));
+const canAssignRole = computed(() => permissionHelper.hasPermission('assign_role'));
+const hasRowActions = computed(() => canChangeUser.value || canAssignRole.value || canDeleteUser.value);
+
+const columns = ref([
+  { key: 'id', label: 'ID', prop: 'id', width: 72, minWidth: 72, sortable: true, visible: true },
+  { key: 'username', label: '用户名', prop: 'username', minWidth: 132, sortable: true, visible: true },
+  { key: 'email', label: '邮箱', prop: 'email', minWidth: 220, sortable: true, visible: true },
+  { key: 'groups', label: '角色组', prop: 'groups', minWidth: 180, sortable: true, visible: true },
+  { key: 'accountType', label: '身份', prop: 'accountType', minWidth: 110, sortable: true, visible: true },
+  { key: 'joinedAt', label: '创建时间', prop: 'joinedAt', minWidth: 146, sortable: true, visible: true },
+  { key: 'actions', label: '操作', prop: 'actions', width: 104, minWidth: 104, visible: true },
+]);
 
 const normalizeUsers = (payload) => {
   if (Array.isArray(payload)) return payload;
@@ -47,11 +98,23 @@ const normalizeGroups = (payload) => {
     if (typeof group === 'string') {
       return { id: group, name: group };
     }
+
     return {
       id: group.id ?? group.name ?? index,
       name: group.name ?? group.group_name ?? String(group.id ?? index),
     };
   });
+};
+
+const formatJoinedAt = (value) => {
+  if (!value) return '--';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '--';
+  return new Intl.DateTimeFormat('zh-CN', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(date);
 };
 
 const normalizeUserRecord = (user, index) => ({
@@ -63,8 +126,41 @@ const normalizeUserRecord = (user, index) => ({
     : Array.isArray(user.roles)
       ? user.roles.map((role) => (typeof role === 'string' ? role : role.name ?? String(role.id ?? ''))).filter(Boolean)
       : [],
+  isStaff: Boolean(user.is_staff),
+  isSuperuser: Boolean(user.is_superuser),
+  joinedAt: formatJoinedAt(user.date_joined),
+  joinedAtRaw: user.date_joined ?? '',
   raw: user,
 });
+
+const accountTypeValue = (user) => {
+  if (user.isSuperuser) return 'super_admin';
+  if (user.isStaff) return 'admin';
+  return 'member';
+};
+
+const accountTypeLabel = (user) => {
+  if (user.isSuperuser) return '超级管理员';
+  if (user.isStaff) return '管理员';
+  return '普通用户';
+};
+
+const groupStatusValue = (user) => (user.groups.length ? 'assigned' : 'missing');
+
+const availableGroups = computed(() => groups.value.map((group) => group.name));
+
+const orderedColumns = computed(() => columns.value.filter((column) => {
+  if (column.key === 'actions' && !hasRowActions.value) {
+    return false;
+  }
+  return column.visible;
+}));
+
+const columnControls = computed(() => columns.value.filter((column) => (
+  column.key !== 'actions' || hasRowActions.value
+)));
+
+const dialogTitle = computed(() => (dialogMode.value === 'create' ? '新增用户' : '编辑用户'));
 
 const fetchData = async () => {
   isLoading.value = true;
@@ -72,274 +168,737 @@ const fetchData = async () => {
   try {
     const [usersData, groupsData] = await Promise.all([
       adminApi.listUsers(),
-      adminApi.listGroups()
+      adminApi.listGroups(),
     ]);
     users.value = normalizeUsers(usersData).map(normalizeUserRecord);
     groups.value = normalizeGroups(groupsData);
   } catch (err) {
-    error.value = err.message || '加载数据失败';
+    error.value = err.message || '加载用户数据失败。';
+  } finally {
+    isLoading.value = false;
+  }
+};
+
+const applyFilters = () => {
+  Object.assign(appliedFilters, draftFilters);
+  pagination.page = 1;
+};
+
+const resetFilters = () => {
+  Object.assign(draftFilters, {
+    keyword: '',
+    group: '',
+    userId: '',
+    accountType: '',
+    groupStatus: '',
+  });
+  Object.assign(appliedFilters, {
+    keyword: '',
+    group: '',
+    userId: '',
+    accountType: '',
+    groupStatus: '',
+  });
+  filterExpanded.value = false;
+  pagination.page = 1;
+};
+
+const filteredUsers = computed(() => {
+  const keyword = appliedFilters.keyword.trim().toLowerCase();
+  const group = appliedFilters.group;
+  const userId = appliedFilters.userId.trim();
+  const accountType = appliedFilters.accountType;
+  const groupStatus = appliedFilters.groupStatus;
+
+  return users.value.filter((user) => {
+    const haystack = [
+      String(user.id),
+      user.username,
+      user.email,
+      user.groups.join(' '),
+      accountTypeLabel(user),
+    ].join(' ').toLowerCase();
+
+    if (keyword && !haystack.includes(keyword)) {
+      return false;
+    }
+    if (group && !user.groups.includes(group)) {
+      return false;
+    }
+    if (userId && !String(user.id).includes(userId)) {
+      return false;
+    }
+    if (accountType && accountTypeValue(user) !== accountType) {
+      return false;
+    }
+    if (groupStatus && groupStatusValue(user) !== groupStatus) {
+      return false;
+    }
+
+    return true;
+  });
+});
+
+const getSortValue = (user, prop) => {
+  if (prop === 'groups') return user.groups.join(' / ');
+  if (prop === 'accountType') return accountTypeLabel(user);
+  if (prop === 'joinedAt') return user.joinedAtRaw;
+  return user[prop];
+};
+
+const sortedUsers = computed(() => {
+  const rows = [...filteredUsers.value];
+  if (!sortState.prop || !sortState.order) {
+    return rows;
+  }
+
+  const direction = sortState.order === 'descending' ? -1 : 1;
+  return rows.sort((left, right) => {
+    const leftValue = getSortValue(left, sortState.prop);
+    const rightValue = getSortValue(right, sortState.prop);
+
+    if (typeof leftValue === 'number' && typeof rightValue === 'number') {
+      return (leftValue - rightValue) * direction;
+    }
+
+    return String(leftValue ?? '').localeCompare(String(rightValue ?? ''), 'zh-CN', {
+      numeric: true,
+      sensitivity: 'base',
+    }) * direction;
+  });
+});
+
+const pagedUsers = computed(() => {
+  const start = (pagination.page - 1) * pagination.pageSize;
+  return sortedUsers.value.slice(start, start + pagination.pageSize);
+});
+
+const totalUsers = computed(() => filteredUsers.value.length);
+
+watch(totalUsers, (nextTotal) => {
+  const maxPage = Math.max(1, Math.ceil(nextTotal / pagination.pageSize));
+  if (pagination.page > maxPage) {
+    pagination.page = maxPage;
+  }
+});
+
+const handleSortChange = ({ prop, order }) => {
+  sortState.prop = prop || 'id';
+  sortState.order = order || 'ascending';
+};
+
+const handlePageChange = (page) => {
+  pagination.page = page;
+};
+
+const moveColumn = (columnKey, delta) => {
+  const index = columns.value.findIndex((column) => column.key === columnKey);
+  const targetIndex = index + delta;
+  if (index === -1 || targetIndex < 0 || targetIndex >= columns.value.length) {
+    return;
+  }
+
+  const nextColumns = [...columns.value];
+  const [column] = nextColumns.splice(index, 1);
+  nextColumns.splice(targetIndex, 0, column);
+  columns.value = nextColumns;
+};
+
+const getDefaultGroups = () => {
+  if (availableGroups.value.includes('member')) {
+    return ['member'];
+  }
+  return availableGroups.value[0] ? [availableGroups.value[0]] : [];
+};
+
+const resetUserForm = () => {
+  userForm.id = null;
+  userForm.username = '';
+  userForm.email = '';
+  userForm.password = '';
+  userForm.groups = canAssignRole.value ? getDefaultGroups() : [];
+};
+
+const openCreateDialog = () => {
+  dialogMode.value = 'create';
+  resetUserForm();
+  dialogVisible.value = true;
+};
+
+const openEditDialog = (user) => {
+  dialogMode.value = 'edit';
+  userForm.id = user.id;
+  userForm.username = user.username;
+  userForm.email = user.email === '--' ? '' : user.email;
+  userForm.password = '';
+  userForm.groups = canAssignRole.value ? [...user.groups] : [];
+  dialogVisible.value = true;
+};
+
+const closeDialog = () => {
+  dialogVisible.value = false;
+};
+
+const validateUserForm = () => {
+  if (!userForm.username.trim() || !userForm.email.trim()) {
+    flash.error('请填写用户名和邮箱。');
+    return false;
+  }
+
+  if (dialogMode.value === 'create' && !userForm.password.trim()) {
+    flash.error('新增用户时必须填写初始密码。');
+    return false;
+  }
+
+  if (canAssignRole.value && userForm.groups.length === 0) {
+    flash.error('请至少选择一个角色组。');
+    return false;
+  }
+
+  return true;
+};
+
+const buildUserPayload = () => {
+  const payload = {
+    username: userForm.username.trim(),
+    email: userForm.email.trim(),
+    password: userForm.password.trim(),
+  };
+
+  if (canAssignRole.value) {
+    payload.groups = [...userForm.groups];
+  }
+
+  return payload;
+};
+
+const handleSubmit = async () => {
+  if (!validateUserForm()) {
+    return;
+  }
+
+  isSaving.value = true;
+  error.value = '';
+  try {
+    const payload = buildUserPayload();
+    if (dialogMode.value === 'create') {
+      await adminApi.createUser(payload);
+      flash.success('用户已创建。');
+    } else {
+      await adminApi.updateUser(userForm.id, payload);
+      flash.success('用户已更新。');
+    }
+    closeDialog();
+    await fetchData();
+  } catch (err) {
+    error.value = err.message || '保存用户失败。';
+  } finally {
+    isSaving.value = false;
+  }
+};
+
+const handleDelete = async (user) => {
+  if (user.id === currentUserId.value) {
+    flash.error('不能删除当前登录用户。');
+    return;
+  }
+
+  try {
+    await ElMessageBox.confirm(
+      `确认删除用户 ${user.username} 吗？此操作不可撤销。`,
+      '删除用户',
+      {
+        confirmButtonText: '删除',
+        cancelButtonText: '取消',
+        type: 'warning',
+      },
+    );
+  } catch {
+    return;
+  }
+
+  isLoading.value = true;
+  error.value = '';
+  try {
+    await adminApi.deleteUser(user.id);
+    flash.success('用户已删除。');
+    await fetchData();
+  } catch (err) {
+    error.value = err.message || '删除用户失败。';
   } finally {
     isLoading.value = false;
   }
 };
 
 onMounted(fetchData);
-
-const filteredUsers = computed(() => {
-  return users.value.filter((user) => {
-    const keyword = searchQuery.value.toLowerCase();
-    const usernameMatch = user.username.toLowerCase().includes(keyword);
-    const emailMatch = user.email.toLowerCase().includes(keyword);
-    const matchesSearch = usernameMatch || emailMatch;
-
-    const matchesGroup = !filterGroup.value || user.groups.includes(filterGroup.value);
-    return matchesSearch && matchesGroup;
-  });
-});
-
-const reviewQueue = computed(() => filteredUsers.value.slice(0, 6));
-const ungroupedCount = computed(() => users.value.filter((user) => user.groups.length === 0).length);
-const tableColumns = [
-  { prop: 'id', label: 'ID', width: '80' },
-  { prop: 'username', label: '用户名', minWidth: '140', sortable: true },
-  { prop: 'email', label: '邮箱', minWidth: '180' },
-  { key: 'groups', label: '角色组', minWidth: '180', slot: 'groups' },
-  { key: 'actions', label: '操作', width: '100', fixed: 'right', slot: 'actions', tooltip: false },
-];
-
-const frameMeta = computed(() => [
-  `筛选结果：${filteredUsers.value.length}`,
-  `待补角色：${ungroupedCount.value}`,
-]);
-const groupDistribution = computed(() => groups.value
-  .map((group) => ({
-    name: group.name,
-    count: users.value.filter((user) => user.groups.includes(group.name)).length,
-  }))
-  .sort((left, right) => right.count - left.count)
-  .slice(0, 6));
-
-const openEditDrawer = (user) => {
-  if (!user) return;
-  selectedUser.value = {
-    ...structuredClone(user),
-    groups: Array.isArray(user.groups) ? [...user.groups] : [],
-  };
-  showEditDrawer.value = true;
-};
-
-const closeEditDrawer = () => {
-  selectedUser.value = null;
-  showEditDrawer.value = false;
-};
-
-const handleUpdateGroups = async () => {
-  if (!selectedUser.value) return;
-  if (!selectedUser.value.groups || selectedUser.value.groups.length === 0) {
-    flash.error('请至少选择一个角色组。');
-    return;
-  }
-  isUpdating.value = true;
-  try {
-    const groupNames = [...selectedUser.value.groups];
-    await adminApi.updateUserGroups(selectedUser.value.id, groupNames);
-
-    const index = users.value.findIndex((u) => u.id === selectedUser.value.id);
-    if (index !== -1) {
-      users.value[index].groups = groupNames;
-    }
-
-    flash.success('用户角色已更新');
-    closeEditDrawer();
-  } catch (err) {
-    flash.error(err.message || '更新失败');
-  } finally {
-    isUpdating.value = false;
-  }
-};
-
-const confirmAndUpdate = async () => {
-  if (!selectedUser.value) return;
-  if (!selectedUser.value.groups || selectedUser.value.groups.length === 0) {
-    flash.error('请至少选择一个角色组。');
-    return;
-  }
-  try {
-    await ElMessageBox.confirm(
-      `确认将 ${selectedUser.value.username} 的角色更新为：${selectedUser.value.groups.join('、') || '无'}？`,
-      '确认操作',
-      { confirmButtonText: '确认', cancelButtonText: '取消', type: 'warning' }
-    );
-    await handleUpdateGroups();
-  } catch {
-    // user cancelled
-  }
-};
 </script>
 
 <template>
-  <OpsSectionFrame
-    eyebrow="Governance / Users"
-    title="用户与角色管理"
-    summary="把角色分配做成 review surface：先看待处理队列，再审表，再在决策侧确认当前角色覆盖。"
-    :meta="frameMeta"
-  >
-    <template #actions>
-      <el-button type="primary" @click="fetchData" :loading="isLoading">刷新数据</el-button>
-    </template>
+  <div class="page-stack users-page">
+    <el-alert v-if="error" :title="error" type="error" show-icon :closable="false" />
 
-    <template #alerts>
-      <el-alert v-if="error" :title="error" type="error" show-icon :closable="false" />
-    </template>
+    <section class="users-page__filters">
+      <div class="users-page__filters-grid">
+        <label class="users-page__field users-page__field--keyword">
+          <span>搜索</span>
+          <el-input
+            v-model="draftFilters.keyword"
+            clearable
+            placeholder="按 ID、用户名、邮箱、角色组搜索"
+            @keyup.enter="applyFilters"
+          >
+            <template #prefix>
+              <AppIcon name="search" />
+            </template>
+          </el-input>
+        </label>
 
-    <GovernanceReviewDesk>
-      <template #queue>
-        <AppSectionCard title="审核队列" desc="优先查看当前筛选范围内最需要处理的用户。" admin>
-          <AppToolbar>
-            <el-form :inline="true" class="admin-form-row">
-              <el-form-item>
-                <el-input v-model="searchQuery" placeholder="搜索用户名或邮箱..." clearable />
-              </el-form-item>
-              <el-form-item>
-                <el-select v-model="filterGroup" placeholder="所有角色" clearable>
-                  <el-option v-for="g in groups" :key="g.id" :label="g.name" :value="g.name" />
-                </el-select>
-              </el-form-item>
-            </el-form>
-          </AppToolbar>
+        <label class="users-page__field">
+          <span>角色组</span>
+          <el-select v-model="draftFilters.group" clearable placeholder="全部角色组">
+            <el-option
+              v-for="group in groups"
+              :key="group.id"
+              :label="group.name"
+              :value="group.name"
+            />
+          </el-select>
+        </label>
 
-          <div v-if="reviewQueue.length === 0" class="admin-empty-state">当前筛选没有待审用户</div>
-          <div v-else class="governance-review-queue">
-            <button
-              v-for="user in reviewQueue"
-              :key="user.id"
-              type="button"
-              class="governance-review-queue__item"
-              @click="openEditDrawer(user)"
-            >
-              <strong>{{ user.username }}</strong>
-              <span>{{ user.email }}</span>
-              <span class="muted-text">
-                {{ user.groups.length ? user.groups.join(' / ') : '未分配角色组' }}
-              </span>
-            </button>
-          </div>
-        </AppSectionCard>
-      </template>
+        <label v-if="filterExpanded" class="users-page__field">
+          <span>用户 ID</span>
+          <el-input
+            v-model="draftFilters.userId"
+            clearable
+            placeholder="按 ID 查询"
+            @keyup.enter="applyFilters"
+          />
+        </label>
 
-      <AppSectionCard title="用户列表" desc="按用户名、邮箱和角色组筛选，点击编辑修改所属角色。" admin>
-        <AdminDataTable
-          :data="filteredUsers"
-          :columns="tableColumns"
-          :loading="isLoading"
-          :error="error"
-          :show-search="false"
-          @retry="fetchData"
-        >
-          <template #groups="{ row }">
-            <div v-if="row.groups && row.groups.length" class="tag-list">
-              <el-tag v-for="groupName in row.groups" :key="groupName" size="small">{{ groupName }}</el-tag>
-            </div>
-            <span v-else class="muted-text">无角色</span>
-          </template>
+        <label v-if="filterExpanded" class="users-page__field">
+          <span>身份</span>
+          <el-select v-model="draftFilters.accountType" clearable placeholder="全部身份">
+            <el-option label="超级管理员" value="super_admin" />
+            <el-option label="管理员" value="admin" />
+            <el-option label="普通用户" value="member" />
+          </el-select>
+        </label>
 
-          <template #actions="{ row }">
-            <el-button type="primary" plain size="small" @click="openEditDrawer(row)">编辑角色</el-button>
-          </template>
-        </AdminDataTable>
-      </AppSectionCard>
+        <label v-if="filterExpanded" class="users-page__field">
+          <span>角色状态</span>
+          <el-select v-model="draftFilters.groupStatus" clearable placeholder="全部状态">
+            <el-option label="已分配角色" value="assigned" />
+            <el-option label="未分配角色" value="missing" />
+          </el-select>
+        </label>
+      </div>
 
-      <template #decision>
-        <AppSectionCard title="决策侧栏" desc="先确认角色覆盖，再进入抽屉提交变更。" admin>
-          <div class="governance-review-decision">
-            <div v-if="selectedUser" class="governance-review-decision__focus">
-              <span class="muted-text">当前待处理</span>
-              <strong>{{ selectedUser.username }}</strong>
-              <p>{{ selectedUser.email }}</p>
-              <p class="muted-text">
-                {{ selectedUser.groups.length ? selectedUser.groups.join(' / ') : '未分配角色组' }}
-              </p>
-            </div>
+      <div class="users-page__filter-actions">
+        <el-button text @click="filterExpanded = !filterExpanded">
+          {{ filterExpanded ? '收起筛选' : '展开筛选' }}
+        </el-button>
+        <el-button type="primary" :loading="isLoading" @click="applyFilters">查询</el-button>
+        <el-button @click="resetFilters">重置</el-button>
+      </div>
+    </section>
 
-            <div class="governance-review-distribution">
-              <article v-for="group in groupDistribution" :key="group.name" class="governance-review-distribution__item">
-                <strong>{{ group.name }}</strong>
-                <span>{{ group.count }} 人</span>
-              </article>
-            </div>
-          </div>
-        </AppSectionCard>
-      </template>
-    </GovernanceReviewDesk>
-
-    <el-drawer v-model="showEditDrawer" size="420px" :with-header="true" destroy-on-close>
-      <template #header>
-        <div class="section-heading">
-          <h3 class="section-heading__title">编辑用户角色</h3>
-          <div class="section-heading__desc">{{ selectedUser?.username || '未选择用户' }}</div>
+    <AppSectionCard admin>
+      <div class="users-page__table-toolbar">
+        <div class="users-page__table-toolbar-left">
+          <el-button v-if="canCreateUser" type="primary" @click="openCreateDialog">
+            <AppIcon name="plus" />
+            新增用户
+          </el-button>
         </div>
-      </template>
 
-      <div v-if="selectedUser" class="status-stack">
-        <p class="muted-text">请选择该用户所属的角色组：</p>
-        <el-checkbox-group v-model="selectedUser.groups">
-          <div class="status-stack">
-            <el-checkbox v-for="g in groups" :key="g.id" :value="g.name" :label="g.name">
-              {{ g.name }}
-            </el-checkbox>
-          </div>
-        </el-checkbox-group>
+        <div class="users-page__table-toolbar-right">
+          <el-popover placement="bottom-end" :width="280" trigger="click">
+            <template #reference>
+              <el-button>
+                列排序
+              </el-button>
+            </template>
+
+            <div class="users-page__column-list">
+              <div
+                v-for="(column, index) in columnControls"
+                :key="column.key"
+                class="users-page__column-item"
+              >
+                <el-checkbox v-model="column.visible" :disabled="column.key === 'actions'">
+                  {{ column.label }}
+                </el-checkbox>
+
+                <div class="users-page__column-order">
+                  <el-button text :disabled="index === 0" @click="moveColumn(column.key, -1)">
+                    上移
+                  </el-button>
+                  <el-button
+                    text
+                    :disabled="index === columnControls.length - 1"
+                    @click="moveColumn(column.key, 1)"
+                  >
+                    下移
+                  </el-button>
+                </div>
+              </div>
+            </div>
+          </el-popover>
+        </div>
+      </div>
+
+      <el-table
+        :data="pagedUsers"
+        row-key="id"
+        size="small"
+        :default-sort="{ prop: sortState.prop, order: sortState.order }"
+        v-loading="isLoading"
+        element-loading-text="加载中..."
+        @sort-change="handleSortChange"
+      >
+        <el-table-column
+          v-for="column in orderedColumns"
+          :key="column.key"
+          :prop="column.prop"
+          :label="column.label"
+          :width="column.width"
+          :min-width="column.minWidth"
+          :sortable="column.sortable ? 'custom' : false"
+          :fixed="column.key === 'actions' ? 'right' : false"
+          :show-overflow-tooltip="column.key !== 'actions'"
+        >
+          <template #default="{ row }">
+            <template v-if="column.key === 'groups'">
+              <div v-if="row.groups.length" class="users-page__group-list">
+                <el-tag v-for="groupName in row.groups" :key="groupName" size="small">
+                  {{ groupName }}
+                </el-tag>
+              </div>
+              <span v-else class="muted-text">未分配</span>
+            </template>
+
+            <template v-else-if="column.key === 'accountType'">
+              <span>{{ accountTypeLabel(row) }}</span>
+            </template>
+
+            <template v-else-if="column.key === 'actions'">
+              <div class="users-page__row-actions">
+                <el-tooltip
+                  v-if="canChangeUser || canAssignRole"
+                  content="编辑"
+                  placement="top"
+                >
+                  <button
+                    type="button"
+                    class="users-page__icon-button"
+                    @click="openEditDialog(row)"
+                  >
+                    <AppIcon name="edit" />
+                  </button>
+                </el-tooltip>
+
+                <el-tooltip
+                  v-if="canDeleteUser && row.id !== currentUserId"
+                  content="删除"
+                  placement="top"
+                >
+                  <button
+                    type="button"
+                    class="users-page__icon-button users-page__icon-button--danger"
+                    @click="handleDelete(row)"
+                  >
+                    <AppIcon name="trash" />
+                  </button>
+                </el-tooltip>
+              </div>
+            </template>
+
+            <template v-else>
+              {{ row[column.prop] }}
+            </template>
+          </template>
+        </el-table-column>
+
+        <template #empty>
+          <div class="admin-empty-state">当前筛选下没有用户记录</div>
+        </template>
+      </el-table>
+
+      <div class="users-page__pagination">
+        <el-pagination
+          small
+          background
+          :current-page="pagination.page"
+          :page-size="pagination.pageSize"
+          :total="totalUsers"
+          layout="total, prev, pager, next"
+          @current-change="handlePageChange"
+        />
+      </div>
+    </AppSectionCard>
+
+    <el-dialog
+      v-model="dialogVisible"
+      :title="dialogTitle"
+      width="560px"
+      destroy-on-close
+    >
+      <div class="users-page__dialog">
+        <label class="users-page__field">
+          <span>用户名</span>
+          <el-input v-model="userForm.username" maxlength="150" />
+        </label>
+
+        <label class="users-page__field">
+          <span>邮箱</span>
+          <el-input v-model="userForm.email" type="email" maxlength="254" />
+        </label>
+
+        <label class="users-page__field">
+          <span>{{ dialogMode === 'create' ? '初始密码' : '重置密码' }}</span>
+          <el-input
+            v-model="userForm.password"
+            type="password"
+            show-password
+            :placeholder="dialogMode === 'create' ? '请输入初始密码' : '留空则不修改密码'"
+          />
+        </label>
+
+        <label v-if="canAssignRole" class="users-page__field">
+          <span>角色组</span>
+          <el-select v-model="userForm.groups" multiple collapse-tags collapse-tags-tooltip>
+            <el-option
+              v-for="group in groups"
+              :key="group.id"
+              :label="group.name"
+              :value="group.name"
+            />
+          </el-select>
+        </label>
       </div>
 
       <template #footer>
-        <div class="inline-actions">
-          <el-button @click="closeEditDrawer" :disabled="isUpdating">取消</el-button>
-          <el-button type="primary" @click="confirmAndUpdate" :loading="isUpdating">保存更改</el-button>
+        <div class="users-page__dialog-actions">
+          <el-button @click="closeDialog" :disabled="isSaving">取消</el-button>
+          <el-button type="primary" :loading="isSaving" @click="handleSubmit">
+            {{ dialogMode === 'create' ? '创建用户' : '保存修改' }}
+          </el-button>
         </div>
       </template>
-    </el-drawer>
-  </OpsSectionFrame>
+    </el-dialog>
+  </div>
 </template>
 
 <style scoped>
-.governance-review-queue,
-.governance-review-distribution {
+.users-page {
+  min-width: 0;
+}
+
+.users-page__filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 18px 20px;
+  border: 1px solid var(--line-soft);
+  border-radius: 20px;
+  background: var(--surface-1);
+}
+
+.users-page__filters-grid {
+  display: grid;
+  flex: 1 1 720px;
+  grid-template-columns: minmax(240px, 2.2fr) repeat(2, minmax(160px, 1fr));
+  gap: 12px;
+}
+
+.users-page__field {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.users-page__field span {
+  color: var(--text-muted);
+  font-size: 0.6875rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.users-page__field--keyword {
+  grid-column: span 2;
+}
+
+.users-page__filter-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.users-page__table-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.users-page__table-toolbar-left,
+.users-page__table-toolbar-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.users-page__column-list {
   display: grid;
   gap: 10px;
 }
 
-.governance-review-queue__item {
-  display: grid;
+.users-page__column-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.users-page__column-order {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.users-page__group-list {
+  display: flex;
+  flex-wrap: wrap;
   gap: 6px;
-  padding: 14px 0 0;
+}
+
+.users-page__row-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+}
+
+.users-page__icon-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
   border: 0;
-  border-top: 1px solid var(--line-soft);
+  border-radius: 10px;
   background: transparent;
-  color: var(--text-primary);
-  text-align: left;
+  color: var(--text-secondary);
   cursor: pointer;
+  transition: background 0.18s ease, color 0.18s ease;
 }
 
-.governance-review-queue__item:first-child {
-  padding-top: 0;
-  border-top: 0;
+.users-page__icon-button:hover {
+  background: var(--surface-2);
+  color: var(--text-primary);
 }
 
-.governance-review-decision {
+.users-page__icon-button--danger:hover {
+  color: var(--risk);
+}
+
+.users-page__pagination {
+  display: flex;
+  justify-content: flex-end;
+  padding-top: 6px;
+}
+
+.users-page__dialog {
   display: grid;
   gap: 14px;
 }
 
-.governance-review-decision__focus {
-  display: grid;
-  gap: 6px;
+.users-page__dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
 }
 
-.governance-review-distribution__item {
-  display: flex;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 10px 0;
-  border-top: 1px solid rgba(127, 146, 170, 0.14);
+.users-page :deep(.el-input__wrapper),
+.users-page :deep(.el-select__wrapper) {
+  min-height: 36px;
+}
+
+.users-page :deep(.el-table) {
+  --el-table-border-color: var(--line-soft);
+  --el-table-header-bg-color: transparent;
+  border: 0;
+}
+
+.users-page :deep(.el-table__inner-wrapper::before) {
+  display: none;
+}
+
+.users-page :deep(.el-table th.el-table__cell) {
+  height: 40px;
+  padding-block: 6px;
+  color: var(--text-muted);
+  font-size: 0.6875rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  background: transparent;
+}
+
+.users-page :deep(.el-table td.el-table__cell) {
+  padding-block: 8px;
+}
+
+.users-page :deep(.el-tag) {
+  border-radius: 999px;
+}
+
+@media (max-width: 1180px) {
+  .users-page__filters-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .users-page__field--keyword {
+    grid-column: span 2;
+  }
+}
+
+@media (max-width: 900px) {
+  .users-page__filters {
+    padding: 16px;
+  }
+
+  .users-page__filters-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .users-page__field--keyword {
+    grid-column: span 1;
+  }
+
+  .users-page__filter-actions,
+  .users-page__table-toolbar {
+    width: 100%;
+    justify-content: space-between;
+  }
+}
+
+@media (max-width: 640px) {
+  .users-page__table-toolbar,
+  .users-page__column-item {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .users-page__column-order,
+  .users-page__filter-actions,
+  .users-page__dialog-actions {
+    justify-content: flex-start;
+  }
 }
 </style>

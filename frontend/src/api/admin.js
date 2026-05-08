@@ -16,6 +16,26 @@ export const createAdminApi = (overrides = {}) => {
         auth: true,
       });
     },
+    createUser(payload) {
+      return config.fetchJson('/api/admin/users', {
+        method: 'POST',
+        auth: true,
+        body: JSON.stringify(payload),
+      });
+    },
+    updateUser(userId, payload) {
+      return config.fetchJson(`/api/admin/users/${userId}`, {
+        method: 'PATCH',
+        auth: true,
+        body: JSON.stringify(payload),
+      });
+    },
+    deleteUser(userId) {
+      return config.fetchJson(`/api/admin/users/${userId}`, {
+        method: 'DELETE',
+        auth: true,
+      });
+    },
     updateUserGroups(userId, groupNames) {
       return config.fetchJson(`/api/admin/users/${userId}/groups`, {
         method: 'PUT',

@@ -206,6 +206,73 @@ class AdminManagementApiTests(TestCase):
             },
         )
 
+    def test_post_admin_users_creates_user_and_assigns_groups(self):
+        response = self.client.post(
+            "/api/admin/users",
+            data=json.dumps(
+                {
+                    "username": "new-analyst",
+                    "email": "new-analyst@example.com",
+                    "password": "secret123",
+                    "groups": [ROLE_MEMBER],
+                }
+            ),
+            content_type="application/json",
+            HTTP_AUTHORIZATION=f"Bearer {self.super_admin_access_token}",
+        )
+
+        self.assertEqual(response.status_code, 201)
+        created_user = User.objects.get(username="new-analyst")
+        self.assertEqual(created_user.email, "new-analyst@example.com")
+        self.assertEqual(
+            list(created_user.groups.values_list("name", flat=True)),
+            [ROLE_MEMBER],
+        )
+        self.assertEqual(response.json()["username"], "new-analyst")
+
+    def test_patch_admin_user_detail_updates_profile_fields_and_groups(self):
+        response = self.client.patch(
+            f"/api/admin/users/{self.target_user.id}",
+            data=json.dumps(
+                {
+                    "username": "target-user-updated",
+                    "email": "target-updated@example.com",
+                    "password": "",
+                    "groups": [ROLE_ADMIN],
+                }
+            ),
+            content_type="application/json",
+            HTTP_AUTHORIZATION=f"Bearer {self.super_admin_access_token}",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.target_user.refresh_from_db()
+        self.assertEqual(self.target_user.username, "target-user-updated")
+        self.assertEqual(self.target_user.email, "target-updated@example.com")
+        self.assertEqual(
+            list(self.target_user.groups.values_list("name", flat=True)),
+            [ROLE_ADMIN],
+        )
+
+    def test_delete_admin_user_detail_removes_target_user(self):
+        response = self.client.delete(
+            f"/api/admin/users/{self.target_user.id}",
+            HTTP_AUTHORIZATION=f"Bearer {self.super_admin_access_token}",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(User.objects.filter(id=self.target_user.id).exists())
+        self.assertEqual(response.json(), {"message": "用户已删除。"})
+
+    def test_delete_admin_user_detail_rejects_current_user(self):
+        response = self.client.delete(
+            f"/api/admin/users/{self.super_admin_user.id}",
+            HTTP_AUTHORIZATION=f"Bearer {self.super_admin_access_token}",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json(), {"message": "不能删除当前登录用户。"})
+
     def test_member_receives_403_on_admin_apis(self):
         users_response = self.client.get(
             "/api/admin/users",
@@ -221,11 +288,30 @@ class AdminManagementApiTests(TestCase):
             content_type="application/json",
             HTTP_AUTHORIZATION=f"Bearer {self.member_access_token}",
         )
+        create_response = self.client.post(
+            "/api/admin/users",
+            data=json.dumps(
+                {
+                    "username": "forbidden-user",
+                    "email": "forbidden@example.com",
+                    "password": "secret123",
+                }
+            ),
+            content_type="application/json",
+            HTTP_AUTHORIZATION=f"Bearer {self.member_access_token}",
+        )
+        delete_response = self.client.delete(
+            f"/api/admin/users/{self.target_user.id}",
+            HTTP_AUTHORIZATION=f"Bearer {self.member_access_token}",
+        )
 
         self.assertEqual(users_response.status_code, 403)
         self.assertEqual(groups_response.status_code, 403)
         self.assertEqual(update_response.status_code, 403)
+        self.assertEqual(create_response.status_code, 403)
+        self.assertEqual(delete_response.status_code, 403)
         self.assertEqual(users_response.json(), {"message": "无权限。"})
         self.assertEqual(groups_response.json(), {"message": "无权限。"})
         self.assertEqual(update_response.json(), {"message": "无权限。"})
-
+        self.assertEqual(create_response.json(), {"message": "无权限。"})
+        self.assertEqual(delete_response.json(), {"message": "无权限。"})
