@@ -1,4 +1,5 @@
 import logging
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date
 
 from django.conf import settings
@@ -309,34 +310,52 @@ def _merge_ranked_results(ranked_lists):
     return merged_results
 
 
-def query_store(query, filters=None, top_k=5, query_variants=None):
-    candidate_limit = _candidate_limit(top_k)
+def _search_single_query(query_text, filters, candidate_limit):
     ranked_lists = []
 
-    for query_text in _normalize_queries(query, query_variants):
-        vector_results = VectorService().search(
-            query=query_text,
-            filters=filters,
-            top_k=candidate_limit,
-        )
-        vector_results = _expand_section_vector_results(query_text, vector_results)
-        if vector_results:
-            ranked_lists.append(("vector", query_text, vector_results))
+    vector_results = VectorService().search(
+        query=query_text,
+        filters=filters,
+        top_k=candidate_limit,
+    )
+    vector_results = _expand_section_vector_results(query_text, vector_results)
+    if vector_results:
+        ranked_lists.append(("vector", query_text, vector_results))
 
-        mysql_fulltext_results = _mysql_full_text_search(
-            query_text,
-            filters=filters,
-            limit=candidate_limit,
-        )
-        if mysql_fulltext_results:
-            ranked_lists.append(("mysql_fulltext", query_text, mysql_fulltext_results))
+    mysql_fulltext_results = _mysql_full_text_search(
+        query_text,
+        filters=filters,
+        limit=candidate_limit,
+    )
+    if mysql_fulltext_results:
+        ranked_lists.append(("mysql_fulltext", query_text, mysql_fulltext_results))
 
-        fallback_keyword_results = _fallback_keyword_search(
-            query_text,
-            filters=filters,
-            limit=candidate_limit,
-        )
-        if fallback_keyword_results:
-            ranked_lists.append(("token_keyword", query_text, fallback_keyword_results))
+    fallback_keyword_results = _fallback_keyword_search(
+        query_text,
+        filters=filters,
+        limit=candidate_limit,
+    )
+    if fallback_keyword_results:
+        ranked_lists.append(("token_keyword", query_text, fallback_keyword_results))
+
+    return ranked_lists
+
+
+def query_store(query, filters=None, top_k=5, query_variants=None):
+    candidate_limit = _candidate_limit(top_k)
+    queries = _normalize_queries(query, query_variants)
+    ranked_lists = []
+
+    if len(queries) == 1:
+        ranked_lists = _search_single_query(queries[0], filters, candidate_limit)
+    else:
+        max_workers = min(len(queries), 5)
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = {
+                executor.submit(_search_single_query, q, filters, candidate_limit): q
+                for q in queries
+            }
+            for future in as_completed(futures):
+                ranked_lists.extend(future.result())
 
     return _merge_ranked_results(ranked_lists)[: int(top_k)]

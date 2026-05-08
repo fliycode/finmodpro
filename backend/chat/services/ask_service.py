@@ -12,7 +12,6 @@ from common.observability import trace_span
 from llm.services.runtime_service import get_chat_provider
 from rag.models import RetrievalLog
 from rag.services.retrieval_log_service import create_retrieval_log
-from rag.services.retrieval_service import retrieve
 
 logger = logging.getLogger(__name__)
 
@@ -82,7 +81,6 @@ def ask_question(*, question, filters=None, top_k=5, session=None):
             top_k=top_k,
             session=session,
             provider=provider,
-            retrieve_fn=retrieve,
         )
         assistant_message = None
         if session is not None:
@@ -138,7 +136,6 @@ def stream_question(*, question, filters=None, top_k=5, session=None):
         top_k=top_k,
         session=session,
         provider=provider,
-        retrieve_fn=retrieve,
     )
 
     def event_stream():
