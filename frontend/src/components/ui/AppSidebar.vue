@@ -39,31 +39,31 @@ const profileActions = computed(() => [
 const areaMeta = computed(() => {
   if (props.area === 'admin') {
     return {
-      label: 'FinGPT-RAG',
-      sublabel: '金融风险洞察引擎',
-      eyebrow: 'Risk console',
+      label: 'FinModPro',
+      sublabel: '',
+      eyebrow: '',
     };
   }
 
   return {
-    label: 'Dossier workspace',
-    sublabel: '结论优先的金融分析台',
-    eyebrow: 'Case-led flow',
+    label: 'FinModPro',
+    sublabel: '',
+    eyebrow: '',
   };
 });
 
 const groupCatalog = computed(() => {
   if (props.area === 'admin') {
     return [
-      { id: 'admin-overview', label: '风险看板' },
-      { id: 'admin-governance', label: '治理审阅' },
-      { id: 'admin-llm', label: 'Gateway ops' },
+      { id: 'admin-overview', label: '' },
+      { id: 'admin-governance', label: '' },
+      { id: 'admin-llm', label: '' },
     ];
   }
 
   return [
-    { id: 'workspace-core', label: '核心档案' },
-    { id: 'workspace-support', label: '辅助记录' },
+    { id: 'workspace-core', label: '' },
+    { id: 'workspace-support', label: '' },
   ];
 });
 

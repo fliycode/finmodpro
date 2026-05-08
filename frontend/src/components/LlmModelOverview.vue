@@ -351,26 +351,6 @@ onMounted(fetchConfigs);
       <el-alert v-if="errorMsg" :title="errorMsg" type="error" show-icon :closable="false" />
     </template>
 
-    <section class="model-overview-metrics" aria-label="模型概览指标">
-      <article
-        v-for="card in summaryCards"
-        :key="card.key"
-        class="model-overview-metrics__card"
-        :class="card.tone ? `is-${card.tone}` : ''"
-      >
-        <div class="model-overview-metrics__head">
-          <span class="model-overview-metrics__label">{{ card.label }}</span>
-          <span class="model-overview-metrics__icon" aria-hidden="true">
-            <AppIcon :name="card.icon" />
-          </span>
-        </div>
-        <div class="model-overview-metrics__foot">
-          <strong class="model-overview-metrics__value">{{ card.value }}</strong>
-          <span class="model-overview-metrics__badge">{{ card.badge }}</span>
-        </div>
-      </article>
-    </section>
-
     <AppSectionCard title="模型列表" desc="统一查看模型状态、调用热度与最近维护动作。" admin>
       <template #header>
         <el-button type="primary" @click="openCreate">

@@ -12,8 +12,6 @@ import {
 import OpsCommandDeck from './admin/ops/OpsCommandDeck.vue';
 import OpsInspectorDrawer from './admin/ops/OpsInspectorDrawer.vue';
 import OpsSectionFrame from './admin/ops/OpsSectionFrame.vue';
-import OpsStatusBand from './admin/ops/OpsStatusBand.vue';
-import LlmManagementTabs from './LlmManagementTabs.vue';
 import AppSectionCard from './ui/AppSectionCard.vue';
 
 const filters = reactive({
@@ -142,8 +140,6 @@ onMounted(async () => {
   <OpsSectionFrame
     :meta="frameMeta"
   >
-    <LlmManagementTabs />
-
     <template #actions>
       <div class="gateway-page__hero-actions">
         <el-select v-model="filters.model" clearable placeholder="按 alias 筛选" style="width: 180px;">
@@ -165,10 +161,6 @@ onMounted(async () => {
 
     <template #alerts>
       <el-alert v-if="errorMsg" :title="errorMsg" type="error" show-icon :closable="false" />
-    </template>
-
-    <template #status-band>
-      <OpsStatusBand :items="metricCards" />
     </template>
 
     <OpsCommandDeck>
