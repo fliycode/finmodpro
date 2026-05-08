@@ -166,6 +166,7 @@ onBeforeUnmount(() => {
     <div v-if="props.title" class="app-topbar__title-group">
       <h1 class="app-topbar__page-title">{{ props.title }}</h1>
     </div>
+    <div v-else class="app-topbar__title-spacer" aria-hidden="true"></div>
 
     <div class="app-topbar__actions">
       <div class="app-topbar__search" @click="openPalette">
@@ -179,59 +180,61 @@ onBeforeUnmount(() => {
         />
       </div>
 
-      <ThemeToggle />
+      <div class="app-topbar__utility-group">
+        <ThemeToggle />
 
-      <div class="app-topbar__avatar-group">
-        <button
-          type="button"
-          class="app-topbar__avatar-trigger"
-          :aria-label="`账号菜单：${profileName}`"
-          @click.stop="toggleDropdown"
-        >
-          <span class="app-topbar__avatar">{{ profileInitial }}</span>
-        </button>
+        <div class="app-topbar__avatar-group">
+          <button
+            type="button"
+            class="app-topbar__avatar-trigger"
+            :aria-label="`账号菜单：${profileName}`"
+            @click.stop="toggleDropdown"
+          >
+            <span class="app-topbar__avatar">{{ profileInitial }}</span>
+          </button>
 
-        <Transition name="dropdown">
-          <div v-if="dropdownOpen" class="app-topbar__dropdown" role="menu">
-            <div class="app-topbar__dropdown-summary">
-              <span class="app-topbar__avatar app-topbar__avatar--lg">{{ profileInitial }}</span>
-              <div>
-                <strong>{{ profileName }}</strong>
-                <span v-if="profileEmail">{{ profileEmail }}</span>
-                <em>{{ roleLabel }}</em>
+          <Transition name="dropdown">
+            <div v-if="dropdownOpen" class="app-topbar__dropdown" role="menu">
+              <div class="app-topbar__dropdown-summary">
+                <span class="app-topbar__avatar app-topbar__avatar--lg">{{ profileInitial }}</span>
+                <div>
+                  <strong>{{ profileName }}</strong>
+                  <span v-if="profileEmail">{{ profileEmail }}</span>
+                  <em>{{ roleLabel }}</em>
+                </div>
               </div>
-            </div>
-            <div class="app-topbar__dropdown-divider"></div>
-            <RouterLink
-              :to="'/workspace/profile'"
-              class="app-topbar__dropdown-item"
-              role="menuitem"
-              @click="closeDropdown"
-            >
-              个人信息
-            </RouterLink>
-            <template v-for="action in actions" :key="action.id">
-              <button
-                v-if="action.id === 'logout'"
-                type="button"
-                class="app-topbar__dropdown-item"
-                role="menuitem"
-                @click="handleLogout"
-              >
-                {{ action.label }}
-              </button>
+              <div class="app-topbar__dropdown-divider"></div>
               <RouterLink
-                v-else
-                :to="action.to"
+                :to="'/workspace/profile'"
                 class="app-topbar__dropdown-item"
                 role="menuitem"
                 @click="closeDropdown"
               >
-                {{ action.label }}
+                个人信息
               </RouterLink>
-            </template>
-          </div>
-        </Transition>
+              <template v-for="action in actions" :key="action.id">
+                <button
+                  v-if="action.id === 'logout'"
+                  type="button"
+                  class="app-topbar__dropdown-item"
+                  role="menuitem"
+                  @click="handleLogout"
+                >
+                  {{ action.label }}
+                </button>
+                <RouterLink
+                  v-else
+                  :to="action.to"
+                  class="app-topbar__dropdown-item"
+                  role="menuitem"
+                  @click="closeDropdown"
+                >
+                  {{ action.label }}
+                </RouterLink>
+              </template>
+            </div>
+          </Transition>
+        </div>
       </div>
     </div>
   </header>

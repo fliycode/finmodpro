@@ -66,8 +66,9 @@ const columns = ref([
   { key: 'id', label: 'ID', prop: 'id', width: 72, minWidth: 72, sortable: true, visible: true },
   { key: 'username', label: '用户名', prop: 'username', minWidth: 132, sortable: true, visible: true },
   { key: 'email', label: '邮箱', prop: 'email', minWidth: 220, sortable: true, visible: true },
+  { key: 'status', label: '状态', prop: 'status', minWidth: 104, sortable: true, visible: true },
   { key: 'groups', label: '角色组', prop: 'groups', minWidth: 180, sortable: true, visible: true },
-  { key: 'accountType', label: '身份', prop: 'accountType', minWidth: 110, sortable: true, visible: true },
+  { key: 'accountType', label: '身份', prop: 'accountType', minWidth: 132, sortable: true, visible: true },
   { key: 'joinedAt', label: '创建时间', prop: 'joinedAt', minWidth: 146, sortable: true, visible: true },
   { key: 'actions', label: '操作', prop: 'actions', width: 104, minWidth: 104, visible: true },
 ]);
@@ -128,6 +129,7 @@ const normalizeUserRecord = (user, index) => ({
       : [],
   isStaff: Boolean(user.is_staff),
   isSuperuser: Boolean(user.is_superuser),
+  isActive: user.is_active !== false,
   joinedAt: formatJoinedAt(user.date_joined),
   joinedAtRaw: user.date_joined ?? '',
   raw: user,
@@ -145,7 +147,22 @@ const accountTypeLabel = (user) => {
   return '普通用户';
 };
 
+const accountTypeTone = (user) => {
+  if (user.isSuperuser) return 'is-super';
+  if (user.isStaff) return 'is-admin';
+  return 'is-member';
+};
+
+const accountTypeIcon = (user) => {
+  if (user.isSuperuser) return 'spark';
+  if (user.isStaff) return 'shield';
+  return 'user';
+};
+
 const groupStatusValue = (user) => (user.groups.length ? 'assigned' : 'missing');
+
+const getStatusValue = (user) => ((user.id === currentUserId.value && user.isActive) ? 'online' : 'offline');
+const getStatusLabel = (user) => (getStatusValue(user) === 'online' ? '在线' : '离线');
 
 const availableGroups = computed(() => groups.value.map((group) => group.name));
 
@@ -217,6 +234,7 @@ const filteredUsers = computed(() => {
       user.email,
       user.groups.join(' '),
       accountTypeLabel(user),
+      getStatusLabel(user),
     ].join(' ').toLowerCase();
 
     if (keyword && !haystack.includes(keyword)) {
@@ -240,6 +258,7 @@ const filteredUsers = computed(() => {
 });
 
 const getSortValue = (user, prop) => {
+  if (prop === 'status') return getStatusLabel(user);
   if (prop === 'groups') return user.groups.join(' / ');
   if (prop === 'accountType') return accountTypeLabel(user);
   if (prop === 'joinedAt') return user.joinedAtRaw;
@@ -502,7 +521,7 @@ onMounted(fetchData);
       </div>
     </section>
 
-    <AppSectionCard admin>
+    <AppSectionCard admin class="users-page__table-card">
       <div class="users-page__table-toolbar">
         <div class="users-page__table-toolbar-left">
           <el-button v-if="canCreateUser" type="primary" @click="openCreateDialog">
@@ -547,11 +566,11 @@ onMounted(fetchData);
         </div>
       </div>
 
-      <el-table
-        :data="pagedUsers"
-        row-key="id"
-        size="small"
-        :default-sort="{ prop: sortState.prop, order: sortState.order }"
+        <el-table
+          :data="pagedUsers"
+          row-key="id"
+          size="small"
+          :default-sort="{ prop: sortState.prop, order: sortState.order }"
         v-loading="isLoading"
         element-loading-text="加载中..."
         @sort-change="handleSortChange"
@@ -566,9 +585,18 @@ onMounted(fetchData);
           :sortable="column.sortable ? 'custom' : false"
           :fixed="column.key === 'actions' ? 'right' : false"
           :show-overflow-tooltip="column.key !== 'actions'"
+          :header-align="column.key === 'actions' ? 'right' : 'left'"
+          :align="column.key === 'actions' ? 'right' : 'left'"
         >
           <template #default="{ row }">
-            <template v-if="column.key === 'groups'">
+            <template v-if="column.key === 'status'">
+              <span :class="['users-page__status-badge', `is-${getStatusValue(row)}`]">
+                <span class="users-page__status-dot"></span>
+                {{ getStatusLabel(row) }}
+              </span>
+            </template>
+
+            <template v-else-if="column.key === 'groups'">
               <div v-if="row.groups.length" class="users-page__group-list">
                 <el-tag v-for="groupName in row.groups" :key="groupName" size="small">
                   {{ groupName }}
@@ -578,7 +606,10 @@ onMounted(fetchData);
             </template>
 
             <template v-else-if="column.key === 'accountType'">
-              <span>{{ accountTypeLabel(row) }}</span>
+              <span :class="['users-page__role-badge', accountTypeTone(row)]">
+                <AppIcon :name="accountTypeIcon(row)" />
+                {{ accountTypeLabel(row) }}
+              </span>
             </template>
 
             <template v-else-if="column.key === 'actions'">
@@ -641,21 +672,25 @@ onMounted(fetchData);
       v-model="dialogVisible"
       :title="dialogTitle"
       width="560px"
+      class="users-page__dialog-modal"
       destroy-on-close
     >
       <div class="users-page__dialog">
         <label class="users-page__field">
-          <span>用户名</span>
+          <span class="users-page__field-label"><em class="users-page__required">*</em>用户名</span>
           <el-input v-model="userForm.username" maxlength="150" />
         </label>
 
         <label class="users-page__field">
-          <span>邮箱</span>
+          <span class="users-page__field-label"><em class="users-page__required">*</em>邮箱</span>
           <el-input v-model="userForm.email" type="email" maxlength="254" />
         </label>
 
         <label class="users-page__field">
-          <span>{{ dialogMode === 'create' ? '初始密码' : '重置密码' }}</span>
+          <span class="users-page__field-label">
+            <em v-if="dialogMode === 'create'" class="users-page__required">*</em>
+            {{ dialogMode === 'create' ? '初始密码' : '重置密码' }}
+          </span>
           <el-input
             v-model="userForm.password"
             type="password"
@@ -665,7 +700,7 @@ onMounted(fetchData);
         </label>
 
         <label v-if="canAssignRole" class="users-page__field">
-          <span>角色组</span>
+          <span class="users-page__field-label"><em class="users-page__required">*</em>角色组</span>
           <el-select v-model="userForm.groups" multiple collapse-tags collapse-tags-tooltip>
             <el-option
               v-for="group in groups"
@@ -701,7 +736,7 @@ onMounted(fetchData);
   justify-content: space-between;
   gap: 16px;
   padding: 18px 20px;
-  border: 1px solid var(--line-soft);
+  border: 1px solid var(--line-strong);
   border-radius: 20px;
   background: var(--surface-1);
 }
@@ -725,6 +760,17 @@ onMounted(fetchData);
   font-weight: 700;
   letter-spacing: 0.08em;
   text-transform: uppercase;
+}
+
+.users-page__field-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.users-page__required {
+  color: var(--risk);
+  font-style: normal;
 }
 
 .users-page__field--keyword {
@@ -769,6 +815,57 @@ onMounted(fetchData);
   display: flex;
   align-items: center;
   gap: 4px;
+}
+
+.users-page__status-badge,
+.users-page__role-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 28px;
+  padding: 0 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.users-page__status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.users-page__status-badge.is-online {
+  color: var(--success);
+  background: var(--success-50);
+  border-color: rgba(33, 129, 92, 0.18);
+}
+
+.users-page__status-badge.is-offline {
+  color: var(--text-muted);
+  background: var(--surface-3);
+}
+
+.users-page__role-badge.is-super {
+  color: #8b5cf6;
+  background: rgba(139, 92, 246, 0.1);
+  border-color: rgba(139, 92, 246, 0.18);
+}
+
+.users-page__role-badge.is-admin {
+  color: var(--brand);
+  background: var(--brand-soft);
+  border-color: rgba(36, 87, 197, 0.2);
+}
+
+.users-page__role-badge.is-member {
+  color: var(--warning);
+  background: var(--warning-50);
+  border-color: rgba(183, 121, 31, 0.18);
 }
 
 .users-page__group-list {
@@ -824,15 +921,26 @@ onMounted(fetchData);
   gap: 10px;
 }
 
+.users-page :deep(.admin-section-card) {
+  padding: 18px 20px;
+  border: 1px solid var(--line-strong);
+  border-radius: 24px;
+  background: var(--surface-1);
+}
+
 .users-page :deep(.el-input__wrapper),
 .users-page :deep(.el-select__wrapper) {
   min-height: 36px;
+  background: var(--surface-2);
+  box-shadow: inset 0 0 0 1px var(--line-strong);
+  border-radius: 12px;
 }
 
 .users-page :deep(.el-table) {
   --el-table-border-color: var(--line-soft);
   --el-table-header-bg-color: transparent;
-  border: 0;
+  border: 1px solid var(--line-soft);
+  border-radius: 18px;
 }
 
 .users-page :deep(.el-table__inner-wrapper::before) {
@@ -852,10 +960,32 @@ onMounted(fetchData);
 
 .users-page :deep(.el-table td.el-table__cell) {
   padding-block: 8px;
+  border-bottom-color: var(--line-soft);
+}
+
+.users-page :deep(.el-table th.el-table__cell .cell),
+.users-page :deep(.el-table td.el-table__cell .cell) {
+  padding-inline: 12px;
 }
 
 .users-page :deep(.el-tag) {
   border-radius: 999px;
+}
+
+.users-page :deep(.el-dialog) {
+  overflow: hidden;
+  border: 1px solid var(--line-strong);
+  border-radius: 24px;
+  background: var(--surface-1);
+}
+
+.users-page :deep(.el-dialog__header),
+.users-page :deep(.el-dialog__footer) {
+  padding-inline: 24px;
+}
+
+.users-page :deep(.el-dialog__body) {
+  padding: 12px 24px 8px;
 }
 
 @media (max-width: 1180px) {

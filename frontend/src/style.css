@@ -1195,6 +1195,11 @@ html[data-theme='dark'] body {
   flex-shrink: 1;
 }
 
+.app-topbar__title-spacer {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
 .app-topbar__page-title {
   margin: 0;
   font-family: var(--font-display);
@@ -1256,8 +1261,18 @@ html[data-theme='dark'] body {
   display: flex;
   align-items: center;
   gap: 10px;
+  margin-left: auto;
+  justify-content: flex-end;
+  flex: 1 1 auto;
   flex-shrink: 1;
   min-width: 0;
+}
+
+.app-topbar__utility-group {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-left: auto;
 }
 
 /* Avatar ─────────────────────────────────────────── */
