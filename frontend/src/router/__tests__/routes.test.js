@@ -3,10 +3,13 @@ import assert from 'node:assert/strict';
 
 import { appRoutes } from '../routes.js';
 
-test('admin route tree includes the LiteLLM cost page route', () => {
+test('admin route tree includes renamed model log and usage routes', () => {
   const adminRoute = appRoutes.find((route) => route.path === '/admin');
   const childPaths = (adminRoute?.children || []).map((route) => route.path);
 
+  assert.ok(childPaths.includes('llm/logs'));
+  assert.ok(childPaths.includes('llm/usage'));
+  assert.ok(childPaths.includes('llm/observability'));
   assert.ok(childPaths.includes('llm/costs'));
 });
 

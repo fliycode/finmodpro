@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import {
   createLlmApi,
   normalizeFineTuneRun,
+  normalizeModelConfigOverviewSummary,
   normalizeModelConfigPayload,
 } from '../llm.js';
 import { createApiConfig } from '../config.js';
@@ -16,8 +17,10 @@ test('normalizeModelConfigPayload exposes LiteLLM routing fields', () => {
         name: 'chat-default',
         provider: 'litellm',
         model_name: 'chat-default',
+        parameter_scale: '32B',
         capability: 'chat',
         endpoint: 'http://localhost:4000',
+        description: '财报风控主力模型',
         alias: 'chat-default',
         upstream_provider: 'openai',
         upstream_model: 'gpt-4o',
@@ -27,18 +30,44 @@ test('normalizeModelConfigPayload exposes LiteLLM routing fields', () => {
         output_price_per_million: 2,
         has_api_key: true,
         api_key_masked: 'sk-tes******3456',
+        invocation_count: 128,
       },
     ],
   });
 
   assert.equal(rows.length, 1);
   assert.equal(rows[0].alias, 'chat-default');
+  assert.equal(rows[0].parameter_scale, '32B');
+  assert.equal(rows[0].description, '财报风控主力模型');
   assert.equal(rows[0].upstream_provider, 'openai');
   assert.equal(rows[0].upstream_model, 'gpt-4o');
   assert.deepEqual(rows[0].fallback_aliases, ['chat-backup']);
   assert.equal(rows[0].weight, 2);
   assert.equal(rows[0].input_price_per_million, 0.5);
   assert.equal(rows[0].output_price_per_million, 2);
+  assert.equal(rows[0].invocation_count, 128);
+});
+
+test('normalizeModelConfigOverviewSummary keeps overview metrics and nullable delta', () => {
+  const overview = normalizeModelConfigOverviewSummary({
+    overview: {
+      total_models: 9,
+      enabled_models: 3,
+      total_invocation_count: 5600,
+      today_invocation_count: 180,
+      yesterday_invocation_count: 120,
+      invocation_change_pct: 50,
+    },
+  });
+
+  assert.deepEqual(overview, {
+    total_models: 9,
+    enabled_models: 3,
+    total_invocation_count: 5600,
+    today_invocation_count: 180,
+    yesterday_invocation_count: 120,
+    invocation_change_pct: 50,
+  });
 });
 
 test('createLlmApi calls LiteLLM sync and migrate endpoints', async () => {

@@ -36,6 +36,7 @@ const iconMap = {
   'sun': 'lucide:sun',
   'search': 'lucide:search',
   'plus': 'lucide:plus',
+  'play': 'lucide:play',
   'x': 'lucide:x',
   'external-link': 'lucide:external-link',
   'alert-triangle': 'lucide:alert-triangle',

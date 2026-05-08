@@ -13,6 +13,7 @@ import OpsCommandDeck from './admin/ops/OpsCommandDeck.vue';
 import OpsInspectorDrawer from './admin/ops/OpsInspectorDrawer.vue';
 import OpsSectionFrame from './admin/ops/OpsSectionFrame.vue';
 import OpsStatusBand from './admin/ops/OpsStatusBand.vue';
+import LlmManagementTabs from './LlmManagementTabs.vue';
 import AppSectionCard from './ui/AppSectionCard.vue';
 
 const filters = reactive({
@@ -62,7 +63,7 @@ const fetchObservability = async () => {
     errors.value = errorsPayload;
     refreshedAt.value = new Date().toLocaleString();
   } catch (error) {
-    errorMsg.value = error.message || '加载日志观测失败';
+    errorMsg.value = error.message || '加载模型日志失败';
   } finally {
     isLoading.value = false;
   }
@@ -139,11 +140,10 @@ onMounted(async () => {
 
 <template>
   <OpsSectionFrame
-    eyebrow="War room / Logs & observability"
-    title="Logs / Observability"
-    summary="用 request 级摘要表格、错误分析、延迟分布和 trace 入口，回答“哪条路由在出错、为什么错、一次请求走了什么链路”。"
     :meta="frameMeta"
   >
+    <LlmManagementTabs />
+
     <template #actions>
       <div class="gateway-page__hero-actions">
         <el-select v-model="filters.model" clearable placeholder="按 alias 筛选" style="width: 180px;">
@@ -172,10 +172,10 @@ onMounted(async () => {
     </template>
 
     <OpsCommandDeck>
-      <AppSectionCard title="错误分析" desc="把错误类型聚合和最近错误样本并排展示，便于先判断主因再下钻具体请求。" admin>
+      <AppSectionCard title="错误分析" desc="先判断主因，再下钻到具体请求和链路节点。" admin>
         <div class="analysis-grid">
           <div class="analysis-column">
-            <span class="section-kicker">Error types</span>
+            <span class="section-kicker">错误类型</span>
             <div v-if="errors.error_types.length === 0" class="admin-empty-state">当前筛选窗口暂无失败类型</div>
             <div v-else class="analysis-list">
               <article v-for="item in errors.error_types" :key="item.error_code" class="analysis-list__item">
@@ -185,7 +185,7 @@ onMounted(async () => {
             </div>
           </div>
           <div class="analysis-column">
-            <span class="section-kicker">Recent errors</span>
+            <span class="section-kicker">最近错误</span>
             <div v-if="errors.recent_errors.length === 0" class="admin-empty-state">暂无最近错误</div>
             <div v-else class="analysis-list">
               <article v-for="item in errors.recent_errors.slice(0, 6)" :key="`${item.trace_id}-${item.time}`" class="analysis-list__item analysis-list__item--stack">
@@ -198,7 +198,7 @@ onMounted(async () => {
         </div>
       </AppSectionCard>
 
-      <AppSectionCard title="Latency 分布" desc="用简洁柱带而不是真趋势图展示当前窗口的延迟密度。" admin>
+      <AppSectionCard title="延迟分布" desc="用简洁柱带展示当前窗口的延迟密度。" admin>
         <div class="latency-list">
           <article v-for="item in summary.latency_buckets" :key="item.label" class="latency-list__item">
             <div class="latency-list__head">
@@ -213,14 +213,14 @@ onMounted(async () => {
       </AppSectionCard>
     </OpsCommandDeck>
 
-    <OpsInspectorDrawer title="Request log" desc="保留请求级别摘要，不暴露原始 prompt / response。">
+    <OpsInspectorDrawer title="模型日志" desc="保留请求级别摘要，不暴露原始 prompt / response。">
       <el-table :data="logs.logs" stripe>
         <el-table-column prop="time" label="时间" min-width="165" />
-        <el-table-column prop="alias" label="Alias" min-width="130" />
-        <el-table-column prop="upstream_model" label="Upstream" min-width="160" />
-        <el-table-column prop="capability" label="Capability" width="100" />
-        <el-table-column prop="stage" label="Stage" width="100" />
-        <el-table-column prop="latency_ms" label="Latency" width="110" />
+        <el-table-column prop="alias" label="模型别名" min-width="130" />
+        <el-table-column prop="upstream_model" label="上游模型" min-width="160" />
+        <el-table-column prop="capability" label="类型" width="100" />
+        <el-table-column prop="stage" label="阶段" width="100" />
+        <el-table-column prop="latency_ms" label="延迟" width="110" />
         <el-table-column label="Token" width="140">
           <template #default="{ row }">
             {{ row.request_tokens }} / {{ row.response_tokens }}
@@ -260,7 +260,7 @@ onMounted(async () => {
       </div>
     </OpsInspectorDrawer>
 
-    <el-drawer v-model="traceDrawerVisible" size="520px" title="Trace 明细" destroy-on-close>
+      <el-drawer v-model="traceDrawerVisible" size="520px" title="Trace 明细" destroy-on-close>
       <div class="trace-panel">
         <div class="trace-panel__meta">
           <strong>{{ trace.trace_id || '未登记 Trace' }}</strong>

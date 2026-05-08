@@ -26,6 +26,7 @@ class ModelConfigSummarySerializer(serializers.ModelSerializer):
     weight = serializers.SerializerMethodField()
     input_price_per_million = serializers.SerializerMethodField()
     output_price_per_million = serializers.SerializerMethodField()
+    invocation_count = serializers.SerializerMethodField()
 
     def get_options(self, obj):
         options = dict(obj.options or {})
@@ -95,6 +96,9 @@ class ModelConfigSummarySerializer(serializers.ModelSerializer):
     def get_output_price_per_million(self, obj):
         return self._get_litellm_options(obj).get("output_price_per_million", 0)
 
+    def get_invocation_count(self, obj):
+        return getattr(obj, "invocation_count", 0)
+
     class Meta:
         model = ModelConfig
         fields = (
@@ -103,7 +107,9 @@ class ModelConfigSummarySerializer(serializers.ModelSerializer):
             "capability",
             "provider",
             "model_name",
+            "parameter_scale",
             "endpoint",
+            "description",
             "options",
             "has_api_key",
             "api_key_masked",
@@ -121,6 +127,7 @@ class ModelConfigSummarySerializer(serializers.ModelSerializer):
             "weight",
             "input_price_per_million",
             "output_price_per_million",
+            "invocation_count",
         )
 
 
@@ -133,7 +140,9 @@ class ModelConfigWriteSerializer(serializers.Serializer):
     capability = serializers.ChoiceField(choices=ModelConfig.CAPABILITY_CHOICES)
     provider = serializers.ChoiceField(choices=ModelConfig.PROVIDER_CHOICES)
     model_name = serializers.CharField(max_length=255)
+    parameter_scale = serializers.CharField(required=False, allow_blank=True, max_length=64, default="")
     endpoint = serializers.URLField(max_length=500)
+    description = serializers.CharField(required=False, allow_blank=True, default="")
     options = serializers.DictField(required=False, default=dict)
     is_active = serializers.BooleanField(required=False, default=False)
 

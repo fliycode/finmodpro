@@ -12,6 +12,7 @@ import OpsCommandDeck from './admin/ops/OpsCommandDeck.vue';
 import OpsInspectorDrawer from './admin/ops/OpsInspectorDrawer.vue';
 import OpsSectionFrame from './admin/ops/OpsSectionFrame.vue';
 import OpsStatusBand from './admin/ops/OpsStatusBand.vue';
+import LlmManagementTabs from './LlmManagementTabs.vue';
 import AppSectionCard from './ui/AppSectionCard.vue';
 
 const filters = reactive({
@@ -60,7 +61,7 @@ const fetchCosts = async () => {
     models.value = modelsPayload;
     refreshedAt.value = new Date().toLocaleString();
   } catch (error) {
-    errorMsg.value = error.message || '加载成本与用量失败';
+    errorMsg.value = error.message || '加载用量统计失败';
   } finally {
     isLoading.value = false;
   }
@@ -69,25 +70,25 @@ const fetchCosts = async () => {
 const metricCards = computed(() => ([
   {
     key: 'total-cost',
-    label: 'Estimated total cost',
+    label: '总成本估算',
     value: `$${summary.value.estimated_total_cost.toFixed(4)}`,
     note: `最近刷新：${refreshedAt.value || '尚未刷新'}`,
   },
   {
     key: 'requests',
-    label: 'Requests',
+    label: '请求量',
     value: summary.value.total_requests,
     note: '当前筛选窗口内的请求总数。',
   },
   {
     key: 'input',
-    label: 'Input tokens',
+    label: '输入 Token',
     value: summary.value.total_request_tokens,
     note: `约 $${summary.value.estimated_input_cost.toFixed(4)}`,
   },
   {
     key: 'output',
-    label: 'Output tokens',
+    label: '输出 Token',
     value: summary.value.total_response_tokens,
     note: `约 $${summary.value.estimated_output_cost.toFixed(4)}`,
   },
@@ -122,7 +123,7 @@ const pricingGapNotice = computed(() => {
   if (summary.value.total_request_tokens === 0 && summary.value.total_response_tokens === 0) {
     return '';
   }
-  return '当前窗口已经统计到 token，但对应路由还没有配置 input/output price per million，因此估算成本仍显示为 0。请到 Models / Routing 编辑路由补齐定价。';
+  return '当前窗口已经统计到 Token，但对应模型还没有配置 input/output price per million，因此估算成本仍显示为 0。请到模型总览补齐定价。';
 });
 
 onMounted(async () => {
@@ -133,11 +134,10 @@ onMounted(async () => {
 
 <template>
   <OpsSectionFrame
-    eyebrow="War room / Cost & usage"
-    title="Cost / Usage"
-    summary="用 token、估算成本、时间分布和模型占比解释“钱花在哪、量出在哪、是输入贵还是输出贵”。"
     :meta="frameMeta"
   >
+    <LlmManagementTabs />
+
     <template #actions>
       <div class="gateway-page__hero-actions">
         <el-select v-model="filters.model" clearable placeholder="按 alias 筛选" style="width: 180px;">
@@ -163,20 +163,20 @@ onMounted(async () => {
     </template>
 
     <OpsCommandDeck>
-      <AppSectionCard title="成本结构" desc="把输入成本、输出成本和当前最贵路由放在一处判断。" admin>
+      <AppSectionCard title="成本结构" desc="把输入成本、输出成本和当前最贵模型放在一处判断。" admin>
         <div class="cost-breakdown-grid">
           <article class="cost-breakdown-card">
-            <span class="section-kicker">Input cost</span>
+            <span class="section-kicker">输入成本</span>
             <strong>${{ summary.estimated_input_cost.toFixed(4) }}</strong>
-            <p>{{ summary.total_request_tokens }} input tokens</p>
+            <p>{{ summary.total_request_tokens }} 输入 Token</p>
           </article>
           <article class="cost-breakdown-card">
-            <span class="section-kicker">Output cost</span>
+            <span class="section-kicker">输出成本</span>
             <strong>${{ summary.estimated_output_cost.toFixed(4) }}</strong>
-            <p>{{ summary.total_response_tokens }} output tokens</p>
+            <p>{{ summary.total_response_tokens }} 输出 Token</p>
           </article>
           <article class="cost-breakdown-card">
-            <span class="section-kicker">Top cost model</span>
+            <span class="section-kicker">最高成本模型</span>
             <strong>{{ topCostModel?.alias || '暂无' }}</strong>
             <p v-if="topCostModel">${{ topCostModel.estimated_total_cost.toFixed(4) }} · {{ topCostModel.request_share_pct }}%</p>
             <p v-else>当前窗口暂无模型成本数据</p>
@@ -200,9 +200,9 @@ onMounted(async () => {
       </AppSectionCard>
     </OpsCommandDeck>
 
-    <OpsInspectorDrawer title="模型占比" desc="按模型展示请求占比、token 与估算成本，便于后续治理热门高成本路由。">
+    <OpsInspectorDrawer title="模型占比" desc="按模型展示请求占比、Token 与估算成本。">
       <el-table :data="models.models" stripe>
-        <el-table-column prop="alias" label="Alias" min-width="160" />
+        <el-table-column prop="alias" label="模型别名" min-width="160" />
         <el-table-column prop="request_count" label="请求数" width="110" />
         <el-table-column prop="request_share_pct" label="请求占比" width="110">
           <template #default="{ row }">

@@ -4,6 +4,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+from datetime import timedelta
 from decimal import Decimal
 from io import BytesIO
 from pathlib import Path
@@ -15,6 +16,7 @@ from django.contrib.auth.models import Group
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase
 from django.test import Client, SimpleTestCase, override_settings
+from django.utils import timezone
 
 from common.exceptions import ServiceConfigurationError, UpstreamRateLimitError, UpstreamServiceError
 from authentication.models import User
@@ -101,7 +103,9 @@ class ModelConfigListApiTests(TestCase):
             capability=ModelConfig.CAPABILITY_CHAT,
             provider=ModelConfig.PROVIDER_OLLAMA,
             model_name="qwen2.5:7b",
+            parameter_scale="7B",
             endpoint="http://localhost:11434",
+            description="财报问答候选模型",
             options={"temperature": 0.1},
             is_active=False,
         )
@@ -136,7 +140,9 @@ class ModelConfigListApiTests(TestCase):
                 "capability",
                 "provider",
                 "model_name",
+                "parameter_scale",
                 "endpoint",
+                "description",
                 "options",
                 "has_api_key",
                 "api_key_masked",
@@ -154,11 +160,59 @@ class ModelConfigListApiTests(TestCase):
                 "weight",
                 "input_price_per_million",
                 "output_price_per_million",
+                "invocation_count",
             },
         )
         self.assertEqual(first_row["id"], get_active_model_config(ModelConfig.CAPABILITY_CHAT).id)
         self.assertTrue(first_row["is_active"])
         self.assertEqual(payload["data"]["model_configs"][1]["id"], replacement.id)
+        self.assertEqual(payload["data"]["model_configs"][1]["parameter_scale"], "7B")
+        self.assertEqual(payload["data"]["model_configs"][1]["description"], "财报问答候选模型")
+
+    def test_list_model_configs_includes_overview_metrics_and_invocation_counts(self):
+        model = get_active_model_config(ModelConfig.CAPABILITY_CHAT)
+        now = timezone.now()
+        today_log = ModelInvocationLog.objects.create(
+            model_config=model,
+            capability=model.capability,
+            provider=model.provider,
+            alias=model.model_name,
+            upstream_model=model.model_name,
+            status=ModelInvocationLog.STATUS_SUCCESS,
+            latency_ms=180,
+        )
+        yesterday_log = ModelInvocationLog.objects.create(
+            model_config=model,
+            capability=model.capability,
+            provider=model.provider,
+            alias=model.model_name,
+            upstream_model=model.model_name,
+            status=ModelInvocationLog.STATUS_SUCCESS,
+            latency_ms=220,
+        )
+        ModelInvocationLog.objects.filter(id=today_log.id).update(created_at=now)
+        ModelInvocationLog.objects.filter(id=yesterday_log.id).update(created_at=now - timedelta(days=1))
+
+        response = self.client.get(
+            "/api/ops/model-configs",
+            HTTP_AUTHORIZATION=f"Bearer {self.admin_access_token}",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()["data"]
+        overview = payload["overview"]
+        self.assertEqual(overview["total_models"], payload["total"])
+        self.assertEqual(
+            overview["enabled_models"],
+            ModelConfig.objects.filter(is_active=True).count(),
+        )
+        self.assertEqual(overview["total_invocation_count"], 2)
+        self.assertEqual(overview["today_invocation_count"], 1)
+        self.assertEqual(overview["yesterday_invocation_count"], 1)
+        self.assertEqual(overview["invocation_change_pct"], 0.0)
+
+        row = next(item for item in payload["model_configs"] if item["id"] == model.id)
+        self.assertEqual(row["invocation_count"], 2)
 
     def test_list_model_configs_masks_api_key(self):
         ModelConfig.objects.create(
@@ -334,7 +388,9 @@ class ModelConfigActivationApiTests(TestCase):
                 "capability",
                 "provider",
                 "model_name",
+                "parameter_scale",
                 "endpoint",
+                "description",
                 "options",
                 "has_api_key",
                 "api_key_masked",
@@ -352,6 +408,7 @@ class ModelConfigActivationApiTests(TestCase):
                 "weight",
                 "input_price_per_million",
                 "output_price_per_million",
+                "invocation_count",
             },
         )
 

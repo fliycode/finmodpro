@@ -17,7 +17,11 @@ from llm.services.model_config_command_service import (
     test_model_config_connection,
     update_model_config,
 )
-from llm.services.model_config_query_service import get_model_config, list_model_configs
+from llm.services.model_config_query_service import (
+    get_model_config,
+    get_model_config_overview,
+    list_model_configs,
+)
 from rbac.services.authz_service import get_authenticated_user, user_has_permission
 
 
@@ -40,9 +44,11 @@ class ModelConfigListView(APIView):
             return permission_error
 
         model_configs = list_model_configs()
+        overview = get_model_config_overview()
         return success_response(
             data={
                 "total": model_configs.count(),
+                "overview": overview,
                 "model_configs": ModelConfigSummarySerializer(model_configs, many=True).data,
             }
         )

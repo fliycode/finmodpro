@@ -3,19 +3,15 @@ import assert from 'node:assert/strict';
 
 import { navigationMap } from '../navigation.js';
 
-test('admin llm navigation exposes the approved IA without fine-tune entry', () => {
+test('admin llm navigation collapses into one model-management parent entry', () => {
   const llmItems = navigationMap.admin.filter((item) => item.group === 'admin-llm');
 
-  assert.deepEqual(
-    llmItems.map((item) => item.to),
-    [
-      '/admin/llm',
-      '/admin/llm/models',
-      '/admin/llm/observability',
-      '/admin/llm/costs',
-      '/admin/lightrag',
-    ],
-  );
+  assert.deepEqual(llmItems.map((item) => item.to), ['/admin/llm/models', '/admin/lightrag']);
+  assert.deepEqual(llmItems[0].children.map((item) => item.to), [
+    '/admin/llm/models',
+    '/admin/llm/logs',
+    '/admin/llm/usage',
+  ]);
 });
 
 test('lightrag navigation exposes child routes instead of flattening the module into one page', () => {
@@ -38,7 +34,7 @@ test('workspace and admin navigation keep separate grouping vocabularies', () =>
   const adminGroups = [...new Set(navigationMap.admin.map((item) => item.group))];
 
   assert.ok(workspaceLabels.includes('智能问答'));
-  assert.ok(adminLabels.includes('网关总览'));
+  assert.ok(adminLabels.includes('模型管理'));
   assert.ok(adminLabels.includes('知识库管理'));
   assert.deepEqual(workspaceGroups, ['workspace-core', 'workspace-support']);
   assert.ok(adminGroups.includes('admin-llm'));

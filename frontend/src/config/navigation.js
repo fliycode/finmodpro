@@ -11,10 +11,18 @@ export const navigationMap = {
     { id: 'admin-overview', label: '数据看板', to: '/admin/overview', icon: 'dashboard', group: 'admin-overview' },
     { id: 'admin-knowledge', label: '知识库管理', to: '/admin/knowledge', icon: 'database', group: 'admin-overview' },
     { id: 'admin-users', label: '用户管理', to: '/admin/users', icon: 'users', group: 'admin-governance' },
-    { id: 'admin-llm-overview', label: '网关总览', to: '/admin/llm', icon: 'network', group: 'admin-llm' },
-    { id: 'admin-llm-models', label: '模型路由', to: '/admin/llm/models', icon: 'sliders', group: 'admin-llm' },
-    { id: 'admin-llm-observability', label: '观测与日志', to: '/admin/llm/observability', icon: 'eye', group: 'admin-llm' },
-    { id: 'admin-llm-costs', label: '成本与用量', to: '/admin/llm/costs', icon: 'bar-chart', group: 'admin-llm' },
+    {
+      id: 'admin-llm-management',
+      label: '模型管理',
+      to: '/admin/llm/models',
+      icon: 'brain-circuit',
+      group: 'admin-llm',
+      children: [
+        { id: 'admin-llm-model-overview', label: '模型总览', to: '/admin/llm/models' },
+        { id: 'admin-llm-logs', label: '模型日志', to: '/admin/llm/logs' },
+        { id: 'admin-llm-usage', label: '用量统计', to: '/admin/llm/usage' },
+      ],
+    },
     {
       id: 'admin-lightrag',
       label: '图谱工作台',

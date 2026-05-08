@@ -56,7 +56,9 @@ export const normalizeModelConfigPayload = (payload = {}) => {
     name: item.name ?? item.config_name ?? item.model_name ?? `config-${index}`,
     provider: item.provider ?? item.vendor ?? "--",
     model_name: item.model_name ?? item.model ?? item.name ?? "--",
+    parameter_scale: item.parameter_scale ?? item.parameterScale ?? '',
     endpoint: item.endpoint ?? item.api_base ?? item.base_url ?? "",
+    description: item.description ?? '',
     capability: item.capability ?? item.model_type ?? item.type ?? "chat",
     is_active: item.is_active ?? item.active ?? item.enabled ?? false,
     updated_at: item.updated_at ?? item.updatedAt ?? item.modified_at ?? item.created_at ?? "",
@@ -74,7 +76,24 @@ export const normalizeModelConfigPayload = (payload = {}) => {
     latest_fine_tune_dataset: item.latest_fine_tune_dataset ?? "",
     latest_fine_tune_status: item.latest_fine_tune_status ?? "",
     latest_fine_tune_artifact_path: item.latest_fine_tune_artifact_path ?? "",
+    invocation_count: Number(item.invocation_count ?? 0),
   }));
+};
+
+export const normalizeModelConfigOverviewSummary = (payload = {}) => {
+  const overview = payload?.overview && typeof payload.overview === 'object' ? payload.overview : payload || {};
+
+  return {
+    total_models: toNumber(overview.total_models, 0),
+    enabled_models: toNumber(overview.enabled_models, 0),
+    total_invocation_count: toNumber(overview.total_invocation_count, 0),
+    today_invocation_count: toNumber(overview.today_invocation_count, 0),
+    yesterday_invocation_count: toNumber(overview.yesterday_invocation_count, 0),
+    invocation_change_pct:
+      overview.invocation_change_pct === null || overview.invocation_change_pct === undefined
+        ? null
+        : toNumber(overview.invocation_change_pct, 0),
+  };
 };
 
 export const normalizeFineTuneRun = (item, index = 0) => ({

@@ -100,23 +100,30 @@ export const appRoutes = [
       },
       {
         path: 'llm',
-        component: () => import('../views/admin/AdminLlmOverviewView.vue'),
-        meta: { title: 'LLM 中台总览', subtitle: '基础设施接入、模型链路状态与运行摘要。', breadcrumb: [{ label: 'Gateway Ops' }, { label: '网关总览' }] },
+        redirect: '/admin/llm/models',
       },
       {
         path: 'llm/models',
         component: () => import('../views/admin/AdminLlmModelsView.vue'),
-        meta: { title: '模型路由', subtitle: '管理模型路由规则、权重分配与 fallback 策略。', breadcrumb: [{ label: 'Gateway Ops' }, { label: '模型路由' }] },
+        meta: { title: '模型总览', subtitle: '管理模型启停、基础信息与调用概况。', breadcrumb: [{ label: 'Gateway Ops' }, { label: '模型管理' }, { label: '模型总览' }] },
+      },
+      {
+        path: 'llm/logs',
+        component: () => import('../views/admin/AdminLlmObservabilityView.vue'),
+        meta: { title: '模型日志', subtitle: '按模型查看调用记录、错误分布与链路细节。', breadcrumb: [{ label: 'Gateway Ops' }, { label: '模型管理' }, { label: '模型日志' }] },
       },
       {
         path: 'llm/observability',
-        component: () => import('../views/admin/AdminLlmObservabilityView.vue'),
-        meta: { title: '观测与异常摘要', subtitle: '调用量、命中情况、失败事件与观测入口。', breadcrumb: [{ label: 'Gateway Ops' }, { label: '观测与日志' }] },
+        redirect: '/admin/llm/logs',
+      },
+      {
+        path: 'llm/usage',
+        component: () => import('../views/admin/AdminLlmCostsView.vue'),
+        meta: { title: '用量统计', subtitle: '按模型和时间窗口追踪调用量、Token 与成本。', breadcrumb: [{ label: 'Gateway Ops' }, { label: '模型管理' }, { label: '用量统计' }] },
       },
       {
         path: 'llm/costs',
-        component: () => import('../views/admin/AdminLlmCostsView.vue'),
-        meta: { title: '成本与用量', subtitle: '按模型、时间维度追踪 API 调用成本与用量。', breadcrumb: [{ label: 'Gateway Ops' }, { label: '成本与用量' }] },
+        redirect: '/admin/llm/usage',
       },
       {
         path: 'llm/knowledge',

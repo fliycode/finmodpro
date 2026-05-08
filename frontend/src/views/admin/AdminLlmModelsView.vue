@@ -1,7 +1,7 @@
 <script setup>
-import LlmGatewayRouting from '../../components/LlmGatewayRouting.vue';
+import LlmModelOverview from '../../components/LlmModelOverview.vue';
 </script>
 
 <template>
-  <LlmGatewayRouting />
+  <LlmModelOverview />
 </template>
