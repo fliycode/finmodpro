@@ -98,17 +98,23 @@ def ensure_litellm_route_from_model_config(model_config):
         route = source_model_config
     else:
         litellm_name = f"litellm-{_strip_litellm_prefixes(source_model_config.name)}"
-        route, _ = ModelConfig.objects.get_or_create(
+        route = ModelConfig.objects.filter(
             capability=source_model_config.capability,
-            name=litellm_name,
-            defaults={
-                "provider": ModelConfig.PROVIDER_LITELLM,
-                "model_name": source_model_config.model_name,
-                "endpoint": settings.LITELLM_GATEWAY_URL,
-                "options": {},
-                "is_active": False,
-            },
-        )
+            provider=ModelConfig.PROVIDER_LITELLM,
+            model_name=source_model_config.model_name,
+        ).order_by("-is_active", "-updated_at", "-id").first()
+        if route is None:
+            route, _ = ModelConfig.objects.get_or_create(
+                capability=source_model_config.capability,
+                name=litellm_name,
+                defaults={
+                    "provider": ModelConfig.PROVIDER_LITELLM,
+                    "model_name": source_model_config.model_name,
+                    "endpoint": settings.LITELLM_GATEWAY_URL,
+                    "options": {},
+                    "is_active": False,
+                },
+            )
 
     route.provider = ModelConfig.PROVIDER_LITELLM
     route.model_name = source_model_config.model_name
@@ -170,10 +176,27 @@ def test_model_config_connection(*, payload):
     return {"ok": True}
 
 
+def ensure_active_source_model_configs():
+    for capability in (
+        ModelConfig.CAPABILITY_CHAT,
+        ModelConfig.CAPABILITY_EMBEDDING,
+        ModelConfig.CAPABILITY_RERANK,
+    ):
+        source_configs = ModelConfig.objects.filter(capability=capability).exclude(
+            provider=ModelConfig.PROVIDER_LITELLM
+        )
+        if not source_configs.exists() or source_configs.filter(is_active=True).exists():
+            continue
+        source_model = source_configs.order_by("-updated_at", "-id").first()
+        source_model.is_active = True
+        source_model.save(update_fields=["is_active", "updated_at"])
+
+
 def migrate_active_configs_to_litellm(*, triggered_by):
     """For each active capability config, ensure a LiteLLM route exists and is active."""
     migrated = []
     with transaction.atomic():
+        ensure_active_source_model_configs()
         for capability in (
             ModelConfig.CAPABILITY_CHAT,
             ModelConfig.CAPABILITY_EMBEDDING,

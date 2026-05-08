@@ -43,9 +43,12 @@ class ModelConfig(models.Model):
         with transaction.atomic():
             super().save(*args, **kwargs)
             if self.is_active:
-                self.__class__.objects.filter(capability=self.capability).exclude(
-                    id=self.id
-                ).update(is_active=False)
+                queryset = self.__class__.objects.filter(capability=self.capability).exclude(id=self.id)
+                if self.provider == self.PROVIDER_LITELLM:
+                    queryset = queryset.filter(provider=self.PROVIDER_LITELLM)
+                else:
+                    queryset = queryset.exclude(provider=self.PROVIDER_LITELLM)
+                queryset.update(is_active=False)
 
 
 class EvalRecord(models.Model):
