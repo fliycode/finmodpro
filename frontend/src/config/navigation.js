@@ -27,7 +27,7 @@ export const navigationMap = {
         { id: 'admin-lightrag-documents', label: '文档管线', to: '/admin/lightrag/documents' },
       ],
     },
-    { id: 'admin-audit-logs', label: '操作审计', to: '/admin/audit-logs', icon: 'clipboard', group: 'admin-governance' },
+    { id: 'admin-audit-logs', label: '操作日志', to: '/admin/audit-logs', icon: 'clipboard', group: 'admin-governance' },
   ],
 };
 

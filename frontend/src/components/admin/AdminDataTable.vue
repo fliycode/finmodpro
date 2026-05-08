@@ -252,7 +252,25 @@ const paginationLayout = computed(() => {
 }
 
 .admin-data-table__search {
-  width: 240px;
+  width: 260px;
+}
+
+.admin-data-table__search :deep(.el-input__wrapper) {
+  border-radius: 999px;
+  background: var(--surface-2);
+  border-color: var(--line-soft);
+  box-shadow: none;
+  transition: border-color 0.2s, background 0.2s, box-shadow 0.2s;
+}
+
+.admin-data-table__search :deep(.el-input__wrapper:hover) {
+  border-color: var(--line-strong);
+}
+
+.admin-data-table__search :deep(.el-input__wrapper.is-focus) {
+  border-color: var(--color-accent);
+  background: var(--surface-1);
+  box-shadow: 0 0 0 1px var(--color-accent);
 }
 
 .admin-data-table__col-toggle {

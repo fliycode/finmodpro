@@ -25,7 +25,7 @@ defineProps({
 <style scoped>
 .ops-status-band {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(var(--band-columns, 4), minmax(0, 1fr));
   gap: 0;
   border: 1px solid var(--line-soft);
   border-radius: 24px;

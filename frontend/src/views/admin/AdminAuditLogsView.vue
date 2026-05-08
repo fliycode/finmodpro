@@ -10,50 +10,48 @@ const audits = ref([]);
 const isLoading = ref(false);
 const errorMsg = ref('');
 const currentPage = ref(1);
-const pageSize = ref(25);
+const pageSize = ref(10);
 const total = ref(0);
 const searchQuery = ref('');
 
 const columns = [
-  { prop: 'id', label: 'ID', width: '70' },
-  { prop: 'actor_name', label: '操作人', minWidth: '100' },
-  { key: 'action', label: '操作', minWidth: '140', slot: 'action' },
-  { prop: 'target_type', label: '目标类型', minWidth: '100' },
-  { key: 'status', label: '状态', width: '80', slot: 'status' },
-  { prop: 'created_at', label: '时间', minWidth: '150' },
+  { prop: 'id', label: 'ID', width: '64' },
+  { prop: 'actor_name', label: '操作人', width: '120' },
+  { key: 'action', label: '操作', width: '140', slot: 'action' },
+  { prop: 'target_type', label: '目标类型', width: '112' },
+  { key: 'status', label: '状态', width: '72', slot: 'status' },
+  { key: 'created_at', label: '时间', width: '176', slot: 'created_at', prop: 'created_at' },
 ];
+
+const actionLabels = {
+  'knowledgebase.ingest': '知识入库',
+  'risk.extract': '风险提取',
+  'risk.extract.retry': '重试风险提取',
+  'risk.batch_extract': '批量风险提取',
+  'risk.batch_extract.retry': '重试批量提取',
+  'risk.sentiment': '舆情分析',
+};
+const formatAction = (action) => actionLabels[action] || action || '--';
 
 const statusLabels = { succeeded: '成功', failed: '失败', pending: '待处理' };
 const statusTypes = { succeeded: 'success', failed: 'danger', pending: 'info' };
-const statusItems = computed(() => ([
+
+const statusItems = computed(() => [
   {
     key: 'total',
-    label: '审计记录',
+    label: '操作记录',
     value: total.value || audits.value.length,
-    note: '当前筛选条件下可回看的审计流水。',
   },
   {
     key: 'failed',
-    label: '失败动作',
+    label: '失败记录',
     value: audits.value.filter((item) => item.status === 'failed').length,
-    note: '需要进一步复盘或重试的异常动作。',
   },
   {
     key: 'actors',
-    label: '操作主体',
+    label: '操作人员',
     value: new Set(audits.value.map((item) => item.actor_name).filter(Boolean)).size,
-    note: '当前结果中出现过的操作者数量。',
   },
-  {
-    key: 'page',
-    label: '当前分页',
-    value: `${currentPage.value} / ${Math.max(1, Math.ceil((total.value || 0) / pageSize.value))}`,
-    note: `每页 ${pageSize.value} 条。`,
-  },
-]));
-const frameMeta = computed(() => [
-  `搜索：${searchQuery.value || '未启用'}`,
-  `分页：${pageSize.value} / 页`,
 ]);
 
 const fetchData = async () => {
@@ -70,16 +68,18 @@ const fetchData = async () => {
     audits.value = data.results || data.audits || [];
     total.value = data.total || 0;
   } catch (err) {
-    errorMsg.value = err.message || '加载审计日志失败';
+    errorMsg.value = err.message || '加载操作日志失败';
   } finally {
     isLoading.value = false;
   }
 };
 
+const pad = (n) => String(n).padStart(2, '0');
 const formatTime = (iso) => {
   if (!iso) return '--';
   try {
-    return new Date(iso).toLocaleString('zh-CN', { hour12: false });
+    const d = new Date(iso);
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
   } catch {
     return iso;
   }
@@ -97,15 +97,14 @@ onMounted(fetchData);
 <template>
   <OpsSectionFrame
     eyebrow="Governance / Audit"
-    title="操作审计"
-    summary="审计页只保留一张可检索的流水工作面，让操作主体、动作、目标与结果状态在同一张表内完成核查。"
-    :meta="frameMeta"
+    title="操作日志"
+    summary=""
   >
     <template #status-band>
-      <OpsStatusBand :items="statusItems" />
+      <OpsStatusBand :items="statusItems" :style="{ '--band-columns': '3' }" />
     </template>
 
-    <AppSectionCard title="审计流水" desc="支持按操作人或动作搜索，重点关注失败状态和关键目标类型。" admin>
+    <AppSectionCard title="审计流水" admin>
       <AdminDataTable
         :data="audits"
         :columns="columns"
@@ -122,7 +121,7 @@ onMounted(fetchData);
         @retry="fetchData"
       >
         <template #action="{ row }">
-          <span>{{ row.action }}</span>
+          <span>{{ formatAction(row.action) }}</span>
         </template>
 
         <template #status="{ row }">
@@ -130,15 +129,11 @@ onMounted(fetchData);
             {{ statusLabels[row.status] || row.status }}
           </el-tag>
         </template>
+
+        <template #created_at="{ row }">
+          <span>{{ formatTime(row.created_at) }}</span>
+        </template>
       </AdminDataTable>
     </AppSectionCard>
   </OpsSectionFrame>
 </template>
-
-<style scoped>
-.audit-log-page {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-</style>

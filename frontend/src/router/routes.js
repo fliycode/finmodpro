@@ -150,7 +150,7 @@ export const appRoutes = [
       {
         path: 'audit-logs',
         component: () => import('../views/admin/AdminAuditLogsView.vue'),
-        meta: { title: '操作审计', subtitle: '查看系统操作记录、变更历史与审计追踪。', breadcrumb: [{ label: '治理审阅' }, { label: '操作审计' }] },
+        meta: { title: '操作日志', subtitle: '', breadcrumb: [{ label: '治理审阅' }, { label: '操作日志' }] },
       },
       {
         path: ':pathMatch(.*)*',
