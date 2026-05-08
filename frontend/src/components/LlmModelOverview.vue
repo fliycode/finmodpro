@@ -7,7 +7,6 @@ import AdminDataTable from './admin/AdminDataTable.vue';
 import OpsSectionFrame from './admin/ops/OpsSectionFrame.vue';
 import AppIcon from './ui/AppIcon.vue';
 import AppSectionCard from './ui/AppSectionCard.vue';
-import LlmManagementTabs from './LlmManagementTabs.vue';
 
 const flash = useFlash();
 
@@ -42,7 +41,6 @@ const editingId = ref(null);
 const errorMsg = ref('');
 const configs = ref([]);
 const summary = ref(normalizeModelConfigOverviewSummary());
-const refreshedAt = ref('');
 const sortField = ref('updated_at');
 const sortOrder = ref('descending');
 const searchQuery = ref('');
@@ -70,38 +68,44 @@ const form = reactive(defaultFormState());
 
 const drawerTitle = computed(() => (editingId.value ? '编辑模型' : '新增模型'));
 const supportsTokenOptions = computed(() => ['deepseek', 'litellm', 'dashscope'].includes(form.provider));
-const frameMeta = computed(() => [
-  `最近刷新：${refreshedAt.value || '尚未刷新'}`,
-  `当前页：${currentPage.value}`,
-  `可见模型：${filteredConfigs.value.length}`,
-]);
+const capabilityCounts = computed(() => capabilityOptions.map((item) => ({
+  ...item,
+  count: configs.value.filter((config) => config.capability === item.value).length,
+})));
 
 const summaryCards = computed(() => {
   const enabledRatio = summary.value.total_models > 0
     ? `${((summary.value.enabled_models / summary.value.total_models) * 100).toFixed(0)}%`
     : '0%';
+  const capabilityCoverage = `${((capabilityCounts.value.filter((item) => item.count > 0).length / capabilityOptions.length) * 100).toFixed(0)}%`;
+  const invocationChangePct = summary.value.invocation_change_pct === null
+    ? '0.0%'
+    : `${summary.value.invocation_change_pct > 0 ? '+' : ''}${summary.value.invocation_change_pct.toFixed(1)}%`;
 
   return [
     {
       key: 'total-models',
       label: '模型总数',
       value: formatCount(summary.value.total_models),
-      note: `当前纳管 ${formatCount(summary.value.total_models)} 个模型条目。`,
-      tone: 'neutral',
+      badge: `${capabilityCoverage} 覆盖`,
+      icon: 'layers',
+      tone: 'brand',
     },
     {
       key: 'enabled-models',
       label: '启用模型',
       value: formatCount(summary.value.enabled_models),
-      note: `启用占比 ${enabledRatio}。`,
-      tone: 'neutral',
+      badge: enabledRatio,
+      icon: 'check',
+      tone: 'success',
     },
     {
       key: 'invocations',
       label: '总调用次数',
       value: formatCount(summary.value.total_invocation_count),
-      note: buildInvocationDeltaNote(),
-      tone: summary.value.invocation_change_pct !== null && summary.value.invocation_change_pct < 0 ? 'warning' : 'brand',
+      badge: invocationChangePct,
+      icon: 'bar-chart',
+      tone: summary.value.invocation_change_pct !== null && summary.value.invocation_change_pct < 0 ? 'warning' : 'accent',
     },
   ];
 });
@@ -177,16 +181,6 @@ function formatUpdatedAt(value) {
 
   const parsed = new Date(value);
   return Number.isNaN(parsed.getTime()) ? value : parsed.toLocaleString();
-}
-
-function buildInvocationDeltaNote() {
-  const today = formatCount(summary.value.today_invocation_count);
-  if (summary.value.invocation_change_pct === null) {
-    return `今日 ${today}，昨日无可比数据。`;
-  }
-
-  const prefix = summary.value.invocation_change_pct > 0 ? '+' : '';
-  return `今日 ${today}，较昨日 ${prefix}${summary.value.invocation_change_pct.toFixed(1)}%。`;
 }
 
 function sortValue(row, field) {
@@ -270,7 +264,6 @@ async function fetchConfigs() {
     const payload = await llmApi.getModelConfigs();
     configs.value = normalizeModelConfigPayload(payload);
     summary.value = normalizeModelConfigOverviewSummary(payload);
-    refreshedAt.value = new Date().toLocaleString();
     const maxPage = Math.max(1, Math.ceil(filteredConfigs.value.length / pageSize.value));
     if (currentPage.value > maxPage) {
       currentPage.value = maxPage;
@@ -353,13 +346,7 @@ onMounted(fetchConfigs);
 </script>
 
 <template>
-  <OpsSectionFrame :meta="frameMeta">
-    <LlmManagementTabs />
-
-    <template #actions>
-      <el-button :loading="isLoading" @click="fetchConfigs">刷新</el-button>
-    </template>
-
+  <OpsSectionFrame>
     <template #alerts>
       <el-alert v-if="errorMsg" :title="errorMsg" type="error" show-icon :closable="false" />
     </template>
@@ -371,9 +358,16 @@ onMounted(fetchConfigs);
         class="model-overview-metrics__card"
         :class="card.tone ? `is-${card.tone}` : ''"
       >
-        <span class="model-overview-metrics__label">{{ card.label }}</span>
-        <strong class="model-overview-metrics__value">{{ card.value }}</strong>
-        <p class="model-overview-metrics__note">{{ card.note }}</p>
+        <div class="model-overview-metrics__head">
+          <span class="model-overview-metrics__label">{{ card.label }}</span>
+          <span class="model-overview-metrics__icon" aria-hidden="true">
+            <AppIcon :name="card.icon" />
+          </span>
+        </div>
+        <div class="model-overview-metrics__foot">
+          <strong class="model-overview-metrics__value">{{ card.value }}</strong>
+          <span class="model-overview-metrics__badge">{{ card.badge }}</span>
+        </div>
       </article>
     </section>
 
@@ -385,6 +379,17 @@ onMounted(fetchConfigs);
         </el-button>
       </template>
 
+      <div class="model-category-strip" aria-label="模型类型分布">
+        <article
+          v-for="item in capabilityCounts"
+          :key="item.value"
+          :class="['model-category-strip__item', `is-${item.value}`, { 'is-empty': item.count === 0 }]"
+        >
+          <span class="model-category-strip__label">{{ item.label }}</span>
+          <strong class="model-category-strip__value">{{ formatCount(item.count) }}</strong>
+        </article>
+      </div>
+
       <AdminDataTable
         :data="paginatedConfigs"
         :columns="tableColumns"
@@ -395,6 +400,8 @@ onMounted(fetchConfigs);
         :total="filteredConfigs.length"
         :sort-field="sortField"
         :sort-order="sortOrder"
+        column-control-label="列排序"
+        :allow-column-reorder="true"
         search-placeholder="搜索模型名称、描述、参数规模"
         @search="handleSearch"
         @retry="fetchConfigs"
@@ -412,7 +419,7 @@ onMounted(fetchConfigs);
 
         <template #capability="{ row }">
           <div class="model-row__type">
-            <span class="model-pill">{{ capabilityLabel(row.capability) }}</span>
+            <span :class="['model-pill', `is-${row.capability || 'unknown'}`]">{{ capabilityLabel(row.capability) }}</span>
             <span class="muted-text">{{ providerLabel(row.provider) }}</span>
           </div>
         </template>
@@ -555,11 +562,11 @@ onMounted(fetchConfigs);
 
 .model-overview-metrics__card {
   display: grid;
-  gap: 10px;
-  min-height: 156px;
-  padding: 22px 24px;
+  gap: 14px;
+  min-height: 112px;
+  padding: 18px 20px;
   border: 1px solid var(--line-soft);
-  border-radius: 24px;
+  border-radius: 20px;
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0.01)),
     var(--surface-1);
@@ -567,16 +574,38 @@ onMounted(fetchConfigs);
 
 .model-overview-metrics__card.is-brand {
   background:
-    radial-gradient(circle at top right, rgba(36, 87, 197, 0.22), transparent 38%),
+    radial-gradient(circle at top right, rgba(36, 87, 197, 0.28), transparent 38%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0.01)),
+    var(--surface-1);
+}
+
+.model-overview-metrics__card.is-success {
+  background:
+    radial-gradient(circle at top right, rgba(33, 129, 92, 0.24), transparent 38%),
     linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0.01)),
     var(--surface-1);
 }
 
 .model-overview-metrics__card.is-warning {
   background:
-    radial-gradient(circle at top right, rgba(183, 121, 31, 0.18), transparent 38%),
+    radial-gradient(circle at top right, rgba(183, 121, 31, 0.22), transparent 38%),
     linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0.01)),
     var(--surface-1);
+}
+
+.model-overview-metrics__card.is-accent {
+  background:
+    radial-gradient(circle at top right, rgba(141, 208, 208, 0.22), transparent 38%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0.01)),
+    var(--surface-1);
+}
+
+.model-overview-metrics__head,
+.model-overview-metrics__foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
 }
 
 .model-overview-metrics__label {
@@ -587,21 +616,93 @@ onMounted(fetchConfigs);
   color: var(--text-muted);
 }
 
+.model-overview-metrics__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text-primary);
+}
+
 .model-overview-metrics__value {
   color: var(--text-primary);
-  font-size: clamp(1.8rem, 2.4vw, 2.4rem);
+  font-size: clamp(1.55rem, 2vw, 2rem);
   line-height: 1.05;
   letter-spacing: -0.05em;
 }
 
-.model-overview-metrics__note {
-  margin: 0;
-  color: var(--text-secondary);
-  line-height: 1.7;
+.model-overview-metrics__badge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;
+  padding: 0 10px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text-primary);
+  font-size: 0.75rem;
+  font-weight: 700;
+  white-space: nowrap;
 }
 
-.model-row__name,
+.model-category-strip {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.model-category-strip__item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 56px;
+  padding: 0 16px;
+  border: 1px solid var(--line-soft);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.model-category-strip__item.is-chat {
+  border-color: rgba(36, 87, 197, 0.32);
+  background: rgba(36, 87, 197, 0.12);
+}
+
+.model-category-strip__item.is-embedding {
+  border-color: rgba(141, 208, 208, 0.34);
+  background: rgba(141, 208, 208, 0.12);
+}
+
+.model-category-strip__item.is-rerank {
+  border-color: rgba(213, 164, 65, 0.34);
+  background: rgba(213, 164, 65, 0.12);
+}
+
+.model-category-strip__item.is-empty {
+  opacity: 0.72;
+}
+
+.model-category-strip__label {
+  color: var(--text-primary);
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+
+.model-category-strip__value {
+  color: var(--text-primary);
+  font-size: 1rem;
+}
+
 .model-row__type {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.model-row__name {
   display: grid;
   gap: 4px;
 }
@@ -617,12 +718,27 @@ onMounted(fetchConfigs);
   width: fit-content;
   min-height: 26px;
   padding: 0 10px;
-  border: 1px solid rgba(213, 164, 65, 0.22);
+  border: 1px solid rgba(213, 164, 65, 0.32);
   border-radius: 999px;
   color: var(--text-primary);
-  background: rgba(213, 164, 65, 0.08);
+  background: rgba(213, 164, 65, 0.16);
   font-size: 0.75rem;
   font-weight: 600;
+}
+
+.model-pill.is-chat {
+  border-color: rgba(36, 87, 197, 0.42);
+  background: rgba(36, 87, 197, 0.18);
+}
+
+.model-pill.is-embedding {
+  border-color: rgba(141, 208, 208, 0.42);
+  background: rgba(141, 208, 208, 0.18);
+}
+
+.model-pill.is-rerank {
+  border-color: rgba(213, 164, 65, 0.42);
+  background: rgba(213, 164, 65, 0.2);
 }
 
 .model-status {
@@ -631,18 +747,21 @@ onMounted(fetchConfigs);
   min-height: 28px;
   padding: 0 10px;
   border-radius: 999px;
+  border: 1px solid transparent;
   font-size: 0.75rem;
   font-weight: 700;
 }
 
 .model-status.is-active {
-  color: #d7f5e7;
-  background: rgba(33, 129, 92, 0.2);
+  color: #effcf5;
+  border-color: rgba(66, 194, 138, 0.42);
+  background: rgba(33, 129, 92, 0.38);
 }
 
 .model-status.is-idle {
-  color: var(--text-secondary);
-  background: rgba(141, 156, 173, 0.12);
+  color: #dbe3ef;
+  border-color: rgba(157, 173, 196, 0.34);
+  background: rgba(71, 86, 110, 0.42);
 }
 
 .model-row__actions {
@@ -704,7 +823,8 @@ onMounted(fetchConfigs);
 }
 
 @media (max-width: 1120px) {
-  .model-overview-metrics {
+  .model-overview-metrics,
+  .model-category-strip {
     grid-template-columns: 1fr;
   }
 }

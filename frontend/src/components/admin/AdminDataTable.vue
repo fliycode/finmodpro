@@ -23,6 +23,8 @@ const props = defineProps({
   // Search
   searchPlaceholder: { type: String, default: '搜索...' },
   showSearch: { type: Boolean, default: true },
+  columnControlLabel: { type: String, default: '列设置' },
+  allowColumnReorder: { type: Boolean, default: false },
 
   // Selection
   showSelection: { type: Boolean, default: false },
@@ -57,11 +59,35 @@ watch(() => props.data, () => {
 
 // ── Column visibility ──
 const visibleColumns = ref(props.columns.map((col) => col.key || col.prop));
-const allColumnKeys = computed(() => props.columns.map((col) => col.key || col.prop));
 
 const visibleCols = computed(() =>
-  props.columns.filter((col) => visibleColumns.value.includes(col.key || col.prop))
+  visibleColumns.value
+    .map((key) => props.columns.find((col) => (col.key || col.prop) === key))
+    .filter(Boolean)
 );
+
+watch(
+  () => props.columns,
+  (nextColumns) => {
+    visibleColumns.value = nextColumns.map((col) => col.key || col.prop);
+  },
+  { deep: true }
+);
+
+const moveColumn = (columnKey, delta) => {
+  const index = visibleColumns.value.findIndex((key) => key === columnKey);
+  const targetIndex = index + delta;
+  if (index === -1 || targetIndex < 0 || targetIndex >= visibleColumns.value.length) {
+    return;
+  }
+
+  const nextColumns = [...visibleColumns.value];
+  const [column] = nextColumns.splice(index, 1);
+  nextColumns.splice(targetIndex, 0, column);
+  visibleColumns.value = nextColumns;
+};
+
+const columnIndex = (columnKey) => visibleColumns.value.findIndex((key) => key === columnKey);
 
 // ── Sorting ──
 const tableRef = ref(null);
@@ -142,14 +168,39 @@ const paginationLayout = computed(() => {
           <template #reference>
             <el-button size="small" text>
               <AppIcon name="settings" />
-              列设置
+              {{ columnControlLabel }}
             </el-button>
           </template>
           <el-checkbox-group v-model="visibleColumns" size="small">
-            <div v-for="col in columns" :key="col.key || col.prop" class="admin-data-table__col-toggle">
+            <div
+              v-for="col in columns"
+              :key="col.key || col.prop"
+              class="admin-data-table__col-toggle"
+            >
               <el-checkbox :label="col.key || col.prop" :value="col.key || col.prop">
                 {{ col.label }}
               </el-checkbox>
+              <div
+                v-if="allowColumnReorder && columnIndex(col.key || col.prop) !== -1"
+                class="admin-data-table__col-order"
+              >
+                <el-button
+                  text
+                  size="small"
+                  :disabled="columnIndex(col.key || col.prop) === 0"
+                  @click="moveColumn(col.key || col.prop, -1)"
+                >
+                  上移
+                </el-button>
+                <el-button
+                  text
+                  size="small"
+                  :disabled="columnIndex(col.key || col.prop) === visibleCols.length - 1"
+                  @click="moveColumn(col.key || col.prop, 1)"
+                >
+                  下移
+                </el-button>
+              </div>
             </div>
           </el-checkbox-group>
         </el-popover>
@@ -274,7 +325,17 @@ const paginationLayout = computed(() => {
 }
 
 .admin-data-table__col-toggle {
-  padding: 2px 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 4px 0;
+}
+
+.admin-data-table__col-order {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
 }
 
 .admin-data-table__error {
