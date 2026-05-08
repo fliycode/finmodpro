@@ -6,7 +6,7 @@ import { navigationMap } from '../navigation.js';
 test('admin llm navigation collapses into one model-management parent entry', () => {
   const llmItems = navigationMap.admin.filter((item) => item.group === 'admin-llm');
 
-  assert.deepEqual(llmItems.map((item) => item.to), ['/admin/llm/models', '/admin/lightrag']);
+  assert.deepEqual(llmItems.map((item) => item.to), ['/admin/llm/models', '/admin/graph/documents']);
   assert.deepEqual(llmItems[0].children.map((item) => item.to), [
     '/admin/llm/models',
     '/admin/llm/logs',
@@ -14,15 +14,15 @@ test('admin llm navigation collapses into one model-management parent entry', ()
   ]);
 });
 
-test('lightrag navigation exposes child routes instead of flattening the module into one page', () => {
-  const graphItem = navigationMap.admin.find((item) => item.id === 'admin-lightrag');
+test('graph management navigation exposes three child pages', () => {
+  const graphItem = navigationMap.admin.find((item) => item.id === 'admin-graph');
 
   assert.deepEqual(
     graphItem.children.map((item) => item.to),
     [
-      '/admin/lightrag/query',
-      '/admin/lightrag/graph',
-      '/admin/lightrag/documents',
+      '/admin/graph/documents',
+      '/admin/graph/knowledge',
+      '/admin/graph/search',
     ],
   );
 });
