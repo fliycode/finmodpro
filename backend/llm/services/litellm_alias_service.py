@@ -7,12 +7,48 @@ from llm.services.litellm_config_render_service import try_build_rendered_litell
 from llm.services.litellm_route_utils import normalize_upstream_model_name
 
 
+_PROVIDER_API_KEY_ENV_VARS = {
+    ModelConfig.PROVIDER_DASHSCOPE: "DASHSCOPE_API_KEY",
+    ModelConfig.PROVIDER_DEEPSEEK: "DEEPSEEK_API_KEY",
+}
+
+
+def _resolve_upstream_provider(*, upstream_provider="", upstream_model_name=""):
+    normalized_provider = str(upstream_provider or "").strip().lower()
+    if normalized_provider:
+        return normalized_provider
+
+    raw_model_name = str(upstream_model_name or "").strip()
+    if "/" not in raw_model_name:
+        return ""
+    return raw_model_name.split("/", 1)[0].strip().lower()
+
+
+def _resolve_api_key_reference(*, api_key="", upstream_provider="", upstream_model_name=""):
+    if api_key:
+        return api_key
+
+    normalized_provider = _resolve_upstream_provider(
+        upstream_provider=upstream_provider,
+        upstream_model_name=upstream_model_name,
+    )
+    env_var_name = _PROVIDER_API_KEY_ENV_VARS.get(normalized_provider)
+    if not env_var_name:
+        return ""
+    return f"os.environ/{env_var_name}"
+
+
 def _build_litellm_alias_config(*, alias, upstream_model_name, api_base, api_key="", upstream_provider=""):
+    api_key_reference = _resolve_api_key_reference(
+        api_key=api_key,
+        upstream_provider=upstream_provider,
+        upstream_model_name=upstream_model_name,
+    )
     upstream_model_name = normalize_upstream_model_name(
         provider=upstream_provider,
         model_name=upstream_model_name,
     )
-    api_key_line = f"      api_key: {api_key}\n" if api_key else ""
+    api_key_line = f"      api_key: {api_key_reference}\n" if api_key_reference else ""
     return (
         "model_list:\n"
         f"  - model_name: {alias}\n"

@@ -96,7 +96,7 @@ class LlmConsoleApiTests(TestCase):
         self.assertEqual(payload["providers"][0]["key"], "litellm")
         self.assertIn("quick_links", payload)
 
-    def test_summary_includes_active_non_litellm_provider_status(self):
+    def test_summary_ignores_non_litellm_provider_rows_for_runtime_status(self):
         ModelConfig.objects.create(
             name="deepseek-chat",
             capability=ModelConfig.CAPABILITY_CHAT,
@@ -115,8 +115,8 @@ class LlmConsoleApiTests(TestCase):
         self.assertEqual(response.status_code, 200)
         payload = response.json()["data"]
         provider_keys = [item["key"] for item in payload["providers"]]
-        self.assertEqual(payload["active_models"]["chat"]["provider"], "deepseek")
-        self.assertIn("deepseek", provider_keys)
+        self.assertEqual(payload["active_models"]["chat"]["provider"], "")
+        self.assertEqual(provider_keys, ["litellm", "langfuse", "unstructured", "llamafactory"])
 
     def test_summary_marks_litellm_configured_when_config_exists_but_is_inactive(self):
         ModelConfig.objects.create(
@@ -148,8 +148,8 @@ class LlmConsoleApiTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         payload = response.json()["data"]
-        deepseek = next(item for item in payload["providers"] if item["key"] == "deepseek")
-        self.assertEqual(deepseek["status"], "missing")
+        litellm = next(item for item in payload["providers"] if item["key"] == "litellm")
+        self.assertEqual(litellm["status"], "missing")
 
     def test_admin_can_fetch_llm_observability_summary(self):
         RetrievalLog.objects.create(

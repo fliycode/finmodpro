@@ -76,6 +76,7 @@ class ModelConfigListApiTests(TestCase):
         )
         self.member_user.groups.add(Group.objects.get(name=ROLE_MEMBER))
         self.member_access_token = generate_access_token(self.member_user)
+        migrate_active_configs_to_litellm(triggered_by=self.admin_user)
 
     def test_list_model_configs_requires_authentication(self):
         response = self.client.get("/api/ops/model-configs")
@@ -100,14 +101,21 @@ class ModelConfigListApiTests(TestCase):
 
     def test_list_model_configs_returns_serialized_rows(self):
         replacement = ModelConfig.objects.create(
-            name="qwen-chat",
+            name="litellm-qwen-chat",
             capability=ModelConfig.CAPABILITY_CHAT,
-            provider=ModelConfig.PROVIDER_OLLAMA,
-            model_name="qwen2.5:7b",
-            parameter_scale="7B",
-            endpoint="http://localhost:11434",
+            provider=ModelConfig.PROVIDER_LITELLM,
+            model_name="chat-qwen-route",
+            parameter_scale="32B",
+            endpoint=settings.LITELLM_GATEWAY_URL,
             description="财报问答候选模型",
-            options={"temperature": 0.1},
+            options={
+                "api_base": "https://api.deepseek.com",
+                "temperature": 0.1,
+                "litellm": {
+                    "upstream_provider": "deepseek",
+                    "upstream_model": "deepseek/deepseek-chat",
+                },
+            },
             is_active=False,
         )
 
@@ -120,17 +128,9 @@ class ModelConfigListApiTests(TestCase):
         payload = response.json()
         self.assertEqual(payload["code"], 0)
         self.assertEqual(payload["message"], "ok")
-        self.assertEqual(payload["data"]["total"], 5)
-        self.assertEqual(
-            [item["name"] for item in payload["data"]["model_configs"]],
-            [
-                "default-chat",
-                "qwen-chat",
-                "default-embedding",
-                "default-dashscope-embedding",
-                "default-dashscope-rerank",
-            ],
-        )
+        self.assertEqual(payload["data"]["total"], 4)
+        self.assertTrue(all(item["provider"] == ModelConfig.PROVIDER_LITELLM for item in payload["data"]["model_configs"]))
+        self.assertTrue(any(item["name"] == "litellm-qwen-chat" for item in payload["data"]["model_configs"]))
 
         first_row = payload["data"]["model_configs"][0]
         self.assertEqual(
@@ -167,7 +167,7 @@ class ModelConfigListApiTests(TestCase):
         self.assertEqual(first_row["id"], get_active_model_config(ModelConfig.CAPABILITY_CHAT).id)
         self.assertTrue(first_row["is_active"])
         self.assertEqual(payload["data"]["model_configs"][1]["id"], replacement.id)
-        self.assertEqual(payload["data"]["model_configs"][1]["parameter_scale"], "7B")
+        self.assertEqual(payload["data"]["model_configs"][1]["parameter_scale"], "32B")
         self.assertEqual(payload["data"]["model_configs"][1]["description"], "财报问答候选模型")
 
     def test_list_model_configs_includes_overview_metrics_and_invocation_counts(self):
@@ -205,7 +205,7 @@ class ModelConfigListApiTests(TestCase):
         self.assertEqual(overview["total_models"], payload["total"])
         self.assertEqual(
             overview["enabled_models"],
-            ModelConfig.objects.filter(is_active=True).count(),
+            ModelConfig.objects.filter(provider=ModelConfig.PROVIDER_LITELLM, is_active=True).count(),
         )
         self.assertEqual(overview["total_invocation_count"], 2)
         self.assertEqual(overview["today_invocation_count"], 1)
@@ -215,7 +215,7 @@ class ModelConfigListApiTests(TestCase):
         row = next(item for item in payload["model_configs"] if item["id"] == model.id)
         self.assertEqual(row["invocation_count"], 2)
 
-    def test_list_model_configs_excludes_internal_litellm_routes(self):
+    def test_list_model_configs_returns_litellm_routes_only(self):
         ModelConfig.objects.create(
             name="litellm-chat-default",
             capability=ModelConfig.CAPABILITY_CHAT,
@@ -234,18 +234,25 @@ class ModelConfigListApiTests(TestCase):
         self.assertEqual(response.status_code, 200)
         payload = response.json()["data"]
         self.assertEqual(payload["total"], 4)
-        self.assertFalse(
-            any(item["provider"] == ModelConfig.PROVIDER_LITELLM for item in payload["model_configs"])
+        self.assertTrue(
+            all(item["provider"] == ModelConfig.PROVIDER_LITELLM for item in payload["model_configs"])
         )
 
     def test_list_model_configs_masks_api_key(self):
         ModelConfig.objects.create(
-            name="deepseek-chat",
+            name="litellm-chat-mask",
             capability=ModelConfig.CAPABILITY_CHAT,
-            provider=ModelConfig.PROVIDER_DEEPSEEK,
-            model_name="deepseek-chat",
-            endpoint="https://api.deepseek.com",
-            options={"api_key": "sk-test-123456"},
+            provider=ModelConfig.PROVIDER_LITELLM,
+            model_name="chat-mask-route",
+            endpoint=settings.LITELLM_GATEWAY_URL,
+            options={
+                "api_key": "sk-test-123456",
+                "api_base": "https://api.deepseek.com",
+                "litellm": {
+                    "upstream_provider": "deepseek",
+                    "upstream_model": "deepseek/deepseek-chat",
+                },
+            },
             is_active=False,
         )
 
@@ -255,12 +262,12 @@ class ModelConfigListApiTests(TestCase):
         )
 
         self.assertEqual(response.status_code, 200)
-        deepseek_row = next(
-            item for item in response.json()["data"]["model_configs"] if item["provider"] == "deepseek"
+        route_row = next(
+            item for item in response.json()["data"]["model_configs"] if item["name"] == "litellm-chat-mask"
         )
-        self.assertTrue(deepseek_row["has_api_key"])
-        self.assertEqual(deepseek_row["api_key_masked"], "sk-tes******3456")
-        self.assertNotIn("sk-test-123456", json.dumps(deepseek_row))
+        self.assertTrue(route_row["has_api_key"])
+        self.assertEqual(route_row["api_key_masked"], "sk-tes******3456")
+        self.assertNotIn("sk-test-123456", json.dumps(route_row))
 
     def test_list_model_configs_exposes_fine_tune_lineage_summary(self):
         base_model = get_active_model_config(ModelConfig.CAPABILITY_CHAT)
@@ -313,6 +320,7 @@ class ModelConfigActivationApiTests(TestCase):
         )
         self.member_user.groups.add(Group.objects.get(name=ROLE_MEMBER))
         self.member_access_token = generate_access_token(self.member_user)
+        migrate_active_configs_to_litellm(triggered_by=self.admin_user)
 
     def test_activation_requires_authentication(self):
         model_config = get_active_model_config(ModelConfig.CAPABILITY_CHAT)
@@ -348,12 +356,19 @@ class ModelConfigActivationApiTests(TestCase):
     def test_activation_enables_target_and_switches_same_capability(self):
         previous = get_active_model_config(ModelConfig.CAPABILITY_CHAT)
         replacement = ModelConfig.objects.create(
-            name="qwen-chat-active",
+            name="litellm-qwen-chat-active",
             capability=ModelConfig.CAPABILITY_CHAT,
-            provider=ModelConfig.PROVIDER_OLLAMA,
-            model_name="qwen2.5:7b",
-            endpoint="http://localhost:11434",
-            options={"temperature": 0.1},
+            provider=ModelConfig.PROVIDER_LITELLM,
+            model_name="chat-qwen-active-route",
+            endpoint=settings.LITELLM_GATEWAY_URL,
+            options={
+                "temperature": 0.1,
+                "api_base": "https://api.deepseek.com",
+                "litellm": {
+                    "upstream_provider": "deepseek",
+                    "upstream_model": "deepseek/deepseek-chat",
+                },
+            },
             is_active=False,
         )
 
@@ -486,20 +501,25 @@ class ModelConfigActivationApiTests(TestCase):
         self.assertEqual(response.json(), {"code": 0, "message": "ok", "data": {"deleted": True}})
         self.assertFalse(ModelConfig.objects.filter(id=model_config.id).exists())
 
-    def test_admin_can_create_deepseek_model_config(self):
+    def test_admin_can_create_litellm_model_config(self):
         response = self.client.post(
             "/api/ops/model-configs/",
             data=json.dumps(
                 {
-                    "name": "deepseek-prod",
+                    "name": "litellm-chat-prod",
                     "capability": "chat",
-                    "provider": "deepseek",
-                    "model_name": "deepseek-chat",
-                    "endpoint": "https://api.deepseek.com",
+                    "provider": "litellm",
+                    "model_name": "chat-prod-route",
+                    "endpoint": "http://localhost:4000",
                     "options": {
                         "api_key": "sk-test-123456",
+                        "api_base": "https://api.deepseek.com",
                         "temperature": 0.2,
                         "max_tokens": 1024,
+                        "litellm": {
+                            "upstream_provider": "deepseek",
+                            "upstream_model": "deepseek/deepseek-chat",
+                        },
                     },
                     "is_active": True,
                 }
@@ -510,13 +530,13 @@ class ModelConfigActivationApiTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         payload = response.json()
-        self.assertEqual(payload["data"]["model_config"]["provider"], "deepseek")
+        self.assertEqual(payload["data"]["model_config"]["provider"], "litellm")
         self.assertTrue(payload["data"]["model_config"]["has_api_key"])
 
     @patch("urllib.request.urlopen")
-    def test_admin_can_test_deepseek_connection(self, mocked_urlopen):
+    def test_admin_can_test_litellm_chat_connection(self, mocked_urlopen):
         mocked_urlopen.return_value = _FakeHttpResponse(
-            {"choices": [{"message": {"content": "pong"}}]}
+            {"choices": [{"message": {"content": "pong"}}], "usage": {"prompt_tokens": 1, "completion_tokens": 1}}
         )
 
         response = self.client.post(
@@ -524,10 +544,17 @@ class ModelConfigActivationApiTests(TestCase):
             data=json.dumps(
                 {
                     "capability": "chat",
-                    "provider": "deepseek",
-                    "model_name": "deepseek-chat",
-                    "endpoint": "https://api.deepseek.com",
-                    "options": {"api_key": "sk-test"},
+                    "provider": "litellm",
+                    "model_name": "chat-default",
+                    "endpoint": "http://localhost:4000",
+                    "options": {
+                        "api_key": "sk-test",
+                        "api_base": "https://api.deepseek.com",
+                        "litellm": {
+                            "upstream_provider": "deepseek",
+                            "upstream_model": "deepseek/deepseek-chat",
+                        },
+                    },
                 }
             ),
             content_type="application/json",
@@ -2099,6 +2126,14 @@ class LiteLLMGatewayCommandServiceTests(TestCase):
         )
         self.admin_user.groups.add(Group.objects.get(name=ROLE_ADMIN))
 
+    def _get_active_source_model(self, capability):
+        return (
+            ModelConfig.objects.filter(capability=capability, is_active=True)
+            .exclude(provider=ModelConfig.PROVIDER_LITELLM)
+            .order_by("-updated_at", "-id")
+            .first()
+        )
+
     def test_migrate_to_litellm_creates_active_chat_and_embedding_routes(self):
         # Seed data (from migration 0001) provides default-chat (Ollama, active)
         # and default-embedding (Ollama, active).
@@ -2109,23 +2144,23 @@ class LiteLLMGatewayCommandServiceTests(TestCase):
         self.assertTrue(ModelConfig.objects.filter(provider="litellm", capability="rerank", is_active=True).exists())
         self.assertTrue(LiteLLMSyncEvent.objects.filter(status="success").exists())
 
-    def test_migrate_to_litellm_keeps_source_models_active(self):
-        chat_model = get_active_model_config(ModelConfig.CAPABILITY_CHAT)
-        embedding_model = get_active_model_config(ModelConfig.CAPABILITY_EMBEDDING)
-        rerank_model = get_active_model_config(ModelConfig.CAPABILITY_RERANK)
+    def test_migrate_to_litellm_deactivates_source_models_and_activates_routes(self):
+        chat_model = self._get_active_source_model(ModelConfig.CAPABILITY_CHAT)
+        embedding_model = self._get_active_source_model(ModelConfig.CAPABILITY_EMBEDDING)
+        rerank_model = self._get_active_source_model(ModelConfig.CAPABILITY_RERANK)
 
         migrate_active_configs_to_litellm(triggered_by=self.admin_user)
 
         chat_model.refresh_from_db()
         embedding_model.refresh_from_db()
         rerank_model.refresh_from_db()
-        self.assertTrue(chat_model.is_active)
-        self.assertTrue(embedding_model.is_active)
-        self.assertTrue(rerank_model.is_active)
+        self.assertFalse(chat_model.is_active)
+        self.assertFalse(embedding_model.is_active)
+        self.assertFalse(rerank_model.is_active)
         self.assertTrue(ModelConfig.objects.filter(provider="litellm", capability="chat", is_active=True).exists())
 
     def test_migrate_to_litellm_copies_source_chat_options_and_upstream_metadata(self):
-        active_chat = get_active_model_config(ModelConfig.CAPABILITY_CHAT)
+        active_chat = self._get_active_source_model(ModelConfig.CAPABILITY_CHAT)
         active_chat.provider = ModelConfig.PROVIDER_DEEPSEEK
         active_chat.name = "deepseek-primary"
         active_chat.model_name = "deepseek-chat"
@@ -2149,7 +2184,7 @@ class LiteLLMGatewayCommandServiceTests(TestCase):
         self.assertEqual(route.options["litellm"]["upstream_model"], "deepseek/deepseek-chat")
 
     def test_migrate_to_litellm_reuses_existing_active_litellm_route_without_double_wrapping(self):
-        active_chat = get_active_model_config(ModelConfig.CAPABILITY_CHAT)
+        active_chat = self._get_active_source_model(ModelConfig.CAPABILITY_CHAT)
         route = ModelConfig.objects.create(
             name="litellm-existing-chat",
             capability=ModelConfig.CAPABILITY_CHAT,
@@ -2179,7 +2214,7 @@ class LiteLLMGatewayCommandServiceTests(TestCase):
         )
 
     def test_migrate_to_litellm_repairs_incomplete_active_litellm_route_from_original_source(self):
-        source_chat = get_active_model_config(ModelConfig.CAPABILITY_CHAT)
+        source_chat = self._get_active_source_model(ModelConfig.CAPABILITY_CHAT)
         source_chat.provider = ModelConfig.PROVIDER_DEEPSEEK
         source_chat.name = "deepseek-primary"
         source_chat.model_name = "deepseek-chat"
@@ -2214,7 +2249,7 @@ class LiteLLMGatewayCommandServiceTests(TestCase):
         )
 
     def test_migrate_to_litellm_maps_dashscope_embedding_to_openai_compatible_upstream(self):
-        active_embedding = get_active_model_config(ModelConfig.CAPABILITY_EMBEDDING)
+        active_embedding = self._get_active_source_model(ModelConfig.CAPABILITY_EMBEDDING)
         active_embedding.provider = ModelConfig.PROVIDER_DASHSCOPE
         active_embedding.name = "dashscope-embed"
         active_embedding.model_name = "text-embedding-v4"
@@ -2255,7 +2290,7 @@ class LiteLLMGatewayCommandServiceTests(TestCase):
         )
 
     def test_migrate_to_litellm_creates_active_rerank_route(self):
-        active_rerank = get_active_model_config(ModelConfig.CAPABILITY_RERANK)
+        active_rerank = self._get_active_source_model(ModelConfig.CAPABILITY_RERANK)
         active_rerank.provider = ModelConfig.PROVIDER_DASHSCOPE
         active_rerank.name = "dashscope-rerank"
         active_rerank.model_name = "qwen3-vl-rerank"
@@ -2278,7 +2313,7 @@ class LiteLLMGatewayCommandServiceTests(TestCase):
         )
 
     def test_migrate_to_litellm_prunes_stale_nested_routes_when_canonical_route_exists(self):
-        active_embedding = get_active_model_config(ModelConfig.CAPABILITY_EMBEDDING)
+        active_embedding = self._get_active_source_model(ModelConfig.CAPABILITY_EMBEDDING)
         active_embedding.provider = ModelConfig.PROVIDER_DASHSCOPE
         active_embedding.name = "dashscope-embed-primary"
         active_embedding.model_name = "text-embedding-v4"
@@ -3291,6 +3326,7 @@ class ModelConfigMigrationApiTests(TestCase):
         )
         self.member_user.groups.add(Group.objects.get(name=ROLE_MEMBER))
         self.member_access_token = generate_access_token(self.member_user)
+        migrate_active_configs_to_litellm(triggered_by=self.admin_user)
 
     def tearDown(self):
         self.litellm_root_patch.disable()
@@ -3456,10 +3492,14 @@ class LiteLLMAliasYamlRegressionTests(TestCase):
     def tearDown(self):
         shutil.rmtree(self.temp_dir, ignore_errors=True)
 
-    def _make_litellm_model_config(self, upstream_model=None, model_name="my-route"):
+    def _make_litellm_model_config(self, upstream_model=None, model_name="my-route", upstream_provider=None):
         options = {"api_base": "http://localhost:8001"}
-        if upstream_model is not None:
-            options["litellm"] = {"upstream_model": upstream_model}
+        if upstream_model is not None or upstream_provider is not None:
+            options["litellm"] = {}
+            if upstream_model is not None:
+                options["litellm"]["upstream_model"] = upstream_model
+            if upstream_provider is not None:
+                options["litellm"]["upstream_provider"] = upstream_provider
         return ModelConfig.objects.create(
             name="Test Route",
             model_name=model_name,
@@ -3528,6 +3568,28 @@ class LiteLLMAliasYamlRegressionTests(TestCase):
         yaml_text = self._sync_and_read_yaml(model_config)
 
         self.assertIn("api_key: sk-upstream", yaml_text)
+
+    def test_yaml_uses_provider_env_api_key_when_explicit_key_is_absent(self):
+        model_config = self._make_litellm_model_config(
+            upstream_model="deepseek/deepseek-chat",
+            upstream_provider=ModelConfig.PROVIDER_DEEPSEEK,
+        )
+
+        yaml_text = self._sync_and_read_yaml(model_config)
+
+        self.assertIn("api_key: os.environ/DEEPSEEK_API_KEY", yaml_text)
+
+    def test_yaml_infers_dashscope_env_api_key_from_upstream_model_prefix(self):
+        model_config = self._make_litellm_model_config(
+            upstream_model="dashscope/text-embedding-v4",
+            model_name="text-embedding-v4",
+        )
+        model_config.capability = ModelConfig.CAPABILITY_EMBEDDING
+        model_config.save(update_fields=["capability", "updated_at"])
+
+        yaml_text = self._sync_and_read_yaml(model_config)
+
+        self.assertIn("api_key: os.environ/DASHSCOPE_API_KEY", yaml_text)
 
     def test_sync_routes_prunes_stale_route_snippets(self):
         base_config_path = self.temp_dir / "base.yaml"

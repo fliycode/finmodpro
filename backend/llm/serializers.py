@@ -2,6 +2,10 @@ from rest_framework import serializers
 
 from llm.models import EvalRecord, FineTuneRun, FineTuneRunnerServer, ModelConfig
 
+LITELLM_PROVIDER_CHOICES = (
+    (ModelConfig.PROVIDER_LITELLM, "LiteLLM"),
+)
+
 
 def _mask_api_key(value):
     if not value:
@@ -138,7 +142,7 @@ class ModelConfigActivationSerializer(serializers.Serializer):
 class ModelConfigWriteSerializer(serializers.Serializer):
     name = serializers.CharField(max_length=255)
     capability = serializers.ChoiceField(choices=ModelConfig.CAPABILITY_CHOICES)
-    provider = serializers.ChoiceField(choices=ModelConfig.PROVIDER_CHOICES)
+    provider = serializers.ChoiceField(choices=LITELLM_PROVIDER_CHOICES)
     model_name = serializers.CharField(max_length=255)
     parameter_scale = serializers.CharField(required=False, allow_blank=True, max_length=64, default="")
     endpoint = serializers.URLField(max_length=500)
@@ -148,7 +152,7 @@ class ModelConfigWriteSerializer(serializers.Serializer):
 
 
 class ModelConfigConnectionTestSerializer(serializers.Serializer):
-    provider = serializers.ChoiceField(choices=ModelConfig.PROVIDER_CHOICES)
+    provider = serializers.ChoiceField(choices=LITELLM_PROVIDER_CHOICES)
     model_name = serializers.CharField(max_length=255)
     endpoint = serializers.URLField(max_length=500)
     options = serializers.DictField(required=False, default=dict)

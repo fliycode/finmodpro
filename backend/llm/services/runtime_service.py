@@ -3,11 +3,6 @@ from urllib.parse import urlparse, urlunparse
 
 from common.exceptions import ProviderConfigurationError
 from llm.models import ModelConfig
-from llm.services.providers.dashscope_provider import (
-    DashScopeEmbeddingProvider,
-    DashScopeRerankProvider,
-)
-from llm.services.providers.deepseek_provider import DeepSeekChatProvider
 from llm.services.model_config_service import get_active_model_config
 from llm.services.providers.litellm_provider import (
     LiteLLMChatProvider,
@@ -40,90 +35,45 @@ def _normalize_litellm_endpoint(endpoint):
 
 
 def _build_provider(model_config):
-    if model_config.provider == ModelConfig.PROVIDER_LITELLM:
-        if model_config.capability == ModelConfig.CAPABILITY_CHAT:
-            return LiteLLMChatProvider(
-                endpoint=_normalize_litellm_endpoint(model_config.endpoint),
-                model_name=model_config.model_name,
-                options=model_config.options,
-                model_config=model_config if model_config.pk else None,
-            )
-
-        if model_config.capability == ModelConfig.CAPABILITY_EMBEDDING:
-            return LiteLLMEmbeddingProvider(
-                endpoint=_normalize_litellm_endpoint(model_config.endpoint),
-                model_name=model_config.model_name,
-                options=model_config.options,
-                model_config=model_config if model_config.pk else None,
-            )
-
-        if model_config.capability == ModelConfig.CAPABILITY_RERANK:
-            return LiteLLMRerankProvider(
-                endpoint=_normalize_litellm_endpoint(model_config.endpoint),
-                model_name=model_config.model_name,
-                options=model_config.options,
-                model_config=model_config if model_config.pk else None,
-            )
-
+    if model_config.provider != ModelConfig.PROVIDER_LITELLM:
         raise ProviderConfigurationError(
-            f"Unsupported capability: {model_config.capability}",
-            provider=model_config.provider,
-            details={"capability": model_config.capability},
-        )
-
-    if model_config.provider == ModelConfig.PROVIDER_DEEPSEEK:
-        if model_config.capability != ModelConfig.CAPABILITY_CHAT:
-            raise ProviderConfigurationError(
-                f"Unsupported capability: {model_config.capability}",
-                provider=model_config.provider,
-                details={
-                    "capability": model_config.capability,
-                    "supported_capabilities": [ModelConfig.CAPABILITY_CHAT],
-                },
-            )
-        return DeepSeekChatProvider(
-            endpoint=model_config.endpoint,
-            model_name=model_config.model_name,
-            options=model_config.options,
-        )
-
-    if model_config.provider == ModelConfig.PROVIDER_DASHSCOPE:
-        if model_config.capability == ModelConfig.CAPABILITY_EMBEDDING:
-            return DashScopeEmbeddingProvider(
-                endpoint=model_config.endpoint,
-                model_name=model_config.model_name,
-                options=model_config.options,
-            )
-
-        if model_config.capability == ModelConfig.CAPABILITY_RERANK:
-            return DashScopeRerankProvider(
-                endpoint=model_config.endpoint,
-                model_name=model_config.model_name,
-                options=model_config.options,
-            )
-
-        raise ProviderConfigurationError(
-            f"Unsupported capability: {model_config.capability}",
+            "Only LiteLLM-backed model configs are supported.",
             provider=model_config.provider,
             details={
                 "capability": model_config.capability,
-                "supported_capabilities": [
-                    ModelConfig.CAPABILITY_EMBEDDING,
-                    ModelConfig.CAPABILITY_RERANK,
-                ],
+                "supported_providers": [ModelConfig.PROVIDER_LITELLM],
             },
         )
 
+    if model_config.capability == ModelConfig.CAPABILITY_CHAT:
+        return LiteLLMChatProvider(
+            endpoint=_normalize_litellm_endpoint(model_config.endpoint),
+            model_name=model_config.model_name,
+            options=model_config.options,
+            model_config=model_config if model_config.pk else None,
+        )
+
+    if model_config.capability == ModelConfig.CAPABILITY_EMBEDDING:
+        return LiteLLMEmbeddingProvider(
+            endpoint=_normalize_litellm_endpoint(model_config.endpoint),
+            model_name=model_config.model_name,
+            options=model_config.options,
+            model_config=model_config if model_config.pk else None,
+        )
+
+    if model_config.capability == ModelConfig.CAPABILITY_RERANK:
+        return LiteLLMRerankProvider(
+            endpoint=_normalize_litellm_endpoint(model_config.endpoint),
+            model_name=model_config.model_name,
+            options=model_config.options,
+            model_config=model_config if model_config.pk else None,
+        )
+
     raise ProviderConfigurationError(
-        f"Unsupported provider: {model_config.provider}",
+        f"Unsupported capability: {model_config.capability}",
         provider=model_config.provider,
         details={
             "capability": model_config.capability,
-            "supported_providers": [
-                ModelConfig.PROVIDER_DEEPSEEK,
-                ModelConfig.PROVIDER_LITELLM,
-                ModelConfig.PROVIDER_DASHSCOPE,
-            ],
         },
     )
 

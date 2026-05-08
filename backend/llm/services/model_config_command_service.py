@@ -4,7 +4,6 @@ from django.db import transaction
 from llm.models import ModelConfig
 from llm.services.litellm_alias_service import sync_litellm_routes
 from llm.services.litellm_route_utils import normalize_upstream_model_name
-from llm.services.model_config_service import get_active_model_config
 from llm.services.runtime_service import _build_provider
 
 
@@ -132,6 +131,8 @@ def set_model_config_active_state(*, model_config_id, is_active):
             model_config = ModelConfig.objects.select_for_update().get(id=model_config_id)
         except ModelConfig.DoesNotExist as exc:
             raise ValueError("模型配置不存在。") from exc
+        if model_config.provider != ModelConfig.PROVIDER_LITELLM:
+            raise ValueError("仅支持管理 LiteLLM 路由配置。")
 
         model_config.is_active = is_active
         model_config.save()
@@ -140,13 +141,19 @@ def set_model_config_active_state(*, model_config_id, is_active):
 
 
 def create_model_config(*, payload):
-    model_config = ModelConfig.objects.create(**payload)
+    model_config = ModelConfig.objects.create(
+        **{
+            **payload,
+            "provider": ModelConfig.PROVIDER_LITELLM,
+        }
+    )
     model_config.refresh_from_db()
     return model_config
 
 
 def update_model_config(*, model_config, payload):
     incoming_options = payload.pop("options", None)
+    payload["provider"] = ModelConfig.PROVIDER_LITELLM
     for key, value in payload.items():
         setattr(model_config, key, value)
     if incoming_options is not None:
@@ -192,6 +199,35 @@ def ensure_active_source_model_configs():
         source_model.save(update_fields=["is_active", "updated_at"])
 
 
+def _get_preferred_migration_model_config(capability):
+    legacy_active = (
+        ModelConfig.objects.filter(capability=capability, is_active=True)
+        .exclude(provider=ModelConfig.PROVIDER_LITELLM)
+        .order_by("-updated_at", "-id")
+        .first()
+    )
+    if legacy_active is not None:
+        return legacy_active
+
+    litellm_active = (
+        ModelConfig.objects.filter(
+            capability=capability,
+            provider=ModelConfig.PROVIDER_LITELLM,
+            is_active=True,
+        )
+        .order_by("-updated_at", "-id")
+        .first()
+    )
+    if litellm_active is not None:
+        return litellm_active
+
+    return (
+        ModelConfig.objects.filter(capability=capability, provider=ModelConfig.PROVIDER_LITELLM)
+        .order_by("-updated_at", "-id")
+        .first()
+    )
+
+
 def migrate_active_configs_to_litellm(*, triggered_by):
     """For each active capability config, ensure a LiteLLM route exists and is active."""
     migrated = []
@@ -202,8 +238,11 @@ def migrate_active_configs_to_litellm(*, triggered_by):
             ModelConfig.CAPABILITY_EMBEDDING,
             ModelConfig.CAPABILITY_RERANK,
         ):
-            active = get_active_model_config(capability)
-            route = ensure_litellm_route_from_model_config(active)
+            source = _get_preferred_migration_model_config(capability)
+            if source is None:
+                continue
+            route = ensure_litellm_route_from_model_config(source)
+            ModelConfig.objects.filter(capability=capability).exclude(id=route.id).update(is_active=False)
             route.is_active = True
             route.save(update_fields=["is_active", "updated_at"])
             migrated.append(capability)

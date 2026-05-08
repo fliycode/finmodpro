@@ -5,8 +5,10 @@ from django.conf import settings
 from django.db.models import Avg
 from django.utils import timezone
 
+from common.exceptions import ModelNotConfiguredError
 from knowledgebase.models import Document, IngestionTask
 from llm.models import FineTuneRun, ModelConfig
+from llm.services.model_config_service import get_active_model_config
 from rag.models import RetrievalLog
 
 
@@ -46,23 +48,6 @@ def _build_provider_status():
             "active_count": active_by_provider.get(ModelConfig.PROVIDER_LITELLM, 0),
         },
     ]
-    for provider_key, provider_label in ModelConfig.PROVIDER_CHOICES:
-        if provider_key == ModelConfig.PROVIDER_LITELLM:
-            continue
-        providers.append(
-            {
-                "key": provider_key,
-                "label": provider_label,
-                "status": (
-                    "connected"
-                    if active_by_provider.get(provider_key)
-                    else "configured"
-                    if configured_by_provider.get(provider_key)
-                    else "missing"
-                ),
-                "active_count": active_by_provider.get(provider_key, 0),
-            }
-        )
     providers.extend(
         [
             {
@@ -125,16 +110,14 @@ def _recent_failed_ingestions(limit=5):
 
 
 def build_llm_console_summary():
-    active_chat = (
-        ModelConfig.objects.filter(capability=ModelConfig.CAPABILITY_CHAT, is_active=True)
-        .order_by("id")
-        .first()
-    )
-    active_embedding = (
-        ModelConfig.objects.filter(capability=ModelConfig.CAPABILITY_EMBEDDING, is_active=True)
-        .order_by("id")
-        .first()
-    )
+    try:
+        active_chat = get_active_model_config(ModelConfig.CAPABILITY_CHAT)
+    except ModelNotConfiguredError:
+        active_chat = None
+    try:
+        active_embedding = get_active_model_config(ModelConfig.CAPABILITY_EMBEDDING)
+    except ModelNotConfiguredError:
+        active_embedding = None
     latest_fine_tune = FineTuneRun.objects.order_by("-updated_at", "-id").first()
     window_start = timezone.now() - timedelta(hours=24)
 
