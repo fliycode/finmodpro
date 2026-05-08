@@ -64,11 +64,6 @@ export const appRoutes = [
         component: () => import('../views/workspace/WorkspaceRiskView.vue'),
         meta: { title: '风险与摘要', subtitle: '多维风险指标监控、异常检测与智能摘要生成。' },
       },
-      {
-        path: 'sentiment',
-        component: () => import('../views/workspace/WorkspaceSentimentView.vue'),
-        meta: { title: '舆情分析', subtitle: '基于金融舆情数据的情绪分析与趋势洞察。' },
-      },
     ],
   },
   {
@@ -151,11 +146,6 @@ export const appRoutes = [
         path: 'lightrag/legacy',
         component: () => import('../views/admin/AdminLightragView.vue'),
         meta: { title: '图谱工作台 / Legacy WebUI', subtitle: '保留旧版 LightRAG WebUI 作为应急回退入口。', breadcrumb: [{ label: 'Gateway Ops' }, { label: '图谱工作台' }, { label: 'Legacy WebUI' }] },
-      },
-      {
-        path: 'evaluation',
-        component: () => import('../views/admin/AdminEvaluationView.vue'),
-        meta: { title: '评测结果', subtitle: '查看模型评测结果、对比实验与质量报告。', breadcrumb: [{ label: '治理审阅' }, { label: '评测结果' }] },
       },
       {
         path: 'audit-logs',

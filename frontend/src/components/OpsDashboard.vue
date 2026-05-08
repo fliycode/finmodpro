@@ -55,7 +55,6 @@ const formatAuditAction = (action) => {
     'knowledgebase.ingest': '知识入库',
     'risk.extract': '风险提取',
     'risk.batch_extract': '批量提取',
-    'risk.sentiment': '舆情分析',
   };
 
   return labels[action] || action || '审计事件';

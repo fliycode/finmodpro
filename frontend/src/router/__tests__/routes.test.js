@@ -24,7 +24,6 @@ test('admin route tree keeps governance pages mounted under admin shell', () => 
   const childPaths = (adminRoute?.children || []).map((route) => route.path);
 
   assert.ok(childPaths.includes('users'));
-  assert.ok(childPaths.includes('evaluation'));
 });
 
 test('admin route tree exposes knowledgebase management under admin shell', () => {

@@ -77,58 +77,6 @@ export const normalizeModelConfigPayload = (payload = {}) => {
   }));
 };
 
-export const normalizeEvaluationRecord = (item, index = 0) => ({
-  id: item?.id ?? item?.evaluation_id ?? index,
-  model_config_id: item?.model_config_id ?? null,
-  evaluation_mode: item?.evaluation_mode ?? 'baseline',
-  target_name: item?.target_name ?? item?.targetName ?? item?.name ?? `evaluation-${index}`,
-  task_type: item?.task_type ?? item?.taskType ?? item?.type ?? '--',
-  status: item?.status ?? item?.state ?? 'pending',
-  qa_accuracy: item?.qa_accuracy ?? item?.qaAccuracy ?? null,
-  extraction_accuracy: item?.extraction_accuracy ?? item?.extractionAccuracy ?? null,
-  precision: item?.precision ?? null,
-  recall: item?.recall ?? null,
-  f1_score: item?.f1_score ?? null,
-  average_latency_ms: item?.average_latency_ms ?? item?.avg_latency_ms ?? null,
-  version: item?.version ?? item?.eval_version ?? item?.tag ?? '--',
-  dataset_name: item?.dataset_name ?? '',
-  dataset_version: item?.dataset_version ?? '',
-  run_notes: item?.run_notes ?? '',
-  metadata: item?.metadata ?? {},
-  created_at: item?.created_at ?? item?.createdAt ?? item?.started_at ?? item?.updated_at ?? '',
-  metadata: item?.metadata ?? {},
-});
-
-export const normalizeEvaluationGroup = (group, index = 0) => {
-  const records = getArray(group, ['records', 'eval_records']).map((item, recordIndex) => normalizeEvaluationRecord(item, recordIndex));
-  const summary = group?.summary || {};
-  return {
-    evaluation_mode: group?.evaluation_mode ?? 'baseline',
-    label: group?.label ?? `分组 ${index + 1}`,
-    total: toNumber(group?.total, records.length),
-    summary: {
-      qa_accuracy: summary.qa_accuracy ?? null,
-      extraction_accuracy: summary.extraction_accuracy ?? null,
-      precision: summary.precision ?? null,
-      recall: summary.recall ?? null,
-      f1_score: summary.f1_score ?? null,
-      average_latency_ms: summary.average_latency_ms ?? null,
-    },
-    records,
-  };
-};
-
-export const normalizeEvaluationPayload = (payload = {}) => {
-  const evalRecords = getArray(payload, ['eval_records', 'evaluations']).map((item, index) => normalizeEvaluationRecord(item, index));
-  const comparisonGroups = getArray(payload, ['comparison_groups']).map((group, index) => normalizeEvaluationGroup(group, index));
-
-  return {
-    total: toNumber(payload.total, evalRecords.length),
-    eval_records: evalRecords,
-    comparison_groups: comparisonGroups,
-  };
-};
-
 export const normalizeFineTuneRun = (item, index = 0) => ({
   id: item?.id ?? item?.fine_tune_run_id ?? index,
   base_model_id: item?.base_model_id ?? null,
@@ -259,24 +207,6 @@ export const createLlmApi = (overrides = {}) => {
         method: 'POST',
         auth: true,
       }));
-    },
-
-    async getEvaluations() {
-      return normalizeEvaluationPayload(unwrap(await fetchJson('/api/ops/evaluations', {
-        method: 'GET',
-        auth: true,
-      })));
-    },
-
-    async triggerEvaluation(data) {
-      const payload = unwrap(await fetchJson('/api/ops/evaluations', {
-        method: 'POST',
-        auth: true,
-        body: JSON.stringify(data),
-      }));
-      return {
-        eval_record: normalizeEvaluationRecord(payload.eval_record || payload),
-      };
     },
 
     async getFineTuneRuns(params = {}) {

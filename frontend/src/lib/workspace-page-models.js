@@ -23,14 +23,6 @@ const MODELS = Object.freeze({
       Object.freeze({ id: 'actions', label: '导出' }),
     ]),
   }),
-  sentiment: Object.freeze({
-    mobileMode: 'chapter-tabs',
-    regions: Object.freeze([
-      Object.freeze({ id: 'summary', label: '判断' }),
-      Object.freeze({ id: 'evidence', label: '样本' }),
-      Object.freeze({ id: 'actions', label: '操作' }),
-    ]),
-  }),
   history: Object.freeze({
     mobileMode: 'single-column',
     regions: Object.freeze([

@@ -6,7 +6,6 @@ export const navigationMap = {
     { id: 'knowledge', label: '知识库管理', to: '/workspace/knowledge', icon: 'database', group: 'workspace-core' },
     { id: 'history', label: '历史会话', to: '/workspace/history', icon: 'history', group: 'workspace-support' },
     { id: 'risk', label: '风险与摘要', to: '/workspace/risk', icon: 'shield', group: 'workspace-core' },
-    { id: 'sentiment', label: '舆情分析', to: '/workspace/sentiment', icon: 'trending-up', group: 'workspace-core' },
   ],
   admin: [
     { id: 'admin-overview', label: '数据看板', to: '/admin/overview', icon: 'dashboard', group: 'admin-overview' },
@@ -28,7 +27,6 @@ export const navigationMap = {
         { id: 'admin-lightrag-documents', label: '文档管线', to: '/admin/lightrag/documents' },
       ],
     },
-    { id: 'admin-evaluation', label: '评测结果', to: '/admin/evaluation', icon: 'check', group: 'admin-governance' },
     { id: 'admin-audit-logs', label: '操作审计', to: '/admin/audit-logs', icon: 'clipboard', group: 'admin-governance' },
   ],
 };
