@@ -11,7 +11,10 @@ import AppSectionCard from './ui/AppSectionCard.vue';
 const flash = useFlash();
 
 const providerOptions = [
-  { label: 'LiteLLM', value: 'litellm' },
+  { label: 'DeepSeek', value: 'deepseek', capabilities: ['chat'] },
+  { label: 'DashScope', value: 'dashscope', capabilities: ['embedding', 'rerank'] },
+  { label: 'Ollama', value: 'ollama', capabilities: ['chat', 'embedding'] },
+  { label: 'OpenAI Compatible', value: 'openai_compatible', capabilities: ['chat', 'embedding', 'rerank'] },
 ];
 
 const capabilityOptions = [
@@ -33,6 +36,7 @@ const tableColumns = [
 
 const isLoading = ref(false);
 const isSaving = ref(false);
+const isTestingConnection = ref(false);
 const drawerVisible = ref(false);
 const editingId = ref(null);
 const errorMsg = ref('');
@@ -47,52 +51,64 @@ const originalOptions = ref({});
 
 const defaultFormState = () => ({
   name: '',
-  model_name: '',
+  model_name: 'deepseek-chat',
   capability: 'chat',
-  provider: 'litellm',
+  provider: 'deepseek',
   parameter_scale: '',
-  endpoint: 'http://localhost:4000',
-  api_base: 'https://api.deepseek.com',
-  upstream_provider: 'deepseek',
-  upstream_model: 'deepseek-chat',
+  endpoint: 'https://api.deepseek.com',
   description: '',
   api_key: '',
   temperature: 0.2,
   max_tokens: 1024,
+  input_price_per_million: 0,
+  output_price_per_million: 0,
+  request_price: 0,
+  price_currency: 'USD',
+  pricing_notes: '',
   is_active: false,
   has_api_key: false,
   api_key_masked: '',
 });
 
-function getCapabilityRouteDefaults(capability = 'chat') {
-  if (capability === 'embedding') {
-    return {
-      model_name: 'embed-default',
-      api_base: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
-      upstream_provider: 'dashscope',
-      upstream_model: 'text-embedding-v4',
-    };
-  }
-  if (capability === 'rerank') {
-    return {
-      model_name: 'rerank-default',
-      api_base: 'https://dashscope.aliyuncs.com/api/v1/services/rerank/text-rerank/text-rerank',
-      upstream_provider: 'dashscope',
-      upstream_model: 'qwen3-vl-rerank',
-    };
-  }
-  return {
-    model_name: 'chat-default',
-    api_base: 'https://api.deepseek.com',
-    upstream_provider: 'deepseek',
-    upstream_model: 'deepseek-chat',
+function getFirstProviderForCapability(capability = 'chat') {
+  return providerOptions.find((item) => item.capabilities.includes(capability))?.value || 'openai_compatible';
+}
+
+function getProviderDefaults(capability = 'chat', provider = 'deepseek') {
+  const defaults = {
+    deepseek: {
+      chat: { endpoint: 'https://api.deepseek.com', model_name: 'deepseek-chat' },
+    },
+    dashscope: {
+      embedding: {
+        endpoint: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+        model_name: 'text-embedding-v4',
+      },
+      rerank: {
+        endpoint: 'https://dashscope.aliyuncs.com/api/v1/services/rerank/text-rerank/text-rerank',
+        model_name: 'gte-rerank-v2',
+      },
+    },
+    ollama: {
+      chat: { endpoint: 'http://127.0.0.1:11434', model_name: 'qwen2.5:7b' },
+      embedding: { endpoint: 'http://127.0.0.1:11434', model_name: 'nomic-embed-text' },
+    },
+    openai_compatible: {
+      chat: { endpoint: 'https://api.openai.com', model_name: 'gpt-4o-mini' },
+      embedding: { endpoint: 'https://api.openai.com', model_name: 'text-embedding-3-small' },
+      rerank: { endpoint: 'https://api.openai.com', model_name: 'bge-reranker-v2-m3' },
+    },
   };
+  return defaults[provider]?.[capability] || { endpoint: '', model_name: '' };
 }
 
 const form = reactive(defaultFormState());
 
 const drawerTitle = computed(() => (editingId.value ? '编辑模型' : '新增模型'));
-const supportsTokenOptions = computed(() => true);
+const supportsTokenOptions = computed(() => form.capability === 'chat');
+const availableProviderOptions = computed(() => (
+  providerOptions.filter((item) => item.capabilities.includes(form.capability))
+));
 const capabilityCounts = computed(() => capabilityOptions.map((item) => ({
   ...item,
   count: configs.value.filter((config) => config.capability === item.value).length,
@@ -230,7 +246,7 @@ function resetForm() {
 
 function openCreate() {
   resetForm();
-  Object.assign(form, getCapabilityRouteDefaults(form.capability));
+  Object.assign(form, getProviderDefaults(form.capability, form.provider));
   drawerVisible.value = true;
 }
 
@@ -246,26 +262,23 @@ function openEdit(config) {
   form.provider = config.provider;
   form.parameter_scale = config.parameter_scale || '';
   form.endpoint = config.endpoint;
-  form.api_base = config.options?.api_base || config.endpoint;
-  form.upstream_provider = config.upstream_provider || 'deepseek';
-  form.upstream_model = config.upstream_model || config.model_name;
   form.description = config.description || '';
   form.is_active = Boolean(config.is_active);
   form.temperature = Number(config.options?.temperature ?? 0.2);
   form.max_tokens = Number(config.options?.max_tokens ?? 1024);
+  form.input_price_per_million = Number(config.input_price_per_million ?? 0);
+  form.output_price_per_million = Number(config.output_price_per_million ?? 0);
+  form.request_price = Number(config.request_price ?? 0);
+  form.price_currency = config.price_currency || 'USD';
+  form.pricing_notes = config.pricing_notes || '';
   form.has_api_key = Boolean(config.has_api_key);
   form.api_key_masked = config.api_key_masked || '';
   drawerVisible.value = true;
 }
 
-function buildPayload() {
+function buildOptions() {
   const options = {
     ...originalOptions.value,
-    api_base: String(form.api_base || '').trim(),
-    litellm: {
-      upstream_provider: form.upstream_provider,
-      upstream_model: String(form.upstream_model || '').trim(),
-    },
   };
   const apiKey = String(form.api_key || '').trim();
 
@@ -279,17 +292,35 @@ function buildPayload() {
     delete options.temperature;
     delete options.max_tokens;
   }
+  return options;
+}
 
+function buildPayload() {
   return {
     name: String(form.name || '').trim(),
     model_name: String(form.model_name || '').trim(),
     capability: form.capability,
-    provider: 'litellm',
+    provider: form.provider,
     parameter_scale: String(form.parameter_scale || '').trim(),
     endpoint: String(form.endpoint || '').trim(),
     description: String(form.description || '').trim(),
-    options,
+    options: buildOptions(),
+    input_price_per_million: Number(form.input_price_per_million || 0),
+    output_price_per_million: Number(form.output_price_per_million || 0),
+    request_price: Number(form.request_price || 0),
+    price_currency: String(form.price_currency || 'USD').trim() || 'USD',
+    pricing_notes: String(form.pricing_notes || '').trim(),
     is_active: Boolean(form.is_active),
+  };
+}
+
+function buildConnectionPayload() {
+  return {
+    capability: form.capability,
+    provider: form.provider,
+    model_name: String(form.model_name || '').trim(),
+    endpoint: String(form.endpoint || '').trim(),
+    options: buildOptions(),
   };
 }
 
@@ -299,12 +330,21 @@ watch(
     if (!drawerVisible.value || editingId.value) {
       return;
     }
-    Object.assign(form, {
-      ...getCapabilityRouteDefaults(capability),
-      capability,
-      provider: 'litellm',
-      endpoint: 'http://localhost:4000',
-    });
+    if (!availableProviderOptions.value.some((item) => item.value === form.provider)) {
+      form.provider = getFirstProviderForCapability(capability);
+      return;
+    }
+    Object.assign(form, getProviderDefaults(capability, form.provider));
+  },
+);
+
+watch(
+  () => form.provider,
+  (provider) => {
+    if (!drawerVisible.value || editingId.value) {
+      return;
+    }
+    Object.assign(form, getProviderDefaults(form.capability, provider));
   },
 );
 
@@ -345,6 +385,18 @@ async function saveModel() {
     flash.error(error.message || '保存模型失败');
   } finally {
     isSaving.value = false;
+  }
+}
+
+async function testConnection() {
+  isTestingConnection.value = true;
+  try {
+    await llmApi.testModelConfigConnection(buildConnectionPayload());
+    flash.success('连接测试通过');
+  } catch (error) {
+    flash.error(error.message || '连接测试失败');
+  } finally {
+    isTestingConnection.value = false;
   }
 }
 
@@ -521,11 +573,11 @@ onMounted(fetchConfigs);
       <el-form label-position="top" class="model-form">
         <div class="model-form__grid">
           <el-form-item label="模型名称">
-            <el-input v-model="form.name" placeholder="例如：chat-primary-route" />
+            <el-input v-model="form.name" placeholder="例如：chat-primary / embed-finance / rerank-main" />
           </el-form-item>
 
-          <el-form-item label="LiteLLM 路由名">
-            <el-input v-model="form.model_name" placeholder="例如：chat-default / embed-default / rerank-default" />
+          <el-form-item label="上游模型名">
+            <el-input v-model="form.model_name" placeholder="例如：deepseek-chat / text-embedding-v4 / gte-rerank-v2" />
           </el-form-item>
 
           <el-form-item label="模型类型">
@@ -535,33 +587,22 @@ onMounted(fetchConfigs);
           </el-form-item>
 
           <el-form-item label="Provider">
-            <el-input model-value="LiteLLM" disabled />
+            <el-select v-model="form.provider">
+              <el-option
+                v-for="item in availableProviderOptions"
+                :key="item.value"
+                :label="item.label"
+                :value="item.value"
+              />
+            </el-select>
           </el-form-item>
 
           <el-form-item label="参数规模">
             <el-input v-model="form.parameter_scale" placeholder="例如：7B / 32B / 671B" />
           </el-form-item>
 
-          <el-form-item label="LiteLLM 地址">
-            <el-input v-model="form.endpoint" placeholder="http://localhost:4000" />
-          </el-form-item>
-        </div>
-
-        <div class="model-form__grid">
-          <el-form-item label="上游 Provider">
-            <el-select v-model="form.upstream_provider">
-              <el-option label="DeepSeek" value="deepseek" />
-              <el-option label="DashScope" value="dashscope" />
-              <el-option label="OpenAI Compatible" value="openai" />
-            </el-select>
-          </el-form-item>
-
-          <el-form-item label="上游模型">
-            <el-input v-model="form.upstream_model" placeholder="例如：deepseek-chat / text-embedding-v4 / qwen3-vl-rerank" />
-          </el-form-item>
-
-          <el-form-item label="上游 API Base">
-            <el-input v-model="form.api_base" placeholder="https://api.deepseek.com" />
+          <el-form-item label="Provider 地址">
+            <el-input v-model="form.endpoint" placeholder="例如：https://api.deepseek.com / http://127.0.0.1:11434" />
           </el-form-item>
         </div>
 
@@ -574,9 +615,9 @@ onMounted(fetchConfigs);
             <el-input v-model="form.api_key" type="password" show-password placeholder="留空则保留当前值" />
           </el-form-item>
 
-          <el-form-item label="启用状态">
-            <el-switch v-model="form.is_active" inline-prompt active-text="启用" inactive-text="停用" />
-          </el-form-item>
+            <el-form-item label="启用状态">
+              <el-switch v-model="form.is_active" inline-prompt active-text="启用" inactive-text="停用" />
+            </el-form-item>
 
           <template v-if="supportsTokenOptions">
             <el-form-item label="Temperature">
@@ -586,13 +627,41 @@ onMounted(fetchConfigs);
             <el-form-item label="Max tokens">
               <el-input-number v-model="form.max_tokens" :step="128" :min="1" :max="65536" controls-position="right" />
             </el-form-item>
-          </template>
+            </template>
         </div>
+
+        <div class="model-form__grid">
+          <el-form-item label="输入价格 / 百万 Token">
+            <el-input-number v-model="form.input_price_per_million" :min="0" :step="0.01" controls-position="right" />
+          </el-form-item>
+
+          <el-form-item label="输出价格 / 百万 Token">
+            <el-input-number v-model="form.output_price_per_million" :min="0" :step="0.01" controls-position="right" />
+          </el-form-item>
+
+          <el-form-item label="按次价格">
+            <el-input-number v-model="form.request_price" :min="0" :step="0.001" controls-position="right" />
+          </el-form-item>
+
+          <el-form-item label="币种">
+            <el-input v-model="form.price_currency" maxlength="8" placeholder="USD" />
+          </el-form-item>
+        </div>
+
+        <el-form-item label="价格备注">
+          <el-input
+            v-model="form.pricing_notes"
+            type="textarea"
+            :rows="2"
+            placeholder="例如：按官方 2026-05 定价录入，rerank 采用按次计费。"
+          />
+        </el-form-item>
       </el-form>
 
       <template #footer>
         <div class="model-form__footer">
           <el-button @click="drawerVisible = false">取消</el-button>
+          <el-button :loading="isTestingConnection" @click="testConnection">测试连接</el-button>
           <el-button type="primary" :loading="isSaving" @click="saveModel">保存</el-button>
         </div>
       </template>

@@ -69,7 +69,7 @@ def extract_risk_events_for_document(*, document):
                 },
             ],
             options={"temperature": 0},
-        )
+        ).content
         extracted_events = _parse_provider_output(raw_content)
         chunk_by_id = {chunk.id: chunk for chunk in chunks}
 

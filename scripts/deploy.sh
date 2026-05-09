@@ -43,8 +43,6 @@ validate_runtime_env() {
   require_not_placeholder_env DJANGO_SECRET_KEY "change-me-in-.env.backend"
   require_non_empty_env JWT_SECRET_KEY
   require_not_placeholder_env JWT_SECRET_KEY "change-me-jwt-in-.env.backend"
-  require_non_empty_env LITELLM_MASTER_KEY
-  require_not_placeholder_env LITELLM_MASTER_KEY "change-me-litellm"
   require_non_empty_env DEEPSEEK_API_KEY
   require_non_empty_env DASHSCOPE_API_KEY
 }
@@ -94,16 +92,12 @@ git fetch --all --prune
 git checkout main
 git pull --ff-only origin main
 
-python3 "$APP_DIR/scripts/render_litellm_config.py"
-
 ensure_disk_headroom
 docker compose -f "$COMPOSE_FILE" up -d --build --remove-orphans
 docker compose -f "$COMPOSE_FILE" exec -T backend python3 manage.py migrate
 if [ "$REBUILD_LLAMAINDEX_INDEX_ON_DEPLOY" = "true" ]; then
   docker compose -f "$COMPOSE_FILE" exec -T backend python3 manage.py rebuild_llamaindex_index
 fi
-docker compose -f "$COMPOSE_FILE" exec -T backend python3 manage.py sync_litellm_routes
-docker compose -f "$COMPOSE_FILE" up -d --force-recreate litellm
 
 "$APP_DIR/scripts/smoke-check.sh"
 prune_recent_deploy_leftovers

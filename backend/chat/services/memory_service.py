@@ -181,7 +181,7 @@ def extract_memories_with_llm(*, session_id: int) -> int:
         response = provider.chat(
             messages=[{"role": "user", "content": prompt}],
             options={"temperature": 0, "max_tokens": 512},
-        )
+        ).content
     except Exception:
         logger.exception("LLM memory extraction failed for session %s", session_id)
         return 0

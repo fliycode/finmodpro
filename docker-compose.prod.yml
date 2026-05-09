@@ -52,9 +52,6 @@ services:
       CHAT_RETRIEVAL_BACKEND: ${CHAT_RETRIEVAL_BACKEND:-llamaindex}
       GRAPH_BACKEND: ${GRAPH_BACKEND:-disabled}
       LLAMAINDEX_STORAGE_DIR: ${LLAMAINDEX_STORAGE_DIR:-/app/storage/llamaindex}
-      LITELLM_INTERNAL_URL: ${LITELLM_INTERNAL_URL:-http://litellm:4000}
-      LITELLM_GATEWAY_URL: ${LITELLM_GATEWAY_URL:-http://litellm:4000}
-      LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:-}
       LIGHTRAG_INTERNAL_URL: ${LIGHTRAG_INTERNAL_URL:-http://lightrag:9621}
       LIGHTRAG_SYNC_ENABLED: ${LIGHTRAG_SYNC_ENABLED:-false}
       LIGHTRAG_GRAPH_STORAGE: ${LIGHTRAG_GRAPH_STORAGE:-Neo4JStorage}
@@ -84,15 +81,12 @@ services:
     volumes:
       - backend_media:/app/media
       - backend_storage:/app/storage
-      - ./deploy/litellm:/deploy/litellm
     restart: unless-stopped
     logging: *default-logging
     depends_on:
       mysql:
         condition: service_healthy
       redis:
-        condition: service_started
-      litellm:
         condition: service_started
       milvus:
         condition: service_started
@@ -139,9 +133,6 @@ services:
       CHAT_RETRIEVAL_BACKEND: ${CHAT_RETRIEVAL_BACKEND:-llamaindex}
       GRAPH_BACKEND: ${GRAPH_BACKEND:-disabled}
       LLAMAINDEX_STORAGE_DIR: ${LLAMAINDEX_STORAGE_DIR:-/app/storage/llamaindex}
-      LITELLM_INTERNAL_URL: ${LITELLM_INTERNAL_URL:-http://litellm:4000}
-      LITELLM_GATEWAY_URL: ${LITELLM_GATEWAY_URL:-http://litellm:4000}
-      LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:-}
       LIGHTRAG_INTERNAL_URL: ${LIGHTRAG_INTERNAL_URL:-http://lightrag:9621}
       LIGHTRAG_SYNC_ENABLED: ${LIGHTRAG_SYNC_ENABLED:-false}
       LIGHTRAG_GRAPH_STORAGE: ${LIGHTRAG_GRAPH_STORAGE:-Neo4JStorage}
@@ -175,8 +166,6 @@ services:
       mysql:
         condition: service_healthy
       redis:
-        condition: service_started
-      litellm:
         condition: service_started
       milvus:
         condition: service_started
@@ -227,23 +216,6 @@ services:
       - "6379:6379"
     volumes:
       - redis_data:/data
-    restart: unless-stopped
-    logging: *default-logging
-
-  litellm:
-    image: docker.litellm.ai/berriai/litellm:main-latest
-    command: ["--config", "/app/config.yaml", "--port", "4000"]
-    environment:
-      LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:-}
-      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
-      DASHSCOPE_API_KEY: ${DASHSCOPE_API_KEY:-}
-      LANGFUSE_HOST: ${LANGFUSE_HOST:-}
-      LANGFUSE_PUBLIC_KEY: ${LANGFUSE_PUBLIC_KEY:-}
-      LANGFUSE_SECRET_KEY: ${LANGFUSE_SECRET_KEY:-}
-    volumes:
-      - ./deploy/litellm/rendered.config.yaml:/app/config.yaml:ro
-    ports:
-      - "4000:4000"
     restart: unless-stopped
     logging: *default-logging
 

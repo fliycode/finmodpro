@@ -52,7 +52,7 @@ def _generate_ai_title(session):
         title = get_chat_provider().chat(
             messages=_build_title_messages(session),
             options={"temperature": 0.2, "max_tokens": 24},
-        )
+        ).content
     except Exception:
         return ""
     return _clean_generated_title(title)

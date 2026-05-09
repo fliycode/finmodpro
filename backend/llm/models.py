@@ -16,11 +16,13 @@ class ModelConfig(models.Model):
     PROVIDER_DEEPSEEK = "deepseek"
     PROVIDER_LITELLM = "litellm"
     PROVIDER_DASHSCOPE = "dashscope"
+    PROVIDER_OPENAI_COMPATIBLE = "openai_compatible"
     PROVIDER_CHOICES = (
         (PROVIDER_OLLAMA, "Ollama"),
         (PROVIDER_DEEPSEEK, "DeepSeek"),
-        (PROVIDER_LITELLM, "LiteLLM"),
         (PROVIDER_DASHSCOPE, "DashScope"),
+        (PROVIDER_OPENAI_COMPATIBLE, "OpenAI Compatible"),
+        (PROVIDER_LITELLM, "LiteLLM (Legacy)"),
     )
 
     name = models.CharField(max_length=255)
@@ -31,6 +33,11 @@ class ModelConfig(models.Model):
     endpoint = models.URLField(max_length=500)
     description = models.TextField(blank=True, default="")
     options = models.JSONField(default=dict, blank=True)
+    input_price_per_million = models.DecimalField(max_digits=12, decimal_places=6, default=0)
+    output_price_per_million = models.DecimalField(max_digits=12, decimal_places=6, default=0)
+    request_price = models.DecimalField(max_digits=12, decimal_places=6, default=0)
+    price_currency = models.CharField(max_length=8, blank=True, default="USD")
+    pricing_notes = models.TextField(blank=True, default="")
     is_active = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -43,12 +50,7 @@ class ModelConfig(models.Model):
         with transaction.atomic():
             super().save(*args, **kwargs)
             if self.is_active:
-                queryset = self.__class__.objects.filter(capability=self.capability).exclude(id=self.id)
-                if self.provider == self.PROVIDER_LITELLM:
-                    queryset = queryset.filter(provider=self.PROVIDER_LITELLM)
-                else:
-                    queryset = queryset.exclude(provider=self.PROVIDER_LITELLM)
-                queryset.update(is_active=False)
+                self.__class__.objects.filter(capability=self.capability).exclude(id=self.id).update(is_active=False)
 
 
 class EvalRecord(models.Model):
@@ -238,6 +240,14 @@ class ModelInvocationLog(models.Model):
         (STATUS_SUCCESS, "Success"),
         (STATUS_FAILED, "Failed"),
     )
+    TOKEN_SOURCE_PROVIDER = "provider"
+    TOKEN_SOURCE_ESTIMATED = "estimated"
+    TOKEN_SOURCE_NONE = "none"
+    TOKEN_SOURCE_CHOICES = (
+        (TOKEN_SOURCE_PROVIDER, "Provider"),
+        (TOKEN_SOURCE_ESTIMATED, "Estimated"),
+        (TOKEN_SOURCE_NONE, "None"),
+    )
 
     STAGE_ROUTING = "routing"
     STAGE_FALLBACK = "fallback"
@@ -256,7 +266,11 @@ class ModelInvocationLog(models.Model):
         blank=True,
     )
     capability = models.CharField(max_length=32, choices=ModelConfig.CAPABILITY_CHOICES)
-    provider = models.CharField(max_length=32, choices=ModelConfig.PROVIDER_CHOICES, default=ModelConfig.PROVIDER_LITELLM)
+    provider = models.CharField(
+        max_length=32,
+        choices=ModelConfig.PROVIDER_CHOICES,
+        default=ModelConfig.PROVIDER_OPENAI_COMPATIBLE,
+    )
     alias = models.CharField(max_length=255)
     upstream_model = models.CharField(max_length=255, blank=True, default="")
     # stage: optional pipeline step label; blank means unclassified (e.g. direct SDK calls outside the gateway).
@@ -265,6 +279,20 @@ class ModelInvocationLog(models.Model):
     latency_ms = models.PositiveIntegerField(default=0)
     request_tokens = models.PositiveIntegerField(default=0)
     response_tokens = models.PositiveIntegerField(default=0)
+    total_tokens = models.PositiveIntegerField(default=0)
+    token_source = models.CharField(
+        max_length=32,
+        choices=TOKEN_SOURCE_CHOICES,
+        default=TOKEN_SOURCE_NONE,
+    )
+    raw_usage = models.JSONField(default=dict, blank=True)
+    provider_request_id = models.CharField(max_length=128, blank=True, default="")
+    input_unit_price_snapshot = models.DecimalField(max_digits=12, decimal_places=6, default=0)
+    output_unit_price_snapshot = models.DecimalField(max_digits=12, decimal_places=6, default=0)
+    request_price_snapshot = models.DecimalField(max_digits=12, decimal_places=6, default=0)
+    input_cost = models.DecimalField(max_digits=18, decimal_places=8, default=0)
+    output_cost = models.DecimalField(max_digits=18, decimal_places=8, default=0)
+    total_cost = models.DecimalField(max_digits=18, decimal_places=8, default=0)
     error_code = models.CharField(max_length=64, blank=True, default="")
     error_message = models.TextField(blank=True, default="")
     trace_id = models.CharField(max_length=128, blank=True, default="")

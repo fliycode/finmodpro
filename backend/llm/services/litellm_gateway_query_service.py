@@ -1,9 +1,4 @@
-"""
-LiteLLM gateway analytics query service.
-
-All functions return plain dicts suitable for JSON serialization.
-No raw prompt or response data is ever exposed.
-"""
+"""Model usage analytics query service."""
 from collections import defaultdict
 from datetime import timedelta
 
@@ -11,7 +6,7 @@ from django.db.models import Avg, Count, Q, Sum
 from django.db.models.functions import TruncDay, TruncHour, TruncMinute
 from django.utils import timezone
 
-from llm.models import LiteLLMSyncEvent, ModelConfig, ModelInvocationLog
+from llm.models import ModelConfig, ModelInvocationLog
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -47,9 +42,8 @@ def _parse_filters(filters: dict | None):
     }
 
 
-def _litellm_qs():
-    """Base queryset scoped to LiteLLM invocation logs only."""
-    return ModelInvocationLog.objects.filter(provider=ModelConfig.PROVIDER_LITELLM)
+def _managed_qs():
+    return ModelInvocationLog.objects.exclude(provider=ModelConfig.PROVIDER_LITELLM)
 
 
 def _apply_filters(qs, filters: dict):
@@ -63,13 +57,16 @@ def _apply_filters(qs, filters: dict):
 
 
 def _pricing_map() -> dict:
-    """Return {model_config_id: (input_price_per_million, output_price_per_million)} for LiteLLM configs only."""
     pricing = {}
-    for mc in ModelConfig.objects.filter(provider=ModelConfig.PROVIDER_LITELLM).only("id", "options"):
-        litellm_opts = (mc.options or {}).get("litellm", {})
-        inp = litellm_opts.get("input_price_per_million", 0) or 0
-        out = litellm_opts.get("output_price_per_million", 0) or 0
-        pricing[mc.id] = (float(inp), float(out))
+    for mc in ModelConfig.objects.exclude(provider=ModelConfig.PROVIDER_LITELLM).only(
+        "id",
+        "input_price_per_million",
+        "output_price_per_million",
+    ):
+        pricing[mc.id] = (
+            float(mc.input_price_per_million or 0),
+            float(mc.output_price_per_million or 0),
+        )
     return pricing
 
 
@@ -84,6 +81,15 @@ def _apply_pricing(row: dict, pricing: dict) -> tuple[float, float]:
     req_tokens = row.get("req_tokens") or 0
     resp_tokens = row.get("resp_tokens") or 0
     return (req_tokens / 1_000_000) * inp_price, (resp_tokens / 1_000_000) * out_price
+
+
+def _resolve_costs(row: dict, pricing: dict) -> tuple[float, float]:
+    input_cost = float(row.get("input_cost_sum") or 0)
+    output_cost = float(row.get("output_cost_sum") or 0)
+    total_cost = float(row.get("total_cost_sum") or 0)
+    if input_cost or output_cost or total_cost:
+        return input_cost, output_cost
+    return _apply_pricing(row, pricing)
 
 
 def _serialize_log(log) -> dict:
@@ -109,11 +115,10 @@ def _serialize_log(log) -> dict:
 # ---------------------------------------------------------------------------
 
 def get_gateway_summary() -> dict:
-    """Return data for the LiteLLM gateway dashboard."""
     window_start = _window_start("24h")
-    litellm_configs = ModelConfig.objects.filter(provider=ModelConfig.PROVIDER_LITELLM)
-    active_count = litellm_configs.filter(is_active=True).count()
-    total_count = litellm_configs.count()
+    managed_configs = ModelConfig.objects.exclude(provider=ModelConfig.PROVIDER_LITELLM)
+    active_count = managed_configs.filter(is_active=True).count()
+    total_count = managed_configs.count()
 
     if active_count:
         gw_status = "healthy"
@@ -128,18 +133,7 @@ def get_gateway_summary() -> dict:
         "total_model_count": total_count,
     }
 
-    # Recent sync event
-    latest_sync = LiteLLMSyncEvent.objects.order_by("-created_at", "-id").first()
-    recent_sync = None
-    if latest_sync is not None:
-        recent_sync = {
-            "status": latest_sync.status,
-            "message": latest_sync.message,
-            "created_at": latest_sync.created_at.isoformat(),
-        }
-
-    # Traffic in last 24h
-    recent_logs = _litellm_qs().filter(created_at__gte=window_start)
+    recent_logs = _managed_qs().filter(created_at__gte=window_start)
     traffic_agg = recent_logs.aggregate(
         total=Count("id"),
         failed=Count("id", filter=Q(status=ModelInvocationLog.STATUS_FAILED)),
@@ -174,7 +168,7 @@ def get_gateway_summary() -> dict:
 
     return {
         "gateway": gateway,
-        "recent_sync": recent_sync,
+        "recent_sync": None,
         "traffic": traffic,
         "top_models": top_models,
         "recent_errors": recent_errors,
@@ -188,7 +182,7 @@ def get_gateway_summary() -> dict:
 def get_logs(filters: dict | None = None, page: int = 1, page_size: int = 50) -> dict:
     """Return filtered request-level log rows. No raw prompt/response."""
     filters = _parse_filters(filters)
-    qs = _apply_filters(_litellm_qs(), filters)
+    qs = _apply_filters(_managed_qs(), filters)
     total = qs.count()
     offset = (page - 1) * page_size
     rows = qs.order_by("-created_at")[offset : offset + page_size]
@@ -204,7 +198,7 @@ def get_logs(filters: dict | None = None, page: int = 1, page_size: int = 50) ->
 def get_logs_summary(filters: dict | None = None) -> dict:
     """Return aggregate metrics honoring the same filters as get_logs."""
     filters = _parse_filters(filters)
-    qs = _apply_filters(_litellm_qs(), filters)
+    qs = _apply_filters(_managed_qs(), filters)
 
     agg = qs.aggregate(
         total=Count("id"),
@@ -261,9 +255,7 @@ def get_logs_summary(filters: dict | None = None) -> dict:
 
 def get_trace(trace_id: str) -> dict | None:
     """Return a trace-level view of all log rows for trace_id, or None."""
-    logs = list(
-        _litellm_qs().filter(trace_id=trace_id).order_by("created_at", "id")
-    )
+    logs = list(_managed_qs().filter(trace_id=trace_id).order_by("created_at", "id"))
     if not logs:
         return None
 
@@ -289,7 +281,7 @@ def get_trace(trace_id: str) -> dict | None:
 def get_errors(time_preset: str = "24h") -> dict:
     """Return aggregated error types plus recent error samples."""
     window_start = _window_start(time_preset)
-    failed_qs = _litellm_qs().filter(
+    failed_qs = _managed_qs().filter(
         status=ModelInvocationLog.STATUS_FAILED,
         created_at__gte=window_start,
     )
@@ -321,7 +313,7 @@ def get_errors(time_preset: str = "24h") -> dict:
 def get_costs_summary(filters: dict | None = None) -> dict:
     """Return token usage and estimated cost summary."""
     filters = _parse_filters(filters)
-    qs = _apply_filters(_litellm_qs(), filters)
+    qs = _apply_filters(_managed_qs(), filters)
 
     # Compute cost and totals from a single per-model_config_id grouped query.
     pricing = _pricing_map()
@@ -331,6 +323,9 @@ def get_costs_summary(filters: dict | None = None) -> dict:
             count=Count("id"),
             req_tokens=Sum("request_tokens"),
             resp_tokens=Sum("response_tokens"),
+            input_cost_sum=Sum("input_cost"),
+            output_cost_sum=Sum("output_cost"),
+            total_cost_sum=Sum("total_cost"),
         )
     )
     total_requests = sum(row["count"] for row in by_config)
@@ -339,7 +334,7 @@ def get_costs_summary(filters: dict | None = None) -> dict:
     estimated_input_cost = 0.0
     estimated_output_cost = 0.0
     for row in by_config:
-        inp, out = _apply_pricing(row, pricing)
+        inp, out = _resolve_costs(row, pricing)
         estimated_input_cost += inp
         estimated_output_cost += out
 
@@ -358,7 +353,7 @@ def get_costs_timeseries(filters: dict | None = None) -> dict:
     """Return usage/cost aggregated over time buckets."""
     filters = _parse_filters(filters)
     time_preset = filters.get("time", "24h")
-    qs = _apply_filters(_litellm_qs(), filters)
+    qs = _apply_filters(_managed_qs(), filters)
 
     # Choose DB truncation function and display format based on time window.
     # 1h uses per-minute bucketing so traffic within the hour stays observable.
@@ -395,6 +390,9 @@ def get_costs_timeseries(filters: dict | None = None) -> dict:
             request_count=Count("id"),
             req_tokens=Sum("request_tokens"),
             resp_tokens=Sum("response_tokens"),
+            input_cost_sum=Sum("input_cost"),
+            output_cost_sum=Sum("output_cost"),
+            total_cost_sum=Sum("total_cost"),
         )
         .order_by("time_bucket")
     )
@@ -408,7 +406,7 @@ def get_costs_timeseries(filters: dict | None = None) -> dict:
             ts = ts.replace(hour=floored_hour, minute=0, second=0, microsecond=0)
         bucket_key = ts.strftime(fmt)
 
-        inp_cost, out_cost = _apply_pricing(row, pricing)
+        inp_cost, out_cost = _resolve_costs(row, pricing)
         buckets[bucket_key]["request_count"] += row["request_count"]
         buckets[bucket_key]["estimated_cost"] += inp_cost + out_cost
 
@@ -435,7 +433,7 @@ def get_costs_timeseries(filters: dict | None = None) -> dict:
 def get_costs_models(filters: dict | None = None) -> dict:
     """Return per-model usage/cost breakdown with request share."""
     filters = _parse_filters(filters)
-    qs = _apply_filters(_litellm_qs(), filters)
+    qs = _apply_filters(_managed_qs(), filters)
 
     # Aggregate by alias + model_config_id
     by_alias = list(
@@ -444,6 +442,9 @@ def get_costs_models(filters: dict | None = None) -> dict:
             request_count=Count("id"),
             req_tokens=Sum("request_tokens"),
             resp_tokens=Sum("response_tokens"),
+            input_cost_sum=Sum("input_cost"),
+            output_cost_sum=Sum("output_cost"),
+            total_cost_sum=Sum("total_cost"),
         )
         .order_by("-request_count")
     )
@@ -452,7 +453,7 @@ def get_costs_models(filters: dict | None = None) -> dict:
 
     models = []
     for row in by_alias:
-        inp_cost, out_cost = _apply_pricing(row, pricing)
+        inp_cost, out_cost = _resolve_costs(row, pricing)
         total_cost = inp_cost + out_cost
         request_count = row["request_count"]
         share = round((request_count / total_requests * 100) if total_requests else 0.0, 2)

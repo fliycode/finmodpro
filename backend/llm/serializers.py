@@ -2,8 +2,11 @@ from rest_framework import serializers
 
 from llm.models import EvalRecord, FineTuneRun, FineTuneRunnerServer, ModelConfig
 
-LITELLM_PROVIDER_CHOICES = (
-    (ModelConfig.PROVIDER_LITELLM, "LiteLLM"),
+DIRECT_PROVIDER_CHOICES = (
+    (ModelConfig.PROVIDER_DEEPSEEK, "DeepSeek"),
+    (ModelConfig.PROVIDER_DASHSCOPE, "DashScope"),
+    (ModelConfig.PROVIDER_OLLAMA, "Ollama"),
+    (ModelConfig.PROVIDER_OPENAI_COMPATIBLE, "OpenAI Compatible"),
 )
 
 
@@ -30,6 +33,9 @@ class ModelConfigSummarySerializer(serializers.ModelSerializer):
     weight = serializers.SerializerMethodField()
     input_price_per_million = serializers.SerializerMethodField()
     output_price_per_million = serializers.SerializerMethodField()
+    request_price = serializers.SerializerMethodField()
+    price_currency = serializers.SerializerMethodField()
+    pricing_notes = serializers.SerializerMethodField()
     invocation_count = serializers.SerializerMethodField()
 
     def get_options(self, obj):
@@ -70,35 +76,36 @@ class ModelConfigSummarySerializer(serializers.ModelSerializer):
         latest_run = self._get_latest_fine_tune_run(obj)
         return latest_run.artifact_path if latest_run else ""
 
-    def _get_litellm_options(self, obj):
-        return (obj.options or {}).get("litellm", {})
-
     def get_alias(self, obj):
-        # Mirrors model_name as the LiteLLM route name. Exposed as a
-        # compatibility field for the admin surface so consumers reference
-        # routes by alias rather than raw model_name.
-        return obj.model_name
+        return obj.name
 
     def get_upstream_provider(self, obj):
-        return self._get_litellm_options(obj).get("upstream_provider", "")
+        return obj.provider
 
     def get_upstream_model(self, obj):
-        return self._get_litellm_options(obj).get("upstream_model", "")
+        return obj.model_name
 
     def get_fallback_aliases(self, obj):
-        value = self._get_litellm_options(obj).get("fallback_aliases", [])
-        if not isinstance(value, list):
-            return []
-        return value
+        value = (obj.options or {}).get("fallback_aliases", [])
+        return value if isinstance(value, list) else []
 
     def get_weight(self, obj):
-        return self._get_litellm_options(obj).get("weight", 1)
+        return (obj.options or {}).get("weight", 1)
 
     def get_input_price_per_million(self, obj):
-        return self._get_litellm_options(obj).get("input_price_per_million", 0)
+        return obj.input_price_per_million
 
     def get_output_price_per_million(self, obj):
-        return self._get_litellm_options(obj).get("output_price_per_million", 0)
+        return obj.output_price_per_million
+
+    def get_request_price(self, obj):
+        return obj.request_price
+
+    def get_price_currency(self, obj):
+        return obj.price_currency
+
+    def get_pricing_notes(self, obj):
+        return obj.pricing_notes
 
     def get_invocation_count(self, obj):
         return getattr(obj, "invocation_count", 0)
@@ -131,6 +138,9 @@ class ModelConfigSummarySerializer(serializers.ModelSerializer):
             "weight",
             "input_price_per_million",
             "output_price_per_million",
+            "request_price",
+            "price_currency",
+            "pricing_notes",
             "invocation_count",
         )
 
@@ -142,17 +152,26 @@ class ModelConfigActivationSerializer(serializers.Serializer):
 class ModelConfigWriteSerializer(serializers.Serializer):
     name = serializers.CharField(max_length=255)
     capability = serializers.ChoiceField(choices=ModelConfig.CAPABILITY_CHOICES)
-    provider = serializers.ChoiceField(choices=LITELLM_PROVIDER_CHOICES)
+    provider = serializers.ChoiceField(choices=DIRECT_PROVIDER_CHOICES)
     model_name = serializers.CharField(max_length=255)
     parameter_scale = serializers.CharField(required=False, allow_blank=True, max_length=64, default="")
     endpoint = serializers.URLField(max_length=500)
     description = serializers.CharField(required=False, allow_blank=True, default="")
     options = serializers.DictField(required=False, default=dict)
+    input_price_per_million = serializers.DecimalField(
+        required=False, max_digits=12, decimal_places=6, default=0
+    )
+    output_price_per_million = serializers.DecimalField(
+        required=False, max_digits=12, decimal_places=6, default=0
+    )
+    request_price = serializers.DecimalField(required=False, max_digits=12, decimal_places=6, default=0)
+    price_currency = serializers.CharField(required=False, allow_blank=True, max_length=8, default="USD")
+    pricing_notes = serializers.CharField(required=False, allow_blank=True, default="")
     is_active = serializers.BooleanField(required=False, default=False)
 
 
 class ModelConfigConnectionTestSerializer(serializers.Serializer):
-    provider = serializers.ChoiceField(choices=LITELLM_PROVIDER_CHOICES)
+    provider = serializers.ChoiceField(choices=DIRECT_PROVIDER_CHOICES)
     model_name = serializers.CharField(max_length=255)
     endpoint = serializers.URLField(max_length=500)
     options = serializers.DictField(required=False, default=dict)

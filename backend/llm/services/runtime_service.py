@@ -1,90 +1,38 @@
-import os
-from urllib.parse import urlparse, urlunparse
-
 from common.exceptions import ProviderConfigurationError
 from llm.models import ModelConfig
 from llm.services.model_config_service import get_active_model_config
-from llm.services.providers.litellm_provider import (
-    LiteLLMChatProvider,
-    LiteLLMEmbeddingProvider,
-    LiteLLMRerankProvider,
-)
-
-
-def _normalize_litellm_endpoint(endpoint):
-    if not endpoint:
-        return endpoint
-
-    parsed = urlparse(endpoint)
-    if parsed.scheme not in {"http", "https"}:
-        return endpoint
-
-    if os.getenv("APP_ENV") != "production":
-        return endpoint
-
-    if parsed.hostname not in {"localhost", "127.0.0.1"}:
-        return endpoint
-
-    internal_base = os.getenv("LITELLM_INTERNAL_URL", "http://litellm:4000").rstrip("/")
-    internal_parsed = urlparse(internal_base)
-    replacement = parsed._replace(
-        scheme=internal_parsed.scheme or parsed.scheme,
-        netloc=internal_parsed.netloc or parsed.netloc,
-    )
-    return urlunparse(replacement)
+from llm.services.providers.registry import get_provider_class
 
 
 def _build_provider(model_config):
-    if model_config.provider != ModelConfig.PROVIDER_LITELLM:
-        raise ProviderConfigurationError(
-            "Only LiteLLM-backed model configs are supported.",
-            provider=model_config.provider,
-            details={
-                "capability": model_config.capability,
-                "supported_providers": [ModelConfig.PROVIDER_LITELLM],
-            },
-        )
-
-    if model_config.capability == ModelConfig.CAPABILITY_CHAT:
-        return LiteLLMChatProvider(
-            endpoint=_normalize_litellm_endpoint(model_config.endpoint),
-            model_name=model_config.model_name,
-            options=model_config.options,
-            model_config=model_config if model_config.pk else None,
-        )
-
-    if model_config.capability == ModelConfig.CAPABILITY_EMBEDDING:
-        return LiteLLMEmbeddingProvider(
-            endpoint=_normalize_litellm_endpoint(model_config.endpoint),
-            model_name=model_config.model_name,
-            options=model_config.options,
-            model_config=model_config if model_config.pk else None,
-        )
-
-    if model_config.capability == ModelConfig.CAPABILITY_RERANK:
-        return LiteLLMRerankProvider(
-            endpoint=_normalize_litellm_endpoint(model_config.endpoint),
-            model_name=model_config.model_name,
-            options=model_config.options,
-            model_config=model_config if model_config.pk else None,
-        )
-
-    raise ProviderConfigurationError(
-        f"Unsupported capability: {model_config.capability}",
+    provider_class = get_provider_class(
         provider=model_config.provider,
-        details={
-            "capability": model_config.capability,
-        },
+        capability=model_config.capability,
+    )
+    return provider_class(
+        endpoint=model_config.endpoint,
+        model_name=model_config.model_name,
+        options=model_config.options,
+        model_config=model_config if model_config.pk else None,
     )
 
 
 def get_chat_provider():
-    return _build_provider(get_active_model_config(ModelConfig.CAPABILITY_CHAT))
+    model_config = get_active_model_config(ModelConfig.CAPABILITY_CHAT)
+    if model_config.capability != ModelConfig.CAPABILITY_CHAT:
+        raise ProviderConfigurationError(
+            "当前启用模型不支持对话能力。",
+            provider=model_config.provider,
+            details={"capability": model_config.capability},
+        )
+    return _build_provider(model_config)
 
 
 def get_embedding_provider():
-    return _build_provider(get_active_model_config(ModelConfig.CAPABILITY_EMBEDDING))
+    model_config = get_active_model_config(ModelConfig.CAPABILITY_EMBEDDING)
+    return _build_provider(model_config)
 
 
 def get_rerank_provider():
-    return _build_provider(get_active_model_config(ModelConfig.CAPABILITY_RERANK))
+    model_config = get_active_model_config(ModelConfig.CAPABILITY_RERANK)
+    return _build_provider(model_config)

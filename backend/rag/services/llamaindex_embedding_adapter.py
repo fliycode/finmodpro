@@ -23,13 +23,13 @@ class LiteLLMEmbeddingAdapter(BaseEmbedding):
         return provider
 
     def _get_query_embedding(self, query: str) -> list[float]:
-        return self._resolve_provider().embed(texts=[query])[0]
+        return self._resolve_provider().embed(texts=[query]).vectors[0]
 
     async def _aget_query_embedding(self, query: str) -> list[float]:
         return self._get_query_embedding(query)
 
     def _get_text_embedding(self, text: str) -> list[float]:
-        return self._resolve_provider().embed(texts=[text])[0]
+        return self._resolve_provider().embed(texts=[text]).vectors[0]
 
     def _get_text_embeddings(self, texts: list[str]) -> list[list[float]]:
-        return self._resolve_provider().embed(texts=texts)
+        return self._resolve_provider().embed(texts=texts).vectors

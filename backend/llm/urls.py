@@ -32,8 +32,6 @@ from llm.controllers.model_config_controller import (
     ModelConfigConnectionTestView,
     ModelConfigDetailView,
     ModelConfigListView,
-    ModelConfigMigrateToLiteLLMView,
-    ModelConfigSyncLiteLLMView,
 )
 from llm.controllers.prompt_config_controller import PromptConfigListView, PromptConfigUpdateView
 
@@ -168,16 +166,6 @@ urlpatterns = [
         name="model-config-test-connection",
     ),
     path(
-        "model-configs/migrate-to-litellm",
-        ModelConfigMigrateToLiteLLMView.as_view(),
-        name="model-config-migrate-to-litellm-legacy",
-    ),
-    path(
-        "model-configs/migrate-to-litellm/",
-        ModelConfigMigrateToLiteLLMView.as_view(),
-        name="model-config-migrate-to-litellm",
-    ),
-    path(
         "model-configs/<int:model_config_id>",
         ModelConfigDetailView.as_view(),
         name="model-config-detail-legacy",
@@ -196,16 +184,6 @@ urlpatterns = [
         "model-configs/<int:model_config_id>/activation/",
         ModelConfigActivationView.as_view(),
         name="model-config-activation",
-    ),
-    path(
-        "model-configs/<int:model_config_id>/sync-litellm",
-        ModelConfigSyncLiteLLMView.as_view(),
-        name="model-config-sync-litellm-legacy",
-    ),
-    path(
-        "model-configs/<int:model_config_id>/sync-litellm/",
-        ModelConfigSyncLiteLLMView.as_view(),
-        name="model-config-sync-litellm",
     ),
     path(
         "prompt-configs/<path:key>",

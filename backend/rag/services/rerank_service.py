@@ -28,7 +28,7 @@ def rerank_results(results, query=None):
                     query=query,
                     documents=snippets,
                     top_n=len(results),
-                )
+                ).items
                 scored = {entry["index"]: entry["relevance_score"] for entry in rerank_output}
                 for idx, item in enumerate(results):
                     item["rerank_score"] = scored.get(idx, 0.0)
@@ -73,7 +73,7 @@ def rerank_with_variants(results, query_variants=None, fallback_query=None):
                 query=q,
                 documents=snippets,
                 top_n=len(results),
-            )
+            ).items
             for entry in rerank_output:
                 idx = entry["index"]
                 best_scores[idx] = max(best_scores[idx], entry["relevance_score"])

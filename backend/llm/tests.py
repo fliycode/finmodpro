@@ -77,7 +77,6 @@ class ModelConfigListApiTests(TestCase):
         )
         self.member_user.groups.add(Group.objects.get(name=ROLE_MEMBER))
         self.member_access_token = generate_access_token(self.member_user)
-        migrate_active_configs_to_litellm(triggered_by=self.admin_user)
 
     def test_list_model_configs_requires_authentication(self):
         response = self.client.get("/api/ops/model-configs")
@@ -102,20 +101,16 @@ class ModelConfigListApiTests(TestCase):
 
     def test_list_model_configs_returns_serialized_rows(self):
         replacement = ModelConfig.objects.create(
-            name="litellm-qwen-chat",
+            name="deepseek-qwen-chat",
             capability=ModelConfig.CAPABILITY_CHAT,
-            provider=ModelConfig.PROVIDER_LITELLM,
-            model_name="chat-qwen-route",
+            provider=ModelConfig.PROVIDER_DEEPSEEK,
+            model_name="deepseek-chat",
             parameter_scale="32B",
-            endpoint=settings.LITELLM_GATEWAY_URL,
+            endpoint="https://api.deepseek.com",
             description="财报问答候选模型",
             options={
-                "api_base": "https://api.deepseek.com",
+                "api_key": "sk-deepseek",
                 "temperature": 0.1,
-                "litellm": {
-                    "upstream_provider": "deepseek",
-                    "upstream_model": "deepseek/deepseek-chat",
-                },
             },
             is_active=False,
         )
@@ -129,9 +124,9 @@ class ModelConfigListApiTests(TestCase):
         payload = response.json()
         self.assertEqual(payload["code"], 0)
         self.assertEqual(payload["message"], "ok")
-        self.assertEqual(payload["data"]["total"], 4)
-        self.assertTrue(all(item["provider"] == ModelConfig.PROVIDER_LITELLM for item in payload["data"]["model_configs"]))
-        self.assertTrue(any(item["name"] == "litellm-qwen-chat" for item in payload["data"]["model_configs"]))
+        self.assertEqual(payload["data"]["total"], ModelConfig.objects.exclude(provider=ModelConfig.PROVIDER_LITELLM).count())
+        self.assertTrue(all(item["provider"] != ModelConfig.PROVIDER_LITELLM for item in payload["data"]["model_configs"]))
+        self.assertTrue(any(item["name"] == "deepseek-qwen-chat" for item in payload["data"]["model_configs"]))
 
         first_row = payload["data"]["model_configs"][0]
         self.assertEqual(
@@ -162,6 +157,9 @@ class ModelConfigListApiTests(TestCase):
                 "weight",
                 "input_price_per_million",
                 "output_price_per_million",
+                "request_price",
+                "price_currency",
+                "pricing_notes",
                 "invocation_count",
             },
         )
@@ -206,7 +204,7 @@ class ModelConfigListApiTests(TestCase):
         self.assertEqual(overview["total_models"], payload["total"])
         self.assertEqual(
             overview["enabled_models"],
-            ModelConfig.objects.filter(provider=ModelConfig.PROVIDER_LITELLM, is_active=True).count(),
+            ModelConfig.objects.exclude(provider=ModelConfig.PROVIDER_LITELLM).filter(is_active=True).count(),
         )
         self.assertEqual(overview["total_invocation_count"], 2)
         self.assertEqual(overview["today_invocation_count"], 1)
@@ -216,7 +214,7 @@ class ModelConfigListApiTests(TestCase):
         row = next(item for item in payload["model_configs"] if item["id"] == model.id)
         self.assertEqual(row["invocation_count"], 2)
 
-    def test_list_model_configs_returns_litellm_routes_only(self):
+    def test_list_model_configs_excludes_legacy_litellm_routes(self):
         ModelConfig.objects.create(
             name="litellm-chat-default",
             capability=ModelConfig.CAPABILITY_CHAT,
@@ -234,25 +232,20 @@ class ModelConfigListApiTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         payload = response.json()["data"]
-        self.assertEqual(payload["total"], 4)
+        self.assertEqual(payload["total"], ModelConfig.objects.exclude(provider=ModelConfig.PROVIDER_LITELLM).count())
         self.assertTrue(
-            all(item["provider"] == ModelConfig.PROVIDER_LITELLM for item in payload["model_configs"])
+            all(item["provider"] != ModelConfig.PROVIDER_LITELLM for item in payload["model_configs"])
         )
 
     def test_list_model_configs_masks_api_key(self):
         ModelConfig.objects.create(
-            name="litellm-chat-mask",
+            name="deepseek-chat-mask",
             capability=ModelConfig.CAPABILITY_CHAT,
-            provider=ModelConfig.PROVIDER_LITELLM,
-            model_name="chat-mask-route",
-            endpoint=settings.LITELLM_GATEWAY_URL,
+            provider=ModelConfig.PROVIDER_DEEPSEEK,
+            model_name="deepseek-chat",
+            endpoint="https://api.deepseek.com",
             options={
                 "api_key": "sk-test-123456",
-                "api_base": "https://api.deepseek.com",
-                "litellm": {
-                    "upstream_provider": "deepseek",
-                    "upstream_model": "deepseek/deepseek-chat",
-                },
             },
             is_active=False,
         )
@@ -264,7 +257,7 @@ class ModelConfigListApiTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         route_row = next(
-            item for item in response.json()["data"]["model_configs"] if item["name"] == "litellm-chat-mask"
+            item for item in response.json()["data"]["model_configs"] if item["name"] == "deepseek-chat-mask"
         )
         self.assertTrue(route_row["has_api_key"])
         self.assertEqual(route_row["api_key_masked"], "sk-tes******3456")
@@ -321,7 +314,6 @@ class ModelConfigActivationApiTests(TestCase):
         )
         self.member_user.groups.add(Group.objects.get(name=ROLE_MEMBER))
         self.member_access_token = generate_access_token(self.member_user)
-        migrate_active_configs_to_litellm(triggered_by=self.admin_user)
 
     def test_activation_requires_authentication(self):
         model_config = get_active_model_config(ModelConfig.CAPABILITY_CHAT)
@@ -357,18 +349,14 @@ class ModelConfigActivationApiTests(TestCase):
     def test_activation_enables_target_and_switches_same_capability(self):
         previous = get_active_model_config(ModelConfig.CAPABILITY_CHAT)
         replacement = ModelConfig.objects.create(
-            name="litellm-qwen-chat-active",
+            name="deepseek-chat-active",
             capability=ModelConfig.CAPABILITY_CHAT,
-            provider=ModelConfig.PROVIDER_LITELLM,
-            model_name="chat-qwen-active-route",
-            endpoint=settings.LITELLM_GATEWAY_URL,
+            provider=ModelConfig.PROVIDER_DEEPSEEK,
+            model_name="deepseek-reasoner",
+            endpoint="https://api.deepseek.com",
             options={
+                "api_key": "sk-deepseek",
                 "temperature": 0.1,
-                "api_base": "https://api.deepseek.com",
-                "litellm": {
-                    "upstream_provider": "deepseek",
-                    "upstream_model": "deepseek/deepseek-chat",
-                },
             },
             is_active=False,
         )
@@ -448,6 +436,9 @@ class ModelConfigActivationApiTests(TestCase):
                 "weight",
                 "input_price_per_million",
                 "output_price_per_million",
+                "request_price",
+                "price_currency",
+                "pricing_notes",
                 "invocation_count",
             },
         )
@@ -484,12 +475,12 @@ class ModelConfigActivationApiTests(TestCase):
 
     def test_delete_removes_inactive_model_config(self):
         model_config = ModelConfig.objects.create(
-            name="litellm-delete-inactive",
+            name="deepseek-delete-inactive",
             capability=ModelConfig.CAPABILITY_CHAT,
-            provider=ModelConfig.PROVIDER_LITELLM,
-            model_name="chat-delete-inactive",
-            endpoint="http://localhost:4000",
-            options={"litellm": {"upstream_provider": "openai", "upstream_model": "gpt-4o"}},
+            provider=ModelConfig.PROVIDER_DEEPSEEK,
+            model_name="deepseek-chat",
+            endpoint="https://api.deepseek.com",
+            options={"api_key": "sk-deepseek"},
             is_active=False,
         )
 
@@ -502,26 +493,23 @@ class ModelConfigActivationApiTests(TestCase):
         self.assertEqual(response.json(), {"code": 0, "message": "ok", "data": {"deleted": True}})
         self.assertFalse(ModelConfig.objects.filter(id=model_config.id).exists())
 
-    def test_admin_can_create_litellm_model_config(self):
+    def test_admin_can_create_direct_provider_model_config(self):
         response = self.client.post(
             "/api/ops/model-configs/",
             data=json.dumps(
                 {
-                    "name": "litellm-chat-prod",
+                    "name": "deepseek-chat-prod",
                     "capability": "chat",
-                    "provider": "litellm",
-                    "model_name": "chat-prod-route",
-                    "endpoint": "http://localhost:4000",
+                    "provider": "deepseek",
+                    "model_name": "deepseek-chat",
+                    "endpoint": "https://api.deepseek.com",
                     "options": {
                         "api_key": "sk-test-123456",
-                        "api_base": "https://api.deepseek.com",
                         "temperature": 0.2,
                         "max_tokens": 1024,
-                        "litellm": {
-                            "upstream_provider": "deepseek",
-                            "upstream_model": "deepseek/deepseek-chat",
-                        },
                     },
+                    "input_price_per_million": "0.500000",
+                    "output_price_per_million": "2.000000",
                     "is_active": True,
                 }
             ),
@@ -531,11 +519,11 @@ class ModelConfigActivationApiTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         payload = response.json()
-        self.assertEqual(payload["data"]["model_config"]["provider"], "litellm")
+        self.assertEqual(payload["data"]["model_config"]["provider"], "deepseek")
         self.assertTrue(payload["data"]["model_config"]["has_api_key"])
 
     @patch("urllib.request.urlopen")
-    def test_admin_can_test_litellm_chat_connection(self, mocked_urlopen):
+    def test_admin_can_test_direct_chat_connection(self, mocked_urlopen):
         mocked_urlopen.return_value = _FakeHttpResponse(
             {"choices": [{"message": {"content": "pong"}}], "usage": {"prompt_tokens": 1, "completion_tokens": 1}}
         )
@@ -545,16 +533,11 @@ class ModelConfigActivationApiTests(TestCase):
             data=json.dumps(
                 {
                     "capability": "chat",
-                    "provider": "litellm",
-                    "model_name": "chat-default",
-                    "endpoint": "http://localhost:4000",
+                    "provider": "deepseek",
+                    "model_name": "deepseek-chat",
+                    "endpoint": "https://api.deepseek.com",
                     "options": {
                         "api_key": "sk-test",
-                        "api_base": "https://api.deepseek.com",
-                        "litellm": {
-                            "upstream_provider": "deepseek",
-                            "upstream_model": "deepseek/deepseek-chat",
-                        },
                     },
                 }
             ),
@@ -566,18 +549,21 @@ class ModelConfigActivationApiTests(TestCase):
         self.assertEqual(response.json()["data"]["ok"], True)
 
     @patch("urllib.request.urlopen")
-    def test_admin_can_test_litellm_embedding_connection(self, mocked_urlopen):
-        mocked_urlopen.return_value = _FakeHttpResponse({"data": [{"embedding": [0.1, 0.2, 0.3]}]})
+    def test_admin_can_test_direct_embedding_connection(self, mocked_urlopen):
+        mocked_urlopen.return_value = _FakeHttpResponse({
+            "data": [{"embedding": [0.1, 0.2, 0.3]}],
+            "usage": {"prompt_tokens": 1, "total_tokens": 1},
+        })
 
         response = self.client.post(
             "/api/ops/model-configs/test-connection/",
             data=json.dumps(
                 {
                     "capability": "embedding",
-                    "provider": "litellm",
-                    "model_name": "embed-default",
-                    "endpoint": "http://localhost:4000",
-                    "options": {"api_key": "sk-litellm"},
+                    "provider": "openai_compatible",
+                    "model_name": "text-embedding-3-small",
+                    "endpoint": "https://api.openai.com",
+                    "options": {"api_key": "sk-openai"},
                 }
             ),
             content_type="application/json",
@@ -3257,7 +3243,7 @@ class ModelConfigConnectionApiTests(TestCase):
         self.assertEqual(response.status_code, 403)
 
     @patch("urllib.request.urlopen")
-    def test_connection_test_litellm_chat_success(self, mock_urlopen):
+    def test_connection_test_deepseek_chat_success(self, mock_urlopen):
         mock_urlopen.return_value = _FakeHttpResponse({
             "choices": [{"message": {"content": "pong"}}],
             "usage": {"prompt_tokens": 1, "completion_tokens": 1},
@@ -3267,9 +3253,9 @@ class ModelConfigConnectionApiTests(TestCase):
             content_type="application/json",
             data=json.dumps({
                 "capability": "chat",
-                "provider": "litellm",
-                "model_name": "test-route",
-                "endpoint": "http://localhost:4000",
+                "provider": "deepseek",
+                "model_name": "deepseek-chat",
+                "endpoint": "https://api.deepseek.com",
                 "options": {"api_key": "sk-test"},
             }),
             HTTP_AUTHORIZATION=f"Bearer {self.admin_access_token}",
@@ -3290,190 +3276,14 @@ class ModelConfigConnectionApiTests(TestCase):
             content_type="application/json",
             data=json.dumps({
                 "capability": "chat",
-                "provider": "litellm",
-                "model_name": "test-route",
-                "endpoint": "http://localhost:4000",
+                "provider": "deepseek",
+                "model_name": "deepseek-chat",
+                "endpoint": "https://api.deepseek.com",
                 "options": {"api_key": "sk-test"},
             }),
             HTTP_AUTHORIZATION=f"Bearer {self.admin_access_token}",
         )
         self.assertEqual(ModelInvocationLog.objects.count(), before)
-
-
-@override_settings(
-    JWT_SECRET_KEY="test-jwt-secret",
-    JWT_ACCESS_TOKEN_LIFETIME_SECONDS=3600,
-)
-class ModelConfigMigrationApiTests(TestCase):
-    def setUp(self):
-        self.client = Client()
-        seed_roles_and_permissions()
-        self.temp_dir = Path(tempfile.mkdtemp(dir=Path.cwd()))
-        self.litellm_root_patch = override_settings(LITELLM_GENERATED_CONFIG_ROOT=self.temp_dir)
-        self.litellm_root_patch.enable()
-
-        self.admin_user = User.objects.create_user(
-            username="migration-admin",
-            password="secret123",
-            email="migration-admin@example.com",
-        )
-        self.admin_user.groups.add(Group.objects.get(name=ROLE_ADMIN))
-        self.admin_access_token = generate_access_token(self.admin_user)
-
-        self.member_user = User.objects.create_user(
-            username="migration-member",
-            password="secret123",
-            email="migration-member@example.com",
-        )
-        self.member_user.groups.add(Group.objects.get(name=ROLE_MEMBER))
-        self.member_access_token = generate_access_token(self.member_user)
-        migrate_active_configs_to_litellm(triggered_by=self.admin_user)
-
-    def tearDown(self):
-        self.litellm_root_patch.disable()
-        shutil.rmtree(self.temp_dir, ignore_errors=True)
-
-    # --- POST /api/ops/model-configs/migrate-to-litellm/ ---
-
-    def test_migrate_requires_authentication(self):
-        response = self.client.post("/api/ops/model-configs/migrate-to-litellm/")
-
-        self.assertEqual(response.status_code, 401)
-        self.assertEqual(
-            response.json(),
-            {"code": 401, "message": "未认证。", "data": {}},
-        )
-
-    def test_migrate_requires_manage_model_config_permission(self):
-        response = self.client.post(
-            "/api/ops/model-configs/migrate-to-litellm/",
-            HTTP_AUTHORIZATION=f"Bearer {self.member_access_token}",
-        )
-
-        self.assertEqual(response.status_code, 403)
-        self.assertEqual(
-            response.json(),
-            {"code": 403, "message": "无权限。", "data": {}},
-        )
-
-    def test_migrate_success_response_shape(self):
-        response = self.client.post(
-            "/api/ops/model-configs/migrate-to-litellm/",
-            HTTP_AUTHORIZATION=f"Bearer {self.admin_access_token}",
-        )
-
-        self.assertEqual(response.status_code, 200)
-        payload = response.json()
-        self.assertEqual(payload["code"], 0)
-        self.assertEqual(payload["message"], "ok")
-        data = payload["data"]
-        self.assertIn("migrated_capabilities", data)
-        self.assertIn("chat", data["migrated_capabilities"])
-        self.assertIn("embedding", data["migrated_capabilities"])
-        sync_result = data["sync_result"]
-        self.assertIn("status", sync_result)
-        self.assertIn("sync_event_id", sync_result)
-        self.assertIn("route_count", sync_result)
-        self.assertEqual(sync_result["status"], "success")
-
-    @patch("llm.controllers.model_config_controller.migrate_active_configs_to_litellm")
-    def test_migrate_returns_503_when_no_active_config(self, mock_migrate):
-        mock_migrate.side_effect = ServiceConfigurationError(
-            "未配置启用中的 chat 模型。", code="model_not_configured"
-        )
-
-        response = self.client.post(
-            "/api/ops/model-configs/migrate-to-litellm/",
-            HTTP_AUTHORIZATION=f"Bearer {self.admin_access_token}",
-        )
-
-        self.assertEqual(response.status_code, 503)
-        payload = response.json()
-        self.assertEqual(payload["code"], 503)
-        self.assertEqual(payload["message"], "未配置启用中的 chat 模型。")
-        self.assertEqual(payload["data"], {"error": "model_not_configured"})
-
-    # --- POST /api/ops/model-configs/<id>/sync-litellm/ ---
-
-    def test_sync_requires_authentication(self):
-        model_config = get_active_model_config(ModelConfig.CAPABILITY_CHAT)
-        response = self.client.post(f"/api/ops/model-configs/{model_config.id}/sync-litellm/")
-
-        self.assertEqual(response.status_code, 401)
-        self.assertEqual(
-            response.json(),
-            {"code": 401, "message": "未认证。", "data": {}},
-        )
-
-    def test_sync_requires_manage_model_config_permission(self):
-        model_config = get_active_model_config(ModelConfig.CAPABILITY_CHAT)
-        response = self.client.post(
-            f"/api/ops/model-configs/{model_config.id}/sync-litellm/",
-            HTTP_AUTHORIZATION=f"Bearer {self.member_access_token}",
-        )
-
-        self.assertEqual(response.status_code, 403)
-        self.assertEqual(
-            response.json(),
-            {"code": 403, "message": "无权限。", "data": {}},
-        )
-
-    def test_sync_returns_404_for_unknown_model_config(self):
-        response = self.client.post(
-            "/api/ops/model-configs/999999/sync-litellm/",
-            HTTP_AUTHORIZATION=f"Bearer {self.admin_access_token}",
-        )
-
-        self.assertEqual(response.status_code, 404)
-        self.assertEqual(
-            response.json(),
-            {"code": 404, "message": "模型配置不存在。", "data": {}},
-        )
-
-    def test_sync_writes_rendered_config_when_base_config_exists(self):
-        """sync_litellm_route_for_config rebuilds the rendered config when the base exists."""
-        model_config = get_active_model_config(ModelConfig.CAPABILITY_CHAT)
-        base_config_path = self.temp_dir / "litellm_config.yaml"
-        rendered_config_path = self.temp_dir / "litellm_config_rendered.yaml"
-        base_config_path.write_text(
-            "model_list:\n"
-            "  - model_name: placeholder\n"
-            "    litellm_params:\n"
-            "      model: openai/placeholder\n"
-            "      api_base: http://placeholder\n"
-            "litellm_settings:\n"
-            "  drop_params: true\n",
-            encoding="utf-8",
-        )
-
-        with override_settings(
-            LITELLM_BASE_CONFIG_PATH=str(base_config_path),
-            LITELLM_RENDERED_CONFIG_PATH=str(rendered_config_path),
-        ):
-            response = self.client.post(
-                f"/api/ops/model-configs/{model_config.id}/sync-litellm/",
-                HTTP_AUTHORIZATION=f"Bearer {self.admin_access_token}",
-            )
-
-        self.assertEqual(response.status_code, 200)
-        self.assertTrue(rendered_config_path.exists(), "Rendered config should have been written")
-
-    def test_migrate_db_writes_are_atomic(self):
-        """If one capability's route activation fails, no LiteLLM routes are activated."""
-        original_ensure = model_config_command_service.ensure_litellm_route_from_model_config
-
-        def _fail_on_embedding(active):
-            if active.capability == ModelConfig.CAPABILITY_EMBEDDING:
-                raise ValueError("boom")
-            return original_ensure(active)
-
-        before_count = ModelConfig.objects.filter(provider="litellm", is_active=True).count()
-        with patch("llm.services.model_config_command_service.ensure_litellm_route_from_model_config", side_effect=_fail_on_embedding):
-            with self.assertRaises(ValueError):
-                migrate_active_configs_to_litellm(triggered_by=self.admin_user)
-
-        after_count = ModelConfig.objects.filter(provider="litellm", is_active=True).count()
-        self.assertEqual(after_count, before_count, "Atomic transaction must roll back on failure")
 
 
 class LiteLLMAliasYamlRegressionTests(TestCase):

@@ -267,7 +267,7 @@ def _rewrite_query(state: ChatRagState):
         {"role": "user", "content": question},
     ]
     try:
-        raw_output = provider.chat(messages=prompt, options={"temperature": 0, "max_tokens": 64})
+        raw_output = provider.chat(messages=prompt, options={"temperature": 0, "max_tokens": 64}).content
     except Exception:
         logger.exception("chat rag rewrite provider failed; falling back to original question")
         rewritten_query = question

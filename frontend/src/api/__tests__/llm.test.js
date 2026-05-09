@@ -9,25 +9,23 @@ import {
 } from '../llm.js';
 import { createApiConfig } from '../config.js';
 
-test('normalizeModelConfigPayload exposes LiteLLM routing fields', () => {
+test('normalizeModelConfigPayload exposes direct provider pricing fields', () => {
   const rows = normalizeModelConfigPayload({
     model_configs: [
       {
         id: 7,
         name: 'chat-default',
-        provider: 'litellm',
-        model_name: 'chat-default',
+        provider: 'deepseek',
+        model_name: 'deepseek-chat',
         parameter_scale: '32B',
         capability: 'chat',
-        endpoint: 'http://localhost:4000',
+        endpoint: 'https://api.deepseek.com',
         description: '财报风控主力模型',
-        alias: 'chat-default',
-        upstream_provider: 'openai',
-        upstream_model: 'gpt-4o',
-        fallback_aliases: ['chat-backup'],
-        weight: 2,
         input_price_per_million: 0.5,
         output_price_per_million: 2,
+        request_price: 0.02,
+        price_currency: 'USD',
+        pricing_notes: '2026-05 official',
         has_api_key: true,
         api_key_masked: 'sk-tes******3456',
         invocation_count: 128,
@@ -36,15 +34,16 @@ test('normalizeModelConfigPayload exposes LiteLLM routing fields', () => {
   });
 
   assert.equal(rows.length, 1);
-  assert.equal(rows[0].alias, 'chat-default');
+  assert.equal(rows[0].alias, 'deepseek-chat');
   assert.equal(rows[0].parameter_scale, '32B');
   assert.equal(rows[0].description, '财报风控主力模型');
-  assert.equal(rows[0].upstream_provider, 'openai');
-  assert.equal(rows[0].upstream_model, 'gpt-4o');
-  assert.deepEqual(rows[0].fallback_aliases, ['chat-backup']);
-  assert.equal(rows[0].weight, 2);
+  assert.equal(rows[0].upstream_provider, 'deepseek');
+  assert.equal(rows[0].upstream_model, 'deepseek-chat');
   assert.equal(rows[0].input_price_per_million, 0.5);
   assert.equal(rows[0].output_price_per_million, 2);
+  assert.equal(rows[0].request_price, 0.02);
+  assert.equal(rows[0].price_currency, 'USD');
+  assert.equal(rows[0].pricing_notes, '2026-05 official');
   assert.equal(rows[0].invocation_count, 128);
 });
 
@@ -70,7 +69,7 @@ test('normalizeModelConfigOverviewSummary keeps overview metrics and nullable de
   });
 });
 
-test('createLlmApi calls LiteLLM sync and migrate endpoints', async () => {
+test('createLlmApi tests model config connections', async () => {
   const calls = [];
   const api = createLlmApi({
     fetchJson: async (path, options) => {
@@ -79,19 +78,21 @@ test('createLlmApi calls LiteLLM sync and migrate endpoints', async () => {
     },
   });
 
-  await api.syncModelConfigToLiteLLM(12);
-  await api.migrateToLiteLLM();
+  await api.testModelConfigConnection({
+    capability: 'chat',
+    provider: 'deepseek',
+    model_name: 'deepseek-chat',
+    endpoint: 'https://api.deepseek.com',
+    options: { api_key: 'secret' },
+  });
 
   assert.deepEqual(
     calls.map((call) => call.path),
-    [
-      '/api/ops/model-configs/12/sync-litellm/',
-      '/api/ops/model-configs/migrate-to-litellm/',
-    ],
+    ['/api/ops/model-configs/test-connection/'],
   );
   assert.deepEqual(
     calls.map((call) => call.options.method),
-    ['POST', 'POST'],
+    ['POST'],
   );
 });
 

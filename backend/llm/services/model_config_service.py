@@ -3,7 +3,7 @@ from llm.models import ModelConfig
 
 
 def get_manageable_model_configs():
-    return ModelConfig.objects.filter(provider=ModelConfig.PROVIDER_LITELLM)
+    return ModelConfig.objects.exclude(provider=ModelConfig.PROVIDER_LITELLM)
 
 
 def get_active_model_config(capability):

@@ -1,128 +1,129 @@
 from django.conf import settings
 from django.db import transaction
 
+from common.exceptions import ServiceConfigurationError
 from llm.models import ModelConfig
-from llm.services.litellm_alias_service import sync_litellm_routes
+from llm.services.litellm_alias_service import sync_litellm_route_for_config, sync_litellm_routes
 from llm.services.litellm_route_utils import normalize_upstream_model_name
 from llm.services.runtime_service import _build_provider
 
-
-def _strip_litellm_prefixes(name):
-    normalized = name or ""
-    while normalized.startswith("litellm-"):
-        normalized = normalized.removeprefix("litellm-")
-    return normalized
+_LEGACY_LITELLM_OPTION_KEYS = ("api_key", "temperature", "max_tokens")
 
 
-def _build_upstream_model_name(*, provider, model_name):
-    return normalize_upstream_model_name(provider=provider, model_name=model_name)
+def _canonical_litellm_route_name(source_model_config):
+    name = (source_model_config.name or "").strip()
+    if name.startswith("litellm-"):
+        return name
+    return f"litellm-{name}"
 
 
-def _build_litellm_route_options(model_config):
-    source_options = dict(model_config.options or {})
-    litellm_options = dict(source_options.get("litellm") or {})
-
-    if model_config.provider == ModelConfig.PROVIDER_LITELLM:
-        upstream_provider = litellm_options.get("upstream_provider") or ""
-        upstream_model = _build_upstream_model_name(
-            provider=upstream_provider or "openai",
-            model_name=litellm_options.get("upstream_model") or model_config.model_name,
-        )
-        api_base = source_options.get("api_base") or litellm_options.get("base_url") or model_config.endpoint
-    else:
-        upstream_provider = litellm_options.get("upstream_provider") or model_config.provider
-        upstream_model = _build_upstream_model_name(
-            provider=upstream_provider,
-            model_name=litellm_options.get("upstream_model") or model_config.model_name,
-        )
-        api_base = source_options.get("api_base") or model_config.endpoint
-
-    litellm_options["upstream_provider"] = upstream_provider
-    litellm_options["upstream_model"] = upstream_model
-    litellm_options["base_url"] = api_base
-    source_options["api_base"] = api_base
-    source_options["litellm"] = litellm_options
-    return source_options
-
-
-def _litellm_route_has_required_metadata(model_config):
-    options = model_config.options or {}
-    litellm_options = options.get("litellm") or {}
-    return bool(
-        options.get("api_key")
-        and options.get("api_base")
-        and litellm_options.get("upstream_provider")
-        and litellm_options.get("upstream_model")
-    )
-
-
-def _find_original_source_model_config(model_config):
-    base_name = _strip_litellm_prefixes(model_config.name)
-    candidates = ModelConfig.objects.filter(capability=model_config.capability).exclude(
-        provider=ModelConfig.PROVIDER_LITELLM
-    )
-    source = candidates.filter(name=base_name).order_by("-id").first()
-    if source is not None:
-        return source
-    return candidates.filter(model_name=model_config.model_name).order_by("-is_active", "-id").first()
-
-
-def _prune_stale_nested_litellm_routes(route):
-    if route.provider != ModelConfig.PROVIDER_LITELLM:
-        return
-    ModelConfig.objects.filter(
-        capability=route.capability,
-        provider=ModelConfig.PROVIDER_LITELLM,
-        model_name=route.model_name,
-        name__startswith="litellm-litellm-",
-    ).exclude(id=route.id).delete()
-
-
-def _resolve_migration_source_model_config(model_config):
-    if model_config.provider != ModelConfig.PROVIDER_LITELLM:
-        return model_config
-
-    if model_config.name.startswith("litellm-litellm-") or not _litellm_route_has_required_metadata(model_config):
-        source = _find_original_source_model_config(model_config)
-        if source is not None:
-            return source
-    return model_config
-
-
-def ensure_litellm_route_from_model_config(model_config):
-    """Get or create a LiteLLM ModelConfig route for the given model config."""
-    source_model_config = _resolve_migration_source_model_config(model_config)
-
+def _build_litellm_route_options(source_model_config):
     if source_model_config.provider == ModelConfig.PROVIDER_LITELLM:
+        options = dict(source_model_config.options or {})
+        litellm_options = dict(options.get("litellm") or {})
+        litellm_options["upstream_model"] = normalize_upstream_model_name(
+            provider=litellm_options.get("upstream_provider") or "",
+            model_name=litellm_options.get("upstream_model") or source_model_config.model_name,
+        )
+        options["litellm"] = litellm_options
+        return options
+
+    source_options = source_model_config.options or {}
+    options = {
+        key: source_options[key]
+        for key in _LEGACY_LITELLM_OPTION_KEYS
+        if source_options.get(key) not in (None, "")
+    }
+    options["api_base"] = source_model_config.endpoint
+    options["litellm"] = {
+        "upstream_provider": source_model_config.provider,
+        "upstream_model": normalize_upstream_model_name(
+            provider=source_model_config.provider,
+            model_name=source_model_config.model_name,
+        ),
+    }
+    return options
+
+
+def ensure_litellm_route_from_model_config(source_model_config):
+    route = (
+        ModelConfig.objects.filter(
+            provider=ModelConfig.PROVIDER_LITELLM,
+            capability=source_model_config.capability,
+            model_name=source_model_config.model_name,
+        )
+        .order_by("-is_active", "-updated_at", "-id")
+        .first()
+    )
+
+    if route is None and source_model_config.provider == ModelConfig.PROVIDER_LITELLM:
         route = source_model_config
-    else:
-        litellm_name = f"litellm-{_strip_litellm_prefixes(source_model_config.name)}"
-        route = ModelConfig.objects.filter(
+
+    if route is None:
+        route = ModelConfig(
+            name=_canonical_litellm_route_name(source_model_config),
             capability=source_model_config.capability,
             provider=ModelConfig.PROVIDER_LITELLM,
             model_name=source_model_config.model_name,
-        ).order_by("-is_active", "-updated_at", "-id").first()
-        if route is None:
-            route, _ = ModelConfig.objects.get_or_create(
-                capability=source_model_config.capability,
-                name=litellm_name,
-                defaults={
-                    "provider": ModelConfig.PROVIDER_LITELLM,
-                    "model_name": source_model_config.model_name,
-                    "endpoint": settings.LITELLM_GATEWAY_URL,
-                    "options": {},
-                    "is_active": False,
-                },
-            )
+        )
 
-    route.provider = ModelConfig.PROVIDER_LITELLM
-    route.model_name = source_model_config.model_name
     route.endpoint = settings.LITELLM_GATEWAY_URL
+    route.description = source_model_config.description
+    route.parameter_scale = source_model_config.parameter_scale
     route.options = _build_litellm_route_options(source_model_config)
+    route.is_active = True
     route.save()
-    _prune_stale_nested_litellm_routes(route)
+
+    if source_model_config.provider != ModelConfig.PROVIDER_LITELLM:
+        source_model_config.is_active = False
+        source_model_config.save()
+
+    nested_name = f"litellm-{_canonical_litellm_route_name(source_model_config)}"
+    ModelConfig.objects.filter(
+        provider=ModelConfig.PROVIDER_LITELLM,
+        capability=source_model_config.capability,
+        name=nested_name,
+    ).exclude(id=route.id).delete()
+
+    sync_litellm_route_for_config(route, triggered_by=None)
     route.refresh_from_db()
     return route
+
+
+def migrate_active_configs_to_litellm(*, triggered_by):
+    migrated_capabilities = []
+    with transaction.atomic():
+        for capability in ModelConfig.CAPABILITY_CHOICES:
+            capability_key = capability[0]
+            active_source = (
+                ModelConfig.objects.filter(capability=capability_key, is_active=True)
+                .exclude(provider=ModelConfig.PROVIDER_LITELLM)
+                .order_by("-updated_at", "-id")
+                .first()
+            )
+            active_route = (
+                ModelConfig.objects.filter(
+                    capability=capability_key,
+                    provider=ModelConfig.PROVIDER_LITELLM,
+                    is_active=True,
+                )
+                .order_by("-updated_at", "-id")
+                .first()
+            )
+            source_model = active_source or active_route
+            if source_model is None:
+                raise ServiceConfigurationError(
+                    f"未配置启用中的 {capability_key} 模型。",
+                    code="model_not_configured",
+                )
+            ensure_litellm_route_from_model_config(source_model)
+            migrated_capabilities.append(capability_key)
+
+        sync_result = sync_litellm_routes(triggered_by=triggered_by)
+    return {
+        "migrated_capabilities": migrated_capabilities,
+        "sync_result": sync_result,
+    }
 
 
 def set_model_config_active_state(*, model_config_id, is_active):
@@ -131,8 +132,8 @@ def set_model_config_active_state(*, model_config_id, is_active):
             model_config = ModelConfig.objects.select_for_update().get(id=model_config_id)
         except ModelConfig.DoesNotExist as exc:
             raise ValueError("模型配置不存在。") from exc
-        if model_config.provider != ModelConfig.PROVIDER_LITELLM:
-            raise ValueError("仅支持管理 LiteLLM 路由配置。")
+        if model_config.provider == ModelConfig.PROVIDER_LITELLM:
+            raise ValueError("LiteLLM 遗留配置不能再启用，请先迁移为直连 provider。")
 
         model_config.is_active = is_active
         model_config.save()
@@ -141,19 +142,13 @@ def set_model_config_active_state(*, model_config_id, is_active):
 
 
 def create_model_config(*, payload):
-    model_config = ModelConfig.objects.create(
-        **{
-            **payload,
-            "provider": ModelConfig.PROVIDER_LITELLM,
-        }
-    )
+    model_config = ModelConfig.objects.create(**payload)
     model_config.refresh_from_db()
     return model_config
 
 
 def update_model_config(*, model_config, payload):
     incoming_options = payload.pop("options", None)
-    payload["provider"] = ModelConfig.PROVIDER_LITELLM
     for key, value in payload.items():
         setattr(model_config, key, value)
     if incoming_options is not None:
@@ -176,75 +171,11 @@ def delete_model_config(*, model_config):
 
 def test_model_config_connection(*, payload):
     provider = _build_provider(ModelConfig(**payload))
-    if payload["capability"] == ModelConfig.CAPABILITY_CHAT:
+    capability = payload["capability"]
+    if capability == ModelConfig.CAPABILITY_CHAT:
         provider.chat(messages=[{"role": "user", "content": "ping"}])
-    elif payload["capability"] == ModelConfig.CAPABILITY_EMBEDDING:
+    elif capability == ModelConfig.CAPABILITY_EMBEDDING:
         provider.embed(texts=["ping"])
+    elif capability == ModelConfig.CAPABILITY_RERANK:
+        provider.rerank(query="ping", documents=["ping"], top_n=1)
     return {"ok": True}
-
-
-def ensure_active_source_model_configs():
-    for capability in (
-        ModelConfig.CAPABILITY_CHAT,
-        ModelConfig.CAPABILITY_EMBEDDING,
-        ModelConfig.CAPABILITY_RERANK,
-    ):
-        source_configs = ModelConfig.objects.filter(capability=capability).exclude(
-            provider=ModelConfig.PROVIDER_LITELLM
-        )
-        if not source_configs.exists() or source_configs.filter(is_active=True).exists():
-            continue
-        source_model = source_configs.order_by("-updated_at", "-id").first()
-        source_model.is_active = True
-        source_model.save(update_fields=["is_active", "updated_at"])
-
-
-def _get_preferred_migration_model_config(capability):
-    legacy_active = (
-        ModelConfig.objects.filter(capability=capability, is_active=True)
-        .exclude(provider=ModelConfig.PROVIDER_LITELLM)
-        .order_by("-updated_at", "-id")
-        .first()
-    )
-    if legacy_active is not None:
-        return legacy_active
-
-    litellm_active = (
-        ModelConfig.objects.filter(
-            capability=capability,
-            provider=ModelConfig.PROVIDER_LITELLM,
-            is_active=True,
-        )
-        .order_by("-updated_at", "-id")
-        .first()
-    )
-    if litellm_active is not None:
-        return litellm_active
-
-    return (
-        ModelConfig.objects.filter(capability=capability, provider=ModelConfig.PROVIDER_LITELLM)
-        .order_by("-updated_at", "-id")
-        .first()
-    )
-
-
-def migrate_active_configs_to_litellm(*, triggered_by):
-    """For each active capability config, ensure a LiteLLM route exists and is active."""
-    migrated = []
-    with transaction.atomic():
-        ensure_active_source_model_configs()
-        for capability in (
-            ModelConfig.CAPABILITY_CHAT,
-            ModelConfig.CAPABILITY_EMBEDDING,
-            ModelConfig.CAPABILITY_RERANK,
-        ):
-            source = _get_preferred_migration_model_config(capability)
-            if source is None:
-                continue
-            route = ensure_litellm_route_from_model_config(source)
-            ModelConfig.objects.filter(capability=capability).exclude(id=route.id).update(is_active=False)
-            route.is_active = True
-            route.save(update_fields=["is_active", "updated_at"])
-            migrated.append(capability)
-    sync_result = sync_litellm_routes(triggered_by=triggered_by)
-    return {"migrated_capabilities": migrated, "sync_result": sync_result}

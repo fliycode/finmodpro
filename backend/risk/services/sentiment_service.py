@@ -198,7 +198,7 @@ def _analyze_document(document):
                     },
                 ],
                 options={"temperature": 0},
-            )
+            ).content
             payload = _parse_provider_payload(raw_content)
             normalized = {
                 "sentiment": _normalize_sentiment(payload.get("sentiment")),

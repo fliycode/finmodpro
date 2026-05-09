@@ -8,11 +8,9 @@ from llm.serializers import (
     ModelConfigSummarySerializer,
     ModelConfigWriteSerializer,
 )
-from llm.services.litellm_alias_service import sync_litellm_route_for_config
 from llm.services.model_config_command_service import (
     create_model_config,
     delete_model_config,
-    migrate_active_configs_to_litellm,
     set_model_config_active_state,
     test_model_config_connection,
     update_model_config,
@@ -144,34 +142,4 @@ class ModelConfigConnectionTestView(APIView):
             return error_response(code=503, message=exc.message, status_code=503, data={"error": exc.code})
         except UpstreamServiceError as exc:
             return error_response(code=exc.status_code, message=exc.message, status_code=exc.status_code, data={"error": exc.code})
-        return success_response(data=result)
-
-
-class ModelConfigMigrateToLiteLLMView(APIView):
-    authentication_classes = []
-    permission_classes = []
-
-    def post(self, request):
-        user, permission_error = _require_manage_permission(request)
-        if permission_error is not None:
-            return permission_error
-        try:
-            result = migrate_active_configs_to_litellm(triggered_by=user)
-        except ServiceConfigurationError as exc:
-            return error_response(code=503, message=exc.message, status_code=503, data={"error": exc.code})
-        return success_response(data=result)
-
-
-class ModelConfigSyncLiteLLMView(APIView):
-    authentication_classes = []
-    permission_classes = []
-
-    def post(self, request, model_config_id):
-        user, permission_error = _require_manage_permission(request)
-        if permission_error is not None:
-            return permission_error
-        model_config = get_model_config(model_config_id=model_config_id)
-        if model_config is None:
-            return error_response(code=404, message="模型配置不存在。", status_code=404)
-        result = sync_litellm_route_for_config(model_config, triggered_by=user)
         return success_response(data=result)

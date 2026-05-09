@@ -11,6 +11,13 @@ from llm.models import FineTuneRun, ModelConfig
 from llm.services.model_config_service import get_active_model_config
 from rag.models import RetrievalLog
 
+_PROVIDER_LABELS = {
+    ModelConfig.PROVIDER_DEEPSEEK: "DeepSeek",
+    ModelConfig.PROVIDER_DASHSCOPE: "DashScope",
+    ModelConfig.PROVIDER_OLLAMA: "Ollama",
+    ModelConfig.PROVIDER_OPENAI_COMPATIBLE: "OpenAI Compatible",
+}
+
 
 def _langfuse_config():
     host = getattr(settings, "LANGFUSE_HOST", "")
@@ -25,7 +32,7 @@ def _langfuse_config():
 
 
 def _build_provider_status():
-    all_configs = list(ModelConfig.objects.all())
+    all_configs = list(ModelConfig.objects.exclude(provider=ModelConfig.PROVIDER_LITELLM))
     active_configs = [config for config in all_configs if config.is_active]
     configured_by_provider = Counter(config.provider for config in all_configs)
     active_by_provider = Counter(config.provider for config in active_configs)
@@ -36,17 +43,18 @@ def _build_provider_status():
 
     providers = [
         {
-            "key": "litellm",
-            "label": "LiteLLM",
+            "key": key,
+            "label": label,
             "status": (
                 "connected"
-                if active_by_provider.get(ModelConfig.PROVIDER_LITELLM)
+                if active_by_provider.get(key)
                 else "configured"
-                if configured_by_provider.get(ModelConfig.PROVIDER_LITELLM)
+                if configured_by_provider.get(key)
                 else "missing"
             ),
-            "active_count": active_by_provider.get(ModelConfig.PROVIDER_LITELLM, 0),
-        },
+            "active_count": active_by_provider.get(key, 0),
+        }
+        for key, label in _PROVIDER_LABELS.items()
     ]
     providers.extend(
         [

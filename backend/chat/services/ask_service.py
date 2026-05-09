@@ -90,7 +90,7 @@ def ask_question(*, question, filters=None, top_k=5, session=None):
             )
 
         try:
-            answer = provider.chat(messages=payload["messages"])
+            answer = provider.chat(messages=payload["messages"]).content
         except Exception:
             if assistant_message is not None:
                 fail_session_message(
@@ -175,7 +175,7 @@ def stream_question(*, question, filters=None, top_k=5, session=None):
                         chunks.append(text)
                         yield {"event": "chunk", "data": {"content": text}}
                 else:
-                    answer = provider.chat(messages=payload["messages"])
+                    answer = provider.chat(messages=payload["messages"]).content
                     chunks.append(answer)
                     yield {"event": "chunk", "data": {"content": answer}}
             except Exception:
