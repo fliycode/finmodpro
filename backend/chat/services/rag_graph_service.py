@@ -10,13 +10,22 @@ from langgraph.graph import END, START, StateGraph
 from chat.services.context_service import build_chat_messages
 from chat.services.session_service import normalize_context_filters
 from chat.services.store import django_memory_store
-from rag.services.lightrag_retrieval_service import retrieve_from_lightrag
+from rag.services.retrieval_backend_service import retrieve_chat_context
 from rag.services.rerank_service import rerank_with_variants
 from rag.services.retrieval_service import build_retrieval_response
 
 logger = logging.getLogger(__name__)
 
 MAX_CHAT_CITATIONS = 3
+
+
+def retrieve_from_lightrag(*, query, filters=None, top_k=None, query_variants=None):
+    return retrieve_chat_context(
+        query=query,
+        filters=filters,
+        top_k=top_k or 5,
+        query_variants=query_variants,
+    )
 
 _DIRECT_ASSISTANT_PATTERNS = (
     "你是谁",
@@ -303,7 +312,9 @@ def _retrieve_and_merge(state: ChatRagState):
 
     raw_results = retrieve_from_lightrag(
         query=rewritten_query,
+        filters=state.get("resolved_filters") or {},
         top_k=retrieval_top_k,
+        query_variants=query_variants,
     )
     reranked = rerank_with_variants(
         raw_results,

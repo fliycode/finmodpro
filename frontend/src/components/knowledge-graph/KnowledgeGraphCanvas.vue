@@ -227,11 +227,11 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div ref="containerRef" class="lightrag-graph-canvas" :style="{ height }" />
+  <div ref="containerRef" class="knowledge-graph-canvas" :style="{ height }" />
 </template>
 
 <style scoped>
-.lightrag-graph-canvas {
+.knowledge-graph-canvas {
   width: 100%;
   min-height: 340px;
 }

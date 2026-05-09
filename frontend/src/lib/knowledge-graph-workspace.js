@@ -46,12 +46,12 @@ const compareSearchMatches = (left, right) => {
   return (left.label || '').localeCompare(right.label || '', 'zh-CN');
 };
 
-export const getLightragStatusTone = (status) => {
+export const getKnowledgeGraphStatusTone = (status) => {
   const normalized = String(status || '').trim().toLowerCase();
   return statusToneMap[normalized] || 'muted';
 };
 
-export const buildLightragGraphFacets = (nodes = [], edges = []) => {
+export const buildKnowledgeGraphFacets = (nodes = [], edges = []) => {
   const nodeTypeCounts = new Map();
   const relationCounts = new Map();
 
@@ -75,7 +75,7 @@ export const buildLightragGraphFacets = (nodes = [], edges = []) => {
   };
 };
 
-export const filterLightragGraph = (
+export const filterKnowledgeGraph = (
   graph = { nodes: [], edges: [] },
   filters = { activeNodeTypes: [], activeRelationLabels: [] },
 ) => {
@@ -100,7 +100,7 @@ export const filterLightragGraph = (
   return { nodes, edges };
 };
 
-export const filterLightragGraphLabels = (labels = [], query = '') => {
+export const filterKnowledgeGraphLabels = (labels = [], query = '') => {
   const normalizedQuery = String(query || '').trim().toLowerCase();
   if (!normalizedQuery) {
     return [...labels];
@@ -109,7 +109,7 @@ export const filterLightragGraphLabels = (labels = [], query = '') => {
   return labels.filter((label) => String(label || '').toLowerCase().includes(normalizedQuery));
 };
 
-export const findLightragGraphMatches = (nodes = [], query = '', limit = 12) => {
+export const findKnowledgeGraphMatches = (nodes = [], query = '', limit = 12) => {
   const tokens = normalizeSearchTokens(query);
   if (!tokens.length) {
     return [];
@@ -157,11 +157,11 @@ export const findLightragGraphMatches = (nodes = [], query = '', limit = 12) => 
     .slice(0, limit);
 };
 
-export const searchLightragGraphNodes = (nodes = [], query = '') => {
-  return findLightragGraphMatches(nodes, query).map((node) => node.id);
+export const searchKnowledgeGraphNodes = (nodes = [], query = '') => {
+  return findKnowledgeGraphMatches(nodes, query).map((node) => node.id);
 };
 
-export const buildLightragGraphNeighbors = (
+export const buildKnowledgeGraphNeighbors = (
   graph = { nodes: [], edges: [] },
   nodeId = '',
   limit = 8,

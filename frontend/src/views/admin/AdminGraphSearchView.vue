@@ -1,7 +1,7 @@
 <script setup>
 import { computed, reactive, ref } from 'vue';
 
-import { lightragApi } from '../../api/lightrag.js';
+import { knowledgeGraphApi } from '../../api/knowledge-graph.js';
 import { useFlash } from '../../lib/flash.js';
 
 const flash = useFlash();
@@ -48,7 +48,7 @@ const handleSubmit = async () => {
   isSubmitting.value = true;
   errorMsg.value = '';
   try {
-    const result = await lightragApi.query({
+    const result = await knowledgeGraphApi.query({
       query: userQuery,
       mode: params.mode,
       top_k: params.kgTopK,

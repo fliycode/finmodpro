@@ -7,7 +7,7 @@ from unittest.mock import patch
 from django.contrib.auth.models import Group
 from django.core.management import call_command
 from django.core.files.uploadedfile import SimpleUploadedFile
-from django.test import Client, TestCase, override_settings
+from django.test import Client, SimpleTestCase, TestCase, override_settings
 
 from authentication.models import User
 from authentication.services.jwt_service import generate_access_token
@@ -15,6 +15,10 @@ from common.exceptions import UpstreamRateLimitError
 from knowledgebase.models import Document, DocumentChunk
 from knowledgebase.services.document_service import create_document_from_upload, ingest_document
 from rag.models import RetrievalLog
+from rag.services.retrieval_backend_service import (
+    retrieve_chat_context,
+    retrieve_rag_context,
+)
 from rag.services.retrieval_evaluation_service import evaluate_retrieval_cases
 from rag.services.embedding_service import tokenize
 from rag.services.retrieval_service import retrieve
@@ -76,6 +80,43 @@ def fake_vector_search(*, query, filters=None, top_k=5):
         )
     results.sort(key=lambda item: (item["score"], item["chunk_id"]), reverse=True)
     return results[: int(top_k)]
+
+
+class RetrievalBackendSelectionTests(SimpleTestCase):
+    @override_settings(RAG_RETRIEVAL_BACKEND="llamaindex")
+    @patch("rag.services.retrieval_backend_service.query_llamaindex_store")
+    def test_retrieve_rag_context_uses_llamaindex_backend(self, mocked_query):
+        mocked_query.return_value = [{"document_id": 1, "chunk_id": 1, "score": 1.0}]
+
+        results = retrieve_rag_context(query="cash flow", filters={"doc_type": "txt"}, top_k=3)
+
+        self.assertEqual(results, mocked_query.return_value)
+        mocked_query.assert_called_once_with(
+            query="cash flow",
+            filters={"doc_type": "txt"},
+            top_k=3,
+            query_variants=None,
+        )
+
+    @override_settings(CHAT_RETRIEVAL_BACKEND="native")
+    @patch("rag.services.retrieval_backend_service.query_store")
+    def test_retrieve_chat_context_uses_native_backend(self, mocked_query):
+        mocked_query.return_value = [{"document_id": 2, "chunk_id": 4, "score": 0.8}]
+
+        results = retrieve_chat_context(
+            query="margin risk",
+            filters={"document_id": 2},
+            top_k=4,
+            query_variants=["risk margin"],
+        )
+
+        self.assertEqual(results, mocked_query.return_value)
+        mocked_query.assert_called_once_with(
+            query="margin risk",
+            filters={"document_id": 2},
+            top_k=4,
+            query_variants=["risk margin"],
+        )
 
 
 @override_settings(

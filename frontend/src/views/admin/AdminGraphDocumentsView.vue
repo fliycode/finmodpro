@@ -1,9 +1,9 @@
 <script setup>
 import { computed, onMounted, reactive, ref } from 'vue';
 
-import { lightragApi } from '../../api/lightrag.js';
+import { knowledgeGraphApi } from '../../api/knowledge-graph.js';
 import AppSectionCard from '../../components/ui/AppSectionCard.vue';
-import { getLightragStatusTone } from '../../lib/lightrag-workspace.js';
+import { getKnowledgeGraphStatusTone } from '../../lib/knowledge-graph-workspace.js';
 import { useFlash } from '../../lib/flash.js';
 
 const flash = useFlash();
@@ -33,9 +33,9 @@ const loadDocuments = async () => {
   isLoading.value = true;
   errorMsg.value = '';
   try {
-    const [counts, page] = await Promise.all([
-      lightragApi.getStatusCounts(),
-      lightragApi.listDocuments({
+      const [counts, page] = await Promise.all([
+      knowledgeGraphApi.getStatusCounts(),
+      knowledgeGraphApi.listDocuments({
         page: pager.page,
         pageSize: pager.pageSize,
         sortField: sortField.value,
@@ -86,8 +86,8 @@ const uploadFile = async () => {
   isUploading.value = true;
   errorMsg.value = '';
   try {
-    await lightragApi.uploadDocument(selectedFile.value);
-    flash.success('文档已提交到 LightRAG。');
+    await knowledgeGraphApi.uploadDocument(selectedFile.value);
+    flash.success('文档已提交到知识图谱管线。');
     selectedFile.value = null;
     await loadDocuments();
   } catch (error) {
@@ -118,7 +118,7 @@ const deleteDocument = async (row) => {
     return;
   }
   await runAction(
-    () => lightragApi.deleteDocument([docId]),
+    () => knowledgeGraphApi.deleteDocument([docId]),
     '文档删除请求已提交。',
   );
 };
@@ -140,15 +140,15 @@ onMounted(loadDocuments);
             <span
               v-for="(count, status) in statusCounts"
               :key="status"
-              :class="['graph-documents__status-chip', `graph-documents__status-chip--${getLightragStatusTone(status)}`]"
+              :class="['graph-documents__status-chip', `graph-documents__status-chip--${getKnowledgeGraphStatusTone(status)}`]"
             >
               {{ status }}: {{ count }}
             </span>
           </div>
           <div class="graph-documents__actions">
-            <el-button :loading="isRunningAction" @click="runAction(() => lightragApi.scanDocuments(), '已触发目录扫描。')">扫描</el-button>
-            <el-button :loading="isRunningAction" @click="runAction(() => lightragApi.reprocessFailedDocuments(), '已重新触发失败任务。')">重试</el-button>
-            <el-button @click="runAction(() => lightragApi.clearCache(), '已清理缓存。')">清空</el-button>
+            <el-button :loading="isRunningAction" @click="runAction(() => knowledgeGraphApi.scanDocuments(), '已触发目录扫描。')">扫描</el-button>
+            <el-button :loading="isRunningAction" @click="runAction(() => knowledgeGraphApi.reprocessFailedDocuments(), '已重新触发失败任务。')">重试</el-button>
+            <el-button @click="runAction(() => knowledgeGraphApi.clearCache(), '已清理缓存。')">清空</el-button>
             <input ref="fileInputRef" type="file" style="display: none;" @change="handleFileChange" />
             <el-button type="primary" :loading="isUploading" @click="handleUploadClick">
               {{ selectedFile ? '上传' : '选择文件' }}
@@ -176,7 +176,7 @@ onMounted(loadDocuments);
         </el-table-column>
         <el-table-column label="状态" width="120" sortable="custom" prop="status">
           <template #default="{ row }">
-            <span :class="['graph-documents__status-pill', `graph-documents__status-pill--${getLightragStatusTone(row.status)}`]">
+              <span :class="['graph-documents__status-pill', `graph-documents__status-pill--${getKnowledgeGraphStatusTone(row.status)}`]">
               {{ row.status }}
             </span>
           </template>

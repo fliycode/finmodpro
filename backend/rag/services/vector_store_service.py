@@ -290,8 +290,10 @@ def _merge_ranked_results(ranked_lists):
             )
             if source_query not in existing["matched_queries"]:
                 existing["matched_queries"].append(source_query)
-            if source_name == "vector":
-                existing["vector_source"] = "milvus"
+            if source_name in {"vector", "llamaindex_vector"}:
+                existing["vector_source"] = (
+                    "llamaindex" if source_name == "llamaindex_vector" else "milvus"
+                )
             else:
                 existing.setdefault("keyword_sources", [])
                 if source_name not in existing["keyword_sources"]:

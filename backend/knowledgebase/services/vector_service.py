@@ -1,3 +1,4 @@
+import logging
 import os
 
 from django.conf import settings
@@ -6,6 +7,8 @@ from knowledgebase.models import DocumentChunk, DocumentSectionChunk, IngestionT
 from knowledgebase.services.embedding_service import build_dense_embedding, build_dense_embeddings
 
 EMBEDDING_PROVIDER_BATCH_LIMIT = 10
+
+logger = logging.getLogger(__name__)
 
 
 class VectorService:
@@ -212,9 +215,21 @@ class VectorService:
                     ingestion_task.save(update_fields=["total_section_count", "indexed_section_count", "updated_at"])
             else:
                 DocumentChunk.objects.bulk_update(chunks_to_update, ["vector_id"])
+        from rag.services.llamaindex_store_service import (
+            should_sync_llamaindex_index,
+            sync_document_index,
+        )
         from rag.services.vector_store_service import index_document
 
         index_document(document)
+        if should_sync_llamaindex_index():
+            try:
+                sync_document_index(document)
+            except Exception:
+                logger.exception(
+                    "llamaindex sync failed after vector indexing",
+                    extra={"document_id": document.id},
+                )
 
     def search(self, *, query, filters=None, top_k=5):
         query_vector = build_dense_embedding(query)
@@ -321,6 +336,16 @@ class VectorService:
         if client.has_collection(settings.MILVUS_COLLECTION_NAME):
             client.drop_collection(settings.MILVUS_COLLECTION_NAME)
         self.__class__._client = None
+        from rag.services.llamaindex_store_service import (
+            clear_llamaindex_store,
+            should_sync_llamaindex_index,
+        )
+
+        if should_sync_llamaindex_index():
+            try:
+                clear_llamaindex_store()
+            except Exception:
+                logger.exception("failed to clear llamaindex store")
 
 
 def index_document_chunks(document):

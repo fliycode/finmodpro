@@ -871,7 +871,12 @@ class ChatAskApiTests(TestCase):
         )
 
         self.assertEqual(response.status_code, 200)
-        mocked_retrieve.assert_called_once_with(query="revenue outlook", top_k=5)
+        mocked_retrieve.assert_called_once_with(
+            query="revenue outlook",
+            filters={"dataset_id": 7, "doc_type": "txt"},
+            top_k=5,
+            query_variants=["revenue outlook"],
+        )
         session.refresh_from_db()
         self.assertEqual(
             list(session.messages.values_list("role", "content")),
@@ -899,7 +904,12 @@ class ChatAskApiTests(TestCase):
         self.assertEqual(response.status_code, 200)
         body = b"".join(response.streaming_content).decode("utf-8")
         self.assertIn("cash flow outlook", body)
-        mocked_retrieve.assert_called_once_with(query="cash flow outlook", top_k=5)
+        mocked_retrieve.assert_called_once_with(
+            query="cash flow outlook",
+            filters={"dataset_id": 11},
+            top_k=5,
+            query_variants=["cash flow outlook"],
+        )
         self.assertEqual(
             list(session.messages.values_list("role", "content")),
             [
@@ -927,7 +937,12 @@ class ChatAskApiTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         response_payload = response.json()
-        mocked_retrieve.assert_called_once_with(query="cash flow outlook", top_k=5)
+        mocked_retrieve.assert_called_once_with(
+            query="cash flow outlook",
+            filters={"dataset_id": 7},
+            top_k=5,
+            query_variants=["cash flow outlook"],
+        )
         session.refresh_from_db()
         self.assertEqual(
             getattr(session, "message_count", None),
@@ -972,7 +987,12 @@ class ChatAskApiTests(TestCase):
         self.assertEqual(response.status_code, 200)
         body = b"".join(response.streaming_content).decode("utf-8")
         self.assertIn("event: done", body)
-        mocked_retrieve.assert_called_once_with(query="cash flow outlook", top_k=5)
+        mocked_retrieve.assert_called_once_with(
+            query="cash flow outlook",
+            filters={"dataset_id": 11},
+            top_k=5,
+            query_variants=["cash flow outlook"],
+        )
         session.refresh_from_db()
         self.assertEqual(
             getattr(session, "message_count", None),
@@ -1026,7 +1046,12 @@ class ChatAskApiTests(TestCase):
         )
 
         self.assertEqual(response.status_code, 200)
-        mocked_retrieve.assert_called_once_with(query="liquidity outlook", top_k=5)
+        mocked_retrieve.assert_called_once_with(
+            query="liquidity outlook",
+            filters={"dataset_id": 7},
+            top_k=5,
+            query_variants=["liquidity outlook"],
+        )
         mocked_title_delay.assert_called_once_with(session.id)
         mocked_summary_delay.assert_called_once_with(session.id)
         mocked_memory_delay.assert_called_once_with(session.id)
@@ -1055,7 +1080,12 @@ class ChatAskApiTests(TestCase):
         )
 
         self.assertEqual(response.status_code, 200)
-        mocked_retrieve.assert_called_once_with(query="cash flow outlook", top_k=5)
+        mocked_retrieve.assert_called_once_with(
+            query="cash flow outlook",
+            filters={"dataset_id": 7},
+            top_k=5,
+            query_variants=["cash flow outlook"],
+        )
         mocked_dispatch.assert_called_once_with(session_id=session.id)
         session.refresh_from_db()
         assistant_message = session.messages.get(role=ChatMessage.ROLE_ASSISTANT)
@@ -1088,7 +1118,12 @@ class ChatAskApiTests(TestCase):
         self.assertEqual(response.status_code, 200)
         body = b"".join(response.streaming_content).decode("utf-8")
         self.assertIn("event: done", body)
-        mocked_retrieve.assert_called_once_with(query="cash flow outlook", top_k=5)
+        mocked_retrieve.assert_called_once_with(
+            query="cash flow outlook",
+            filters={"dataset_id": 11},
+            top_k=5,
+            query_variants=["cash flow outlook"],
+        )
         mocked_dispatch.assert_called_once_with(session_id=session.id)
         session.refresh_from_db()
         assistant_message = session.messages.get(role=ChatMessage.ROLE_ASSISTANT)

@@ -48,10 +48,14 @@ services:
       CELERY_TASK_ALWAYS_EAGER: ${CELERY_TASK_ALWAYS_EAGER:-false}
       CELERY_TASK_EAGER_PROPAGATES: ${CELERY_TASK_EAGER_PROPAGATES:-true}
       CELERY_TASK_STORE_EAGER_RESULT: ${CELERY_TASK_STORE_EAGER_RESULT:-false}
+      RAG_RETRIEVAL_BACKEND: ${RAG_RETRIEVAL_BACKEND:-llamaindex}
+      CHAT_RETRIEVAL_BACKEND: ${CHAT_RETRIEVAL_BACKEND:-llamaindex}
+      GRAPH_BACKEND: ${GRAPH_BACKEND:-llamaindex}
+      LLAMAINDEX_STORAGE_DIR: ${LLAMAINDEX_STORAGE_DIR:-/app/storage/llamaindex}
       LITELLM_INTERNAL_URL: ${LITELLM_INTERNAL_URL:-http://litellm:4000}
       LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:-}
       LIGHTRAG_INTERNAL_URL: ${LIGHTRAG_INTERNAL_URL:-http://lightrag:9621}
-      LIGHTRAG_SYNC_ENABLED: ${LIGHTRAG_SYNC_ENABLED:-true}
+      LIGHTRAG_SYNC_ENABLED: ${LIGHTRAG_SYNC_ENABLED:-false}
       LIGHTRAG_GRAPH_STORAGE: ${LIGHTRAG_GRAPH_STORAGE:-Neo4JStorage}
       LIGHTRAG_CHAT_RETRIEVAL_ENABLED: ${LIGHTRAG_CHAT_RETRIEVAL_ENABLED:-true}
       LIGHTRAG_CHAT_MODE: ${LIGHTRAG_CHAT_MODE:-mix}
@@ -78,6 +82,7 @@ services:
       - "8000:8000"
     volumes:
       - backend_media:/app/media
+      - backend_storage:/app/storage
       - ./deploy/litellm:/deploy/litellm
     restart: unless-stopped
     logging: *default-logging
@@ -129,10 +134,14 @@ services:
       CELERY_TASK_ALWAYS_EAGER: ${CELERY_TASK_ALWAYS_EAGER:-false}
       CELERY_TASK_EAGER_PROPAGATES: ${CELERY_TASK_EAGER_PROPAGATES:-true}
       CELERY_TASK_STORE_EAGER_RESULT: ${CELERY_TASK_STORE_EAGER_RESULT:-false}
+      RAG_RETRIEVAL_BACKEND: ${RAG_RETRIEVAL_BACKEND:-llamaindex}
+      CHAT_RETRIEVAL_BACKEND: ${CHAT_RETRIEVAL_BACKEND:-llamaindex}
+      GRAPH_BACKEND: ${GRAPH_BACKEND:-llamaindex}
+      LLAMAINDEX_STORAGE_DIR: ${LLAMAINDEX_STORAGE_DIR:-/app/storage/llamaindex}
       LITELLM_INTERNAL_URL: ${LITELLM_INTERNAL_URL:-http://litellm:4000}
       LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:-}
       LIGHTRAG_INTERNAL_URL: ${LIGHTRAG_INTERNAL_URL:-http://lightrag:9621}
-      LIGHTRAG_SYNC_ENABLED: ${LIGHTRAG_SYNC_ENABLED:-true}
+      LIGHTRAG_SYNC_ENABLED: ${LIGHTRAG_SYNC_ENABLED:-false}
       LIGHTRAG_GRAPH_STORAGE: ${LIGHTRAG_GRAPH_STORAGE:-Neo4JStorage}
       LIGHTRAG_CHAT_RETRIEVAL_ENABLED: ${LIGHTRAG_CHAT_RETRIEVAL_ENABLED:-true}
       LIGHTRAG_CHAT_MODE: ${LIGHTRAG_CHAT_MODE:-mix}
@@ -157,6 +166,7 @@ services:
       MEDIA_ROOT: ${MEDIA_ROOT:-/app/media}
     volumes:
       - backend_media:/app/media
+      - backend_storage:/app/storage
     restart: unless-stopped
     logging: *default-logging
     depends_on:
@@ -279,95 +289,11 @@ services:
     restart: unless-stopped
     logging: *default-logging
 
-  neo4j:
-    image: neo4j:5-community
-    environment:
-      NEO4J_AUTH: ${NEO4J_USERNAME:-neo4j}/${NEO4J_PASSWORD:-change-me-neo4j}
-      NEO4J_server_default__listen__address: 0.0.0.0
-      NEO4J_server_memory_heap_initial__size: ${NEO4J_HEAP_INITIAL_SIZE:-512m}
-      NEO4J_server_memory_heap_max__size: ${NEO4J_HEAP_MAX_SIZE:-512m}
-      NEO4J_server_memory_pagecache_size: ${NEO4J_PAGECACHE_SIZE:-256m}
-      NEO4J_apoc_export_file_enabled: "true"
-      NEO4J_apoc_import_file_enabled: "true"
-    ports:
-      - "7474:7474"
-      - "7687:7687"
-    volumes:
-      - neo4j_data:/data
-      - neo4j_logs:/logs
-    restart: unless-stopped
-    logging: *default-logging
-    healthcheck:
-      test: ["CMD-SHELL", "cypher-shell -a bolt://127.0.0.1:7687 -u ${NEO4J_USERNAME:-neo4j} -p ${NEO4J_PASSWORD:-change-me-neo4j} 'RETURN 1;' >/dev/null || exit 1"]
-      interval: 15s
-      timeout: 10s
-      retries: 20
-      start_period: 45s
-
-  lightrag:
-    image: ghcr.io/hkuds/lightrag:latest
-    container_name: finmodpro-lightrag-1
-    ports:
-      - "127.0.0.1:9621:9621"
-    environment:
-      # LLM: DeepSeek Chat via LiteLLM gateway
-      LLM_BINDING: openai
-      LLM_BINDING_HOST: http://litellm:4000/v1
-      LLM_BINDING_API_KEY: ${LITELLM_MASTER_KEY:-}
-      LLM_MODEL: chat-default
-
-      # Embedding: DashScope text-embedding-v4 direct
-      EMBEDDING_BINDING: openai
-      EMBEDDING_BINDING_HOST: https://dashscope.aliyuncs.com/compatible-mode/v1
-      EMBEDDING_BINDING_API_KEY: ${DASHSCOPE_API_KEY:-}
-      EMBEDDING_MODEL: text-embedding-v4
-      EMBEDDING_DIM: "1024"
-
-      # Storage: Milvus vectors + Neo4j graph
-      LIGHTRAG_VECTOR_STORAGE: MilvusVectorDBStorage
-      MILVUS_URI: http://milvus:19530
-      MILVUS_DB_NAME: default
-      LIGHTRAG_KV_STORAGE: JsonKVStorage
-      LIGHTRAG_GRAPH_STORAGE: ${LIGHTRAG_GRAPH_STORAGE:-Neo4JStorage}
-      LIGHTRAG_CHAT_RETRIEVAL_ENABLED: ${LIGHTRAG_CHAT_RETRIEVAL_ENABLED:-true}
-      LIGHTRAG_CHAT_MODE: ${LIGHTRAG_CHAT_MODE:-mix}
-      LIGHTRAG_CHAT_TOP_K: ${LIGHTRAG_CHAT_TOP_K:-5}
-      LIGHTRAG_DOC_STATUS_STORAGE: JsonDocStatusStorage
-      NEO4J_URI: ${NEO4J_URI:-bolt://neo4j:7687}
-      NEO4J_USERNAME: ${NEO4J_USERNAME:-neo4j}
-      NEO4J_PASSWORD: ${NEO4J_PASSWORD:-change-me-neo4j}
-
-      # Working dirs
-      WORKING_DIR: /app/data/rag_storage
-      INPUT_DIR: /app/data/inputs
-
-      # Performance tuning (resource-constrained)
-      MAX_ASYNC: "4"
-      EMBEDDING_FUNC_MAX_ASYNC: "4"
-      CHUNK_SIZE: "1200"
-      WORKERS: "1"
-      LOG_LEVEL: INFO
-    volumes:
-      - lightrag_data:/app/data
-    restart: unless-stopped
-    mem_limit: 1g
-    mem_reservation: 512m
-    logging: *default-logging
-    depends_on:
-      litellm:
-        condition: service_started
-      milvus:
-        condition: service_started
-      neo4j:
-        condition: service_healthy
-
 volumes:
   backend_media:
+  backend_storage:
   mysql_data:
   redis_data:
   etcd_data:
   minio_data:
   milvus_data:
-  neo4j_data:
-  neo4j_logs:
-  lightrag_data:

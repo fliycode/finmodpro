@@ -19,9 +19,10 @@ from django.test import TestCase
 from django.test import Client, SimpleTestCase, override_settings
 from django.utils import timezone
 
-from common.exceptions import ServiceConfigurationError, UpstreamRateLimitError, UpstreamServiceError
 from authentication.models import User
 from authentication.services.jwt_service import generate_access_token
+from common.exceptions import ServiceConfigurationError, UpstreamRateLimitError, UpstreamServiceError
+from knowledgebase.models import Document, IngestionTask
 from llm.models import EvalRecord, FineTuneRun, LiteLLMSyncEvent, ModelConfig, ModelInvocationLog
 from llm.services import model_config_command_service
 from llm.services.model_config_command_service import migrate_active_configs_to_litellm
@@ -3790,6 +3791,143 @@ class LightRAGBridgeApiTests(TestCase):
         self.assertEqual(payload["status_counts"]["status_counts"]["all"], 4)
         self.assertEqual(payload["popular_labels"], ["风险", "债务"])
         self.assertIn("configuration", payload)
+
+    @override_settings(GRAPH_BACKEND="llamaindex")
+    def test_overview_uses_compat_backend_when_graph_backend_switched(self):
+        Document.objects.create(
+            title="Graph Compat Doc",
+            file=SimpleUploadedFile("graph.txt", b"graph payload", content_type="text/plain"),
+            file_size=13,
+            filename="graph.txt",
+            doc_type="txt",
+            uploaded_by=self.admin_user,
+            owner=self.admin_user,
+            status=Document.STATUS_INDEXED,
+        )
+
+        response = self.client.get(
+            "/api/ops/lightrag/",
+            HTTP_AUTHORIZATION=f"Bearer {self.admin_access_token}",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()["data"]
+        self.assertEqual(payload["health"]["backend"], "llamaindex")
+        self.assertEqual(payload["status_counts"]["status_counts"]["indexed"], 1)
+        self.assertEqual(payload["configuration"]["graph_storage"], "LlamaIndexCompat")
+
+    @override_settings(GRAPH_BACKEND="llamaindex")
+    def test_documents_paginated_uses_compat_backend(self):
+        document = Document.objects.create(
+            title="Compat Uploaded Doc",
+            file=SimpleUploadedFile("compat.txt", b"compat payload", content_type="text/plain"),
+            file_size=14,
+            filename="compat.txt",
+            doc_type="txt",
+            uploaded_by=self.admin_user,
+            owner=self.admin_user,
+            status=Document.STATUS_UPLOADED,
+        )
+        task = IngestionTask.objects.create(document=document, status=IngestionTask.STATUS_QUEUED)
+
+        response = self.client.post(
+            "/api/ops/lightrag/documents/paginated/",
+            data=json.dumps({"page": 1, "page_size": 10}),
+            content_type="application/json",
+            HTTP_AUTHORIZATION=f"Bearer {self.admin_access_token}",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()["data"]
+        self.assertEqual(payload["pagination"]["total_count"], 1)
+        self.assertEqual(payload["documents"][0]["doc_id"], str(document.id))
+        self.assertEqual(payload["documents"][0]["track_id"], str(task.id))
+
+    @override_settings(GRAPH_BACKEND="llamaindex")
+    @patch("llm.services.lightrag_compat_service.retrieve_rag_context")
+    def test_query_uses_compat_retrieval_backend(self, mocked_retrieve):
+        mocked_retrieve.return_value = [
+            {
+                "document_id": 42,
+                "document_title": "Liquidity Note",
+                "snippet": "Capital adequacy remains stable.",
+            }
+        ]
+
+        response = self.client.post(
+            "/api/ops/lightrag/query/",
+            data=json.dumps({"query": "capital adequacy", "chunk_top_k": 3}),
+            content_type="application/json",
+            HTTP_AUTHORIZATION=f"Bearer {self.admin_access_token}",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()["data"]
+        self.assertIn("Capital adequacy remains stable.", payload["response"])
+        self.assertEqual(payload["references"][0]["doc_id"], "42")
+        mocked_retrieve.assert_called_once_with(query="capital adequacy", filters={}, top_k=3)
+
+    @override_settings(GRAPH_BACKEND="llamaindex")
+    def test_label_list_uses_current_documents(self):
+        Document.objects.create(
+            title="流动性风险",
+            file=SimpleUploadedFile("liquidity.txt", b"payload", content_type="text/plain"),
+            file_size=7,
+            filename="liquidity.txt",
+            doc_type="txt",
+            uploaded_by=self.admin_user,
+            owner=self.admin_user,
+            status=Document.STATUS_INDEXED,
+        )
+
+        response = self.client.get(
+            "/api/ops/lightrag/graph/label/list/",
+            HTTP_AUTHORIZATION=f"Bearer {self.admin_access_token}",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("流动性风险", response.json()["data"])
+
+    @override_settings(GRAPH_BACKEND="llamaindex")
+    @patch("llm.services.lightrag_compat_service.retrieve_rag_context")
+    def test_graph_endpoint_returns_document_centric_graph(self, mocked_retrieve):
+        document = Document.objects.create(
+            title="资本充足率观察",
+            file=SimpleUploadedFile("capital.txt", b"payload", content_type="text/plain"),
+            file_size=7,
+            filename="capital.txt",
+            doc_type="txt",
+            uploaded_by=self.admin_user,
+            owner=self.admin_user,
+            status=Document.STATUS_INDEXED,
+        )
+        chunk = document.chunks.create(
+            chunk_index=0,
+            content="资本充足率维持稳定，核心一级资本充足。",
+            metadata={"page_label": "片段 1"},
+        )
+        mocked_retrieve.return_value = [
+            {
+                "document_id": document.id,
+                "chunk_id": chunk.id,
+                "document_title": document.title,
+                "page_label": "片段 1",
+                "snippet": chunk.content,
+                "metadata": {},
+            }
+        ]
+
+        response = self.client.get(
+            "/api/ops/lightrag/graphs/",
+            {"label": "资本充足率", "max_nodes": 20},
+            HTTP_AUTHORIZATION=f"Bearer {self.admin_access_token}",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()["data"]
+        self.assertTrue(any(node["label"] == "资本充足率观察" for node in payload["nodes"]))
+        self.assertTrue(any(edge["label"] == "命中" for edge in payload["edges"]))
+        mocked_retrieve.assert_called_once_with(query="资本充足率", filters={}, top_k=6)
 
     def _build_response(self, *, status_code, payload):
         class _MockResponse:

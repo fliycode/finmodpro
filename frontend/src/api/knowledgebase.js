@@ -93,7 +93,7 @@ const buildProcessStep = (document, task) => {
     return {
       code: 'graph-sync',
       label: '图谱同步中',
-      detail: '正在将文档同步到 LightRAG / Neo4j 图谱。',
+      detail: '正在将文档同步到当前知识图谱索引。',
       progress: 95,
       isTerminal: false,
       isSearchReady: false,

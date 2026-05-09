@@ -137,7 +137,7 @@ export const appRoutes = [
       {
         path: 'graph/documents',
         component: () => import('../views/admin/AdminGraphDocumentsView.vue'),
-        meta: { title: '图谱管理 / 图谱文档', subtitle: '管理 LightRAG 文档的上传、入库与处理状态。', breadcrumb: [{ label: '图谱管理' }, { label: '图谱文档' }] },
+        meta: { title: '图谱管理 / 图谱文档', subtitle: '管理知识图谱文档的上传、入库与处理状态。', breadcrumb: [{ label: '图谱管理' }, { label: '图谱文档' }] },
       },
       {
         path: 'graph/knowledge',

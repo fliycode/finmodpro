@@ -22,7 +22,7 @@ const buildQuery = (params = {}) => {
   return queryString ? `?${queryString}` : '';
 };
 
-export const normalizeLightragDocument = (row = {}) => ({
+export const normalizeKnowledgeGraphDocument = (row = {}) => ({
   id: row.id || row.doc_id || row.track_id || row.file_path || row.file_name || row.title || 'unknown',
   docId: row.doc_id || row.id || '',
   title: row.title || row.file_name || row.file_path || '未命名文档',
@@ -63,7 +63,7 @@ const readGraphText = (value) => {
   return '';
 };
 
-export const normalizeGraphNode = (row = {}) => ({
+export const normalizeKnowledgeGraphNode = (row = {}) => ({
   id: readGraphText(row.id)
     || readGraphText(row.entity_id)
     || readGraphText(row.properties?.entity_id)
@@ -95,7 +95,7 @@ export const normalizeGraphNode = (row = {}) => ({
   raw: row,
 });
 
-export const normalizeGraphEdge = (row = {}) => ({
+export const normalizeKnowledgeGraphEdge = (row = {}) => ({
   id: readGraphText(row.id)
     || `${readGraphText(row.source) || readGraphText(row.source_id) || readGraphText(row.source_entity) || 'source'}-${readGraphText(row.target) || readGraphText(row.target_id) || readGraphText(row.target_entity) || 'target'}`,
   source: readGraphText(row.source)
@@ -121,7 +121,7 @@ export const normalizeGraphEdge = (row = {}) => ({
   raw: row,
 });
 
-export const createLightragApi = (overrides = {}) => {
+export const createKnowledgeGraphApi = (overrides = {}) => {
   const apiConfig = createApiConfig(overrides);
   const fetchJson = overrides.fetchJson || apiConfig.fetchJson;
 
@@ -152,10 +152,10 @@ export const createLightragApi = (overrides = {}) => {
       const payload = unwrap(await fetchJson(`/api/ops/lightrag/graphs/${query}`, {
         method: 'GET',
         auth: true,
-      }));
+        }));
       return {
-        nodes: Array.isArray(payload.nodes) ? payload.nodes.map((node) => normalizeGraphNode(node)) : [],
-        edges: Array.isArray(payload.edges) ? payload.edges.map((edge) => normalizeGraphEdge(edge)) : [],
+        nodes: Array.isArray(payload.nodes) ? payload.nodes.map((node) => normalizeKnowledgeGraphNode(node)) : [],
+        edges: Array.isArray(payload.edges) ? payload.edges.map((edge) => normalizeKnowledgeGraphEdge(edge)) : [],
         isTruncated: Boolean(payload.is_truncated),
         raw: payload,
       };
@@ -196,7 +196,7 @@ export const createLightragApi = (overrides = {}) => {
 
       return {
         documents: Array.isArray(payload.documents)
-          ? payload.documents.map((row) => normalizeLightragDocument(row))
+          ? payload.documents.map((row) => normalizeKnowledgeGraphDocument(row))
           : [],
         pagination: payload.pagination || {},
         statusCounts: payload.status_counts || {},
@@ -260,4 +260,4 @@ export const createLightragApi = (overrides = {}) => {
   };
 };
 
-export const lightragApi = createLightragApi();
+export const knowledgeGraphApi = createKnowledgeGraphApi();

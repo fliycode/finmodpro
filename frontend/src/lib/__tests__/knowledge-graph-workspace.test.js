@@ -2,17 +2,17 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
-  buildLightragGraphNeighbors,
-  buildLightragGraphFacets,
-  filterLightragGraphLabels,
-  filterLightragGraph,
-  findLightragGraphMatches,
-  getLightragStatusTone,
-  searchLightragGraphNodes,
-} from '../lightrag-workspace.js';
+  buildKnowledgeGraphNeighbors,
+  buildKnowledgeGraphFacets,
+  filterKnowledgeGraphLabels,
+  filterKnowledgeGraph,
+  findKnowledgeGraphMatches,
+  getKnowledgeGraphStatusTone,
+  searchKnowledgeGraphNodes,
+} from '../knowledge-graph-workspace.js';
 
-test('buildLightragGraphFacets groups node and relation counts', () => {
-  const facets = buildLightragGraphFacets(
+test('buildKnowledgeGraphFacets groups node and relation counts', () => {
+  const facets = buildKnowledgeGraphFacets(
     [
       { id: 'n1', type: '公司' },
       { id: 'n2', type: '公司' },
@@ -35,8 +35,8 @@ test('buildLightragGraphFacets groups node and relation counts', () => {
   ]);
 });
 
-test('filterLightragGraph removes hidden nodes and disconnected edges', () => {
-  const graph = filterLightragGraph(
+test('filterKnowledgeGraph removes hidden nodes and disconnected edges', () => {
+  const graph = filterKnowledgeGraph(
     {
       nodes: [
         { id: 'a', type: '公司' },
@@ -58,8 +58,8 @@ test('filterLightragGraph removes hidden nodes and disconnected edges', () => {
   assert.deepEqual(graph.edges.map((edge) => edge.id), ['ab']);
 });
 
-test('searchLightragGraphNodes matches across label, type, and description', () => {
-  const ids = searchLightragGraphNodes(
+test('searchKnowledgeGraphNodes matches across label, type, and description', () => {
+  const ids = searchKnowledgeGraphNodes(
     [
       { id: 'bank', label: '招商银行', type: '公司', description: '流动性风险关注对象' },
       { id: 'bond', label: '债券违约', type: '事件', description: '' },
@@ -70,8 +70,8 @@ test('searchLightragGraphNodes matches across label, type, and description', () 
   assert.deepEqual(ids, ['bank']);
 });
 
-test('findLightragGraphMatches ranks label matches ahead of description matches', () => {
-  const matches = findLightragGraphMatches(
+test('findKnowledgeGraphMatches ranks label matches ahead of description matches', () => {
+  const matches = findKnowledgeGraphMatches(
     [
       { id: 'bank', label: '流动性风险', type: '主题', description: '监管口径' },
       { id: 'memo', label: '季度纪要', type: '文档', description: '包含流动性风险相关描述' },
@@ -82,8 +82,8 @@ test('findLightragGraphMatches ranks label matches ahead of description matches'
   assert.deepEqual(matches.map((item) => item.id), ['bank', 'memo']);
 });
 
-test('filterLightragGraphLabels narrows the visible label list without changing order', () => {
-  const labels = filterLightragGraphLabels(
+test('filterKnowledgeGraphLabels narrows the visible label list without changing order', () => {
+  const labels = filterKnowledgeGraphLabels(
     ['流动性风险', '资本结构', '风险抽取'],
     '风险',
   );
@@ -91,8 +91,8 @@ test('filterLightragGraphLabels narrows the visible label list without changing 
   assert.deepEqual(labels, ['流动性风险', '风险抽取']);
 });
 
-test('buildLightragGraphNeighbors returns connected node summaries for an active node', () => {
-  const neighbors = buildLightragGraphNeighbors(
+test('buildKnowledgeGraphNeighbors returns connected node summaries for an active node', () => {
+  const neighbors = buildKnowledgeGraphNeighbors(
     {
       nodes: [
         { id: 'company', label: '招商银行', type: '公司' },
@@ -118,9 +118,9 @@ test('buildLightragGraphNeighbors returns connected node summaries for an active
   ]);
 });
 
-test('getLightragStatusTone maps known statuses into semantic tones', () => {
-  assert.equal(getLightragStatusTone('processed'), 'success');
-  assert.equal(getLightragStatusTone('processing'), 'brand');
-  assert.equal(getLightragStatusTone('failed'), 'risk');
-  assert.equal(getLightragStatusTone('unknown'), 'muted');
+test('getKnowledgeGraphStatusTone maps known statuses into semantic tones', () => {
+  assert.equal(getKnowledgeGraphStatusTone('processed'), 'success');
+  assert.equal(getKnowledgeGraphStatusTone('processing'), 'brand');
+  assert.equal(getKnowledgeGraphStatusTone('failed'), 'risk');
+  assert.equal(getKnowledgeGraphStatusTone('unknown'), 'muted');
 });

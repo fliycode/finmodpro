@@ -1,17 +1,17 @@
 <script setup>
 import { computed, defineAsyncComponent, onMounted, reactive, ref, watch } from 'vue';
 
-import { lightragApi } from '../../api/lightrag.js';
+import { knowledgeGraphApi } from '../../api/knowledge-graph.js';
 import {
-  buildLightragGraphFacets,
-  buildLightragGraphNeighbors,
-  filterLightragGraph,
-  filterLightragGraphLabels,
-  findLightragGraphMatches,
-} from '../../lib/lightrag-workspace.js';
+  buildKnowledgeGraphFacets,
+  buildKnowledgeGraphNeighbors,
+  filterKnowledgeGraph,
+  filterKnowledgeGraphLabels,
+  findKnowledgeGraphMatches,
+} from '../../lib/knowledge-graph-workspace.js';
 import { useFlash } from '../../lib/flash.js';
 
-const LightragGraphCanvas = defineAsyncComponent(() => import('../../components/lightrag/LightragGraphCanvas.vue'));
+const KnowledgeGraphCanvas = defineAsyncComponent(() => import('../../components/knowledge-graph/KnowledgeGraphCanvas.vue'));
 
 const flash = useFlash();
 const isLoading = ref(false);
@@ -32,13 +32,13 @@ const form = reactive({
   maxNodes: 120,
 });
 
-const graphFacets = computed(() => buildLightragGraphFacets(graph.value.nodes, graph.value.edges));
-const filteredGraph = computed(() => filterLightragGraph(graph.value, {
+const graphFacets = computed(() => buildKnowledgeGraphFacets(graph.value.nodes, graph.value.edges));
+const filteredGraph = computed(() => filterKnowledgeGraph(graph.value, {
   activeNodeTypes: activeNodeTypes.value,
   activeRelationLabels: activeRelationLabels.value,
 }));
-const filteredLabels = computed(() => filterLightragGraphLabels(labels.value, form.labelQuery));
-const matchedNodes = computed(() => findLightragGraphMatches(graph.value.nodes, form.nodeSearch, 12));
+const filteredLabels = computed(() => filterKnowledgeGraphLabels(labels.value, form.labelQuery));
+const matchedNodes = computed(() => findKnowledgeGraphMatches(graph.value.nodes, form.nodeSearch, 12));
 const matchedNodeIds = computed(() => matchedNodes.value.map((node) => node.id));
 const visibleNodeIds = computed(() => new Set(filteredGraph.value.nodes.map((node) => node.id)));
 const visibleMatchedNodeIds = computed(() => matchedNodeIds.value.filter((nodeId) => visibleNodeIds.value.has(nodeId)));
@@ -46,7 +46,7 @@ const hasGraphData = computed(() => graph.value.nodes.length > 0 || graph.value.
 const hasVisibleGraph = computed(() => filteredGraph.value.nodes.length > 0);
 const selectedNode = computed(() => graph.value.nodes.find((node) => node.id === selectedNodeId.value) || null);
 const selectedEdge = computed(() => graph.value.edges.find((edge) => edge.id === selectedEdgeId.value) || null);
-const selectedNodeNeighbors = computed(() => buildLightragGraphNeighbors(graph.value, selectedNodeId.value, 8));
+const selectedNodeNeighbors = computed(() => buildKnowledgeGraphNeighbors(graph.value, selectedNodeId.value, 8));
 const formatGraphMetaValue = (value) => {
   if (value === undefined || value === null || value === '') {
     return '';
@@ -127,7 +127,7 @@ const fetchGraph = async (label = form.label, options = {}) => {
   errorMsg.value = '';
   try {
     form.label = label;
-    graph.value = await lightragApi.getGraph(label, {
+    graph.value = await knowledgeGraphApi.getGraph(label, {
       maxDepth: form.maxDepth,
       maxNodes: form.maxNodes,
     });
@@ -144,7 +144,7 @@ const loadLabels = async () => {
   isLoading.value = true;
   errorMsg.value = '';
   try {
-    labels.value = await lightragApi.getLabelList();
+    labels.value = await knowledgeGraphApi.getLabelList();
     if (!labels.value.length) {
       form.label = '';
       graph.value = { nodes: [], edges: [], isTruncated: false };
@@ -365,7 +365,7 @@ onMounted(() => {
         </div>
 
         <div v-if="hasVisibleGraph" class="knowledge-graph__canvas-shell">
-          <LightragGraphCanvas
+            <KnowledgeGraphCanvas
             :nodes="filteredGraph.nodes"
             :edges="filteredGraph.edges"
             :selected-node-id="selectedNodeId"

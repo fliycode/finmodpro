@@ -1,6 +1,6 @@
 from common.observability import trace_span
+from rag.services.retrieval_backend_service import retrieve_rag_context
 from rag.services.rerank_service import rerank_results
-from rag.services.vector_store_service import query_store
 
 
 def _normalize_top_k(top_k):
@@ -51,7 +51,7 @@ def retrieve(*, query, filters=None, top_k=5, query_variants=None):
         },
         input_data={"query": query},
     ) as observation:
-        results = query_store(
+        results = retrieve_rag_context(
             query=query,
             filters=filters,
             top_k=normalized_top_k,

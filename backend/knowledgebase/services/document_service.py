@@ -20,6 +20,7 @@ from knowledgebase.services.chunk_service import (
     estimate_flat_chunk_count,
 )
 from knowledgebase.services.graph_sync_service import sync_document_to_graph_with_trace
+from knowledgebase.services.graph_sync_service import is_graph_sync_enabled
 from knowledgebase.services.hierarchical_chunk_service import build_hierarchical_document_chunks
 from knowledgebase.services.parser_service import parse_document_file
 from knowledgebase.services.search_text_service import build_contextual_search_text
@@ -808,7 +809,7 @@ def ingest_document(document, ingestion_task=None):
                     current_step=IngestionTask.STEP_INDEXING,
                 )
             vectorize_document(document)
-            if ingestion_task is not None and getattr(settings, "LIGHTRAG_SYNC_ENABLED", False):
+            if ingestion_task is not None and is_graph_sync_enabled():
                 _update_ingestion_task_step(
                     ingestion_task,
                     current_step=IngestionTask.STEP_GRAPH_SYNC,
@@ -1019,17 +1020,22 @@ def delete_document_with_vectors(document):
     storage = file_field.storage
     file_name = file_field.name
     document_id = document.id
+    chunk_ids = list(
+        DocumentChunk.objects.filter(document=document).values_list("id", flat=True)
+    )
     document.delete()
     transaction.on_commit(
         lambda: _cleanup_deleted_document_artifacts(
             document_id=document_id,
             storage=storage,
             file_name=file_name,
+            chunk_ids=chunk_ids,
         )
     )
 
 
-def _cleanup_deleted_document_artifacts(*, document_id, storage, file_name):
+def _cleanup_deleted_document_artifacts(*, document_id, storage, file_name, chunk_ids):
+    from rag.services.llamaindex_store_service import delete_document_index
     from rag.services.vector_store_service import _VECTOR_STORE
 
     try:
@@ -1041,6 +1047,13 @@ def _cleanup_deleted_document_artifacts(*, document_id, storage, file_name):
         )
 
     _VECTOR_STORE.pop(document_id, None)
+    try:
+        delete_document_index(document_id=document_id, chunk_ids=chunk_ids)
+    except Exception:
+        logger.exception(
+            "Failed to delete llamaindex nodes after document cleanup",
+            extra={"document_id": document_id},
+        )
 
     if not file_name:
         return

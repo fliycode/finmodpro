@@ -1,10 +1,15 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { createLightragApi, normalizeGraphEdge, normalizeGraphNode, normalizeLightragDocument } from '../lightrag.js';
+import {
+  createKnowledgeGraphApi,
+  normalizeKnowledgeGraphDocument,
+  normalizeKnowledgeGraphEdge,
+  normalizeKnowledgeGraphNode,
+} from '../knowledge-graph.js';
 
-test('normalizeLightragDocument maps mixed document payloads into stable rows', () => {
-  const row = normalizeLightragDocument({
+test('normalizeKnowledgeGraphDocument maps mixed document payloads into stable rows', () => {
+  const row = normalizeKnowledgeGraphDocument({
     doc_id: 'doc-1',
     file_name: 'bank-risk.pdf',
     status: 'processed',
@@ -16,8 +21,8 @@ test('normalizeLightragDocument maps mixed document payloads into stable rows', 
   assert.equal(row.status, 'processed');
 });
 
-test('normalizeGraphNode preserves human-readable node labels', () => {
-  const node = normalizeGraphNode({
+test('normalizeKnowledgeGraphNode preserves human-readable node labels', () => {
+  const node = normalizeKnowledgeGraphNode({
     entity_name: '流动性风险',
     entity_type: 'risk',
   });
@@ -26,8 +31,8 @@ test('normalizeGraphNode preserves human-readable node labels', () => {
   assert.equal(node.type, 'risk');
 });
 
-test('normalizeGraphNode reads nested LightRAG graph properties', () => {
-  const node = normalizeGraphNode({
+test('normalizeKnowledgeGraphNode reads nested graph properties', () => {
+  const node = normalizeKnowledgeGraphNode({
     id: 'Baseline Probe Observations',
     labels: ['Baseline Probe Observations'],
     properties: {
@@ -44,8 +49,8 @@ test('normalizeGraphNode reads nested LightRAG graph properties', () => {
   assert.equal(node.properties.file_path, 'baseline-observations.txt');
 });
 
-test('normalizeGraphEdge reads nested LightRAG edge properties', () => {
-  const edge = normalizeGraphEdge({
+test('normalizeKnowledgeGraphEdge reads nested graph properties', () => {
+  const edge = normalizeKnowledgeGraphEdge({
     id: '0',
     type: 'DIRECTED',
     source: 'A',
@@ -61,9 +66,9 @@ test('normalizeGraphEdge reads nested LightRAG edge properties', () => {
   assert.equal(edge.properties.keywords, 'document date');
 });
 
-test('createLightragApi targets the bridge endpoints', async () => {
+test('createKnowledgeGraphApi targets the compatibility endpoints', async () => {
   const calls = [];
-  const api = createLightragApi({
+  const api = createKnowledgeGraphApi({
     fetchJson: async (path, options) => {
       calls.push({ path, options });
       return { code: 0, data: { status_counts: { all: 2 }, documents: [], pagination: {} } };

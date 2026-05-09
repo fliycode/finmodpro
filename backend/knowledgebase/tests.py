@@ -308,6 +308,45 @@ class KnowledgebaseApiTests(TestCase):
         self.assertEqual(ingestion_task.graph_sync_status, IngestionTask.GRAPH_SYNC_STATUS_FAILED)
         self.assertIn("LightRAG 服务不可达。", ingestion_task.graph_sync_error_message)
 
+    @override_settings(
+        GRAPH_BACKEND="llamaindex",
+        LIGHTRAG_SYNC_ENABLED=False,
+    )
+    @patch("knowledgebase.services.graph_sync_service.send_lightrag_request")
+    def test_document_ingest_marks_llamaindex_graph_sync_without_upstream_call(self, mocked_sync):
+        upload_response = self.client.post(
+            "/api/knowledgebase/documents",
+            data={
+                "title": "llamaindex graph report",
+                "source_date": "2025-12-31",
+                "file": SimpleUploadedFile(
+                    "llamaindex-graph.txt",
+                    b"llamaindex graph payload",
+                    content_type="text/plain",
+                ),
+            },
+            HTTP_AUTHORIZATION=f"Bearer {self.access_token}",
+        )
+        document_id = upload_response.json()["document"]["id"]
+
+        response = self.client.post(
+            f"/api/knowledgebase/documents/{document_id}/ingest",
+            HTTP_AUTHORIZATION=f"Bearer {self.access_token}",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()["document"]
+        self.assertEqual(
+            payload["process_result"],
+            "文档已完成解析、切块、索引与图谱同步，可用于检索。",
+        )
+
+        ingestion_task = IngestionTask.objects.get(document_id=document_id)
+        self.assertEqual(ingestion_task.graph_sync_status, IngestionTask.GRAPH_SYNC_STATUS_SUCCEEDED)
+        self.assertEqual(ingestion_task.graph_document_id, str(document_id))
+        self.assertEqual(ingestion_task.graph_track_id, str(ingestion_task.id))
+        mocked_sync.assert_not_called()
+
     def test_dataset_create_list_detail_and_dataset_scoped_documents(self):
         create_response = self.client.post(
             "/api/knowledgebase/datasets",
@@ -1579,6 +1618,45 @@ class VectorServiceBatchingTests(TestCase):
         self.assertTrue(section.vector_id)
         self.assertEqual(task.indexed_section_count, 1)
         mock_index_document.assert_called_once_with(document)
+
+    @override_settings(RAG_RETRIEVAL_BACKEND="llamaindex")
+    @patch("rag.services.llamaindex_store_service.sync_document_index")
+    @patch("rag.services.vector_store_service.index_document")
+    @patch.object(VectorService, "_delete_existing_document_vectors")
+    @patch.object(VectorService, "ensure_collection")
+    def test_index_syncs_llamaindex_when_backend_enabled(
+        self,
+        mock_ensure_collection,
+        _mock_delete_existing_vectors,
+        mock_index_document,
+        mock_sync_document_index,
+    ):
+        provider = RecordingEmbeddingProvider()
+        fake_client = _FakeMilvusClient()
+        mock_ensure_collection.return_value = fake_client
+        document = Document.objects.create(
+            title="LlamaIndex batch me",
+            file=SimpleUploadedFile(
+                "llamaindex.txt",
+                b"llamaindex",
+                content_type="text/plain",
+            ),
+            filename="llamaindex.txt",
+            doc_type="txt",
+            status=Document.STATUS_CHUNKED,
+            visibility=Document.VISIBILITY_INTERNAL,
+            parsed_text="chunk one",
+        )
+        DocumentChunk.objects.create(document=document, chunk_index=0, content="chunk one")
+
+        with patch(
+            "knowledgebase.services.embedding_service.get_embedding_provider",
+            return_value=provider,
+        ):
+            VectorService().index(document)
+
+        mock_index_document.assert_called_once_with(document)
+        mock_sync_document_index.assert_called_once_with(document)
 
 
 @override_settings(

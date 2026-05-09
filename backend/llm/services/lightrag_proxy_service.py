@@ -57,6 +57,10 @@ def _get_base_url():
     return base_url
 
 
+def use_compat_backend():
+    return str(getattr(settings, "GRAPH_BACKEND", "lightrag") or "").strip().lower() != "lightrag"
+
+
 def _build_error_message(payload, fallback):
     if isinstance(payload, dict):
         for key in ("message", "detail", "error", "status"):
