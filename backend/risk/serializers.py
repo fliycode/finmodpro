@@ -79,6 +79,10 @@ class TimeRangeRiskReportCreateSerializer(serializers.Serializer):
 class RiskEventSummarySerializer(serializers.ModelSerializer):
     document_id = serializers.IntegerField(source="document.id", read_only=True, allow_null=True)
     chunk_id = serializers.IntegerField(source="chunk.id", read_only=True, allow_null=True)
+    document_filename = serializers.CharField(source="document.filename", read_only=True, allow_null=True, default=None)
+    document_file_size = serializers.IntegerField(source="document.file_size", read_only=True, allow_null=True, default=0)
+    document_source_date = serializers.DateField(source="document.source_date", read_only=True, allow_null=True, default=None)
+    document_title = serializers.CharField(source="document.title", read_only=True, allow_null=True, default=None)
 
     class Meta:
         model = RiskEvent
@@ -94,6 +98,10 @@ class RiskEventSummarySerializer(serializers.ModelSerializer):
             "review_status",
             "document_id",
             "chunk_id",
+            "document_filename",
+            "document_file_size",
+            "document_source_date",
+            "document_title",
             "created_at",
             "updated_at",
         ]

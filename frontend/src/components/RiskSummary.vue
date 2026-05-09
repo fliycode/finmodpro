@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onMounted, ref } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
 import { riskApi } from "../api/risk.js";
 import { useFlash } from "../lib/flash.js";
 import {
@@ -74,9 +74,9 @@ const highRiskEvents = computed(() =>
     .slice(0, 5)
 );
 
-const trendNodes = computed(() => {
+const allTrendNodes = computed(() => {
   const trend = analytics.value.trend || [];
-  return trend.slice(-4).map((item, i, arr) => ({
+  return trend.map((item, i, arr) => ({
     date: item.key || item.date || '',
     label: '',
     count: item.value || item.count || 0,
@@ -84,8 +84,40 @@ const trendNodes = computed(() => {
   }));
 });
 
-const activeStep = ref(1);
+const trendPageSize = 4;
+const trendOffset = ref(0);
+const trendNodes = computed(() => {
+  const nodes = allTrendNodes.value;
+  const start = Math.max(0, nodes.length - trendPageSize - trendOffset.value);
+  return nodes.slice(start, start + trendPageSize);
+});
+const canScrollTrendLeft = computed(() => trendOffset.value > 0);
+const canScrollTrendRight = computed(() => allTrendNodes.value.length > trendPageSize + trendOffset.value);
+const scrollTrendLeft = () => { if (canScrollTrendLeft.value) trendOffset.value--; };
+const scrollTrendRight = () => { if (canScrollTrendRight.value) trendOffset.value++; };
+
 const activeExtractTab = ref('results');
+const highlightEnabled = ref(true);
+
+const dominantLevelForType = (typeName) => {
+  const typeEvents = events.value.filter(e => e.risk_type === typeName);
+  if (!typeEvents.length) return 'low';
+  const priority = { critical: 4, high: 3, medium: 2, low: 1 };
+  return typeEvents.reduce((best, e) =>
+    (priority[e.risk_level] || 0) > (priority[best] || 0) ? e.risk_level : best
+  , 'low');
+};
+
+const docPage = ref(1);
+const docPageSize = 5;
+const docTotalPages = computed(() => Math.max(1, Math.ceil(riskTypeDist.value.length / docPageSize)));
+const pagedRiskTypes = computed(() => {
+  const start = (docPage.value - 1) * docPageSize;
+  return riskTypeDist.value.slice(start, start + docPageSize);
+});
+const prevDocPage = () => { if (docPage.value > 1) docPage.value--; };
+const nextDocPage = () => { if (docPage.value < docTotalPages.value) docPage.value++; };
+watch(riskTypeDist, () => { docPage.value = 1; trendOffset.value = 0; });
 
 /* ---- API calls ---- */
 
@@ -154,11 +186,12 @@ const getHlCls = (i) => hlClasses[i % hlClasses.length];
 
 const sourceDoc = computed(() => {
   const e = events.value[0];
+  const rawSize = e?.document_file_size || 0;
   return {
-    title: `${e?.company_name || '未知公司'}年度报告.pdf`,
+    title: e?.document_title || e?.document_filename || `${e?.company_name || '未知公司'}_风险文档`,
     company: e?.company_name || '未知公司',
-    size: "23.4 MB",
-    date: "2024-03-20",
+    size: rawSize > 0 ? `${(rawSize / 1024 / 1024).toFixed(1)} MB` : '--',
+    date: e?.document_source_date || '--',
   };
 });
 
@@ -240,7 +273,7 @@ const downloadGeneratedReport = async (format = "markdown") => {
     <div class="risk-grid">
       <!-- LEFT COLUMN -->
       <div class="risk-left">
-        <!-- Row 1: Source + Steps -->
+        <!-- Row 1: Source -->
         <div class="risk-row-top">
           <section class="risk-panel risk-source">
             <div class="risk-panel__head">
@@ -254,42 +287,28 @@ const downloadGeneratedReport = async (format = "markdown") => {
                   <p>{{ sourceDoc.size }} · {{ sourceDoc.date }}</p>
                 </div>
               </div>
-              <button class="risk-source__upload">重新上传</button>
             </div>
           </section>
-
-          <div class="risk-steps">
-            <div
-              v-for="(s, i) in [{ n: 1, l: '风险识别' }, { n: 2, l: '信息提取' }, { n: 3, l: '风险总结' }]"
-              :key="s.n"
-              class="risk-step"
-              :class="{ 'is-active': activeStep >= s.n }"
-              @click="activeStep = s.n"
-            >
-              <span class="risk-step__n">{{ s.n }}</span>
-              <span>{{ s.l }}</span>
-            </div>
-          </div>
         </div>
 
         <!-- Row 2: Doc Viewer + Extract List (fills remaining space) -->
         <div class="risk-work">
           <!-- Document Panel -->
-          <div class="risk-doc">
+          <div class="risk-doc" v-loading="isEventsLoading">
             <div class="risk-doc__bar">
               <span>已识别 {{ riskTypeDist.length }} 类风险，共 {{ totalEvents }} 条风险信息</span>
               <span class="risk-doc__pager">
-                <button>&lt;</button>
-                <span class="risk-doc__page-num">{{ events.length ? `1 / ${Math.max(1, Math.ceil(events.length / 5))}` : '- / -' }}</span>
-                <button>&gt;</button>
+                <button @click="prevDocPage" :disabled="docPage <= 1">&lt;</button>
+                <span class="risk-doc__page-num">{{ riskTypeDist.length ? `${docPage} / ${docTotalPages}` : '- / -' }}</span>
+                <button @click="nextDocPage" :disabled="docPage >= docTotalPages">&gt;</button>
               </span>
             </div>
             <div class="risk-doc__page">
               <h3>风险因素分析</h3>
               <p>基于已提取的风险事件，以下列出主要风险类别及证据：</p>
-              <template v-for="(group, gi) in riskTypeDist.slice(0, 5)" :key="group.key">
-                <h4>{{ gi + 1 }}. {{ group.key }}</h4>
-                <p class="risk-doc__hl" :class="getHlCls(gi)">
+              <template v-for="(group, gi) in pagedRiskTypes" :key="group.key">
+                <h4>{{ (docPage - 1) * docPageSize + gi + 1 }}. {{ group.key }}</h4>
+                <p class="risk-doc__hl" :class="[getHlCls(gi), { 'no-highlight': !highlightEnabled }]">
                   {{ events.filter(e => e.risk_type === group.key).slice(0, 1).map(e => e.evidence_text || e.summary).join('') || '暂无证据文本。' }}
                 </p>
               </template>
@@ -300,7 +319,7 @@ const downloadGeneratedReport = async (format = "markdown") => {
           </div>
 
           <!-- Extract Panel -->
-          <div class="risk-extract">
+          <div class="risk-extract" v-loading="isEventsLoading">
             <div class="risk-extract__head">
               <div class="risk-extract__tabs">
                 <button
@@ -314,36 +333,64 @@ const downloadGeneratedReport = async (format = "markdown") => {
               </div>
               <div class="risk-extract__tools">
                 <span class="risk-extract__toggle-label">高亮</span>
-                <span class="risk-extract__toggle" />
+                <span
+                  class="risk-extract__toggle"
+                  :class="{ 'is-off': !highlightEnabled }"
+                  @click="highlightEnabled = !highlightEnabled"
+                  role="switch"
+                  :aria-checked="highlightEnabled"
+                />
                 <button class="risk-extract__download" @click="downloadGeneratedReport('json')">
                   <AppIcon name="download" :size="12" /> 导出
                 </button>
               </div>
             </div>
             <div class="risk-extract__list">
-              <div
-                v-for="(item, i) in riskTypeDist"
-                :key="item.key"
-                class="risk-extract__item"
-                :class="{ 'is-active': i === 0 }"
-              >
-                <div class="risk-extract__icon" :class="getRiskIconCls(i)">
-                  <AppIcon name="alert-triangle" :size="13" />
-                </div>
-                <div class="risk-extract__body">
-                  <div class="risk-extract__name">{{ item.key }}</div>
-                  <div class="risk-extract__desc">
-                    {{ events.filter(e => e.risk_type === item.key).slice(0, 1).map(e => e.summary).join('') || '暂无描述' }}
+              <!-- Extract results tab -->
+              <template v-if="activeExtractTab === 'results'">
+                <div
+                  v-for="(item, i) in riskTypeDist"
+                  :key="item.key"
+                  class="risk-extract__item"
+                  :class="{ 'is-active': i === 0 }"
+                >
+                  <div class="risk-extract__icon" :class="getRiskIconCls(i)">
+                    <AppIcon name="alert-triangle" :size="13" />
                   </div>
+                  <div class="risk-extract__body">
+                    <div class="risk-extract__name">{{ item.key }}</div>
+                    <div class="risk-extract__desc">
+                      {{ events.filter(e => e.risk_type === item.key).slice(0, 1).map(e => e.summary).join('') || '暂无描述' }}
+                    </div>
+                  </div>
+                  <div class="risk-extract__meta">
+                    <span>{{ item.value }} 条</span>
+                    <span class="risk-extract__level" :class="getRiskLevelClass(dominantLevelForType(item.key))">{{ getRiskLevelText(dominantLevelForType(item.key)) }}</span>
+                  </div>
+                  <span class="risk-extract__chev">&rsaquo;</span>
                 </div>
-                <div class="risk-extract__meta">
-                  <span>{{ item.value }} 条</span>
-                  <span class="risk-extract__level" :class="getRiskLevelClass(item.key)">{{ getRiskLevelText(item.key) }}</span>
+              </template>
+              <!-- Source fragments tab -->
+              <template v-else-if="activeExtractTab === 'source'">
+                <div
+                  v-for="(ev, i) in events.slice(0, 20)"
+                  :key="ev.id || i"
+                  class="risk-source-frag"
+                >
+                  <div class="risk-source-frag__header">
+                    <span class="risk-source-frag__type">{{ ev.risk_type }}</span>
+                    <span class="risk-source-frag__company">{{ ev.company_name }}</span>
+                  </div>
+                  <p class="risk-source-frag__text" :class="{ 'no-highlight': !highlightEnabled }">
+                    {{ ev.evidence_text || '无原文片段' }}
+                  </p>
                 </div>
-                <span class="risk-extract__chev">&rsaquo;</span>
-              </div>
-              <div v-if="riskTypeDist.length === 0" class="risk-extract__empty">
+              </template>
+              <div v-if="riskTypeDist.length === 0 && activeExtractTab === 'results'" class="risk-extract__empty">
                 等待风险提取完成...
+              </div>
+              <div v-if="events.length === 0 && activeExtractTab === 'source'" class="risk-extract__empty">
+                暂无原文片段数据。
               </div>
             </div>
           </div>
@@ -355,7 +402,7 @@ const downloadGeneratedReport = async (format = "markdown") => {
             <h3><AppIcon name="history" :size="14" /> 风险信息时间轴</h3>
           </div>
           <div class="risk-timeline__track">
-            <button class="risk-timeline__arr">&lsaquo;</button>
+            <button class="risk-timeline__arr" :class="{ 'is-disabled': !canScrollTrendLeft }" :disabled="!canScrollTrendLeft" @click="scrollTrendLeft">&lsaquo;</button>
             <template v-for="(node, i) in trendNodes" :key="i">
               <div class="risk-timeline__node" :class="{ 'is-active': node.active }">
                 <strong>{{ node.date }}</strong>
@@ -364,7 +411,7 @@ const downloadGeneratedReport = async (format = "markdown") => {
               </div>
             </template>
             <div v-if="trendNodes.length === 0" class="risk-timeline__empty">暂无时间轴数据</div>
-            <button class="risk-timeline__arr">&rsaquo;</button>
+            <button class="risk-timeline__arr" :class="{ 'is-disabled': !canScrollTrendRight }" :disabled="!canScrollTrendRight" @click="scrollTrendRight">&rsaquo;</button>
           </div>
         </section>
       </div>
@@ -417,7 +464,7 @@ const downloadGeneratedReport = async (format = "markdown") => {
         <section class="risk-panel risk-top5">
           <div class="risk-panel__head">
             <h3><AppIcon name="alert-triangle" :size="14" /> 高风险信息 TOP5</h3>
-            <button class="risk-panel__all">查看全部</button>
+            <button class="risk-panel__all" @click="eventsDrawerOpen = true">查看全部</button>
           </div>
           <div class="risk-top5__list">
             <div v-for="(ev, i) in highRiskEvents" :key="ev.id || i" class="risk-top5__row">
@@ -435,17 +482,13 @@ const downloadGeneratedReport = async (format = "markdown") => {
             <h3><AppIcon name="download" :size="14" /> 导出与分享</h3>
           </div>
           <div class="risk-export__grid">
-            <button class="risk-export__btn" @click="downloadGeneratedReport('markdown')" :disabled="!generatedReport">
-              <AppIcon name="download" :size="15" />
-              <div>数据<span>Excel / CSV</span></div>
-            </button>
             <button class="risk-export__btn" @click="generateReport" :disabled="isReportLoading">
               <AppIcon name="file-text" :size="15" />
-              <div>报告<span>PDF 报告</span></div>
+              <div>生成<span>风险报告</span></div>
             </button>
-            <button class="risk-export__btn">
-              <AppIcon name="external-link" :size="15" />
-              <div>分享<span>分享链接</span></div>
+            <button class="risk-export__btn" @click="downloadGeneratedReport('markdown')" :disabled="!generatedReport">
+              <AppIcon name="download" :size="15" />
+              <div>导出<span>Markdown 格式</span></div>
             </button>
           </div>
         </section>
@@ -486,7 +529,7 @@ const downloadGeneratedReport = async (format = "markdown") => {
   display: flex;
   flex-direction: column;
   height: calc(100vh - 88px); /* fills viewport minus topbar */
-  min-height: 700px;
+  min-height: min(700px, 100vh - 88px);
   gap: 12px;
   overflow: hidden;
 }
@@ -574,9 +617,6 @@ const downloadGeneratedReport = async (format = "markdown") => {
 }
 
 .risk-row-top {
-  display: grid;
-  grid-template-columns: 1fr auto;
-  gap: 10px;
   flex-shrink: 0;
 }
 
@@ -675,70 +715,6 @@ const downloadGeneratedReport = async (format = "markdown") => {
   color: #8592aa;
 }
 
-.risk-source__upload {
-  height: 30px;
-  padding: 0 14px;
-  border-radius: 7px;
-  border: 1px solid rgba(84, 127, 255, 0.28);
-  background: #123a9c;
-  color: #b7caff;
-  font-weight: 700;
-  font-size: 12px;
-  cursor: pointer;
-  flex-shrink: 0;
-}
-
-/* ---- Steps ---- */
-
-.risk-steps {
-  display: flex;
-  border-radius: 10px;
-  overflow: hidden;
-  border: 1px solid rgba(111, 144, 205, 0.13);
-  flex-shrink: 0;
-}
-
-.risk-step {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 0 18px;
-  height: 44px;
-  font-size: 13px;
-  font-weight: 700;
-  color: #7987a0;
-  background: rgba(9, 18, 35, 0.8);
-  cursor: pointer;
-  transition: color 0.2s, background 0.2s;
-  white-space: nowrap;
-}
-
-.risk-step.is-active {
-  color: #fff;
-  background: linear-gradient(90deg, rgba(233, 76, 89, 0.28), rgba(13, 27, 55, 0.7));
-}
-
-.risk-step__n {
-  width: 24px;
-  height: 24px;
-  border-radius: 50%;
-  display: grid;
-  place-items: center;
-  background: rgba(80, 99, 136, 0.28);
-  border: 1px solid rgba(125, 151, 203, 0.15);
-  color: #92a0b8;
-  font-weight: 800;
-  font-size: 12px;
-  flex-shrink: 0;
-}
-
-.risk-step.is-active .risk-step__n {
-  color: #fff;
-  background: #e94c59;
-  border-color: rgba(233, 76, 89, 0.4);
-  box-shadow: 0 0 12px rgba(233, 76, 89, 0.35);
-}
-
 /* ---- Work Area (Doc + Extract) ---- */
 
 .risk-work {
@@ -808,7 +784,7 @@ const downloadGeneratedReport = async (format = "markdown") => {
   background: linear-gradient(90deg, rgba(255,255,255,.02) 0 6px, transparent 6px calc(100% - 6px), rgba(255,255,255,.02) calc(100% - 6px)), #081529;
   font-size: 12px;
   line-height: 1.65;
-  color: #202633;
+  color: #c8d2e3;
 }
 
 .risk-doc__page h3 { font-size: 15px; margin: 0 0 4px; color: #f6f7fb; }
@@ -820,7 +796,13 @@ const downloadGeneratedReport = async (format = "markdown") => {
   padding: 3px 5px;
   font-weight: 600;
   margin: 0 0 8px;
-  color: #202633;
+  color: #e8edf5;
+}
+
+.risk-doc__hl.no-highlight {
+  background: transparent !important;
+  color: #a0adc4;
+  font-weight: 400;
 }
 
 .hl-red { background: rgba(234, 72, 92, 0.26); }
@@ -907,6 +889,15 @@ const downloadGeneratedReport = async (format = "markdown") => {
   height: 12px;
   background: #fff;
   border-radius: 50%;
+  transition: right 0.2s;
+}
+
+.risk-extract__toggle.is-off {
+  background: #3a4560;
+}
+
+.risk-extract__toggle.is-off::after {
+  right: 16px;
 }
 
 .risk-extract__download {
@@ -1275,7 +1266,7 @@ const downloadGeneratedReport = async (format = "markdown") => {
 
 .risk-export__grid {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(2, 1fr);
   gap: 8px;
   padding: 10px 12px;
 }
@@ -1337,14 +1328,75 @@ const downloadGeneratedReport = async (format = "markdown") => {
   overflow: hidden;
 }
 
+/* Source Fragments */
+
+.risk-source-frag {
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(111, 144, 205, 0.07);
+  background: rgba(14, 28, 53, 0.7);
+}
+
+.risk-source-frag__header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.risk-source-frag__type {
+  font-size: 10px;
+  font-weight: 800;
+  color: #ff949b;
+  background: rgba(233, 76, 89, 0.1);
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.risk-source-frag__company {
+  font-size: 10px;
+  color: #8492aa;
+}
+
+.risk-source-frag__text {
+  font-size: 11px;
+  line-height: 1.6;
+  color: #c8d2e3;
+  margin: 0;
+  background: rgba(47, 111, 255, 0.08);
+  border-radius: 4px;
+  padding: 6px 8px;
+}
+
+.risk-source-frag__text.no-highlight {
+  background: transparent;
+  color: #a0adc4;
+}
+
+/* Disabled timeline arrow */
+
+.risk-timeline__arr.is-disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+
 /* ---- Responsive ---- */
 
 @media (max-width: 1200px) {
   .risk-grid {
     grid-template-columns: 1fr;
+    overflow-y: auto;
   }
   .risk-right {
-    display: none;
+    display: flex;
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: 10px;
+    overflow: visible;
+  }
+  .risk-right > section {
+    flex: 1 1 300px;
+    min-width: 0;
   }
 }
 
