@@ -107,7 +107,10 @@ LITELLM_RENDERED_CONFIG_PATH = get_env(
     str(BASE_DIR.parent / "deploy" / "litellm" / "rendered.config.yaml"),
 )
 LITELLM_MASTER_KEY = get_env("LITELLM_MASTER_KEY", "")
-LITELLM_GATEWAY_URL = get_env("LITELLM_GATEWAY_URL", "http://localhost:4000")
+LITELLM_GATEWAY_URL = get_env(
+    "LITELLM_GATEWAY_URL",
+    get_env("LITELLM_INTERNAL_URL", "http://litellm:4000"),
+)
 LIGHTRAG_INTERNAL_URL = get_env("LIGHTRAG_INTERNAL_URL", "http://127.0.0.1:9621")
 LIGHTRAG_TIMEOUT_SECONDS = get_int_env("LIGHTRAG_TIMEOUT_SECONDS", 30)
 LIGHTRAG_SYNC_ENABLED = get_bool_env("LIGHTRAG_SYNC_ENABLED", False)
