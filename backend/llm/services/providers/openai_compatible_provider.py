@@ -1,5 +1,6 @@
 import json
 import logging
+import os
 import time
 from urllib import error, request
 
@@ -19,6 +20,11 @@ from llm.services.providers.base import (
 
 logger = logging.getLogger(__name__)
 TRANSPORT_RETRY_ATTEMPTS = 3
+_PROVIDER_API_KEY_ENV_VARS = {
+    "deepseek": "DEEPSEEK_API_KEY",
+    "dashscope": "DASHSCOPE_API_KEY",
+    "openai_compatible": "OPENAI_API_KEY",
+}
 
 
 class OpenAICompatibleApiMixin:
@@ -33,6 +39,12 @@ class OpenAICompatibleApiMixin:
     def _resolve_options(self, options=None):
         merged_options = {**self.options, **(options or {})}
         api_key = merged_options.get("api_key")
+        if not api_key:
+            env_var_name = _PROVIDER_API_KEY_ENV_VARS.get(self.provider_name)
+            if env_var_name:
+                api_key = os.environ.get(env_var_name, "").strip()
+        if api_key:
+            merged_options["api_key"] = api_key
         if not api_key:
             raise UpstreamServiceError(
                 "模型 API Key 未配置。",

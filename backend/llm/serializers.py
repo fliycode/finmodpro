@@ -171,6 +171,7 @@ class ModelConfigWriteSerializer(serializers.Serializer):
 
 
 class ModelConfigConnectionTestSerializer(serializers.Serializer):
+    model_config_id = serializers.IntegerField(required=False)
     provider = serializers.ChoiceField(choices=DIRECT_PROVIDER_CHOICES)
     model_name = serializers.CharField(max_length=255)
     endpoint = serializers.URLField(max_length=500)

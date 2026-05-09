@@ -1,5 +1,6 @@
 import json
 import logging
+import os
 import time
 from urllib import error, request
 
@@ -11,6 +12,7 @@ from llm.services.providers.openai_compatible_provider import OpenAICompatibleEm
 
 
 logger = logging.getLogger(__name__)
+_DASHSCOPE_API_KEY_ENV_VAR = "DASHSCOPE_API_KEY"
 
 _DASHSCOPE_RERANK_URL = (
     "https://dashscope.aliyuncs.com/api/v1/services/rerank/text-rerank/text-rerank"
@@ -41,6 +43,10 @@ class DashScopeRerankProvider(BaseRerankProvider):
     def _resolve_options(self, options=None):
         merged_options = {**self.options, **(options or {})}
         api_key = merged_options.get("api_key")
+        if not api_key:
+            api_key = os.environ.get(_DASHSCOPE_API_KEY_ENV_VAR, "").strip()
+        if api_key:
+            merged_options["api_key"] = api_key
         if not api_key:
             raise UpstreamServiceError(
                 "DashScope API Key 未配置。",

@@ -138,6 +138,8 @@ class ModelConfigConnectionTestView(APIView):
         }
         try:
             result = test_model_config_connection(payload=payload)
+        except ValueError as exc:
+            return error_response(code=400, message=str(exc), status_code=400)
         except ServiceConfigurationError as exc:
             return error_response(code=503, message=exc.message, status_code=503, data={"error": exc.code})
         except UpstreamServiceError as exc:

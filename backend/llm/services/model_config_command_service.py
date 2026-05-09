@@ -170,6 +170,20 @@ def delete_model_config(*, model_config):
 
 
 def test_model_config_connection(*, payload):
+    payload = dict(payload)
+    model_config_id = payload.pop("model_config_id", None)
+    existing_model_config = None
+    if model_config_id is not None:
+        existing_model_config = ModelConfig.objects.filter(id=model_config_id).first()
+        if existing_model_config is None:
+            raise ValueError("模型配置不存在。")
+
+    merged_options = {
+        **((existing_model_config.options if existing_model_config is not None else {}) or {}),
+        **(payload.get("options") or {}),
+    }
+    payload["options"] = merged_options
+
     provider = _build_provider(ModelConfig(**payload))
     capability = payload["capability"]
     if capability == ModelConfig.CAPABILITY_CHAT:

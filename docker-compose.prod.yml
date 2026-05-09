@@ -31,6 +31,9 @@ services:
       DJANGO_CORS_ALLOWED_ORIGINS: ${DJANGO_CORS_ALLOWED_ORIGINS:-http://47.85.103.76:5173,http://127.0.0.1:5173,http://localhost:5173}
       DJANGO_CSRF_TRUSTED_ORIGINS: ${DJANGO_CSRF_TRUSTED_ORIGINS:-http://47.85.103.76:5173,http://127.0.0.1:5173,http://localhost:5173}
       JWT_SECRET_KEY: ${JWT_SECRET_KEY:-change-me-jwt-in-.env.backend}
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      DASHSCOPE_API_KEY: ${DASHSCOPE_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       DB_ENGINE: ${DB_ENGINE:-mysql}
       DB_NAME: ${DB_NAME:-finmodpro}
       DB_HOST: mysql
@@ -112,6 +115,9 @@ services:
       DJANGO_CORS_ALLOWED_ORIGINS: ${DJANGO_CORS_ALLOWED_ORIGINS:-http://47.85.103.76:5173,http://127.0.0.1:5173,http://localhost:5173}
       DJANGO_CSRF_TRUSTED_ORIGINS: ${DJANGO_CSRF_TRUSTED_ORIGINS:-http://47.85.103.76:5173,http://127.0.0.1:5173,http://localhost:5173}
       JWT_SECRET_KEY: ${JWT_SECRET_KEY:-change-me-jwt-in-.env.backend}
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      DASHSCOPE_API_KEY: ${DASHSCOPE_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       DB_ENGINE: ${DB_ENGINE:-mysql}
       DB_NAME: ${DB_NAME:-finmodpro}
       DB_HOST: mysql

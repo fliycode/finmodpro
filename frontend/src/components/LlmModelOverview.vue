@@ -316,6 +316,7 @@ function buildPayload() {
 
 function buildConnectionPayload() {
   return {
+    model_config_id: editingId.value || undefined,
     capability: form.capability,
     provider: form.provider,
     model_name: String(form.model_name || '').trim(),

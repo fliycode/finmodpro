@@ -3285,6 +3285,63 @@ class ModelConfigConnectionApiTests(TestCase):
         )
         self.assertEqual(ModelInvocationLog.objects.count(), before)
 
+    @patch("urllib.request.urlopen")
+    def test_connection_test_reuses_saved_api_key_for_existing_model(self, mock_urlopen):
+        mock_urlopen.return_value = _FakeHttpResponse({
+            "choices": [{"message": {"content": "pong"}}],
+            "usage": {"prompt_tokens": 1, "completion_tokens": 1},
+        })
+        model_config = ModelConfig.objects.create(
+            name="saved-deepseek-chat",
+            capability=ModelConfig.CAPABILITY_CHAT,
+            provider=ModelConfig.PROVIDER_DEEPSEEK,
+            model_name="deepseek-chat",
+            endpoint="https://api.deepseek.com",
+            options={"api_key": "sk-stored"},
+            is_active=False,
+        )
+
+        response = self.client.post(
+            "/api/ops/model-configs/test-connection/",
+            content_type="application/json",
+            data=json.dumps({
+                "model_config_id": model_config.id,
+                "capability": "chat",
+                "provider": "deepseek",
+                "model_name": "deepseek-chat",
+                "endpoint": "https://api.deepseek.com",
+                "options": {},
+            }),
+            HTTP_AUTHORIZATION=f"Bearer {self.admin_access_token}",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["data"]["ok"], True)
+
+    @patch.dict(os.environ, {"DEEPSEEK_API_KEY": "env-deepseek-key"}, clear=False)
+    @patch("urllib.request.urlopen")
+    def test_connection_test_uses_provider_env_api_key_when_payload_omits_key(self, mock_urlopen):
+        mock_urlopen.return_value = _FakeHttpResponse({
+            "choices": [{"message": {"content": "pong"}}],
+            "usage": {"prompt_tokens": 1, "completion_tokens": 1},
+        })
+
+        response = self.client.post(
+            "/api/ops/model-configs/test-connection/",
+            content_type="application/json",
+            data=json.dumps({
+                "capability": "chat",
+                "provider": "deepseek",
+                "model_name": "deepseek-chat",
+                "endpoint": "https://api.deepseek.com",
+                "options": {},
+            }),
+            HTTP_AUTHORIZATION=f"Bearer {self.admin_access_token}",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["data"]["ok"], True)
+
 
 class LiteLLMAliasYamlRegressionTests(TestCase):
     """Regression tests for YAML generation in litellm_alias_service."""
