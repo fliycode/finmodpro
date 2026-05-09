@@ -208,7 +208,13 @@ def clear_llamaindex_store():
     return LlamaIndexStoreService().clear()
 
 
-def query_llamaindex_store(query, filters=None, top_k=5, query_variants=None):
+def query_llamaindex_store(
+    query,
+    filters=None,
+    top_k=5,
+    query_variants=None,
+    allow_keyword_fallback=True,
+):
     candidate_limit = _candidate_limit(top_k)
     queries = _normalize_queries(query, query_variants)
     ranked_lists = []
@@ -230,12 +236,16 @@ def query_llamaindex_store(query, filters=None, top_k=5, query_variants=None):
         if mysql_fulltext_results:
             ranked_lists.append(("mysql_fulltext", query_text, mysql_fulltext_results))
 
-        fallback_keyword_results = _fallback_keyword_search(
-            query_text,
-            filters=filters,
-            limit=candidate_limit,
+        should_run_keyword_fallback = allow_keyword_fallback and not (
+            vector_results or mysql_fulltext_results
         )
-        if fallback_keyword_results:
-            ranked_lists.append(("token_keyword", query_text, fallback_keyword_results))
+        if should_run_keyword_fallback:
+            fallback_keyword_results = _fallback_keyword_search(
+                query_text,
+                filters=filters,
+                limit=candidate_limit,
+            )
+            if fallback_keyword_results:
+                ranked_lists.append(("token_keyword", query_text, fallback_keyword_results))
 
     return _merge_ranked_results(ranked_lists)[: int(top_k)]

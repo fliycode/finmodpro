@@ -33,6 +33,7 @@ def retrieve_rag_context(*, query, filters=None, top_k=5, query_variants=None):
             filters=filters,
             top_k=top_k,
             query_variants=query_variants,
+            allow_keyword_fallback=True,
         )
     return query_store(
         query=query,
@@ -44,12 +45,16 @@ def retrieve_rag_context(*, query, filters=None, top_k=5, query_variants=None):
 
 def retrieve_chat_context(*, query, filters=None, top_k=5, query_variants=None):
     backend = get_chat_retrieval_backend()
+    allow_keyword_fallback = bool(
+        getattr(settings, "CHAT_RAG_KEYWORD_FALLBACK_ENABLED", False)
+    )
     if backend == "llamaindex":
         return query_llamaindex_store(
             query=query,
             filters=filters,
             top_k=top_k,
             query_variants=query_variants,
+            allow_keyword_fallback=allow_keyword_fallback,
         )
     if backend == "native":
         return query_store(
@@ -63,4 +68,5 @@ def retrieve_chat_context(*, query, filters=None, top_k=5, query_variants=None):
         filters=filters,
         top_k=top_k,
         query_variants=query_variants,
+        allow_keyword_fallback=allow_keyword_fallback,
     )

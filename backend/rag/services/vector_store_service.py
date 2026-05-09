@@ -96,8 +96,8 @@ def _serialize_chunk_result(chunk, score, *, keyword_score=0.0):
     }
 
 
-def _keyword_match_score(query, chunk):
-    query_tokens = tokenize(query)
+def _keyword_match_score(query, chunk, *, query_tokens=None, query_phrase=None):
+    query_tokens = query_tokens if query_tokens is not None else tokenize(query)
     if not query_tokens:
         return 0.0
 
@@ -106,13 +106,14 @@ def _keyword_match_score(query, chunk):
     if not content_tokens:
         return 0.0
 
-    matched_token_count = sum(1 for token in query_tokens if token in content_tokens)
+    unique_query_tokens = set(query_tokens)
+    content_token_set = set(content_tokens)
+    matched_token_count = sum(1 for token in unique_query_tokens if token in content_token_set)
     if matched_token_count == 0:
         return 0.0
 
-    unique_query_tokens = max(len(set(query_tokens)), 1)
-    score = matched_token_count / unique_query_tokens
-    phrase = " ".join(query_tokens)
+    score = matched_token_count / max(len(unique_query_tokens), 1)
+    phrase = query_phrase if query_phrase is not None else " ".join(query_tokens)
     if phrase and phrase in searchable_text:
         score += 0.5
     title = str((chunk.metadata or {}).get("document_title") or chunk.document.title or "").lower()
@@ -122,12 +123,35 @@ def _keyword_match_score(query, chunk):
 
 
 def _fallback_keyword_search(query, filters=None, limit=5):
+    query_tokens = tokenize(query)
+    if not query_tokens:
+        return []
+    query_phrase = " ".join(query_tokens)
     results = []
-    queryset = DocumentChunk.objects.select_related("document").order_by("id")
-    for chunk in queryset:
+    queryset = (
+        DocumentChunk.objects.select_related("document")
+        .only(
+            "id",
+            "document_id",
+            "section_chunk_id",
+            "content",
+            "search_text",
+            "metadata",
+            "chunk_index",
+            "document__title",
+            "document__doc_type",
+            "document__source_date",
+        )
+    )
+    for chunk in queryset.iterator(chunk_size=500):
         if not _matches_filters(chunk.metadata or {}, filters or {}):
             continue
-        keyword_score = _keyword_match_score(query, chunk)
+        keyword_score = _keyword_match_score(
+            query,
+            chunk,
+            query_tokens=query_tokens,
+            query_phrase=query_phrase,
+        )
         if keyword_score <= 0:
             continue
         results.append(_serialize_chunk_result(chunk, keyword_score, keyword_score=keyword_score))

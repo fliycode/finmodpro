@@ -16,13 +16,13 @@ from common.exceptions import UpstreamRateLimitError
 from knowledgebase.models import Document, DocumentChunk
 from knowledgebase.services.document_service import create_document_from_upload, ingest_document
 from rag.models import RetrievalLog
+from rag.services.llamaindex_store_service import LlamaIndexStoreService, query_llamaindex_store
 from rag.services.retrieval_backend_service import (
     retrieve_chat_context,
     retrieve_rag_context,
 )
 from rag.services.retrieval_evaluation_service import evaluate_retrieval_cases
 from rag.services.embedding_service import tokenize
-from rag.services.llamaindex_store_service import LlamaIndexStoreService
 from rag.services.retrieval_service import retrieve
 from rag.services.vector_store_service import clear_store, index_document
 from rbac.services.rbac_service import ROLE_ADMIN, seed_roles_and_permissions
@@ -98,6 +98,7 @@ class RetrievalBackendSelectionTests(SimpleTestCase):
             filters={"doc_type": "txt"},
             top_k=3,
             query_variants=None,
+            allow_keyword_fallback=True,
         )
 
     @override_settings(CHAT_RETRIEVAL_BACKEND="native")
@@ -134,6 +135,58 @@ class LlamaIndexStoreServiceTests(SimpleTestCase):
         LlamaIndexStoreService()._delete_existing_nodes(index, ["chunk:1", "chunk:2"])
 
         self.assertEqual(deleted_node_ids, ["chunk:1"])
+
+
+class LlamaIndexQueryStrategyTests(SimpleTestCase):
+    @patch("rag.services.llamaindex_store_service._fallback_keyword_search")
+    @patch("rag.services.llamaindex_store_service._mysql_full_text_search")
+    @patch("rag.services.llamaindex_store_service.LlamaIndexStoreService.search")
+    def test_query_llamaindex_store_skips_keyword_fallback_when_other_hits_exist(
+        self,
+        mocked_search,
+        mocked_fulltext,
+        mocked_fallback,
+    ):
+        mocked_search.return_value = [{"document_id": 1, "chunk_id": 10, "score": 0.8}]
+        mocked_fulltext.return_value = []
+        mocked_fallback.return_value = [{"document_id": 1, "chunk_id": 11, "score": 0.7}]
+
+        results = query_llamaindex_store(
+            query="cash flow",
+            top_k=3,
+            allow_keyword_fallback=True,
+        )
+
+        self.assertEqual(len(results), 1)
+        mocked_fallback.assert_not_called()
+
+    @patch("rag.services.llamaindex_store_service._fallback_keyword_search")
+    @patch("rag.services.llamaindex_store_service._mysql_full_text_search")
+    @patch("rag.services.llamaindex_store_service.LlamaIndexStoreService.search")
+    def test_query_llamaindex_store_runs_keyword_fallback_only_when_enabled_and_needed(
+        self,
+        mocked_search,
+        mocked_fulltext,
+        mocked_fallback,
+    ):
+        mocked_search.return_value = []
+        mocked_fulltext.return_value = []
+        mocked_fallback.return_value = [{"document_id": 1, "chunk_id": 11, "score": 0.7}]
+
+        disabled_results = query_llamaindex_store(
+            query="treasury hedging note",
+            top_k=2,
+            allow_keyword_fallback=False,
+        )
+        enabled_results = query_llamaindex_store(
+            query="treasury hedging note",
+            top_k=2,
+            allow_keyword_fallback=True,
+        )
+
+        self.assertEqual(disabled_results, [])
+        self.assertEqual(len(enabled_results), 1)
+        mocked_fallback.assert_called_once()
 
 
 @override_settings(
