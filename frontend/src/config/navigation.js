@@ -23,18 +23,6 @@ export const navigationMap = {
         { id: 'admin-llm-usage', label: '用量统计', to: '/admin/llm/usage' },
       ],
     },
-    {
-      id: 'admin-graph',
-      label: '图谱管理',
-      to: '/admin/graph/documents',
-      icon: 'network',
-      group: 'admin-llm',
-      children: [
-        { id: 'admin-graph-documents', label: '图谱文档', to: '/admin/graph/documents' },
-        { id: 'admin-graph-knowledge', label: '知识图谱', to: '/admin/graph/knowledge' },
-        { id: 'admin-graph-search', label: '图谱检索', to: '/admin/graph/search' },
-      ],
-    },
     { id: 'admin-audit-logs', label: '操作日志', to: '/admin/audit-logs', icon: 'clipboard', group: 'admin-governance' },
   ],
 };

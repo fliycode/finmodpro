@@ -13,13 +13,14 @@ test('admin route tree includes renamed model log and usage routes', () => {
   assert.ok(childPaths.includes('llm/costs'));
 });
 
-test('admin route tree splits graph management into child pages', () => {
+test('admin route tree no longer mounts graph management pages', () => {
   const adminRoute = appRoutes.find((route) => route.path === '/admin');
   const childPaths = (adminRoute?.children || []).map((route) => route.path);
 
-  assert.ok(childPaths.includes('graph/documents'));
-  assert.ok(childPaths.includes('graph/knowledge'));
-  assert.ok(childPaths.includes('graph/search'));
+  assert.ok(childPaths.includes('graph'));
+  assert.ok(!childPaths.includes('graph/documents'));
+  assert.ok(!childPaths.includes('graph/knowledge'));
+  assert.ok(!childPaths.includes('graph/search'));
 });
 
 test('admin route tree keeps governance pages mounted under admin shell', () => {

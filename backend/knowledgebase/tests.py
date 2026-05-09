@@ -221,6 +221,7 @@ class KnowledgebaseApiTests(TestCase):
         self.assertEqual(document.error_message, "")
 
     @override_settings(
+        GRAPH_BACKEND="lightrag",
         LIGHTRAG_SYNC_ENABLED=True,
         LIGHTRAG_INTERNAL_URL="http://lightrag:9621",
     )
@@ -265,6 +266,7 @@ class KnowledgebaseApiTests(TestCase):
         self.assertIsNotNone(ingestion_task.graph_sync_finished_at)
 
     @override_settings(
+        GRAPH_BACKEND="lightrag",
         LIGHTRAG_SYNC_ENABLED=True,
         LIGHTRAG_INTERNAL_URL="http://lightrag:9621",
     )
@@ -309,11 +311,11 @@ class KnowledgebaseApiTests(TestCase):
         self.assertIn("LightRAG 服务不可达。", ingestion_task.graph_sync_error_message)
 
     @override_settings(
-        GRAPH_BACKEND="llamaindex",
+        GRAPH_BACKEND="disabled",
         LIGHTRAG_SYNC_ENABLED=False,
     )
     @patch("knowledgebase.services.graph_sync_service.send_lightrag_request")
-    def test_document_ingest_marks_llamaindex_graph_sync_without_upstream_call(self, mocked_sync):
+    def test_document_ingest_skips_graph_sync_when_graph_backend_disabled(self, mocked_sync):
         upload_response = self.client.post(
             "/api/knowledgebase/documents",
             data={
@@ -338,13 +340,13 @@ class KnowledgebaseApiTests(TestCase):
         payload = response.json()["document"]
         self.assertEqual(
             payload["process_result"],
-            "文档已完成解析、切块、索引与图谱同步，可用于检索。",
+            "文档已完成解析、切块与索引，可用于检索。",
         )
 
         ingestion_task = IngestionTask.objects.get(document_id=document_id)
-        self.assertEqual(ingestion_task.graph_sync_status, IngestionTask.GRAPH_SYNC_STATUS_SUCCEEDED)
-        self.assertEqual(ingestion_task.graph_document_id, str(document_id))
-        self.assertEqual(ingestion_task.graph_track_id, str(ingestion_task.id))
+        self.assertEqual(ingestion_task.graph_sync_status, IngestionTask.GRAPH_SYNC_STATUS_SKIPPED)
+        self.assertEqual(ingestion_task.graph_document_id, "")
+        self.assertEqual(ingestion_task.graph_track_id, "")
         mocked_sync.assert_not_called()
 
     def test_dataset_create_list_detail_and_dataset_scoped_documents(self):

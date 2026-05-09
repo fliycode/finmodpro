@@ -6,25 +6,12 @@ import { navigationMap } from '../navigation.js';
 test('admin llm navigation collapses into one model-management parent entry', () => {
   const llmItems = navigationMap.admin.filter((item) => item.group === 'admin-llm');
 
-  assert.deepEqual(llmItems.map((item) => item.to), ['/admin/llm/models', '/admin/graph/documents']);
+  assert.deepEqual(llmItems.map((item) => item.to), ['/admin/llm/models']);
   assert.deepEqual(llmItems[0].children.map((item) => item.to), [
     '/admin/llm/models',
     '/admin/llm/logs',
     '/admin/llm/usage',
   ]);
-});
-
-test('graph management navigation exposes three child pages', () => {
-  const graphItem = navigationMap.admin.find((item) => item.id === 'admin-graph');
-
-  assert.deepEqual(
-    graphItem.children.map((item) => item.to),
-    [
-      '/admin/graph/documents',
-      '/admin/graph/knowledge',
-      '/admin/graph/search',
-    ],
-  );
 });
 
 test('workspace and admin navigation keep separate grouping vocabularies', () => {
@@ -36,6 +23,7 @@ test('workspace and admin navigation keep separate grouping vocabularies', () =>
   assert.ok(workspaceLabels.includes('智能问答'));
   assert.ok(adminLabels.includes('模型管理'));
   assert.ok(adminLabels.includes('知识库管理'));
+  assert.ok(!adminLabels.includes('图谱管理'));
   assert.deepEqual(workspaceGroups, ['workspace-core', 'workspace-support']);
   assert.ok(adminGroups.includes('admin-llm'));
   assert.notDeepEqual(workspaceLabels, adminLabels);

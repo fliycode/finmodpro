@@ -20,11 +20,7 @@ def get_graph_backend():
 
 def is_graph_sync_enabled():
     backend = get_graph_backend()
-    if backend == "llamaindex":
-        return True
-    if backend == "lightrag":
-        return bool(getattr(settings, "LIGHTRAG_SYNC_ENABLED", False))
-    return False
+    return backend == "lightrag" and bool(getattr(settings, "LIGHTRAG_SYNC_ENABLED", False))
 
 
 def _serialize_source_metadata(document):
@@ -104,37 +100,6 @@ def _extract_identifier(payload, *keys):
 
 def sync_document_to_graph(*, document, ingestion_task=None):
     backend = get_graph_backend()
-
-    if backend == "llamaindex":
-        started_at = timezone.now()
-        if ingestion_task is not None:
-            _update_graph_sync_state(
-                ingestion_task,
-                status=IngestionTask.GRAPH_SYNC_STATUS_RUNNING,
-                error_message="",
-                started_at=started_at,
-                finished_at=None,
-                graph_document_id="",
-                graph_track_id="",
-            )
-            _update_graph_sync_state(
-                ingestion_task,
-                status=IngestionTask.GRAPH_SYNC_STATUS_SUCCEEDED,
-                error_message="",
-                finished_at=timezone.now(),
-                graph_document_id=str(document.id),
-                graph_track_id=str(ingestion_task.id),
-            )
-        return {
-            "status": IngestionTask.GRAPH_SYNC_STATUS_SUCCEEDED,
-            "payload": {
-                "doc_id": str(document.id),
-                "track_id": str(ingestion_task.id) if ingestion_task is not None else str(document.id),
-                "backend": "llamaindex",
-            },
-            "graph_document_id": str(document.id),
-            "graph_track_id": str(ingestion_task.id) if ingestion_task is not None else str(document.id),
-        }
 
     if backend != "lightrag" or not getattr(settings, "LIGHTRAG_SYNC_ENABLED", False):
         if ingestion_task is not None:

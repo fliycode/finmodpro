@@ -132,22 +132,7 @@ export const appRoutes = [
       },
       {
         path: 'graph',
-        redirect: '/admin/graph/documents',
-      },
-      {
-        path: 'graph/documents',
-        component: () => import('../views/admin/AdminGraphDocumentsView.vue'),
-        meta: { title: '图谱管理 / 图谱文档', subtitle: '管理知识图谱文档的上传、入库与处理状态。', breadcrumb: [{ label: '图谱管理' }, { label: '图谱文档' }] },
-      },
-      {
-        path: 'graph/knowledge',
-        component: () => import('../views/admin/AdminKnowledgeGraphView.vue'),
-        meta: { title: '图谱管理 / 知识图谱', subtitle: '在画布上浏览实体关系结构、筛选和检查节点细节。', breadcrumb: [{ label: '图谱管理' }, { label: '知识图谱' }] },
-      },
-      {
-        path: 'graph/search',
-        component: () => import('../views/admin/AdminGraphSearchView.vue'),
-        meta: { title: '图谱管理 / 图谱检索', subtitle: '基于知识图谱的智能检索与问答。', breadcrumb: [{ label: '图谱管理' }, { label: '图谱检索' }] },
+        redirect: '/admin/knowledge',
       },
       {
         path: 'audit-logs',

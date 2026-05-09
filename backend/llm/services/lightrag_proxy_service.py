@@ -57,8 +57,8 @@ def _get_base_url():
     return base_url
 
 
-def use_compat_backend():
-    return str(getattr(settings, "GRAPH_BACKEND", "lightrag") or "").strip().lower() != "lightrag"
+def is_lightrag_backend_enabled():
+    return str(getattr(settings, "GRAPH_BACKEND", "disabled") or "").strip().lower() == "lightrag"
 
 
 def _build_error_message(payload, fallback):
