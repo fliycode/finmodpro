@@ -1,6 +1,7 @@
 import json
 import shutil
 import tempfile
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from django.apps import apps
@@ -47,10 +48,10 @@ class FakeEmbeddingProvider:
 
 class FakeChatProvider:
     def chat(self, *, messages, options=None):
-        return messages[-1]["content"]
+        return SimpleNamespace(content=messages[-1]["content"])
 
     def stream(self, *, messages, options=None):
-        content = self.chat(messages=messages, options=options)
+        content = self.chat(messages=messages, options=options).content
         for chunk in [content[:12], content[12:]]:
             if chunk:
                 yield chunk
@@ -65,7 +66,10 @@ class ScriptedChatProvider:
         self.calls.append({"messages": messages, "options": options})
         if not self.responses:
             raise AssertionError("No scripted responses left for chat call.")
-        return self.responses.pop(0)
+        response = self.responses.pop(0)
+        if hasattr(response, "content"):
+            return response
+        return SimpleNamespace(content=response)
 
 
 def fake_vector_search(*, query, filters=None, top_k=5):
@@ -252,7 +256,7 @@ class LlmMemoryExtractionTests(TestCase):
 
         class FixedProvider:
             def chat(self, *, messages, options=None):
-                return llm_response
+                return SimpleNamespace(content=llm_response)
 
         mocked_provider.return_value = FixedProvider()
 
@@ -280,7 +284,7 @@ class LlmMemoryExtractionTests(TestCase):
 
         class FixedProvider:
             def chat(self, *, messages, options=None):
-                return llm_response
+                return SimpleNamespace(content=llm_response)
 
         mocked_provider.return_value = FixedProvider()
 
@@ -305,7 +309,7 @@ class LlmMemoryExtractionTests(TestCase):
 
         class BrokenProvider:
             def chat(self, *, messages, options=None):
-                return "这不是JSON格式的输出"
+                return SimpleNamespace(content="这不是JSON格式的输出")
 
         mocked_provider.return_value = BrokenProvider()
 
@@ -357,7 +361,7 @@ class MemoryIntegrationTests(TestCase):
 
         class OneShot:
             def chat(self, *, messages, options=None):
-                return llm_resp
+                return SimpleNamespace(content=llm_resp)
 
         mocked_llm.return_value = OneShot()
 
@@ -481,7 +485,7 @@ class ChatAskApiTests(TestCase):
             "/api/chat/ask",
             data=json.dumps(
                 {
-                    "question": "revenue and margin outlook",
+                    "question": "查一下 Outlook memo 里的 revenue and margin outlook",
                     "top_k": 2,
                 }
             ),
@@ -491,8 +495,8 @@ class ChatAskApiTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         payload = response.json()
-        self.assertEqual(payload["question"], "revenue and margin outlook")
-        self.assertEqual(payload["query"], "revenue and margin outlook")
+        self.assertEqual(payload["question"], "查一下 Outlook memo 里的 revenue and margin outlook")
+        self.assertEqual(payload["query"], "查一下 Outlook memo 里的 revenue and margin outlook")
         self.assertIn("Outlook memo", payload["answer"])
         self.assertIn("revenue growth stayed resilient", payload["answer"])
         self.assertIn("duration_ms", payload)
@@ -511,33 +515,34 @@ class ChatAskApiTests(TestCase):
                     "with stronger cash generation"
                 ),
                 "score": payload["citations"][0]["score"],
-                "rerank_score": payload["citations"][0]["rerank_score"],
             },
         )
         self.assertEqual(RetrievalLog.objects.count(), 1)
         retrieval_log = RetrievalLog.objects.get()
-        self.assertEqual(retrieval_log.query, "revenue and margin outlook")
+        self.assertEqual(retrieval_log.query, "查一下 Outlook memo 里的 revenue and margin outlook")
         self.assertEqual(retrieval_log.top_k, 2)
         self.assertEqual(retrieval_log.filters, {})
         self.assertEqual(retrieval_log.result_count, 1)
         self.assertEqual(retrieval_log.source, RetrievalLog.SOURCE_CHAT_ASK)
         self.assertIsNotNone(retrieval_log.duration_ms)
         self.assertEqual(retrieval_log.metadata["route"], "retrieve")
-        self.assertEqual(retrieval_log.metadata["rewritten_query"], "revenue and margin outlook")
+        self.assertEqual(retrieval_log.metadata["route_guard"], "document_lookup_intent")
+        self.assertEqual(retrieval_log.metadata["rewritten_query"], "查一下 Outlook memo 里的 revenue and margin outlook")
         self.assertEqual(retrieval_log.metadata["answer_mode"], "cited")
 
     def test_prepare_chat_payload_rewrites_query_and_grades_results(self):
         provider = ScriptedChatProvider([
-            '{"rewritten_query":"capital adequacy stress test"}',
+            '{"rewritten_query":"capital adequacy stress test report","query_variants":["capital adequacy stress test report","car stress scenario"]}',
         ])
 
         payload = prepare_chat_payload(
-            question="资本充足率压力测试结果是什么？",
+            question="查一下资本充足率压力测试报告结果是什么？",
             provider=provider,
         )
 
-        self.assertEqual(payload["query"], "capital adequacy stress test")
+        self.assertEqual(payload["query"], "capital adequacy stress test report")
         self.assertIn(payload["answer_mode"], ("cited", "fallback"))
+        self.assertEqual(payload["query_variants"], ["capital adequacy stress test report"])
 
     def test_prepare_chat_payload_logs_rewrite_and_score_filter(self):
         provider = ScriptedChatProvider([
@@ -546,7 +551,7 @@ class ChatAskApiTests(TestCase):
 
         with self.assertLogs("chat.services.rag_graph_service", level="INFO") as captured:
             prepare_chat_payload(
-                question="现金流预测怎么看？",
+                question="查一下现金流预测报告怎么看？",
                 provider=provider,
             )
 
@@ -561,13 +566,13 @@ class ChatAskApiTests(TestCase):
         ])
 
         payload = prepare_chat_payload(
-            question="资本充足率压力测试结果是什么？",
+            question="查一下资本充足率压力测试报告结果是什么？",
             provider=provider,
         )
 
         self.assertEqual(
             payload["query_variants"],
-            ["capital adequacy stress test", "car stress scenario"],
+            ["capital adequacy stress test"],
         )
 
     def test_prepare_chat_payload_forces_retrieval_for_report_title_lookup(self):
@@ -581,7 +586,7 @@ class ChatAskApiTests(TestCase):
         )
 
         self.assertEqual(payload["route"], "retrieve")
-        self.assertEqual(payload["route_guard"], "none")
+        self.assertEqual(payload["route_guard"], "document_lookup_intent")
 
     def test_prepare_chat_payload_forces_direct_for_platform_question(self):
         provider = ScriptedChatProvider([])
@@ -592,9 +597,37 @@ class ChatAskApiTests(TestCase):
             )
 
         self.assertEqual(payload["route"], "direct")
-        self.assertEqual(payload["route_guard"], "none")
+        self.assertEqual(payload["route_guard"], "direct_assistant_intent")
         self.assertEqual(payload["answer_mode"], "direct")
         mocked_retrieve.assert_not_called()
+
+    def test_prepare_chat_payload_defaults_to_direct_for_generic_instruction(self):
+        provider = ScriptedChatProvider([])
+        with patch("chat.services.rag_graph_service.retrieve_from_lightrag") as mocked_retrieve:
+            payload = prepare_chat_payload(
+                question="请只回复四个字：系统正常",
+                provider=provider,
+            )
+
+        self.assertEqual(payload["route"], "direct")
+        self.assertEqual(payload["route_guard"], "constrained_response_intent")
+        self.assertEqual(payload["answer_mode"], "direct")
+        self.assertEqual(payload["grading_mode"], "none")
+        mocked_retrieve.assert_not_called()
+
+    def test_prepare_chat_payload_uses_retrieval_when_context_filters_present(self):
+        provider = ScriptedChatProvider([
+            '{"rewritten_query":"foreign exchange exposure"}',
+        ])
+        with patch("chat.services.rag_graph_service.retrieve_from_lightrag", return_value=[]):
+            payload = prepare_chat_payload(
+                question="foreign exchange exposure",
+                filters={"doc_type": "pdf"},
+                provider=provider,
+            )
+
+        self.assertEqual(payload["route"], "retrieve")
+        self.assertEqual(payload["route_guard"], "context_filters_present")
 
     def test_chat_ask_persists_rewrite_metadata_in_retrieval_log(self):
         provider = ScriptedChatProvider([
@@ -620,7 +653,7 @@ class ChatAskApiTests(TestCase):
         ):
             response = self.client.post(
                 "/api/chat/ask",
-                data=json.dumps({"question": "资本充足率压力测试结果是什么？"}),
+                data=json.dumps({"question": "查一下资本充足率压力测试报告结果是什么？"}),
                 content_type="application/json",
                 HTTP_AUTHORIZATION=f"Bearer {self.access_token}",
             )
@@ -628,7 +661,7 @@ class ChatAskApiTests(TestCase):
         self.assertEqual(response.status_code, 200)
         retrieval_log = RetrievalLog.objects.latest("id")
         self.assertEqual(retrieval_log.metadata["route"], "retrieve")
-        self.assertEqual(retrieval_log.metadata["route_guard"], "none")
+        self.assertEqual(retrieval_log.metadata["route_guard"], "document_lookup_intent")
         self.assertEqual(retrieval_log.metadata["rewritten_query"], "capital adequacy stress test")
         self.assertEqual(
             retrieval_log.metadata["query_variants"],
@@ -672,7 +705,7 @@ class ChatAskApiTests(TestCase):
     def test_chat_ask_uses_hybrid_retrieval_for_title_keyword_hits(self):
         response = self.client.post(
             "/api/chat/ask",
-            data=json.dumps({"query": "Outlook memo"}),
+            data=json.dumps({"query": "查一下 Outlook memo"}),
             content_type="application/json",
             HTTP_AUTHORIZATION=f"Bearer {self.access_token}",
         )
@@ -712,6 +745,21 @@ class ChatAskApiTests(TestCase):
         self.assertEqual(payload["citations"], [])
         mocked_retrieve.assert_not_called()
 
+    def test_chat_ask_constrained_reply_skips_knowledgebase_retrieval(self):
+        with patch("chat.services.rag_graph_service.retrieve_from_lightrag", return_value=[]) as mocked_retrieve:
+            response = self.client.post(
+                "/api/chat/ask",
+                data=json.dumps({"question": "请只回复四个字：系统正常"}),
+                content_type="application/json",
+                HTTP_AUTHORIZATION=f"Bearer {self.access_token}",
+            )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["answer_mode"], "direct")
+        self.assertEqual(payload["citations"], [])
+        mocked_retrieve.assert_not_called()
+
     def test_chat_ask_platform_question_skips_knowledgebase_retrieval(self):
         with patch("chat.services.rag_graph_service.retrieve_from_lightrag", return_value=[]) as mocked_retrieve:
             response = self.client.post(
@@ -741,7 +789,7 @@ class ChatAskApiTests(TestCase):
         with patch("chat.services.rag_graph_service.retrieve_from_lightrag", return_value=[weak_match]):
             response = self.client.post(
                 "/api/chat/ask",
-                data=json.dumps({"question": "利润率趋势"}),
+                data=json.dumps({"question": "查一下利润率报告趋势"}),
                 content_type="application/json",
                 HTTP_AUTHORIZATION=f"Bearer {self.access_token}",
             )
@@ -767,7 +815,7 @@ class ChatAskApiTests(TestCase):
         with patch("chat.services.rag_graph_service.retrieve_from_lightrag", return_value=results):
             response = self.client.post(
                 "/api/chat/ask",
-                data=json.dumps({"question": "revenue and margin outlook", "top_k": 5}),
+                data=json.dumps({"question": "查一下 report 的 revenue and margin outlook", "top_k": 5}),
                 content_type="application/json",
                 HTTP_AUTHORIZATION=f"Bearer {self.access_token}",
             )
@@ -783,7 +831,7 @@ class ChatAskApiTests(TestCase):
     def test_chat_ask_returns_only_citations_used_by_answer(self):
         class IndexedCitationProvider:
             def chat(self, *, messages, options=None):
-                return "根据[2]，利润率改善更明显。"
+                return SimpleNamespace(content="根据[2]，利润率改善更明显。")
 
         results = [
             {
@@ -803,7 +851,7 @@ class ChatAskApiTests(TestCase):
         ):
             response = self.client.post(
                 "/api/chat/ask",
-                data=json.dumps({"question": "margin outlook", "top_k": 3}),
+                data=json.dumps({"question": "查一下 report 的 margin outlook", "top_k": 3}),
                 content_type="application/json",
                 HTTP_AUTHORIZATION=f"Bearer {self.access_token}",
             )
@@ -817,7 +865,7 @@ class ChatAskApiTests(TestCase):
     def test_chat_stream_returns_initial_metadata_event_and_chunks(self):
         response = self.client.post(
             "/api/chat/ask/stream",
-            data=json.dumps({"question": "revenue and margin outlook", "top_k": 2}),
+            data=json.dumps({"question": "查一下 Outlook memo 里的 revenue and margin outlook", "top_k": 2}),
             content_type="application/json",
             HTTP_AUTHORIZATION=f"Bearer {self.access_token}",
         )
@@ -1311,7 +1359,7 @@ class ChatAskApiTests(TestCase):
         class CapturingProvider:
             def chat(self, *, messages, options=None):
                 captured_calls.append(messages)
-                return "ok"
+                return SimpleNamespace(content="ok")
 
             def stream(self, *, messages, options=None):
                 captured_calls.append(messages)
@@ -1425,7 +1473,7 @@ class ChatSessionCreateApiTests(TestCase):
     def test_generate_session_title_uses_model_summary_instead_of_raw_question(self):
         class TitleProvider:
             def chat(self, *, messages, options=None):
-                return "平台身份咨询"
+                return SimpleNamespace(content="平台身份咨询")
 
         session = create_chat_session(user=self.user)
         create_session_message(
@@ -1455,7 +1503,7 @@ class ChatSessionCreateApiTests(TestCase):
 
             def chat(self, *, messages, options=None):
                 self.calls += 1
-                return "首轮标题"
+                return SimpleNamespace(content="首轮标题")
 
         provider = TitleProvider()
         session = create_chat_session(user=self.user)

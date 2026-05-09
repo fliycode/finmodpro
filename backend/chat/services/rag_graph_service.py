@@ -104,6 +104,18 @@ _GENERATION_PATTERNS = (
     "建议",
     "推荐",
 )
+_CONSTRAINED_RESPONSE_PATTERNS = (
+    "只回复",
+    "只返回",
+    "只说",
+    "一句话",
+    "两句话",
+    "一个词",
+    "两个字",
+    "四个字",
+    "不要解释",
+    "不用解释",
+)
 
 _JSON_OBJECT_PATTERN = re.compile(r"\{.*\}", re.DOTALL)
 _FENCED_JSON_PATTERN = re.compile(r"```(?:json)?\s*(.*?)\s*```", re.DOTALL | re.IGNORECASE)
@@ -117,6 +129,7 @@ class ChatRagState(TypedDict, total=False):
     provider: object
     resolved_filters: dict
     route: str
+    route_guard: str
     rewritten_query: str
     query_variants: list
     retrieval_results: list
@@ -152,6 +165,13 @@ def _has_document_lookup_intent(question):
     return has_source_hint and has_lookup_hint
 
 
+def _has_constrained_response_intent(question):
+    normalized = _normalize_question_text(question)
+    if not normalized:
+        return False
+    return any(pattern in normalized for pattern in _CONSTRAINED_RESPONSE_PATTERNS)
+
+
 def _parse_json_candidate(raw_text):
     text = str(raw_text or "").strip()
     fenced_match = _FENCED_JSON_PATTERN.search(text)
@@ -165,8 +185,14 @@ def _parse_json_candidate(raw_text):
     return json.loads(candidate)
 
 
-def _normalize_query_variants(*queries):
-    limit = max(int(getattr(settings, "RAG_MULTI_QUERY_VARIANT_COUNT", 1) or 1), 1)
+def _normalize_query_variants(*queries, limit=None):
+    resolved_limit = limit
+    if resolved_limit is None:
+        resolved_limit = getattr(settings, "RAG_MULTI_QUERY_VARIANT_COUNT", 1)
+    try:
+        resolved_limit = max(int(resolved_limit or 1), 1)
+    except (TypeError, ValueError):
+        resolved_limit = 1
     seen = set()
     normalized = []
     for candidate in queries:
@@ -183,14 +209,46 @@ def _normalize_query_variants(*queries):
                 continue
             seen.add(value)
             normalized.append(value)
-    return normalized[:limit]
+    return normalized[:resolved_limit]
 
 
-def _extract_query_variants(parsed, fallback_query):
+def _extract_query_variants(parsed, fallback_query, *, limit=None):
     if not isinstance(parsed, dict):
-        return _normalize_query_variants(fallback_query)
+        return _normalize_query_variants(fallback_query, limit=limit)
     raw_variants = parsed.get("query_variants") or parsed.get("queries") or parsed.get("variants") or []
-    return _normalize_query_variants(parsed.get("rewritten_query") or fallback_query, raw_variants)
+    return _normalize_query_variants(
+        parsed.get("rewritten_query") or fallback_query,
+        raw_variants,
+        limit=limit,
+    )
+
+
+def _chat_query_variant_limit():
+    raw_value = getattr(
+        settings,
+        "CHAT_RAG_QUERY_VARIANT_COUNT",
+        getattr(settings, "RAG_MULTI_QUERY_VARIANT_COUNT", 1),
+    )
+    try:
+        return max(int(raw_value or 1), 1)
+    except (TypeError, ValueError):
+        return 1
+
+
+def _chat_retrieval_top_k(requested_top_k):
+    try:
+        normalized_top_k = max(int(requested_top_k), 1)
+    except (TypeError, ValueError):
+        normalized_top_k = 1
+    try:
+        multiplier = max(int(getattr(settings, "CHAT_RAG_RETRIEVAL_TOP_K_MULTIPLIER", 2) or 2), 1)
+    except (TypeError, ValueError):
+        multiplier = 2
+    try:
+        floor = max(int(getattr(settings, "CHAT_RAG_RETRIEVAL_TOP_K_FLOOR", 8) or 8), 1)
+    except (TypeError, ValueError):
+        floor = 8
+    return max(normalized_top_k * multiplier, floor)
 
 
 def _numeric_score(item, key):
@@ -235,23 +293,33 @@ def _select_relevant_results(results, *, limit=MAX_CHAT_CITATIONS):
 
 def _route_by_rules(state: ChatRagState):
     question = state["question"]
+    resolved_filters = state.get("resolved_filters") or {}
     if _has_direct_assistant_intent(question):
         route = "direct"
+        route_guard = "direct_assistant_intent"
+    elif _has_constrained_response_intent(question):
+        route = "direct"
+        route_guard = "constrained_response_intent"
+    elif resolved_filters:
+        route = "retrieve"
+        route_guard = "context_filters_present"
     elif _has_document_lookup_intent(question):
         route = "retrieve"
+        route_guard = "document_lookup_intent"
     else:
-        route = "retrieve"
+        route = "direct"
+        route_guard = "default_direct"
     logger.info(
         "chat rag route",
-        extra={"question": question, "route": route},
+        extra={"question": question, "route": route, "route_guard": route_guard},
     )
-    return {"route": route}
+    return {"route": route, "route_guard": route_guard}
 
 
 def _rewrite_query(state: ChatRagState):
     question = state["question"]
     provider = state["provider"]
-    max_query_variants = max(int(getattr(settings, "RAG_MULTI_QUERY_VARIANT_COUNT", 1) or 1), 1)
+    max_query_variants = _chat_query_variant_limit()
     prompt = [
         {
             "role": "system",
@@ -271,21 +339,21 @@ def _rewrite_query(state: ChatRagState):
     except Exception:
         logger.exception("chat rag rewrite provider failed; falling back to original question")
         rewritten_query = question
-        query_variants = _normalize_query_variants(question)
+        query_variants = _normalize_query_variants(question, limit=max_query_variants)
     else:
         try:
             parsed = _parse_json_candidate(raw_output)
             if not isinstance(parsed, dict):
                 raise ValueError("rewrite response is not a JSON object")
             rewritten_query = str(parsed.get("rewritten_query") or "").strip() or question
-            query_variants = _extract_query_variants(parsed, rewritten_query)
+            query_variants = _extract_query_variants(parsed, rewritten_query, limit=max_query_variants)
         except (json.JSONDecodeError, TypeError, ValueError) as exc:
             logger.warning(
                 "chat rag rewrite returned invalid JSON; falling back to original question",
                 extra={"error": str(exc)},
             )
             rewritten_query = question
-            query_variants = _normalize_query_variants(question)
+            query_variants = _normalize_query_variants(question, limit=max_query_variants)
     logger.info(
         "chat rag rewrite",
         extra={
@@ -302,12 +370,15 @@ def _rewrite_query(state: ChatRagState):
 
 def _retrieve_and_merge(state: ChatRagState):
     rewritten_query = state.get("rewritten_query") or state["question"]
-    query_variants = state.get("query_variants") or _normalize_query_variants(rewritten_query)
+    query_variants = state.get("query_variants") or _normalize_query_variants(
+        rewritten_query,
+        limit=_chat_query_variant_limit(),
+    )
     requested_top_k = int(state["top_k"])
     retrieval_top_k = requested_top_k
     candidate_limit = MAX_CHAT_CITATIONS
     if _has_document_lookup_intent(state["question"]):
-        retrieval_top_k = max(requested_top_k * 4, 20)
+        retrieval_top_k = _chat_retrieval_top_k(requested_top_k)
         candidate_limit = retrieval_top_k
 
     raw_results = retrieve_from_lightrag(
@@ -439,7 +510,10 @@ def prepare_chat_payload(*, question, filters=None, top_k=5, session=None, provi
         "question": question,
         "query": result.get("rewritten_query") or question,
         "query_variants": result.get("query_variants")
-        or _normalize_query_variants(result.get("rewritten_query") or question),
+        or _normalize_query_variants(
+            result.get("rewritten_query") or question,
+            limit=_chat_query_variant_limit(),
+        ),
         "messages": result["messages"],
         "citations": result["citations"],
         "answer_mode": result["answer_mode"],
@@ -447,8 +521,8 @@ def prepare_chat_payload(*, question, filters=None, top_k=5, session=None, provi
         "duration_ms": duration_ms,
         "retrieval_results": result["retrieval_results"],
         "route": result.get("route") or "direct",
-        "route_guard": "none",
-        "grading_mode": "score_filter",
+        "route_guard": result.get("route_guard") or "default_direct",
+        "grading_mode": "score_filter" if (result.get("route") or "direct") == "retrieve" else "none",
         "retrieved_count": len(result.get("retrieval_results") or []),
         "citation_count": len(result.get("citations") or []),
         "filters": resolved_filters,
