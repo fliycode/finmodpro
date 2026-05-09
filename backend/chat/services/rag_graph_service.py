@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 MAX_CHAT_CITATIONS = 3
 
 
-def retrieve_from_lightrag(*, query, filters=None, top_k=None, query_variants=None):
+def retrieve_chat_context_results(*, query, filters=None, top_k=None, query_variants=None):
     return retrieve_chat_context(
         query=query,
         filters=filters,
@@ -381,7 +381,7 @@ def _retrieve_and_merge(state: ChatRagState):
         retrieval_top_k = _chat_retrieval_top_k(requested_top_k)
         candidate_limit = retrieval_top_k
 
-    raw_results = retrieve_from_lightrag(
+    raw_results = retrieve_chat_context_results(
         query=rewritten_query,
         filters=state.get("resolved_filters") or {},
         top_k=retrieval_top_k,
@@ -401,7 +401,7 @@ def _retrieve_and_merge(state: ChatRagState):
             "query_variants": query_variants,
             "top_k": retrieval_top_k,
             "retrieved_count": len(retrieval_results),
-            "retrieval_source": "lightrag" if raw_results else "none",
+            "retrieval_source": "llamaindex" if raw_results else "none",
         },
     )
     return {"retrieval_results": retrieval_results}

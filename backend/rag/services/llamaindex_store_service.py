@@ -1,211 +1,470 @@
 import logging
-import shutil
-from pathlib import Path
 
 from django.conf import settings
 
-from llama_index.core import StorageContext, VectorStoreIndex, load_index_from_storage
+from llama_index.core import StorageContext, VectorStoreIndex
 from llama_index.core.schema import TextNode
+from llama_index.vector_stores.milvus import MilvusVectorStore
 
 from knowledgebase.models import DocumentChunk
-from rag.services.llamaindex_embedding_adapter import LiteLLMEmbeddingAdapter
-from rag.services.vector_store_service import (
-    _candidate_limit,
-    _fallback_keyword_search,
-    _matches_filters,
-    _merge_ranked_results,
-    _mysql_full_text_search,
-    _normalize_queries,
-    _serialize_chunk_result,
-)
+from rag.services.llamaindex_embedding_adapter import FinModProEmbeddingAdapter
 
 logger = logging.getLogger(__name__)
 
 
-def should_sync_llamaindex_index():
-    retrieval_backends = {
-        str(getattr(settings, "RAG_RETRIEVAL_BACKEND", "") or "").strip().lower(),
-        str(getattr(settings, "CHAT_RETRIEVAL_BACKEND", "") or "").strip().lower(),
+def _build_milvus_vector_store():
+    kwargs = {
+        "uri": settings.MILVUS_URI,
+        "collection_name": settings.MILVUS_COLLECTION_NAME,
+        "dim": settings.KB_EMBEDDING_DIMENSION,
+        "embedding_field": "vector",
+        "text_key": "content",
+        "similarity_metric": "COSINE",
+        "overwrite": False,
     }
-    return "llamaindex" in retrieval_backends
+    token = getattr(settings, "MILVUS_TOKEN", "")
+    if token:
+        kwargs["token"] = token
+    return MilvusVectorStore(**kwargs)
 
 
-class LlamaIndexStoreService:
-    def _storage_dir(self):
-        storage_dir = Path(getattr(settings, "LLAMAINDEX_STORAGE_DIR"))
-        storage_dir.mkdir(parents=True, exist_ok=True)
-        return storage_dir
-
-    def _has_persisted_index(self):
-        storage_dir = self._storage_dir()
-        return any(storage_dir.iterdir())
-
-    def _build_embed_model(self):
-        return LiteLLMEmbeddingAdapter()
-
-    def _persist_index(self, index):
-        index.storage_context.persist(persist_dir=str(self._storage_dir()))
-
-    def _create_index(self):
-        index = VectorStoreIndex(
-            nodes=[],
-            embed_model=self._build_embed_model(),
-            show_progress=False,
-        )
-        index.set_index_id(settings.LLAMAINDEX_INDEX_ID)
-        self._persist_index(index)
-        return index
-
-    def _load_index(self):
-        if not self._has_persisted_index():
-            return self._create_index()
-
-        storage_context = StorageContext.from_defaults(
-            persist_dir=str(self._storage_dir())
-        )
-        try:
-            return load_index_from_storage(
-                storage_context,
-                index_id=settings.LLAMAINDEX_INDEX_ID,
-                embed_model=self._build_embed_model(),
-            )
-        except Exception:
-            logger.exception("failed to load llamaindex store; recreating empty index")
-            return self._create_index()
-
-    def _build_node_id(self, chunk_id):
-        return f"chunk:{int(chunk_id)}"
-
-    def _build_chunk_node(self, chunk):
-        metadata = chunk.metadata or {}
-        document = chunk.document
-        return TextNode(
-            id_=self._build_node_id(chunk.id),
-            text=chunk.search_text or chunk.content,
-            metadata={
-                "document_id": document.id,
-                "chunk_id": chunk.id,
-                "document_title": metadata.get("document_title") or document.title,
-                "doc_type": metadata.get("doc_type") or document.doc_type,
-                "source_date": metadata.get("source_date")
-                or (document.source_date.isoformat() if document.source_date else None),
-                "page_label": metadata.get(
-                    "page_label", f"chunk-{chunk.chunk_index + 1}"
-                ),
-                "chunk_index": chunk.chunk_index,
-            },
-        )
-
-    def _delete_existing_nodes(self, index, node_ids):
-        if not node_ids:
-            return
-
-        nodes_dict = getattr(getattr(index, "index_struct", None), "nodes_dict", None) or {}
-        existing_node_ids = [node_id for node_id in node_ids if node_id in nodes_dict]
-        if existing_node_ids:
-            index.delete_nodes(existing_node_ids, delete_from_docstore=True)
-
-    def sync_document(self, document):
-        index = self._load_index()
-        chunks = list(
-            DocumentChunk.objects.select_related("document")
-            .filter(document=document)
-            .order_by("chunk_index")
-        )
-        node_ids = [self._build_node_id(chunk.id) for chunk in chunks]
-        self._delete_existing_nodes(index, node_ids)
-        if chunks:
-            index.insert_nodes([self._build_chunk_node(chunk) for chunk in chunks])
-        self._persist_index(index)
-
-    def delete_document(self, *, document_id, chunk_ids=None):
-        if not self._has_persisted_index():
-            return
-
-        resolved_chunk_ids = [int(chunk_id) for chunk_id in (chunk_ids or [])]
-        if not resolved_chunk_ids:
-            resolved_chunk_ids = list(
-                DocumentChunk.objects.filter(document_id=document_id).values_list(
-                    "id", flat=True
-                )
-            )
-        if not resolved_chunk_ids:
-            return
-
-        index = self._load_index()
-        self._delete_existing_nodes(
-            index,
-            [self._build_node_id(chunk_id) for chunk_id in resolved_chunk_ids],
-        )
-        self._persist_index(index)
-
-    def clear(self):
-        storage_dir = self._storage_dir()
-        if storage_dir.exists():
-            shutil.rmtree(storage_dir)
-
-    def search(self, *, query, filters=None, top_k=5):
-        if not self._has_persisted_index():
-            return []
-
-        index = self._load_index()
-        retriever = index.as_retriever(similarity_top_k=max(int(top_k), 1))
-        retrieved_nodes = retriever.retrieve(query)
-
-        score_by_chunk_id = {}
-        for result in retrieved_nodes:
-            metadata = result.node.metadata or {}
-            if not _matches_filters(metadata, filters or {}):
-                continue
-            chunk_id = metadata.get("chunk_id")
-            if chunk_id in (None, ""):
-                continue
-            score_by_chunk_id[int(chunk_id)] = max(
-                score_by_chunk_id.get(int(chunk_id), 0.0),
-                float(result.score or 0.0),
-            )
-
-        if not score_by_chunk_id:
-            return []
-
-        chunks_by_id = {
-            chunk.id: chunk
-            for chunk in DocumentChunk.objects.select_related("document").filter(
-                id__in=score_by_chunk_id.keys()
-            )
-        }
-        results = []
-        for chunk_id, score in score_by_chunk_id.items():
-            chunk = chunks_by_id.get(chunk_id)
-            if chunk is None:
-                continue
-            row = _serialize_chunk_result(chunk, score)
-            row["score"] = score
-            row["vector_score"] = score
-            results.append(row)
-        results.sort(
-            key=lambda item: (
-                item.get("score", 0.0),
-                item.get("chunk_id") or 0,
-            ),
-            reverse=True,
-        )
-        return results[: int(top_k)]
+def _build_embed_model():
+    return FinModProEmbeddingAdapter()
 
 
-def sync_document_index(document):
-    return LlamaIndexStoreService().sync_document(document)
-
-
-def delete_document_index(*, document_id, chunk_ids=None):
-    return LlamaIndexStoreService().delete_document(
-        document_id=document_id,
-        chunk_ids=chunk_ids,
+def _build_index():
+    vector_store = _build_milvus_vector_store()
+    storage_context = StorageContext.from_defaults(vector_store=vector_store)
+    return VectorStoreIndex(
+        nodes=[],
+        storage_context=storage_context,
+        embed_model=_build_embed_model(),
     )
 
 
-def clear_llamaindex_store():
-    return LlamaIndexStoreService().clear()
+def _build_filter_expression(filters):
+    filters = filters or {}
+    clauses = []
+
+    document_id = filters.get("document_id")
+    if document_id not in (None, ""):
+        clauses.append(f"document_id == {int(document_id)}")
+
+    doc_type = filters.get("doc_type")
+    if doc_type:
+        clauses.append(f'doc_type == "{doc_type}"')
+
+    source_date_from = filters.get("source_date_from")
+    if source_date_from:
+        clauses.append(f'source_date >= "{source_date_from}"')
+
+    source_date_to = filters.get("source_date_to")
+    if source_date_to:
+        clauses.append(f'source_date <= "{source_date_to}"')
+
+    return " and ".join(clauses) if clauses else None
+
+
+def _build_node_id(chunk_id):
+    return f"chunk:{int(chunk_id)}"
+
+
+def _build_chunk_node(chunk):
+    metadata = chunk.metadata or {}
+    document = chunk.document
+    return TextNode(
+        id_=_build_node_id(chunk.id),
+        text=chunk.search_text or chunk.content,
+        metadata={
+            "document_id": document.id,
+            "chunk_id": chunk.id,
+            "document_title": metadata.get("document_title") or document.title,
+            "doc_type": metadata.get("doc_type") or document.doc_type,
+            "source_date": metadata.get("source_date")
+            or (document.source_date.isoformat() if document.source_date else None),
+            "page_label": metadata.get(
+                "page_label", f"chunk-{chunk.chunk_index + 1}"
+            ),
+            "chunk_index": chunk.chunk_index,
+        },
+    )
+
+
+def _serialize_chunk_result(chunk, score):
+    metadata = chunk.metadata or {}
+    return {
+        "document_id": chunk.document_id,
+        "chunk_id": chunk.id,
+        "section_chunk_id": chunk.section_chunk_id,
+        "document_title": metadata.get("document_title") or chunk.document.title,
+        "doc_type": metadata.get("doc_type") or chunk.document.doc_type,
+        "source_date": metadata.get("source_date")
+        or (chunk.document.source_date.isoformat() if chunk.document.source_date else None),
+        "page_label": metadata.get("page_label", f"chunk-{chunk.chunk_index + 1}"),
+        "snippet": chunk.content,
+        "metadata": metadata,
+        "section_context_summary": None,
+        "score": score,
+        "vector_score": score,
+        "keyword_score": 0.0,
+        "matched_queries": [],
+    }
+
+
+def sync_document(document):
+    from knowledgebase.services.vector_service import VectorService
+
+    VectorService().index(document)
+
+
+def delete_document(*, document_id, chunk_ids=None):
+    resolved_chunk_ids = [int(chunk_id) for chunk_id in (chunk_ids or [])]
+    if not resolved_chunk_ids:
+        resolved_chunk_ids = list(
+            DocumentChunk.objects.filter(document_id=document_id).values_list(
+                "id", flat=True
+            )
+        )
+    if not resolved_chunk_ids:
+        return
+
+    try:
+        vector_store = _build_milvus_vector_store()
+        for chunk_id in resolved_chunk_ids:
+            vector_store.delete(str(chunk_id))
+    except Exception:
+        logger.exception("failed to delete llamaindex nodes for document %s", document_id)
+
+
+def clear_store():
+    try:
+        vector_store = _build_milvus_vector_store()
+        vector_store.clear()
+    except Exception:
+        logger.exception("failed to clear llamaindex milvus store")
+
+
+def search(*, query, filters=None, top_k=5):
+    index = _build_index()
+    filter_expr = _build_filter_expression(filters)
+
+    retriever_kwargs = {"similarity_top_k": max(int(top_k), 1)}
+    if filter_expr:
+        retriever_kwargs["vector_store_kwargs"] = {"filter": filter_expr}
+
+    retriever = index.as_retriever(**retriever_kwargs)
+    retrieved_nodes = retriever.retrieve(query)
+
+    if not retrieved_nodes:
+        return []
+
+    score_by_chunk_id = {}
+    for result in retrieved_nodes:
+        metadata = result.node.metadata or {}
+        chunk_id = metadata.get("chunk_id")
+        if chunk_id in (None, ""):
+            continue
+        score_by_chunk_id[int(chunk_id)] = max(
+            score_by_chunk_id.get(int(chunk_id), 0.0),
+            float(result.score or 0.0),
+        )
+
+    if not score_by_chunk_id:
+        return []
+
+    chunks_by_id = {
+        chunk.id: chunk
+        for chunk in DocumentChunk.objects.select_related("document").filter(
+            id__in=score_by_chunk_id.keys()
+        )
+    }
+    results = []
+    for chunk_id, score in score_by_chunk_id.items():
+        chunk = chunks_by_id.get(chunk_id)
+        if chunk is None:
+            continue
+        row = _serialize_chunk_result(chunk, score)
+        results.append(row)
+
+    results.sort(
+        key=lambda item: (item.get("score", 0.0), item.get("chunk_id") or 0),
+        reverse=True,
+    )
+    return results[: int(top_k)]
+
+
+def _candidate_limit(top_k):
+    normalized_top_k = max(int(top_k), 1)
+    multiplier = max(
+        int(getattr(settings, "RAG_RETRIEVAL_CANDIDATE_MULTIPLIER", 1) or 1), 1
+    )
+    floor = max(int(getattr(settings, "RAG_RETRIEVAL_CANDIDATE_FLOOR", 1) or 1), 1)
+    return max(normalized_top_k * multiplier, floor)
+
+
+def _normalize_queries(query, query_variants=None):
+    seen = set()
+    normalized = []
+    for candidate in [query, *(query_variants or [])]:
+        value = str(candidate or "").strip()
+        if not value or value in seen:
+            continue
+        seen.add(value)
+        normalized.append(value)
+    return normalized or [str(query or "").strip()]
+
+
+def _merge_ranked_results(ranked_lists):
+    merged = {}
+    rrf_k = max(int(getattr(settings, "RAG_RRF_K", 60) or 60), 1)
+
+    for source_name, source_query, results in ranked_lists:
+        for rank, result in enumerate(results, start=1):
+            key = (result.get("document_id"), result.get("chunk_id"))
+            existing = merged.get(key)
+            if existing is None:
+                existing = {**result, "score": 0.0, "matched_queries": []}
+                merged[key] = existing
+
+            existing["score"] += 1.0 / (rrf_k + rank)
+            existing["fusion_score"] = existing["score"]
+            existing["vector_score"] = max(
+                float(existing.get("vector_score") or 0.0),
+                float(result.get("vector_score") or 0.0),
+            )
+            existing["keyword_score"] = max(
+                float(existing.get("keyword_score") or 0.0),
+                float(result.get("keyword_score") or 0.0),
+            )
+            if source_query not in existing["matched_queries"]:
+                existing["matched_queries"].append(source_query)
+
+    merged_results = list(merged.values())
+    merged_results.sort(
+        key=lambda item: (
+            item["score"],
+            item.get("keyword_score", 0.0),
+            item.get("vector_score", 0.0),
+            item.get("chunk_id") or 0,
+        ),
+        reverse=True,
+    )
+    return merged_results
+
+
+def _mysql_full_text_search(query, filters=None, limit=5):
+    if not getattr(settings, "RAG_MYSQL_FULLTEXT_ENABLED", False):
+        return []
+    from django.db import connection
+
+    if connection.vendor != "mysql":
+        return []
+
+    filters = filters or {}
+    chunk_table = DocumentChunk._meta.db_table
+    document_table = DocumentChunk._meta.get_field("document").related_model._meta.db_table
+    where_clauses = [
+        "kc.search_text <> ''",
+        "MATCH(kc.search_text) AGAINST (%s IN NATURAL LANGUAGE MODE)",
+    ]
+    params = [query, query]
+
+    document_id = filters.get("document_id")
+    if document_id not in (None, ""):
+        where_clauses.append("kc.document_id = %s")
+        params.append(int(document_id))
+
+    doc_type = filters.get("doc_type")
+    if doc_type:
+        where_clauses.append("d.doc_type = %s")
+        params.append(doc_type)
+
+    source_date_from = filters.get("source_date_from")
+    if source_date_from:
+        where_clauses.append("d.source_date >= %s")
+        params.append(source_date_from)
+
+    source_date_to = filters.get("source_date_to")
+    if source_date_to:
+        where_clauses.append("d.source_date <= %s")
+        params.append(source_date_to)
+
+    params.append(int(limit))
+
+    sql = f"""
+        SELECT
+            kc.id,
+            MATCH(kc.search_text) AGAINST (%s IN NATURAL LANGUAGE MODE) AS lexical_score
+        FROM {chunk_table} kc
+        INNER JOIN {document_table} d ON d.id = kc.document_id
+        WHERE {' AND '.join(where_clauses)}
+        ORDER BY lexical_score DESC, kc.id DESC
+        LIMIT %s
+    """
+
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute(sql, params)
+            rows = cursor.fetchall()
+    except Exception:
+        logger.exception("mysql full-text retrieval failed")
+        return []
+
+    if not rows:
+        return []
+
+    from datetime import date as date_type
+
+    score_by_chunk_id = {int(chunk_id): float(score or 0.0) for chunk_id, score in rows}
+    chunk_ids = list(score_by_chunk_id.keys())
+    chunks_by_id = {
+        chunk.id: chunk
+        for chunk in DocumentChunk.objects.select_related("document").filter(id__in=chunk_ids)
+    }
+    results = []
+    for chunk_id in chunk_ids:
+        chunk = chunks_by_id.get(chunk_id)
+        if chunk is None:
+            continue
+        lexical_score = score_by_chunk_id[chunk_id]
+        metadata = chunk.metadata or {}
+        results.append({
+            "document_id": chunk.document_id,
+            "chunk_id": chunk.id,
+            "section_chunk_id": chunk.section_chunk_id,
+            "document_title": metadata.get("document_title") or chunk.document.title,
+            "doc_type": metadata.get("doc_type") or chunk.document.doc_type,
+            "source_date": metadata.get("source_date")
+            or (chunk.document.source_date.isoformat() if chunk.document.source_date else None),
+            "page_label": metadata.get("page_label", f"chunk-{chunk.chunk_index + 1}"),
+            "snippet": chunk.content,
+            "metadata": metadata,
+            "section_context_summary": None,
+            "score": lexical_score,
+            "vector_score": 0.0,
+            "keyword_score": lexical_score,
+            "matched_queries": [],
+        })
+    return results
+
+
+def _keyword_match_score(query, chunk):
+    import re
+    import math
+    from collections import Counter
+
+    token_pattern = re.compile(r"[\w一-鿿]+", re.UNICODE)
+    query_tokens = token_pattern.findall((query or "").lower())
+    if not query_tokens:
+        return 0.0
+
+    searchable_text = (chunk.search_text or chunk.content or "").lower()
+    content_tokens = token_pattern.findall(searchable_text)
+    if not content_tokens:
+        return 0.0
+
+    unique_query_tokens = set(query_tokens)
+    content_token_set = set(content_tokens)
+    matched_token_count = sum(1 for token in unique_query_tokens if token in content_token_set)
+    if matched_token_count == 0:
+        return 0.0
+
+    score = matched_token_count / max(len(unique_query_tokens), 1)
+    phrase = " ".join(query_tokens)
+    if phrase and phrase in searchable_text:
+        score += 0.5
+    title = str((chunk.metadata or {}).get("document_title") or chunk.document.title or "").lower()
+    if phrase and phrase in title:
+        score += 0.5
+    return score
+
+
+def _fallback_keyword_search(query, filters=None, limit=5):
+    import re
+
+    token_pattern = re.compile(r"[\w一-鿿]+", re.UNICODE)
+    query_tokens = token_pattern.findall((query or "").lower())
+    if not query_tokens:
+        return []
+    query_phrase = " ".join(query_tokens)
+
+    def _matches_filters(metadata, filters):
+        if not filters:
+            return True
+        from datetime import date as date_type
+
+        document_id = filters.get("document_id")
+        if document_id is not None and metadata.get("document_id") != int(document_id):
+            return False
+        doc_type = filters.get("doc_type")
+        if doc_type and metadata.get("doc_type") != doc_type:
+            return False
+        source_date = metadata.get("source_date")
+        if source_date and isinstance(source_date, str):
+            try:
+                source_date = date_type.fromisoformat(source_date)
+            except ValueError:
+                source_date = None
+        source_date_from = filters.get("source_date_from")
+        if source_date_from:
+            try:
+                from_date = date_type.fromisoformat(source_date_from) if isinstance(source_date_from, str) else source_date_from
+                if source_date is None or source_date < from_date:
+                    return False
+            except ValueError:
+                pass
+        source_date_to = filters.get("source_date_to")
+        if source_date_to:
+            try:
+                to_date = date_type.fromisoformat(source_date_to) if isinstance(source_date_to, str) else source_date_to
+                if source_date is None or source_date > to_date:
+                    return False
+            except ValueError:
+                pass
+        return True
+
+    results = []
+    queryset = (
+        DocumentChunk.objects.select_related("document")
+        .only(
+            "id",
+            "document_id",
+            "section_chunk_id",
+            "content",
+            "search_text",
+            "metadata",
+            "chunk_index",
+            "document__title",
+            "document__doc_type",
+            "document__source_date",
+        )
+    )
+    for chunk in queryset.iterator(chunk_size=500):
+        if not _matches_filters(chunk.metadata or {}, filters or {}):
+            continue
+        keyword_score = _keyword_match_score(query, chunk)
+        if keyword_score <= 0:
+            continue
+        metadata = chunk.metadata or {}
+        results.append({
+            "document_id": chunk.document_id,
+            "chunk_id": chunk.id,
+            "section_chunk_id": chunk.section_chunk_id,
+            "document_title": metadata.get("document_title") or chunk.document.title,
+            "doc_type": metadata.get("doc_type") or chunk.document.doc_type,
+            "source_date": metadata.get("source_date")
+            or (chunk.document.source_date.isoformat() if chunk.document.source_date else None),
+            "page_label": metadata.get("page_label", f"chunk-{chunk.chunk_index + 1}"),
+            "snippet": chunk.content,
+            "metadata": metadata,
+            "section_context_summary": None,
+            "score": keyword_score,
+            "vector_score": 0.0,
+            "keyword_score": keyword_score,
+            "matched_queries": [],
+        })
+    results.sort(key=lambda item: item["score"], reverse=True)
+    return results[: int(limit)]
 
 
 def query_llamaindex_store(
@@ -220,7 +479,7 @@ def query_llamaindex_store(
     ranked_lists = []
 
     for query_text in queries:
-        vector_results = LlamaIndexStoreService().search(
+        vector_results = search(
             query=query_text,
             filters=filters,
             top_k=candidate_limit,

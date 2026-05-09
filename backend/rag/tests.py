@@ -16,21 +16,26 @@ from common.exceptions import UpstreamRateLimitError
 from knowledgebase.models import Document, DocumentChunk
 from knowledgebase.services.document_service import create_document_from_upload, ingest_document
 from rag.models import RetrievalLog
-from rag.services.llamaindex_store_service import LlamaIndexStoreService, query_llamaindex_store
+from rag.services.llamaindex_store_service import query_llamaindex_store
 from rag.services.retrieval_backend_service import (
     retrieve_chat_context,
     retrieve_rag_context,
 )
 from rag.services.retrieval_evaluation_service import evaluate_retrieval_cases
-from rag.services.embedding_service import tokenize
+from rag.services.llamaindex_store_service import clear_store, sync_document
 from rag.services.retrieval_service import retrieve
-from rag.services.vector_store_service import clear_store, index_document
 from rbac.services.rbac_service import ROLE_ADMIN, seed_roles_and_permissions
+
+import re as _re
+_TOKEN_PATTERN = _re.compile(r"[\w一-鿿]+", _re.UNICODE)
+
+def tokenize(text):
+    return _TOKEN_PATTERN.findall((text or "").lower())
 
 
 class FakeEmbeddingProvider:
     def embed(self, *, texts, options=None):
-        return [[float(index + 1) for index in range(64)] for _ in texts]
+        return SimpleNamespace(vectors=[[float(index + 1) for index in range(64)] for _ in texts])
 
 
 def fake_vector_search(*, query, filters=None, top_k=5):
@@ -85,7 +90,6 @@ def fake_vector_search(*, query, filters=None, top_k=5):
 
 
 class RetrievalBackendSelectionTests(SimpleTestCase):
-    @override_settings(RAG_RETRIEVAL_BACKEND="llamaindex")
     @patch("rag.services.retrieval_backend_service.query_llamaindex_store")
     def test_retrieve_rag_context_uses_llamaindex_backend(self, mocked_query):
         mocked_query.return_value = [{"document_id": 1, "chunk_id": 1, "score": 1.0}]
@@ -101,9 +105,8 @@ class RetrievalBackendSelectionTests(SimpleTestCase):
             allow_keyword_fallback=True,
         )
 
-    @override_settings(CHAT_RETRIEVAL_BACKEND="native")
-    @patch("rag.services.retrieval_backend_service.query_store")
-    def test_retrieve_chat_context_uses_native_backend(self, mocked_query):
+    @patch("rag.services.retrieval_backend_service.query_llamaindex_store")
+    def test_retrieve_chat_context_uses_llamaindex_backend(self, mocked_query):
         mocked_query.return_value = [{"document_id": 2, "chunk_id": 4, "score": 0.8}]
 
         results = retrieve_chat_context(
@@ -119,28 +122,14 @@ class RetrievalBackendSelectionTests(SimpleTestCase):
             filters={"document_id": 2},
             top_k=4,
             query_variants=["risk margin"],
+            allow_keyword_fallback=False,
         )
-
-
-class LlamaIndexStoreServiceTests(SimpleTestCase):
-    def test_delete_existing_nodes_skips_missing_nodes(self):
-        deleted_node_ids = []
-        index = SimpleNamespace(
-            index_struct=SimpleNamespace(nodes_dict={"chunk:1": object()}),
-            delete_nodes=lambda node_ids, delete_from_docstore=True: deleted_node_ids.extend(
-                node_ids
-            ),
-        )
-
-        LlamaIndexStoreService()._delete_existing_nodes(index, ["chunk:1", "chunk:2"])
-
-        self.assertEqual(deleted_node_ids, ["chunk:1"])
 
 
 class LlamaIndexQueryStrategyTests(SimpleTestCase):
     @patch("rag.services.llamaindex_store_service._fallback_keyword_search")
     @patch("rag.services.llamaindex_store_service._mysql_full_text_search")
-    @patch("rag.services.llamaindex_store_service.LlamaIndexStoreService.search")
+    @patch("rag.services.llamaindex_store_service.search")
     def test_query_llamaindex_store_skips_keyword_fallback_when_other_hits_exist(
         self,
         mocked_search,
@@ -162,7 +151,7 @@ class LlamaIndexQueryStrategyTests(SimpleTestCase):
 
     @patch("rag.services.llamaindex_store_service._fallback_keyword_search")
     @patch("rag.services.llamaindex_store_service._mysql_full_text_search")
-    @patch("rag.services.llamaindex_store_service.LlamaIndexStoreService.search")
+    @patch("rag.services.llamaindex_store_service.search")
     def test_query_llamaindex_store_runs_keyword_fallback_only_when_enabled_and_needed(
         self,
         mocked_search,
@@ -204,13 +193,13 @@ class RagRetrievalApiTests(TestCase):
         )
         self.embedding_provider_patcher.start()
         self.vector_search_patcher = patch(
-            "knowledgebase.services.vector_service.VectorService.search",
+            "rag.services.llamaindex_store_service.search",
             side_effect=fake_vector_search,
         )
         self.vector_search_patcher.start()
         self.vector_index_patcher = patch(
             "knowledgebase.services.document_service.index_document_chunks",
-            side_effect=index_document,
+            side_effect=sync_document,
         )
         self.vector_index_patcher.start()
         self.media_root = tempfile.mkdtemp()
@@ -353,7 +342,7 @@ class RagRetrievalApiTests(TestCase):
         self.assertEqual(payload["results"][0]["document_title"], "Treasury hedging note")
         self.assertIn("foreign exchange exposure", payload["results"][0]["snippet"])
 
-    @patch("knowledgebase.services.vector_service.VectorService.search")
+    @patch("rag.services.llamaindex_store_service.search")
     def test_retrieval_query_uses_milvus_backing_store(self, mocked_search):
         mocked_search.return_value = [
             {
@@ -466,9 +455,9 @@ class RagRetrievalApiTests(TestCase):
 
 
 class RetrievalEvaluationServiceTests(TestCase):
-    @patch("rag.services.retrieval_service.query_store")
-    def test_retrieve_passes_query_variants_to_query_store(self, mocked_query_store):
-        mocked_query_store.return_value = []
+    @patch("rag.services.retrieval_service.retrieve_rag_context")
+    def test_retrieve_passes_query_variants_to_query_store(self, mocked_retrieve):
+        mocked_retrieve.return_value = []
 
         retrieve(
             query="capital adequacy",
@@ -476,7 +465,7 @@ class RetrievalEvaluationServiceTests(TestCase):
             top_k=5,
         )
 
-        mocked_query_store.assert_called_once_with(
+        mocked_retrieve.assert_called_once_with(
             query="capital adequacy",
             filters=None,
             top_k=5,

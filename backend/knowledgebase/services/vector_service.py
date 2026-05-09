@@ -4,7 +4,7 @@ import os
 from django.conf import settings
 
 from knowledgebase.models import DocumentChunk, DocumentSectionChunk, IngestionTask
-from knowledgebase.services.embedding_service import build_dense_embedding, build_dense_embeddings
+from knowledgebase.services.embedding_service import build_dense_embeddings
 
 EMBEDDING_PROVIDER_BATCH_LIMIT = 10
 
@@ -215,112 +215,6 @@ class VectorService:
                     ingestion_task.save(update_fields=["total_section_count", "indexed_section_count", "updated_at"])
             else:
                 DocumentChunk.objects.bulk_update(chunks_to_update, ["vector_id"])
-        from rag.services.llamaindex_store_service import (
-            should_sync_llamaindex_index,
-            sync_document_index,
-        )
-        from rag.services.vector_store_service import index_document
-
-        index_document(document)
-        if should_sync_llamaindex_index():
-            try:
-                sync_document_index(document)
-            except Exception:
-                logger.exception(
-                    "llamaindex sync failed after vector indexing",
-                    extra={"document_id": document.id},
-                )
-
-    def search(self, *, query, filters=None, top_k=5):
-        query_vector = build_dense_embedding(query)
-        client = self.ensure_collection(
-            dimension=len(query_vector) if query_vector else settings.KB_EMBEDDING_DIMENSION
-        )
-        search_results = client.search(
-            collection_name=settings.MILVUS_COLLECTION_NAME,
-            data=[query_vector],
-            limit=int(top_k),
-            filter=self._build_filter_expression(filters),
-            output_fields=[
-                "document_id",
-                "chunk_id",
-                "section_chunk_id",
-                "document_title",
-                "doc_type",
-                "source_date",
-                "page_label",
-                "content",
-            ],
-        )
-        hits = search_results[0] if search_results else []
-        chunk_ids = [
-            hit.get("entity", {}).get("chunk_id")
-            for hit in hits
-            if hit.get("entity", {}).get("chunk_id") is not None
-        ]
-        section_chunk_ids = [
-            hit.get("entity", {}).get("section_chunk_id")
-            for hit in hits
-            if hit.get("entity", {}).get("section_chunk_id") is not None
-        ]
-        chunks_by_id = {
-            chunk.id: chunk
-            for chunk in DocumentChunk.objects.select_related("document").filter(id__in=chunk_ids)
-        }
-        sections_by_id = {
-            section.id: section
-            for section in DocumentSectionChunk.objects.select_related("document").filter(id__in=section_chunk_ids)
-        }
-        results = []
-        for hit in hits:
-            entity = hit.get("entity", {})
-            chunk_id = entity.get("chunk_id")
-            section_chunk_id = entity.get("section_chunk_id")
-            if section_chunk_id is not None:
-                section = sections_by_id.get(section_chunk_id)
-                if section is None:
-                    continue
-                metadata = section.metadata or {}
-                results.append(
-                    {
-                        "document_id": section.document_id,
-                        "section_chunk_id": section.id,
-                        "document_title": metadata.get("document_title") or section.document.title,
-                        "doc_type": metadata.get("doc_type") or section.document.doc_type,
-                        "source_date": metadata.get("source_date")
-                        or (section.document.source_date.isoformat() if section.document.source_date else None),
-                        "page_label": metadata.get("page_label", f"section-{section.section_index + 1}"),
-                        "snippet": section.content,
-                        "content": section.content,
-                        "metadata": metadata,
-                        "score": hit.get("distance", 0.0),
-                        "vector_score": hit.get("distance", 0.0),
-                        "keyword_score": 0.0,
-                    }
-                )
-                continue
-            chunk = chunks_by_id.get(chunk_id)
-            if chunk is None:
-                continue
-
-            metadata = chunk.metadata or {}
-            results.append(
-                {
-                    "document_id": chunk.document_id,
-                    "chunk_id": chunk.id,
-                    "document_title": metadata.get("document_title") or chunk.document.title,
-                    "doc_type": metadata.get("doc_type") or chunk.document.doc_type,
-                    "source_date": metadata.get("source_date")
-                    or (chunk.document.source_date.isoformat() if chunk.document.source_date else None),
-                    "page_label": metadata.get("page_label", f"chunk-{chunk.chunk_index + 1}"),
-                    "snippet": chunk.content,
-                    "metadata": metadata,
-                    "score": hit.get("distance", 0.0),
-                    "vector_score": hit.get("distance", 0.0),
-                    "keyword_score": 0.0,
-                }
-            )
-        return results
 
     def delete_document(self, document_id):
         client = self._get_client()
@@ -336,16 +230,6 @@ class VectorService:
         if client.has_collection(settings.MILVUS_COLLECTION_NAME):
             client.drop_collection(settings.MILVUS_COLLECTION_NAME)
         self.__class__._client = None
-        from rag.services.llamaindex_store_service import (
-            clear_llamaindex_store,
-            should_sync_llamaindex_index,
-        )
-
-        if should_sync_llamaindex_index():
-            try:
-                clear_llamaindex_store()
-            except Exception:
-                logger.exception("failed to clear llamaindex store")
 
 
 def index_document_chunks(document):

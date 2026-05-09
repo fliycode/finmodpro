@@ -19,8 +19,6 @@ from knowledgebase.services.chunk_service import (
     choose_chunking_strategy,
     estimate_flat_chunk_count,
 )
-from knowledgebase.services.graph_sync_service import sync_document_to_graph_with_trace
-from knowledgebase.services.graph_sync_service import is_graph_sync_enabled
 from knowledgebase.services.hierarchical_chunk_service import build_hierarchical_document_chunks
 from knowledgebase.services.parser_service import parse_document_file
 from knowledgebase.services.search_text_service import build_contextual_search_text
@@ -235,13 +233,6 @@ def _build_process_result(document, ingestion_task):
     if document.status == Document.STATUS_FAILED:
         return document.error_message or "文档处理失败。"
     if document.status == Document.STATUS_INDEXED:
-        if ingestion_task is not None:
-            if ingestion_task.graph_sync_status == IngestionTask.GRAPH_SYNC_STATUS_RUNNING:
-                return "文档已完成解析、切块与索引，正在同步图谱。"
-            if ingestion_task.graph_sync_status == IngestionTask.GRAPH_SYNC_STATUS_FAILED:
-                return "文档已完成解析、切块与索引，但图谱同步失败，可重试。"
-            if ingestion_task.graph_sync_status == IngestionTask.GRAPH_SYNC_STATUS_SUCCEEDED:
-                return "文档已完成解析、切块、索引与图谱同步，可用于检索。"
         return "文档已完成解析、切块与索引，可用于检索。"
     if ingestion_task is None:
         return "文档已上传，等待摄取任务执行。"
@@ -794,7 +785,6 @@ def ingest_document(document, ingestion_task=None):
         metadata={"document_id": document.id, "doc_type": document.doc_type},
         input_data={"document_title": document.title},
     ) as observation:
-        graph_sync_status = IngestionTask.GRAPH_SYNC_STATUS_SKIPPED
         try:
             parser_result = parse_document(document)
             if ingestion_task is not None:
@@ -809,24 +799,6 @@ def ingest_document(document, ingestion_task=None):
                     current_step=IngestionTask.STEP_INDEXING,
                 )
             vectorize_document(document)
-            if ingestion_task is not None and is_graph_sync_enabled():
-                _update_ingestion_task_step(
-                    ingestion_task,
-                    current_step=IngestionTask.STEP_GRAPH_SYNC,
-                )
-            try:
-                graph_sync_result = sync_document_to_graph_with_trace(
-                    document=document,
-                    ingestion_task=ingestion_task,
-                )
-                graph_sync_status = graph_sync_result["status"]
-            except (ServiceConfigurationError, UpstreamServiceError, OSError, ValueError) as exc:
-                graph_sync_status = IngestionTask.GRAPH_SYNC_STATUS_FAILED
-                logger.warning(
-                    "graph sync failed for document %s: %s",
-                    document.id,
-                    exc,
-                )
             if ingestion_task is not None:
                 _mark_ingestion_task_finished(
                     ingestion_task,
@@ -836,7 +808,6 @@ def ingest_document(document, ingestion_task=None):
                 output={
                     "status": "succeeded",
                     "chunk_count": _count_chunk_result_items(chunks),
-                    "graph_sync_status": graph_sync_status,
                 }
             )
             return document
@@ -1035,8 +1006,7 @@ def delete_document_with_vectors(document):
 
 
 def _cleanup_deleted_document_artifacts(*, document_id, storage, file_name, chunk_ids):
-    from rag.services.llamaindex_store_service import delete_document_index
-    from rag.services.vector_store_service import _VECTOR_STORE
+    from rag.services.llamaindex_store_service import delete_document
 
     try:
         VectorService().delete_document(document_id)
@@ -1046,9 +1016,8 @@ def _cleanup_deleted_document_artifacts(*, document_id, storage, file_name, chun
             extra={"document_id": document_id},
         )
 
-    _VECTOR_STORE.pop(document_id, None)
     try:
-        delete_document_index(document_id=document_id, chunk_ids=chunk_ids)
+        delete_document(document_id=document_id, chunk_ids=chunk_ids)
     except Exception:
         logger.exception(
             "Failed to delete llamaindex nodes after document cleanup",

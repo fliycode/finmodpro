@@ -1,4 +1,3 @@
-from django.conf import settings
 from django.db import models, transaction
 
 
@@ -205,29 +204,6 @@ class FineTuneRun(models.Model):
     notes = models.TextField(blank=True, default="")
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
-
-    class Meta:
-        ordering = ["-created_at", "-id"]
-
-
-class LiteLLMSyncEvent(models.Model):
-    STATUS_SUCCESS = "success"
-    STATUS_FAILED = "failed"
-    STATUS_CHOICES = (
-        (STATUS_SUCCESS, "Success"),
-        (STATUS_FAILED, "Failed"),
-    )
-
-    status = models.CharField(max_length=32, choices=STATUS_CHOICES)
-    triggered_by = models.ForeignKey(
-        settings.AUTH_USER_MODEL,
-        null=True,
-        blank=True,
-        on_delete=models.SET_NULL,
-    )
-    message = models.TextField(blank=True, default="")
-    checksum = models.CharField(max_length=128, blank=True, default="")
-    created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
         ordering = ["-created_at", "-id"]

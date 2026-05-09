@@ -1,19 +1,29 @@
+import hashlib
+
+from django.core.cache import cache
 from pydantic import ConfigDict, Field
 
 from llama_index.core.embeddings import BaseEmbedding
 
 from llm.services.runtime_service import get_embedding_provider
 
+_CACHE_PREFIX = "emb:"
+_CACHE_TTL = 86400  # 24 hours
 
-class LiteLLMEmbeddingAdapter(BaseEmbedding):
+
+def _cache_key(text: str) -> str:
+    return _CACHE_PREFIX + hashlib.sha256(text.encode()).hexdigest()
+
+
+class FinModProEmbeddingAdapter(BaseEmbedding):
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
     provider: object | None = Field(default=None, exclude=True)
-    model_name: str = "finmodpro-litellm-embedding"
+    model_name: str = "finmodpro-embedding"
 
     @classmethod
     def class_name(cls) -> str:
-        return "finmodpro_litellm_embedding"
+        return "finmodpro_embedding"
 
     def _resolve_provider(self):
         provider = self.provider
@@ -23,13 +33,40 @@ class LiteLLMEmbeddingAdapter(BaseEmbedding):
         return provider
 
     def _get_query_embedding(self, query: str) -> list[float]:
-        return self._resolve_provider().embed(texts=[query]).vectors[0]
+        key = _cache_key(query)
+        cached = cache.get(key)
+        if cached is not None:
+            return cached
+        vector = self._resolve_provider().embed(texts=[query]).vectors[0]
+        cache.set(key, vector, _CACHE_TTL)
+        return vector
 
     async def _aget_query_embedding(self, query: str) -> list[float]:
         return self._get_query_embedding(query)
 
     def _get_text_embedding(self, text: str) -> list[float]:
-        return self._resolve_provider().embed(texts=[text]).vectors[0]
+        return self._get_query_embedding(text)
 
     def _get_text_embeddings(self, texts: list[str]) -> list[list[float]]:
-        return self._resolve_provider().embed(texts=texts).vectors
+        keys = [_cache_key(t) for t in texts]
+        cached = cache.get_many(keys)
+
+        results: list[list[float] | None] = [None] * len(texts)
+        uncached_indices: list[int] = []
+
+        for i, key in enumerate(keys):
+            if key in cached:
+                results[i] = cached[key]
+            else:
+                uncached_indices.append(i)
+
+        if uncached_indices:
+            uncached_texts = [texts[i] for i in uncached_indices]
+            vectors = self._resolve_provider().embed(texts=uncached_texts).vectors
+            to_set: dict[str, list[float]] = {}
+            for idx, vector in zip(uncached_indices, vectors):
+                results[idx] = vector
+                to_set[keys[idx]] = vector
+            cache.set_many(to_set, _CACHE_TTL)
+
+        return results  # type: ignore[return-value]

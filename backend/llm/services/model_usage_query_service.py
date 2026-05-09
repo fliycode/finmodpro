@@ -43,7 +43,7 @@ def _parse_filters(filters: dict | None):
 
 
 def _managed_qs():
-    return ModelInvocationLog.objects.exclude(provider=ModelConfig.PROVIDER_LITELLM)
+    return ModelInvocationLog.objects.all()
 
 
 def _apply_filters(qs, filters: dict):
@@ -58,7 +58,7 @@ def _apply_filters(qs, filters: dict):
 
 def _pricing_map() -> dict:
     pricing = {}
-    for mc in ModelConfig.objects.exclude(provider=ModelConfig.PROVIDER_LITELLM).only(
+    for mc in ModelConfig.objects.all().only(
         "id",
         "input_price_per_million",
         "output_price_per_million",
@@ -116,7 +116,7 @@ def _serialize_log(log) -> dict:
 
 def get_gateway_summary() -> dict:
     window_start = _window_start("24h")
-    managed_configs = ModelConfig.objects.exclude(provider=ModelConfig.PROVIDER_LITELLM)
+    managed_configs = ModelConfig.objects.all()
     active_count = managed_configs.filter(is_active=True).count()
     total_count = managed_configs.count()
 
@@ -168,7 +168,6 @@ def get_gateway_summary() -> dict:
 
     return {
         "gateway": gateway,
-        "recent_sync": None,
         "traffic": traffic,
         "top_models": top_models,
         "recent_errors": recent_errors,

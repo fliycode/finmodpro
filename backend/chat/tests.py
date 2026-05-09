@@ -36,9 +36,14 @@ from common.exceptions import (
 from knowledgebase.services.document_service import create_document_from_upload, ingest_document
 from knowledgebase.models import DocumentChunk
 from rag.models import RetrievalLog
-from rag.services.embedding_service import tokenize
-from rag.services.vector_store_service import clear_store, index_document
+from rag.services.llamaindex_store_service import clear_store, sync_document
 from rbac.services.rbac_service import ROLE_ADMIN, seed_roles_and_permissions
+
+import re as _re
+_TOKEN_PATTERN = _re.compile(r"[\w一-鿿]+", _re.UNICODE)
+
+def tokenize(text):
+    return _TOKEN_PATTERN.findall((text or "").lower())
 
 
 class FakeEmbeddingProvider:
@@ -381,14 +386,13 @@ class MemoryIntegrationTests(TestCase):
 @override_settings(
     JWT_SECRET_KEY="test-jwt-secret",
     JWT_ACCESS_TOKEN_LIFETIME_SECONDS=3600,
-    LIGHTRAG_CHAT_RETRIEVAL_ENABLED=True,
 )
 class ChatAskApiTests(TestCase):
     def setUp(self):
         self.client = Client()
         seed_roles_and_permissions()
         self.vector_clear_patcher = patch(
-            "rag.services.vector_store_service.VectorService.clear",
+            "knowledgebase.services.vector_service.VectorService.clear",
             return_value=None,
         )
         self.vector_clear_patcher.start()
@@ -409,11 +413,11 @@ class ChatAskApiTests(TestCase):
         self.vector_search_patcher.start()
         self.vector_index_patcher = patch(
             "knowledgebase.services.document_service.index_document_chunks",
-            side_effect=index_document,
+            side_effect=sync_document,
         )
         self.vector_index_patcher.start()
-        self.lightrag_patcher = patch(
-            "chat.services.rag_graph_service.retrieve_from_lightrag",
+        self.retrieval_patcher = patch(
+            "chat.services.rag_graph_service.retrieve_chat_context_results",
             return_value=[
                 {
                     "document_id": 0,
@@ -437,7 +441,7 @@ class ChatAskApiTests(TestCase):
                 }
             ],
         )
-        self.lightrag_patcher.start()
+        self.retrieval_patcher.start()
         self.chat_provider_patcher.start()
         self.media_root = tempfile.mkdtemp()
         self.override = override_settings(
@@ -471,7 +475,7 @@ class ChatAskApiTests(TestCase):
 
     def tearDown(self):
         self.chat_provider_patcher.stop()
-        self.lightrag_patcher.stop()
+        self.retrieval_patcher.stop()
         self.embedding_provider_patcher.stop()
         self.vector_search_patcher.stop()
         self.override.disable()
@@ -590,7 +594,7 @@ class ChatAskApiTests(TestCase):
 
     def test_prepare_chat_payload_forces_direct_for_platform_question(self):
         provider = ScriptedChatProvider([])
-        with patch("chat.services.rag_graph_service.retrieve_from_lightrag") as mocked_retrieve:
+        with patch("chat.services.rag_graph_service.retrieve_chat_context_results") as mocked_retrieve:
             payload = prepare_chat_payload(
                 question="你好，这是什么平台？",
                 provider=provider,
@@ -603,7 +607,7 @@ class ChatAskApiTests(TestCase):
 
     def test_prepare_chat_payload_defaults_to_direct_for_generic_instruction(self):
         provider = ScriptedChatProvider([])
-        with patch("chat.services.rag_graph_service.retrieve_from_lightrag") as mocked_retrieve:
+        with patch("chat.services.rag_graph_service.retrieve_chat_context_results") as mocked_retrieve:
             payload = prepare_chat_payload(
                 question="请只回复四个字：系统正常",
                 provider=provider,
@@ -619,7 +623,7 @@ class ChatAskApiTests(TestCase):
         provider = ScriptedChatProvider([
             '{"rewritten_query":"foreign exchange exposure"}',
         ])
-        with patch("chat.services.rag_graph_service.retrieve_from_lightrag", return_value=[]):
+        with patch("chat.services.rag_graph_service.retrieve_chat_context_results", return_value=[]):
             payload = prepare_chat_payload(
                 question="foreign exchange exposure",
                 filters={"doc_type": "pdf"},
@@ -637,7 +641,7 @@ class ChatAskApiTests(TestCase):
         with (
             patch("chat.services.ask_service.get_chat_provider", return_value=provider),
             patch(
-                "chat.services.rag_graph_service.retrieve_from_lightrag",
+                "chat.services.rag_graph_service.retrieve_chat_context_results",
                 return_value=[
                     {
                         "document_title": "Stress Test Report",
@@ -672,7 +676,7 @@ class ChatAskApiTests(TestCase):
         self.assertEqual(retrieval_log.metadata["citation_count"], 1)
         self.assertEqual(retrieval_log.metadata["answer_mode"], "cited")
 
-    @patch("chat.services.rag_graph_service.retrieve_from_lightrag", return_value=[])
+    @patch("chat.services.rag_graph_service.retrieve_chat_context_results", return_value=[])
     def test_chat_ask_accepts_query_alias_and_falls_back_to_model_answer_when_no_match(self, _mocked):
         response = self.client.post(
             "/api/chat/ask",
@@ -731,7 +735,7 @@ class ChatAskApiTests(TestCase):
             status=ChatMessage.STATUS_COMPLETE,
         )
 
-        with patch("chat.services.rag_graph_service.retrieve_from_lightrag", return_value=[]) as mocked_retrieve:
+        with patch("chat.services.rag_graph_service.retrieve_chat_context_results", return_value=[]) as mocked_retrieve:
             response = self.client.post(
                 "/api/chat/ask",
                 data=json.dumps({"question": "你是谁？", "session_id": session.id}),
@@ -746,7 +750,7 @@ class ChatAskApiTests(TestCase):
         mocked_retrieve.assert_not_called()
 
     def test_chat_ask_constrained_reply_skips_knowledgebase_retrieval(self):
-        with patch("chat.services.rag_graph_service.retrieve_from_lightrag", return_value=[]) as mocked_retrieve:
+        with patch("chat.services.rag_graph_service.retrieve_chat_context_results", return_value=[]) as mocked_retrieve:
             response = self.client.post(
                 "/api/chat/ask",
                 data=json.dumps({"question": "请只回复四个字：系统正常"}),
@@ -761,7 +765,7 @@ class ChatAskApiTests(TestCase):
         mocked_retrieve.assert_not_called()
 
     def test_chat_ask_platform_question_skips_knowledgebase_retrieval(self):
-        with patch("chat.services.rag_graph_service.retrieve_from_lightrag", return_value=[]) as mocked_retrieve:
+        with patch("chat.services.rag_graph_service.retrieve_chat_context_results", return_value=[]) as mocked_retrieve:
             response = self.client.post(
                 "/api/chat/ask",
                 data=json.dumps({"question": "你好，这是什么平台？"}),
@@ -786,7 +790,7 @@ class ChatAskApiTests(TestCase):
             "score": 0.05,
             "rerank_score": 0.05,
         }
-        with patch("chat.services.rag_graph_service.retrieve_from_lightrag", return_value=[weak_match]):
+        with patch("chat.services.rag_graph_service.retrieve_chat_context_results", return_value=[weak_match]):
             response = self.client.post(
                 "/api/chat/ask",
                 data=json.dumps({"question": "查一下利润率报告趋势"}),
@@ -812,7 +816,7 @@ class ChatAskApiTests(TestCase):
             }
             for index in range(5)
         ]
-        with patch("chat.services.rag_graph_service.retrieve_from_lightrag", return_value=results):
+        with patch("chat.services.rag_graph_service.retrieve_chat_context_results", return_value=results):
             response = self.client.post(
                 "/api/chat/ask",
                 data=json.dumps({"question": "查一下 report 的 revenue and margin outlook", "top_k": 5}),
@@ -846,7 +850,7 @@ class ChatAskApiTests(TestCase):
             for index in range(3)
         ]
         with (
-            patch("chat.services.rag_graph_service.retrieve_from_lightrag", return_value=results),
+            patch("chat.services.rag_graph_service.retrieve_chat_context_results", return_value=results),
             patch("chat.services.ask_service.get_chat_provider", return_value=IndexedCitationProvider()),
         ):
             response = self.client.post(
@@ -881,7 +885,7 @@ class ChatAskApiTests(TestCase):
         self.assertIn('event: done', body)
         self.assertIn('"citations": []', body.split("event: chunk", 1)[0])
 
-    @patch("chat.services.rag_graph_service.retrieve_from_lightrag", return_value=[])
+    @patch("chat.services.rag_graph_service.retrieve_chat_context_results", return_value=[])
     def test_chat_stream_fallback_reports_notice_when_no_citations(self, _mocked):
         response = self.client.post(
             "/api/chat/ask/stream",
@@ -903,7 +907,7 @@ class ChatAskApiTests(TestCase):
         self.assertIn("平台助手", messages[0]["content"])
         self.assertEqual(messages[1], {"role": "user", "content": "你是谁？"})
 
-    @patch("chat.services.rag_graph_service.retrieve_from_lightrag", return_value=[])
+    @patch("chat.services.rag_graph_service.retrieve_chat_context_results", return_value=[])
     def test_chat_ask_persists_session_messages_and_uses_session_filters(self, mocked_retrieve):
         session = ChatSession.objects.create(
             user=self.user,
@@ -934,7 +938,7 @@ class ChatAskApiTests(TestCase):
             ],
         )
 
-    @patch("chat.services.rag_graph_service.retrieve_from_lightrag", return_value=[])
+    @patch("chat.services.rag_graph_service.retrieve_chat_context_results", return_value=[])
     def test_chat_stream_persists_session_messages_and_uses_session_filters(self, mocked_retrieve):
         session = ChatSession.objects.create(
             user=self.user,
@@ -966,7 +970,7 @@ class ChatAskApiTests(TestCase):
             ],
         )
 
-    @patch("chat.services.rag_graph_service.retrieve_from_lightrag", return_value=[])
+    @patch("chat.services.rag_graph_service.retrieve_chat_context_results", return_value=[])
     def test_chat_ask_finalizes_assistant_message_and_updates_session_counters(
         self, mocked_retrieve
     ):
@@ -1015,7 +1019,7 @@ class ChatAskApiTests(TestCase):
         self.assertEqual(assistant_message.content, response_payload["answer"])
         self.assertTrue(assistant_message.content)
 
-    @patch("chat.services.rag_graph_service.retrieve_from_lightrag", return_value=[])
+    @patch("chat.services.rag_graph_service.retrieve_chat_context_results", return_value=[])
     def test_chat_stream_finalizes_assistant_message_and_updates_session_counters(
         self, mocked_retrieve
     ):
@@ -1072,7 +1076,7 @@ class ChatAskApiTests(TestCase):
     @patch("chat.tasks.extract_session_memories_task.delay")
     @patch("chat.tasks.update_session_summary_task.delay")
     @patch("chat.tasks.update_session_title_task.delay")
-    @patch("chat.services.rag_graph_service.retrieve_from_lightrag", return_value=[])
+    @patch("chat.services.rag_graph_service.retrieve_chat_context_results", return_value=[])
     def test_chat_ask_dispatches_session_maintenance_tasks(
         self,
         mocked_retrieve,
@@ -1108,7 +1112,7 @@ class ChatAskApiTests(TestCase):
         "chat.services.ask_service.dispatch_session_maintenance_tasks",
         side_effect=RuntimeError("maintenance queue unavailable"),
     )
-    @patch("chat.services.rag_graph_service.retrieve_from_lightrag", return_value=[])
+    @patch("chat.services.rag_graph_service.retrieve_chat_context_results", return_value=[])
     def test_chat_ask_succeeds_when_session_maintenance_dispatch_fails(
         self,
         mocked_retrieve,
@@ -1144,7 +1148,7 @@ class ChatAskApiTests(TestCase):
         "chat.services.ask_service.dispatch_session_maintenance_tasks",
         side_effect=RuntimeError("maintenance queue unavailable"),
     )
-    @patch("chat.services.rag_graph_service.retrieve_from_lightrag", return_value=[])
+    @patch("chat.services.rag_graph_service.retrieve_chat_context_results", return_value=[])
     def test_chat_stream_succeeds_when_session_maintenance_dispatch_fails(
         self,
         mocked_retrieve,
@@ -1351,7 +1355,7 @@ class ChatAskApiTests(TestCase):
 
 
     @patch("chat.services.ask_service.get_chat_provider")
-    @patch("chat.services.rag_graph_service.retrieve_from_lightrag", return_value=[])
+    @patch("chat.services.rag_graph_service.retrieve_chat_context_results", return_value=[])
     def test_direct_route_answer_includes_session_context(self, mocked_retrieve, mocked_provider):
         """Direct-route answers (e.g. 'you are who') must inject session history into the prompt."""
         captured_calls = []

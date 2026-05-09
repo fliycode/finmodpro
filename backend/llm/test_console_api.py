@@ -5,7 +5,7 @@ from django.test import Client, TestCase, override_settings
 from authentication.models import User
 from authentication.services.jwt_service import generate_access_token
 from knowledgebase.models import Document, IngestionTask
-from llm.models import LiteLLMSyncEvent, ModelConfig, ModelInvocationLog
+from llm.models import ModelConfig, ModelInvocationLog
 from rag.models import RetrievalLog
 from rbac.services.rbac_service import ROLE_ADMIN, ROLE_MEMBER, seed_roles_and_permissions
 
@@ -276,18 +276,14 @@ class GatewayApiTests(TestCase):
         self.model_config = ModelConfig.objects.create(
             name="gw-chat",
             capability=ModelConfig.CAPABILITY_CHAT,
-            provider=ModelConfig.PROVIDER_LITELLM,
+            provider=ModelConfig.PROVIDER_DEEPSEEK,
             model_name="gw-chat",
             endpoint="http://localhost:4000",
             is_active=True,
+            input_price_per_million=5.0,
+            output_price_per_million=15.0,
             options={
                 "api_key": "sk-test",
-                "litellm": {
-                    "upstream_provider": "openai",
-                    "upstream_model": "gpt-4o",
-                    "input_price_per_million": 5.0,
-                    "output_price_per_million": 15.0,
-                },
             },
         )
 
@@ -321,7 +317,6 @@ class GatewayApiTests(TestCase):
             self.assertEqual(response.json()["code"], 403)
 
     def test_gateway_summary_returns_expected_keys(self):
-        LiteLLMSyncEvent.objects.create(status=LiteLLMSyncEvent.STATUS_SUCCESS, message="ok")
         self._make_log()
 
         response = self.client.get(
@@ -331,7 +326,7 @@ class GatewayApiTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         data = response.json()["data"]
-        for key in ("gateway", "recent_sync", "traffic", "top_models", "recent_errors"):
+        for key in ("gateway", "traffic", "top_models", "recent_errors"):
             self.assertIn(key, data, f"Missing key: {key}")
 
     def test_gateway_logs_returns_rows(self):

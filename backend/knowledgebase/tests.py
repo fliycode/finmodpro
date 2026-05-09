@@ -32,10 +32,9 @@ from knowledgebase.services.document_service import (
     vectorize_document,
 )
 from knowledgebase.services.vector_service import VectorService
-from rag.services.vector_store_service import index_document
+from rag.services.llamaindex_store_service import clear_store, sync_document
 from knowledgebase.services.parser_service import ParserService, parse_document_file
 from knowledgebase.tasks import ingest_document_task
-from rag.services.vector_store_service import _VECTOR_STORE, clear_store, query_store
 from rbac.services.rbac_service import ROLE_ADMIN, seed_roles_and_permissions
 
 
@@ -57,7 +56,6 @@ def fake_index_document_chunks(document):
     for chunk in document.chunks.all():
         chunk.vector_id = str(chunk.id)
         chunk.save(update_fields=["vector_id"])
-    index_document(document)
 
 
 
@@ -219,135 +217,6 @@ class KnowledgebaseApiTests(TestCase):
         self.assertEqual(ingestion_task.retry_count, 1)
         self.assertEqual(document.status, Document.STATUS_INDEXED)
         self.assertEqual(document.error_message, "")
-
-    @override_settings(
-        GRAPH_BACKEND="lightrag",
-        LIGHTRAG_SYNC_ENABLED=True,
-        LIGHTRAG_INTERNAL_URL="http://lightrag:9621",
-    )
-    @patch("knowledgebase.services.graph_sync_service.send_lightrag_request")
-    def test_document_ingest_tracks_graph_sync_success(self, mocked_sync):
-        mocked_sync.return_value = {"doc_id": "graph-doc-1", "track_id": "track-1"}
-
-        upload_response = self.client.post(
-            "/api/knowledgebase/documents",
-            data={
-                "title": "graph sync report",
-                "source_date": "2025-12-31",
-                "file": SimpleUploadedFile(
-                    "graph-sync.txt",
-                    b"graph sync payload",
-                    content_type="text/plain",
-                ),
-            },
-            HTTP_AUTHORIZATION=f"Bearer {self.access_token}",
-        )
-        document_id = upload_response.json()["document"]["id"]
-
-        response = self.client.post(
-            f"/api/knowledgebase/documents/{document_id}/ingest",
-            HTTP_AUTHORIZATION=f"Bearer {self.access_token}",
-        )
-
-        self.assertEqual(response.status_code, 200)
-        payload = response.json()["document"]
-        self.assertEqual(
-            payload["process_result"],
-            "文档已完成解析、切块、索引与图谱同步，可用于检索。",
-        )
-
-        ingestion_task = IngestionTask.objects.get(document_id=document_id)
-        self.assertEqual(ingestion_task.status, IngestionTask.STATUS_SUCCEEDED)
-        self.assertEqual(ingestion_task.current_step, IngestionTask.STEP_COMPLETED)
-        self.assertEqual(ingestion_task.graph_sync_status, IngestionTask.GRAPH_SYNC_STATUS_SUCCEEDED)
-        self.assertEqual(ingestion_task.graph_document_id, "graph-doc-1")
-        self.assertEqual(ingestion_task.graph_track_id, "track-1")
-        self.assertIsNotNone(ingestion_task.graph_sync_started_at)
-        self.assertIsNotNone(ingestion_task.graph_sync_finished_at)
-
-    @override_settings(
-        GRAPH_BACKEND="lightrag",
-        LIGHTRAG_SYNC_ENABLED=True,
-        LIGHTRAG_INTERNAL_URL="http://lightrag:9621",
-    )
-    @patch("knowledgebase.services.graph_sync_service.send_lightrag_request")
-    def test_document_ingest_keeps_document_indexed_when_graph_sync_fails(self, mocked_sync):
-        mocked_sync.side_effect = UpstreamServiceError(
-            "LightRAG 服务不可达。",
-            provider="lightrag",
-        )
-
-        upload_response = self.client.post(
-            "/api/knowledgebase/documents",
-            data={
-                "title": "graph sync failure report",
-                "source_date": "2025-12-31",
-                "file": SimpleUploadedFile(
-                    "graph-sync-failure.txt",
-                    b"graph sync payload",
-                    content_type="text/plain",
-                ),
-            },
-            HTTP_AUTHORIZATION=f"Bearer {self.access_token}",
-        )
-        document_id = upload_response.json()["document"]["id"]
-
-        response = self.client.post(
-            f"/api/knowledgebase/documents/{document_id}/ingest",
-            HTTP_AUTHORIZATION=f"Bearer {self.access_token}",
-        )
-
-        self.assertEqual(response.status_code, 200)
-        payload = response.json()["document"]
-        self.assertEqual(payload["status"], "indexed")
-        self.assertEqual(
-            payload["process_result"],
-            "文档已完成解析、切块与索引，但图谱同步失败，可重试。",
-        )
-
-        ingestion_task = IngestionTask.objects.get(document_id=document_id)
-        self.assertEqual(ingestion_task.status, IngestionTask.STATUS_SUCCEEDED)
-        self.assertEqual(ingestion_task.graph_sync_status, IngestionTask.GRAPH_SYNC_STATUS_FAILED)
-        self.assertIn("LightRAG 服务不可达。", ingestion_task.graph_sync_error_message)
-
-    @override_settings(
-        GRAPH_BACKEND="disabled",
-        LIGHTRAG_SYNC_ENABLED=False,
-    )
-    @patch("knowledgebase.services.graph_sync_service.send_lightrag_request")
-    def test_document_ingest_skips_graph_sync_when_graph_backend_disabled(self, mocked_sync):
-        upload_response = self.client.post(
-            "/api/knowledgebase/documents",
-            data={
-                "title": "llamaindex graph report",
-                "source_date": "2025-12-31",
-                "file": SimpleUploadedFile(
-                    "llamaindex-graph.txt",
-                    b"llamaindex graph payload",
-                    content_type="text/plain",
-                ),
-            },
-            HTTP_AUTHORIZATION=f"Bearer {self.access_token}",
-        )
-        document_id = upload_response.json()["document"]["id"]
-
-        response = self.client.post(
-            f"/api/knowledgebase/documents/{document_id}/ingest",
-            HTTP_AUTHORIZATION=f"Bearer {self.access_token}",
-        )
-
-        self.assertEqual(response.status_code, 200)
-        payload = response.json()["document"]
-        self.assertEqual(
-            payload["process_result"],
-            "文档已完成解析、切块与索引，可用于检索。",
-        )
-
-        ingestion_task = IngestionTask.objects.get(document_id=document_id)
-        self.assertEqual(ingestion_task.graph_sync_status, IngestionTask.GRAPH_SYNC_STATUS_SKIPPED)
-        self.assertEqual(ingestion_task.graph_document_id, "")
-        self.assertEqual(ingestion_task.graph_track_id, "")
-        mocked_sync.assert_not_called()
 
     def test_dataset_create_list_detail_and_dataset_scoped_documents(self):
         create_response = self.client.post(
@@ -1458,7 +1327,7 @@ class VectorServiceBatchingTests(TestCase):
         self.override.disable()
         shutil.rmtree(self.media_root, ignore_errors=True)
 
-    @patch("rag.services.vector_store_service.index_document")
+    @patch("knowledgebase.services.vector_service.index_document_chunks")
     @patch.object(VectorService, "_delete_existing_document_vectors")
     @patch.object(VectorService, "ensure_collection")
     def test_index_batches_chunk_embeddings(self, mock_ensure_collection, _mock_delete_existing_vectors, mock_index_document):
@@ -1494,7 +1363,7 @@ class VectorServiceBatchingTests(TestCase):
         mock_index_document.assert_called_once_with(document)
 
     @override_settings(KB_EMBEDDING_BATCH_SIZE=32)
-    @patch("rag.services.vector_store_service.index_document")
+    @patch("knowledgebase.services.vector_service.index_document_chunks")
     @patch.object(VectorService, "_delete_existing_document_vectors")
     @patch.object(VectorService, "ensure_collection")
     def test_index_caps_embedding_batch_size_at_provider_limit(self, mock_ensure_collection, _mock_delete_existing_vectors, mock_index_document):
@@ -1527,7 +1396,7 @@ class VectorServiceBatchingTests(TestCase):
         self.assertEqual(len(fake_client.insert_calls[0][1]), 11)
         mock_index_document.assert_called_once_with(document)
 
-    @patch("rag.services.vector_store_service.index_document")
+    @patch("knowledgebase.services.vector_service.index_document_chunks")
     @patch.object(VectorService, "_delete_existing_document_vectors")
     @patch.object(VectorService, "ensure_collection")
     def test_index_hierarchical_document_embeds_only_unindexed_sections(self, mock_ensure_collection, _mock_delete_existing_vectors, mock_index_document):
@@ -1577,7 +1446,7 @@ class VectorServiceBatchingTests(TestCase):
         self.assertEqual(len(fake_client.insert_calls[0][1]), 1)
         mock_index_document.assert_called_once_with(document)
 
-    @patch("rag.services.vector_store_service.index_document")
+    @patch("knowledgebase.services.vector_service.index_document_chunks")
     @patch.object(VectorService, "_delete_existing_document_vectors")
     @patch.object(VectorService, "ensure_collection")
     def test_index_hierarchical_document_updates_section_progress(self, mock_ensure_collection, _mock_delete_existing_vectors, mock_index_document):
@@ -1621,44 +1490,6 @@ class VectorServiceBatchingTests(TestCase):
         self.assertEqual(task.indexed_section_count, 1)
         mock_index_document.assert_called_once_with(document)
 
-    @override_settings(RAG_RETRIEVAL_BACKEND="llamaindex")
-    @patch("rag.services.llamaindex_store_service.sync_document_index")
-    @patch("rag.services.vector_store_service.index_document")
-    @patch.object(VectorService, "_delete_existing_document_vectors")
-    @patch.object(VectorService, "ensure_collection")
-    def test_index_syncs_llamaindex_when_backend_enabled(
-        self,
-        mock_ensure_collection,
-        _mock_delete_existing_vectors,
-        mock_index_document,
-        mock_sync_document_index,
-    ):
-        provider = RecordingEmbeddingProvider()
-        fake_client = _FakeMilvusClient()
-        mock_ensure_collection.return_value = fake_client
-        document = Document.objects.create(
-            title="LlamaIndex batch me",
-            file=SimpleUploadedFile(
-                "llamaindex.txt",
-                b"llamaindex",
-                content_type="text/plain",
-            ),
-            filename="llamaindex.txt",
-            doc_type="txt",
-            status=Document.STATUS_CHUNKED,
-            visibility=Document.VISIBILITY_INTERNAL,
-            parsed_text="chunk one",
-        )
-        DocumentChunk.objects.create(document=document, chunk_index=0, content="chunk one")
-
-        with patch(
-            "knowledgebase.services.embedding_service.get_embedding_provider",
-            return_value=provider,
-        ):
-            VectorService().index(document)
-
-        mock_index_document.assert_called_once_with(document)
-        mock_sync_document_index.assert_called_once_with(document)
 
 
 @override_settings(

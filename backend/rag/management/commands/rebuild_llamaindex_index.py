@@ -1,36 +1,33 @@
 from django.core.management.base import BaseCommand
 
 from knowledgebase.models import Document
-from rag.services.llamaindex_store_service import (
-    clear_llamaindex_store,
-    sync_document_index,
-)
+from rag.services.llamaindex_store_service import clear_store, sync_document
 
 
 class Command(BaseCommand):
-    help = "Rebuild the persisted LlamaIndex retrieval store from indexed knowledgebase documents."
+    help = "Rebuild the LlamaIndex Milvus vector store from indexed knowledgebase documents."
 
     def add_arguments(self, parser):
         parser.add_argument(
             "--clear-only",
             action="store_true",
-            help="Only clear the persisted LlamaIndex store without rebuilding it.",
+            help="Only clear the vector store without rebuilding it.",
         )
 
     def handle(self, *args, **options):
-        clear_llamaindex_store()
+        clear_store()
         if options["clear_only"]:
-            self.stdout.write(self.style.SUCCESS("Cleared LlamaIndex store."))
+            self.stdout.write(self.style.SUCCESS("Cleared vector store."))
             return
 
         documents = Document.objects.filter(status=Document.STATUS_INDEXED).order_by("id")
         indexed_count = 0
         for document in documents:
-            sync_document_index(document)
+            sync_document(document)
             indexed_count += 1
 
         self.stdout.write(
             self.style.SUCCESS(
-                f"Rebuilt LlamaIndex store for {indexed_count} indexed document(s)."
+                f"Rebuilt vector store for {indexed_count} indexed document(s)."
             )
         )

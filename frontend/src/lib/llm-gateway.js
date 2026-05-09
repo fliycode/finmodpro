@@ -1,5 +1,3 @@
-import { toRaw } from 'vue';
-
 const toNumber = (value, fallback = 0) => {
   const numeric = Number(value ?? fallback);
   return Number.isFinite(numeric) ? numeric : fallback;
@@ -48,7 +46,6 @@ export const normalizeGatewaySummary = (payload = {}) => {
   const data = payload?.data && typeof payload.data === 'object' ? payload.data : payload || {};
   const gateway = normalizeObject(data.gateway);
   const traffic = normalizeObject(data.traffic);
-  const recentSync = data.recent_sync ? normalizeObject(data.recent_sync) : null;
 
   return {
     gateway: {
@@ -56,14 +53,6 @@ export const normalizeGatewaySummary = (payload = {}) => {
       active_model_count: toNumber(gateway.active_model_count, 0),
       total_model_count: toNumber(gateway.total_model_count, 0),
     },
-    recent_sync: recentSync
-      ? {
-          status: recentSync.status ?? '',
-          message: recentSync.message ?? '',
-          created_at: recentSync.created_at ?? '',
-          raw: recentSync,
-        }
-      : null,
     traffic: {
       request_count: toNumber(traffic.request_count, 0),
       failed_count: toNumber(traffic.failed_count, 0),
@@ -192,47 +181,5 @@ export const normalizeGatewayCostsModels = (payload = {}) => {
       raw: item ?? {},
     })),
     raw: data,
-  };
-};
-
-export const getRouteDeleteBlockReason = (route = {}) => (
-  route?.is_active
-    ? '当前默认路由不能直接删除，请先切换默认链路或在编辑抽屉里取消默认状态。'
-    : ''
-);
-
-export const cloneRouteOptions = (options = {}) => structuredClone(toRaw(options));
-
-const parseFallbackAliases = (value) => String(value || '')
-  .split(',')
-  .map((item) => item.trim())
-  .filter(Boolean);
-
-export const buildRoutePayload = ({ originalOptions = {}, editingId = null, form = {} } = {}) => {
-  const options = cloneRouteOptions(originalOptions);
-  if (String(form.api_key || '').trim()) {
-    options.api_key = String(form.api_key).trim();
-  } else if (!editingId) {
-    delete options.api_key;
-  }
-
-  options.litellm = {
-    ...(options.litellm || {}),
-    upstream_provider: String(form.upstream_provider || '').trim(),
-    upstream_model: String(form.upstream_model || '').trim(),
-    fallback_aliases: parseFallbackAliases(form.fallback_aliases_text),
-    weight: Number(form.weight) || 1,
-    input_price_per_million: Number(form.input_price_per_million) || 0,
-    output_price_per_million: Number(form.output_price_per_million) || 0,
-  };
-
-  return {
-    name: String(form.name || '').trim(),
-    capability: form.capability,
-    provider: 'litellm',
-    model_name: String(form.alias || '').trim(),
-    endpoint: String(form.endpoint || '').trim(),
-    options,
-    is_active: Boolean(form.is_active),
   };
 };

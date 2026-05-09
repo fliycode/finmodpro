@@ -2,7 +2,7 @@ from rest_framework.views import APIView
 
 from common.api_response import error_response, success_response
 from llm.controllers.model_config_controller import _require_manage_permission
-from llm.services.litellm_gateway_query_service import (
+from llm.services.model_usage_query_service import (
     get_costs_models,
     get_costs_summary,
     get_costs_timeseries,

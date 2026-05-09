@@ -23,16 +23,12 @@ from authentication.models import User
 from authentication.services.jwt_service import generate_access_token
 from common.exceptions import ServiceConfigurationError, UpstreamRateLimitError, UpstreamServiceError
 from knowledgebase.models import Document, IngestionTask
-from llm.models import EvalRecord, FineTuneRun, LiteLLMSyncEvent, ModelConfig, ModelInvocationLog
+from llm.models import EvalRecord, FineTuneRun, ModelConfig, ModelInvocationLog
 from llm.services import model_config_command_service
-from llm.services.model_config_command_service import migrate_active_configs_to_litellm
 from llm.services.model_config_service import get_active_model_config
 from llm.services.fine_tune_service import create_fine_tune_run
 from llm.services.fine_tune_runner_client import build_llamafactory_command
 from llm.services.prompt_service import load_prompt_template, render_prompt
-from llm.services.litellm_alias_service import sync_litellm_route_for_config, sync_litellm_routes
-from llm.services.litellm_config_render_service import build_rendered_litellm_config
-from llm.services.providers.litellm_provider import LiteLLMChatProvider, LiteLLMEmbeddingProvider
 from llm.services.runtime_service import (
     get_chat_provider,
     get_embedding_provider,
@@ -124,8 +120,7 @@ class ModelConfigListApiTests(TestCase):
         payload = response.json()
         self.assertEqual(payload["code"], 0)
         self.assertEqual(payload["message"], "ok")
-        self.assertEqual(payload["data"]["total"], ModelConfig.objects.exclude(provider=ModelConfig.PROVIDER_LITELLM).count())
-        self.assertTrue(all(item["provider"] != ModelConfig.PROVIDER_LITELLM for item in payload["data"]["model_configs"]))
+        self.assertEqual(payload["data"]["total"], ModelConfig.objects.count())
         self.assertTrue(any(item["name"] == "deepseek-qwen-chat" for item in payload["data"]["model_configs"]))
 
         first_row = payload["data"]["model_configs"][0]
@@ -204,7 +199,7 @@ class ModelConfigListApiTests(TestCase):
         self.assertEqual(overview["total_models"], payload["total"])
         self.assertEqual(
             overview["enabled_models"],
-            ModelConfig.objects.exclude(provider=ModelConfig.PROVIDER_LITELLM).filter(is_active=True).count(),
+            ModelConfig.objects.filter(is_active=True).count(),
         )
         self.assertEqual(overview["total_invocation_count"], 2)
         self.assertEqual(overview["today_invocation_count"], 1)
@@ -213,29 +208,6 @@ class ModelConfigListApiTests(TestCase):
 
         row = next(item for item in payload["model_configs"] if item["id"] == model.id)
         self.assertEqual(row["invocation_count"], 2)
-
-    def test_list_model_configs_excludes_legacy_litellm_routes(self):
-        ModelConfig.objects.create(
-            name="litellm-chat-default",
-            capability=ModelConfig.CAPABILITY_CHAT,
-            provider=ModelConfig.PROVIDER_LITELLM,
-            model_name="chat-default",
-            endpoint=settings.LITELLM_GATEWAY_URL,
-            options={"api_base": "https://api.deepseek.com/v1"},
-            is_active=True,
-        )
-
-        response = self.client.get(
-            "/api/ops/model-configs",
-            HTTP_AUTHORIZATION=f"Bearer {self.admin_access_token}",
-        )
-
-        self.assertEqual(response.status_code, 200)
-        payload = response.json()["data"]
-        self.assertEqual(payload["total"], ModelConfig.objects.exclude(provider=ModelConfig.PROVIDER_LITELLM).count())
-        self.assertTrue(
-            all(item["provider"] != ModelConfig.PROVIDER_LITELLM for item in payload["model_configs"])
-        )
 
     def test_list_model_configs_masks_api_key(self):
         ModelConfig.objects.create(
@@ -445,9 +417,9 @@ class ModelConfigActivationApiTests(TestCase):
 
     def test_delete_requires_authentication(self):
         model_config = ModelConfig.objects.create(
-            name="litellm-delete-unauth",
+            name="chat-delete-unauth",
             capability=ModelConfig.CAPABILITY_CHAT,
-            provider=ModelConfig.PROVIDER_LITELLM,
+            provider=ModelConfig.PROVIDER_DEEPSEEK,
             model_name="chat-delete-unauth",
             endpoint="http://localhost:4000",
             options={},
@@ -1294,15 +1266,12 @@ class FineTuneRunCallbackApiTests(TestCase):
         self.client = Client()
         seed_roles_and_permissions()
         self.export_dir = tempfile.mkdtemp()
-        self.generated_config_dir = tempfile.mkdtemp()
         self.override = override_settings(
             FINE_TUNE_EXPORT_ROOT=self.export_dir,
-            LITELLM_GENERATED_CONFIG_ROOT=self.generated_config_dir,
         )
         self.override.enable()
         self.addCleanup(self.override.disable)
         self.addCleanup(shutil.rmtree, self.export_dir, True)
-        self.addCleanup(shutil.rmtree, self.generated_config_dir, True)
 
         self.admin_user = User.objects.create_user(
             username="ops-finetune-callback-admin",
@@ -1395,7 +1364,7 @@ class FineTuneRunCallbackApiTests(TestCase):
             "/artifacts/ft-001",
         )
 
-    def test_runner_callback_registers_inactive_litellm_candidate_model(self):
+    def test_runner_callback_registers_inactive_candidate_model(self):
         base_model = get_active_model_config(ModelConfig.CAPABILITY_CHAT)
         run = create_fine_tune_run(
             payload={
@@ -1423,43 +1392,8 @@ class FineTuneRunCallbackApiTests(TestCase):
         self.assertEqual(response.status_code, 200)
         run.refresh_from_db()
         self.assertIsNotNone(run.registered_model_config_id)
-        self.assertEqual(run.registered_model_config.provider, ModelConfig.PROVIDER_LITELLM)
+        self.assertEqual(run.registered_model_config.provider, ModelConfig.PROVIDER_OPENAI_COMPATIBLE)
         self.assertFalse(run.registered_model_config.is_active)
-
-    def test_runner_callback_generates_litellm_alias_config_artifact(self):
-        base_model = get_active_model_config(ModelConfig.CAPABILITY_CHAT)
-        run = create_fine_tune_run(
-            payload={
-                "base_model_id": base_model.id,
-                "dataset_name": "财报基准集",
-                "dataset_version": "2026Q2",
-                "strategy": "lora",
-                "notes": "等待外部训练回写。",
-            }
-        )
-
-        response = self.client.post(
-            f"/api/ops/fine-tunes/{run.id}/callback",
-            data=json.dumps(
-                {
-                    "status": "succeeded",
-                    "deployment_endpoint": "http://127.0.0.1:9000/v1",
-                    "deployment_model_name": "finmodpro-ft-chat",
-                }
-            ),
-            content_type="application/json",
-            HTTP_X_FINE_TUNE_TOKEN=run.callback_token,
-        )
-
-        self.assertEqual(response.status_code, 200)
-        run.refresh_from_db()
-        artifact_manifest = run.artifact_manifest
-        self.assertEqual(artifact_manifest["litellm_alias"], "finmodpro-ft-chat")
-        config_path = artifact_manifest["litellm_config_path"]
-        self.assertTrue(Path(config_path).exists())
-        config_body = Path(config_path).read_text(encoding="utf-8")
-        self.assertIn("model_name: finmodpro-ft-chat", config_body)
-        self.assertIn("api_base: http://127.0.0.1:9000/v1", config_body)
 
     def test_runner_callback_is_idempotent_for_candidate_model_registration(self):
         base_model = get_active_model_config(ModelConfig.CAPABILITY_CHAT)
@@ -1724,351 +1658,6 @@ class FineTuneRunCallbackApiTests(TestCase):
         self.assertEqual(remote_payload["training_job"]["framework"], "llamafactory")
         self.assertEqual(remote_payload["callback"]["token_header"], "X-Fine-Tune-Token")
         self.assertTrue(remote_payload["callback"]["token"].startswith("ftcb_"))
-
-
-class LiteLLMGatewayAuditModelTests(TestCase):
-    def setUp(self):
-        self.client = Client()
-        seed_roles_and_permissions()
-
-        self.admin_user = User.objects.create_user(
-            username="audit-admin",
-            password="secret123",
-            email="audit-admin@example.com",
-        )
-        self.admin_user.groups.add(Group.objects.get(name=ROLE_ADMIN))
-        self.admin_access_token = generate_access_token(self.admin_user)
-
-    def test_model_config_list_includes_litellm_route_fields(self):
-        model = ModelConfig.objects.create(
-            name="chat-default",
-            capability=ModelConfig.CAPABILITY_CHAT,
-            provider=ModelConfig.PROVIDER_LITELLM,
-            model_name="chat-default",
-            endpoint="http://localhost:4000",
-            options={
-                "litellm": {
-                    "upstream_provider": "openai",
-                    "upstream_model": "gpt-4o",
-                    "fallback_aliases": ["chat-backup"],
-                    "weight": 1,
-                }
-            },
-            is_active=True,
-        )
-
-        response = self.client.get(
-            "/api/ops/model-configs/",
-            HTTP_AUTHORIZATION=f"Bearer {self.admin_access_token}",
-        )
-
-        row = next(
-            (item for item in response.json()["data"]["model_configs"] if item["id"] == model.id),
-            None,
-        )
-        self.assertIsNotNone(row, "Expected LiteLLM model config row not found in response")
-        self.assertEqual(row["alias"], "chat-default")
-        self.assertEqual(row["upstream_provider"], "openai")
-        self.assertEqual(row["upstream_model"], "gpt-4o")
-        self.assertEqual(row["fallback_aliases"], ["chat-backup"])
-        self.assertEqual(row["weight"], 1)
-        self.assertEqual(row["input_price_per_million"], 0)
-        self.assertEqual(row["output_price_per_million"], 0)
-
-    def test_model_config_list_includes_litellm_pricing_fields(self):
-        model = ModelConfig.objects.create(
-            name="chat-priced",
-            capability=ModelConfig.CAPABILITY_CHAT,
-            provider=ModelConfig.PROVIDER_LITELLM,
-            model_name="chat-priced",
-            endpoint="http://localhost:4000",
-            options={
-                "litellm": {
-                    "upstream_provider": "openai",
-                    "upstream_model": "gpt-4o-mini",
-                    "input_price_per_million": 0.15,
-                    "output_price_per_million": 0.6,
-                }
-            },
-            is_active=False,
-        )
-
-        response = self.client.get(
-            "/api/ops/model-configs/",
-            HTTP_AUTHORIZATION=f"Bearer {self.admin_access_token}",
-        )
-
-        row = next(
-            (item for item in response.json()["data"]["model_configs"] if item["id"] == model.id),
-            None,
-        )
-        self.assertIsNotNone(row, "Expected LiteLLM model config row not found in response")
-        self.assertEqual(row["input_price_per_million"], 0.15)
-        self.assertEqual(row["output_price_per_million"], 0.6)
-
-    def test_model_invocation_log_stage_constants_and_choices(self):
-        """STAGE_* constants must match their string values and STAGE_CHOICES must list all three."""
-        self.assertEqual(ModelInvocationLog.STAGE_ROUTING, "routing")
-        self.assertEqual(ModelInvocationLog.STAGE_FALLBACK, "fallback")
-        self.assertEqual(ModelInvocationLog.STAGE_DIRECT, "direct")
-
-        choice_values = [v for v, _ in ModelInvocationLog.STAGE_CHOICES]
-        self.assertIn("routing", choice_values)
-        self.assertIn("fallback", choice_values)
-        self.assertIn("direct", choice_values)
-        self.assertEqual(len(choice_values), 3)
-
-    def test_model_invocation_log_stage_stored_and_retrieved(self):
-        """A log created with a known stage constant round-trips correctly."""
-        model = ModelConfig.objects.create(
-            name="chat-stage-test",
-            capability=ModelConfig.CAPABILITY_CHAT,
-            provider=ModelConfig.PROVIDER_LITELLM,
-            model_name="gpt-4o",
-            endpoint="http://localhost:4000",
-        )
-        log = ModelInvocationLog.objects.create(
-            model_config=model,
-            capability=ModelConfig.CAPABILITY_CHAT,
-            provider=ModelConfig.PROVIDER_LITELLM,
-            alias="chat-stage-test",
-            stage=ModelInvocationLog.STAGE_FALLBACK,
-            status=ModelInvocationLog.STATUS_SUCCESS,
-            latency_ms=50,
-            request_tokens=5,
-            response_tokens=10,
-        )
-
-        fetched = ModelInvocationLog.objects.get(pk=log.pk)
-        self.assertEqual(fetched.stage, ModelInvocationLog.STAGE_FALLBACK)
-
-    def test_model_invocation_log_stage_defaults_to_blank(self):
-        """Omitting stage should produce an empty string (unclassified)."""
-        model = ModelConfig.objects.create(
-            name="chat-stage-blank",
-            capability=ModelConfig.CAPABILITY_CHAT,
-            provider=ModelConfig.PROVIDER_LITELLM,
-            model_name="gpt-4o",
-            endpoint="http://localhost:4000",
-        )
-        log = ModelInvocationLog.objects.create(
-            model_config=model,
-            capability=ModelConfig.CAPABILITY_CHAT,
-            provider=ModelConfig.PROVIDER_LITELLM,
-            alias="chat-stage-blank",
-            status=ModelInvocationLog.STATUS_SUCCESS,
-            latency_ms=10,
-            request_tokens=1,
-            response_tokens=2,
-        )
-        self.assertEqual(log.stage, "")
-
-    def test_model_invocation_log_ordering_most_recent_first(self):
-        """ModelInvocationLog Meta ordering must return newer records before older ones."""
-        model = ModelConfig.objects.create(
-            name="chat-order-test",
-            capability=ModelConfig.CAPABILITY_CHAT,
-            provider=ModelConfig.PROVIDER_LITELLM,
-            model_name="gpt-4o",
-            endpoint="http://localhost:4000",
-        )
-        first = ModelInvocationLog.objects.create(
-            model_config=model,
-            capability=ModelConfig.CAPABILITY_CHAT,
-            provider=ModelConfig.PROVIDER_LITELLM,
-            alias="order-a",
-            status=ModelInvocationLog.STATUS_SUCCESS,
-            latency_ms=10,
-            request_tokens=1,
-            response_tokens=1,
-        )
-        second = ModelInvocationLog.objects.create(
-            model_config=model,
-            capability=ModelConfig.CAPABILITY_CHAT,
-            provider=ModelConfig.PROVIDER_LITELLM,
-            alias="order-b",
-            status=ModelInvocationLog.STATUS_SUCCESS,
-            latency_ms=10,
-            request_tokens=1,
-            response_tokens=1,
-        )
-
-        ids = list(
-            ModelInvocationLog.objects.filter(pk__in=[first.pk, second.pk]).values_list("pk", flat=True)
-        )
-        self.assertEqual(ids[0], second.pk, "Most recent log should appear first")
-        self.assertEqual(ids[1], first.pk, "Oldest log should appear last")
-
-    def test_model_invocation_log_persists_trace_and_tokens(self):
-        model = ModelConfig.objects.create(
-            name="chat-invocation-test",
-            capability=ModelConfig.CAPABILITY_CHAT,
-            provider=ModelConfig.PROVIDER_LITELLM,
-            model_name="gpt-4o",
-            endpoint="http://localhost:4000",
-            is_active=True,
-        )
-        log = ModelInvocationLog.objects.create(
-            model_config=model,
-            capability=ModelConfig.CAPABILITY_CHAT,
-            provider=ModelConfig.PROVIDER_LITELLM,
-            alias="chat-default",
-            upstream_model="gpt-4o",
-            status=ModelInvocationLog.STATUS_SUCCESS,
-            latency_ms=420,
-            request_tokens=120,
-            response_tokens=220,
-            trace_id="trace-1",
-            request_id="request-1",
-        )
-
-        fetched = ModelInvocationLog.objects.get(pk=log.pk)
-        self.assertEqual(fetched.alias, "chat-default")
-        self.assertEqual(fetched.trace_id, "trace-1")
-        self.assertEqual(fetched.request_id, "request-1")
-        self.assertEqual(fetched.request_tokens, 120)
-        self.assertEqual(fetched.response_tokens, 220)
-        self.assertEqual(fetched.latency_ms, 420)
-        self.assertEqual(fetched.status, ModelInvocationLog.STATUS_SUCCESS)
-        self.assertEqual(fetched.capability, ModelConfig.CAPABILITY_CHAT)
-        self.assertEqual(fetched.provider, ModelConfig.PROVIDER_LITELLM)
-        self.assertEqual(fetched.upstream_model, "gpt-4o")
-        self.assertIsNotNone(fetched.created_at)
-
-    def test_model_invocation_log_survives_model_config_deletion(self):
-        model = ModelConfig.objects.create(
-            name="chat-to-delete",
-            capability=ModelConfig.CAPABILITY_CHAT,
-            provider=ModelConfig.PROVIDER_LITELLM,
-            model_name="gpt-4o",
-            endpoint="http://localhost:4000",
-            is_active=False,
-        )
-        log = ModelInvocationLog.objects.create(
-            model_config=model,
-            capability=ModelConfig.CAPABILITY_CHAT,
-            provider=ModelConfig.PROVIDER_LITELLM,
-            alias="chat-to-delete",
-            status=ModelInvocationLog.STATUS_SUCCESS,
-            latency_ms=100,
-            request_tokens=10,
-            response_tokens=20,
-            trace_id="trace-del",
-        )
-
-        model.delete()
-
-        log.refresh_from_db()
-        self.assertIsNone(log.model_config)
-        self.assertEqual(log.trace_id, "trace-del")
-        self.assertEqual(log.alias, "chat-to-delete")
-
-    def test_litellm_sync_event_status_constants(self):
-        self.assertEqual(LiteLLMSyncEvent.STATUS_SUCCESS, "success")
-        self.assertEqual(LiteLLMSyncEvent.STATUS_FAILED, "failed")
-
-    def test_litellm_sync_event_creates_with_defaults(self):
-        event = LiteLLMSyncEvent.objects.create(status=LiteLLMSyncEvent.STATUS_SUCCESS)
-
-        self.assertEqual(event.status, "success")
-        self.assertEqual(event.message, "")
-        self.assertEqual(event.checksum, "")
-        self.assertIsNone(event.triggered_by)
-        self.assertIsNotNone(event.created_at)
-
-    def test_litellm_sync_event_persists_all_fields(self):
-        event = LiteLLMSyncEvent.objects.create(
-            status=LiteLLMSyncEvent.STATUS_FAILED,
-            triggered_by=self.admin_user,
-            message="upstream timeout",
-            checksum="abc123def456",
-        )
-
-        fetched = LiteLLMSyncEvent.objects.get(pk=event.pk)
-        self.assertEqual(fetched.status, "failed")
-        self.assertEqual(fetched.triggered_by, self.admin_user)
-        self.assertEqual(fetched.message, "upstream timeout")
-        self.assertEqual(fetched.checksum, "abc123def456")
-
-    def test_litellm_sync_event_ordering_most_recent_first(self):
-        first = LiteLLMSyncEvent.objects.create(status=LiteLLMSyncEvent.STATUS_SUCCESS)
-        second = LiteLLMSyncEvent.objects.create(status=LiteLLMSyncEvent.STATUS_FAILED)
-
-        ids = list(LiteLLMSyncEvent.objects.filter(pk__in=[first.pk, second.pk]).values_list("pk", flat=True))
-        self.assertEqual(ids[0], second.pk)
-        self.assertEqual(ids[1], first.pk)
-
-    def test_litellm_sync_event_triggered_by_null_on_user_delete(self):
-        temp_user = User.objects.create_user(
-            username="temp-sync-user",
-            password="secret",
-            email="temp-sync@example.com",
-        )
-        event = LiteLLMSyncEvent.objects.create(
-            status=LiteLLMSyncEvent.STATUS_SUCCESS,
-            triggered_by=temp_user,
-        )
-
-        temp_user.delete()
-
-        event.refresh_from_db()
-        self.assertIsNone(event.triggered_by)
-
-    def test_fallback_aliases_non_list_stored_value_serializes_as_empty_list(self):
-        """A non-list value stored in options.litellm.fallback_aliases must be coerced to []."""
-        model = ModelConfig.objects.create(
-            name="chat-bad-aliases",
-            capability=ModelConfig.CAPABILITY_CHAT,
-            provider=ModelConfig.PROVIDER_LITELLM,
-            model_name="chat-bad-aliases",
-            endpoint="http://localhost:4000",
-            options={"litellm": {"fallback_aliases": "not-a-list"}},
-            is_active=False,
-        )
-
-        response = self.client.get(
-            "/api/ops/model-configs/",
-            HTTP_AUTHORIZATION=f"Bearer {self.admin_access_token}",
-        )
-
-        self.assertEqual(response.status_code, 200)
-        row = next(
-            (item for item in response.json()["data"]["model_configs"] if item["id"] == model.id),
-            None,
-        )
-        self.assertIsNotNone(row, "Expected model config row not found in response")
-        self.assertEqual(row["fallback_aliases"], [])
-
-    def test_non_litellm_model_serializer_compat_fields_have_defaults(self):
-        """Non-LiteLLM configs expose empty/default values for the LiteLLM compat fields."""
-        model = ModelConfig.objects.create(
-            name="ollama-compat-defaults",
-            capability=ModelConfig.CAPABILITY_CHAT,
-            provider=ModelConfig.PROVIDER_OLLAMA,
-            model_name="qwen2.5:7b",
-            endpoint="http://localhost:11434",
-            options={},
-            is_active=False,
-        )
-
-        response = self.client.get(
-            "/api/ops/model-configs/",
-            HTTP_AUTHORIZATION=f"Bearer {self.admin_access_token}",
-        )
-
-        self.assertEqual(response.status_code, 200)
-        row = next(
-            (item for item in response.json()["data"]["model_configs"] if item["id"] == model.id),
-            None,
-        )
-        self.assertIsNotNone(row, "Expected model config row not found in response")
-        self.assertEqual(row["alias"], "qwen2.5:7b")
-        self.assertEqual(row["upstream_provider"], "")
-        self.assertEqual(row["upstream_model"], "")
-        self.assertEqual(row["fallback_aliases"], [])
-        self.assertEqual(row["weight"], 1)
-
-
 class ModelInvocationLogIndexTests(TestCase):
     """Pin the composite indexes declared on ModelInvocationLog.Meta."""
 
@@ -2101,652 +1690,21 @@ class ModelInvocationLogIndexTests(TestCase):
             expected.issubset(self._index_names()),
             f"Missing indexes: {expected - self._index_names()}",
         )
-
-
-class LiteLLMGatewayCommandServiceTests(TestCase):
-    def setUp(self):
-        seed_roles_and_permissions()
-        self.admin_user = User.objects.create_user(
-            username="cmd-admin",
-            password="secret123",
-            email="cmd-admin@example.com",
-        )
-        self.admin_user.groups.add(Group.objects.get(name=ROLE_ADMIN))
-
-    def _get_active_source_model(self, capability):
-        return (
-            ModelConfig.objects.filter(capability=capability, is_active=True)
-            .exclude(provider=ModelConfig.PROVIDER_LITELLM)
-            .order_by("-updated_at", "-id")
-            .first()
-        )
-
-    def test_migrate_to_litellm_creates_active_chat_and_embedding_routes(self):
-        # Seed data (from migration 0001) provides default-chat (Ollama, active)
-        # and default-embedding (Ollama, active).
-        result = migrate_active_configs_to_litellm(triggered_by=self.admin_user)
-
-        self.assertEqual(result["migrated_capabilities"], ["chat", "embedding", "rerank"])
-        self.assertTrue(ModelConfig.objects.filter(provider="litellm", capability="chat", is_active=True).exists())
-        self.assertTrue(ModelConfig.objects.filter(provider="litellm", capability="rerank", is_active=True).exists())
-        self.assertTrue(LiteLLMSyncEvent.objects.filter(status="success").exists())
-
-    def test_migrate_to_litellm_deactivates_source_models_and_activates_routes(self):
-        chat_model = self._get_active_source_model(ModelConfig.CAPABILITY_CHAT)
-        embedding_model = self._get_active_source_model(ModelConfig.CAPABILITY_EMBEDDING)
-        rerank_model = self._get_active_source_model(ModelConfig.CAPABILITY_RERANK)
-
-        migrate_active_configs_to_litellm(triggered_by=self.admin_user)
-
-        chat_model.refresh_from_db()
-        embedding_model.refresh_from_db()
-        rerank_model.refresh_from_db()
-        self.assertFalse(chat_model.is_active)
-        self.assertFalse(embedding_model.is_active)
-        self.assertFalse(rerank_model.is_active)
-        self.assertTrue(ModelConfig.objects.filter(provider="litellm", capability="chat", is_active=True).exists())
-
-    def test_migrate_to_litellm_copies_source_chat_options_and_upstream_metadata(self):
-        active_chat = self._get_active_source_model(ModelConfig.CAPABILITY_CHAT)
-        active_chat.provider = ModelConfig.PROVIDER_DEEPSEEK
-        active_chat.name = "deepseek-primary"
-        active_chat.model_name = "deepseek-chat"
-        active_chat.endpoint = "https://api.deepseek.com/v1"
-        active_chat.options = {
-            "api_key": "sk-deepseek",
-            "temperature": 0.2,
-            "max_tokens": 512,
-        }
-        active_chat.save()
-
-        migrate_active_configs_to_litellm(triggered_by=self.admin_user)
-
-        route = ModelConfig.objects.get(provider="litellm", capability="chat", is_active=True)
-        self.assertEqual(route.endpoint, settings.LITELLM_GATEWAY_URL)
-        self.assertEqual(route.options["api_key"], "sk-deepseek")
-        self.assertEqual(route.options["temperature"], 0.2)
-        self.assertEqual(route.options["max_tokens"], 512)
-        self.assertEqual(route.options["api_base"], "https://api.deepseek.com/v1")
-        self.assertEqual(route.options["litellm"]["upstream_provider"], "deepseek")
-        self.assertEqual(route.options["litellm"]["upstream_model"], "deepseek/deepseek-chat")
-
-    def test_migrate_to_litellm_reuses_existing_active_litellm_route_without_double_wrapping(self):
-        active_chat = self._get_active_source_model(ModelConfig.CAPABILITY_CHAT)
-        route = ModelConfig.objects.create(
-            name="litellm-existing-chat",
-            capability=ModelConfig.CAPABILITY_CHAT,
-            provider=ModelConfig.PROVIDER_LITELLM,
-            model_name=active_chat.model_name,
-            endpoint=settings.LITELLM_GATEWAY_URL,
-            options={
-                "api_base": active_chat.endpoint,
-                "litellm": {
-                    "upstream_provider": active_chat.provider,
-                    "upstream_model": active_chat.model_name,
-                },
-            },
-            is_active=True,
-        )
-
-        migrate_active_configs_to_litellm(triggered_by=self.admin_user)
-
-        route.refresh_from_db()
-        self.assertTrue(route.is_active)
-        self.assertFalse(
-            ModelConfig.objects.filter(
-                capability=ModelConfig.CAPABILITY_CHAT,
-                provider=ModelConfig.PROVIDER_LITELLM,
-                name="litellm-litellm-existing-chat",
-            ).exists()
-        )
-
-    def test_migrate_to_litellm_repairs_incomplete_active_litellm_route_from_original_source(self):
-        source_chat = self._get_active_source_model(ModelConfig.CAPABILITY_CHAT)
-        source_chat.provider = ModelConfig.PROVIDER_DEEPSEEK
-        source_chat.name = "deepseek-primary"
-        source_chat.model_name = "deepseek-chat"
-        source_chat.endpoint = "https://api.deepseek.com/v1"
-        source_chat.options = {
-            "api_key": "sk-deepseek",
-            "temperature": 0.2,
-        }
-        source_chat.save()
-
-        broken_route = ModelConfig.objects.create(
-            name="litellm-deepseek-primary",
-            capability=ModelConfig.CAPABILITY_CHAT,
-            provider=ModelConfig.PROVIDER_LITELLM,
-            model_name="deepseek-chat",
-            endpoint=settings.LITELLM_GATEWAY_URL,
-            options={},
-            is_active=True,
-        )
-
-        migrate_active_configs_to_litellm(triggered_by=self.admin_user)
-
-        broken_route.refresh_from_db()
-        self.assertTrue(broken_route.is_active)
-        self.assertEqual(broken_route.options["api_key"], "sk-deepseek")
-        self.assertFalse(
-            ModelConfig.objects.filter(
-                capability=ModelConfig.CAPABILITY_CHAT,
-                provider=ModelConfig.PROVIDER_LITELLM,
-                name="litellm-litellm-deepseek-primary",
-            ).exists()
-        )
-
-    def test_migrate_to_litellm_maps_dashscope_embedding_to_openai_compatible_upstream(self):
-        active_embedding = self._get_active_source_model(ModelConfig.CAPABILITY_EMBEDDING)
-        active_embedding.provider = ModelConfig.PROVIDER_DASHSCOPE
-        active_embedding.name = "dashscope-embed"
-        active_embedding.model_name = "text-embedding-v4"
-        active_embedding.endpoint = "https://dashscope.aliyuncs.com/compatible-mode/v1"
-        active_embedding.options = {"api_key": "sk-dashscope"}
-        active_embedding.save()
-
-        migrate_active_configs_to_litellm(triggered_by=self.admin_user)
-
-        route = ModelConfig.objects.get(provider="litellm", capability="embedding", is_active=True)
-        self.assertEqual(route.options["litellm"]["upstream_provider"], "dashscope")
-        self.assertEqual(route.options["litellm"]["upstream_model"], "openai/text-embedding-v4")
-
-    def test_migrate_to_litellm_repairs_stale_dashscope_embedding_prefix_on_existing_route(self):
-        route = ModelConfig.objects.create(
-            name="litellm-existing-embed",
-            capability=ModelConfig.CAPABILITY_EMBEDDING,
-            provider=ModelConfig.PROVIDER_LITELLM,
-            model_name="text-embedding-v4",
-            endpoint=settings.LITELLM_GATEWAY_URL,
-            options={
-                "api_key": "sk-dashscope",
-                "api_base": "https://dashscope.aliyuncs.com/compatible-mode/v1",
-                "litellm": {
-                    "upstream_provider": "dashscope",
-                    "upstream_model": "dashscope/text-embedding-v4",
-                },
-            },
-            is_active=True,
-        )
-
-        migrate_active_configs_to_litellm(triggered_by=self.admin_user)
-
-        route.refresh_from_db()
-        self.assertEqual(
-            route.options["litellm"]["upstream_model"],
-            "openai/text-embedding-v4",
-        )
-
-    def test_migrate_to_litellm_creates_active_rerank_route(self):
-        active_rerank = self._get_active_source_model(ModelConfig.CAPABILITY_RERANK)
-        active_rerank.provider = ModelConfig.PROVIDER_DASHSCOPE
-        active_rerank.name = "dashscope-rerank"
-        active_rerank.model_name = "qwen3-vl-rerank"
-        active_rerank.endpoint = "https://dashscope.aliyuncs.com/api/v1/services/rerank/text-rerank/text-rerank"
-        active_rerank.options = {"api_key": "sk-dashscope"}
-        active_rerank.save()
-
-        result = migrate_active_configs_to_litellm(triggered_by=self.admin_user)
-
-        self.assertIn(ModelConfig.CAPABILITY_RERANK, result["migrated_capabilities"])
-        route = ModelConfig.objects.get(
-            provider=ModelConfig.PROVIDER_LITELLM,
-            capability=ModelConfig.CAPABILITY_RERANK,
-            is_active=True,
-        )
-        self.assertEqual(route.model_name, "qwen3-vl-rerank")
-        self.assertEqual(
-            route.options["litellm"]["upstream_model"],
-            "openai/qwen3-vl-rerank",
-        )
-
-    def test_migrate_to_litellm_prunes_stale_nested_routes_when_canonical_route_exists(self):
-        active_embedding = self._get_active_source_model(ModelConfig.CAPABILITY_EMBEDDING)
-        active_embedding.provider = ModelConfig.PROVIDER_DASHSCOPE
-        active_embedding.name = "dashscope-embed-primary"
-        active_embedding.model_name = "text-embedding-v4"
-        active_embedding.endpoint = "https://dashscope.aliyuncs.com/compatible-mode/v1"
-        active_embedding.options = {"api_key": "sk-dashscope"}
-        active_embedding.save()
-
-        canonical_route = ModelConfig.objects.create(
-            name="litellm-dashscope-embed-primary",
-            capability=ModelConfig.CAPABILITY_EMBEDDING,
-            provider=ModelConfig.PROVIDER_LITELLM,
-            model_name="text-embedding-v4",
-            endpoint=settings.LITELLM_GATEWAY_URL,
-            options={
-                "api_key": "sk-dashscope",
-                "api_base": "https://dashscope.aliyuncs.com/compatible-mode/v1",
-                "litellm": {
-                    "upstream_provider": "dashscope",
-                    "upstream_model": "openai/text-embedding-v4",
-                },
-            },
-            is_active=True,
-        )
-        stale_nested_route = ModelConfig.objects.create(
-            name="litellm-litellm-dashscope-embed-primary",
-            capability=ModelConfig.CAPABILITY_EMBEDDING,
-            provider=ModelConfig.PROVIDER_LITELLM,
-            model_name="text-embedding-v4",
-            endpoint=settings.LITELLM_GATEWAY_URL,
-            options={},
-            is_active=False,
-        )
-
-        migrate_active_configs_to_litellm(triggered_by=self.admin_user)
-
-        canonical_route.refresh_from_db()
-        self.assertTrue(canonical_route.is_active)
-        self.assertFalse(ModelConfig.objects.filter(id=stale_nested_route.id).exists())
-
-    @patch("urllib.request.urlopen")
-    def test_litellm_provider_records_successful_chat_invocation(self, mock_urlopen):
-        mock_urlopen.return_value = _FakeHttpResponse({
-            "choices": [{"message": {"content": "ok"}}],
-            "usage": {"prompt_tokens": 11, "completion_tokens": 7},
-        })
-        model_config = ModelConfig.objects.create(
-            name="litellm-chat-test",
-            capability=ModelConfig.CAPABILITY_CHAT,
-            provider=ModelConfig.PROVIDER_LITELLM,
-            model_name="chat-default",
-            endpoint="http://localhost:4000",
-            options={"api_key": "sk-test"},
-            is_active=True,
-        )
-        provider = LiteLLMChatProvider(
-            endpoint="http://localhost:4000",
-            model_name="chat-default",
-            options={"api_key": "sk-test"},
-            model_config=model_config,
-        )
-
-        provider.chat(messages=[{"role": "user", "content": "hi"}], trace_id="trace-1", request_id="request-1")
-
-        log = ModelInvocationLog.objects.get(trace_id="trace-1")
-        self.assertEqual(log.request_tokens, 11)
-        self.assertEqual(log.response_tokens, 7)
-        self.assertEqual(log.status, "success")
-        self.assertEqual(log.request_id, "request-1")
-        self.assertEqual(log.model_config, model_config)
-
-    @patch("urllib.request.urlopen")
-    @override_settings(LITELLM_MASTER_KEY="master-key")
-    def test_litellm_provider_uses_configured_gateway_master_key(self, mock_urlopen):
-        mock_urlopen.return_value = _FakeHttpResponse({
-            "choices": [{"message": {"content": "ok"}}],
-            "usage": {"prompt_tokens": 1, "completion_tokens": 1},
-        })
-        provider = LiteLLMChatProvider(
-            endpoint="http://localhost:4000",
-            model_name="chat-default",
-            options={"api_key": "upstream-key"},
-        )
-
-        provider.chat(messages=[{"role": "user", "content": "hi"}])
-
-        request_obj = mock_urlopen.call_args.args[0]
-        self.assertEqual(request_obj.headers["Authorization"], "Bearer master-key")
-
-    @patch("urllib.request.urlopen")
-    def test_litellm_provider_records_failed_chat_invocation(self, mock_urlopen):
-        mock_urlopen.side_effect = HTTPError(
-            url="http://localhost:4000/v1/chat/completions",
-            code=500,
-            msg="Internal Server Error",
-            hdrs={},
-            fp=BytesIO(b"server error"),
-        )
-        model_config = ModelConfig.objects.create(
-            name="litellm-chat-fail-test",
-            capability=ModelConfig.CAPABILITY_CHAT,
-            provider=ModelConfig.PROVIDER_LITELLM,
-            model_name="chat-fail",
-            endpoint="http://localhost:4000",
-            options={"api_key": "sk-test"},
-            is_active=False,
-        )
-        provider = LiteLLMChatProvider(
-            endpoint="http://localhost:4000",
-            model_name="chat-fail",
-            options={"api_key": "sk-test"},
-            model_config=model_config,
-        )
-
-        with self.assertRaises(Exception):
-            provider.chat(messages=[{"role": "user", "content": "hi"}], trace_id="trace-fail", request_id="req-fail")
-
-        log = ModelInvocationLog.objects.get(trace_id="trace-fail")
-        self.assertEqual(log.status, "failed")
-        self.assertEqual(log.model_config, model_config)
-
-    @patch("urllib.request.urlopen")
-    def test_litellm_embedding_provider_records_successful_invocation(self, mock_urlopen):
-        mock_urlopen.return_value = _FakeHttpResponse({
-            "data": [{"embedding": [0.1, 0.2, 0.3]}],
-            "usage": {"prompt_tokens": 5, "total_tokens": 5},
-        })
-        model_config = ModelConfig.objects.create(
-            name="litellm-embed-test",
-            capability=ModelConfig.CAPABILITY_EMBEDDING,
-            provider=ModelConfig.PROVIDER_LITELLM,
-            model_name="embed-default",
-            endpoint="http://localhost:4000",
-            options={"api_key": "sk-test"},
-            is_active=True,
-        )
-        provider = LiteLLMEmbeddingProvider(
-            endpoint="http://localhost:4000",
-            model_name="embed-default",
-            options={"api_key": "sk-test"},
-            model_config=model_config,
-        )
-
-        provider.embed(texts=["hello world"], trace_id="embed-trace-1", request_id="embed-req-1")
-
-        log = ModelInvocationLog.objects.get(trace_id="embed-trace-1")
-        self.assertEqual(log.capability, "embedding")
-        self.assertEqual(log.request_tokens, 5)
-        self.assertEqual(log.response_tokens, 0)
-        self.assertEqual(log.status, "success")
-        self.assertEqual(log.request_id, "embed-req-1")
-        self.assertEqual(log.model_config, model_config)
-
-    @patch("urllib.request.urlopen")
-    def test_litellm_embedding_provider_sends_float_encoding_format(self, mock_urlopen):
-        mock_urlopen.return_value = _FakeHttpResponse({
-            "data": [{"embedding": [0.1, 0.2, 0.3]}],
-            "usage": {"prompt_tokens": 5, "total_tokens": 5},
-        })
-        provider = LiteLLMEmbeddingProvider(
-            endpoint="http://localhost:4000",
-            model_name="embed-default",
-            options={"api_key": "sk-test"},
-        )
-
-        provider.embed(texts=["hello world"])
-
-        request_obj = mock_urlopen.call_args.args[0]
-        payload = json.loads(request_obj.data.decode("utf-8"))
-        self.assertEqual(payload["encoding_format"], "float")
-
-    @patch("urllib.request.urlopen")
-    def test_litellm_embedding_provider_posts_multiple_texts_in_single_request(self, mock_urlopen):
-        mock_urlopen.return_value = _FakeHttpResponse({
-            "data": [
-                {"embedding": [0.1, 0.2, 0.3]},
-                {"embedding": [0.4, 0.5, 0.6]},
-            ],
-            "usage": {"prompt_tokens": 8, "total_tokens": 8},
-        })
-        provider = LiteLLMEmbeddingProvider(
-            endpoint="http://localhost:4000",
-            model_name="embed-default",
-            options={"api_key": "sk-test"},
-        )
-
-        vectors = provider.embed(texts=["hello", "world"])
-
-        self.assertEqual(mock_urlopen.call_count, 1)
-        request_obj = mock_urlopen.call_args.args[0]
-        payload = json.loads(request_obj.data.decode("utf-8"))
-        self.assertEqual(payload["input"], ["hello", "world"])
-        self.assertEqual(vectors, [[0.1, 0.2, 0.3], [0.4, 0.5, 0.6]])
-
-    @patch("urllib.request.urlopen")
-    def test_litellm_embedding_provider_retries_transient_timeout(self, mock_urlopen):
-        mock_urlopen.side_effect = [
-            TimeoutError("timed out"),
-            _FakeHttpResponse({
-                "data": [{"embedding": [0.1, 0.2, 0.3]}],
-                "usage": {"prompt_tokens": 5, "total_tokens": 5},
-            }),
-        ]
-        provider = LiteLLMEmbeddingProvider(
-            endpoint="http://localhost:4000",
-            model_name="embed-default",
-            options={"api_key": "sk-test"},
-        )
-
-        vectors = provider.embed(texts=["hello"])
-
-        self.assertEqual(vectors, [[0.1, 0.2, 0.3]])
-        self.assertEqual(mock_urlopen.call_count, 2)
-
-    @patch("urllib.request.urlopen")
-    def test_litellm_embedding_provider_retries_double_transient_timeout(self, mock_urlopen):
-        mock_urlopen.side_effect = [
-            TimeoutError("timed out"),
-            TimeoutError("timed out again"),
-            _FakeHttpResponse({
-                "data": [{"embedding": [0.1, 0.2, 0.3]}],
-                "usage": {"prompt_tokens": 5, "total_tokens": 5},
-            }),
-        ]
-        provider = LiteLLMEmbeddingProvider(
-            endpoint="http://localhost:4000",
-            model_name="embed-default",
-            options={"api_key": "sk-test"},
-        )
-
-        vectors = provider.embed(texts=["hello"])
-
-        self.assertEqual(vectors, [[0.1, 0.2, 0.3]])
-        self.assertEqual(mock_urlopen.call_count, 3)
-
-    @patch("urllib.request.urlopen")
-    def test_litellm_embedding_provider_records_failed_invocation(self, mock_urlopen):
-        mock_urlopen.side_effect = HTTPError(
-            url="http://localhost:4000/v1/embeddings",
-            code=429,
-            msg="Too Many Requests",
-            hdrs={"Retry-After": "5"},
-            fp=BytesIO(b"rate limited"),
-        )
-        model_config = ModelConfig.objects.create(
-            name="litellm-embed-fail-test",
-            capability=ModelConfig.CAPABILITY_EMBEDDING,
-            provider=ModelConfig.PROVIDER_LITELLM,
-            model_name="embed-fail",
-            endpoint="http://localhost:4000",
-            options={"api_key": "sk-test"},
-            is_active=False,
-        )
-        provider = LiteLLMEmbeddingProvider(
-            endpoint="http://localhost:4000",
-            model_name="embed-fail",
-            options={"api_key": "sk-test"},
-            model_config=model_config,
-        )
-
-        with self.assertRaises(Exception):
-            provider.embed(texts=["hi"], trace_id="embed-fail-trace", request_id="embed-fail-req")
-
-        log = ModelInvocationLog.objects.get(trace_id="embed-fail-trace")
-        self.assertEqual(log.status, "failed")
-        self.assertEqual(log.model_config, model_config)
-
-    @patch("urllib.request.urlopen")
-    def test_get_rerank_provider_supports_active_litellm_route(self, mock_urlopen):
-        mock_urlopen.return_value = _FakeHttpResponse({
-            "results": [
-                {"index": 1, "relevance_score": 0.91},
-                {"index": 0, "relevance_score": 0.55},
-            ],
-        })
-        ModelConfig.objects.filter(capability=ModelConfig.CAPABILITY_RERANK).update(is_active=False)
-        ModelConfig.objects.create(
-            name="litellm-rerank-test",
-            capability=ModelConfig.CAPABILITY_RERANK,
-            provider=ModelConfig.PROVIDER_LITELLM,
-            model_name="rerank-default",
-            endpoint="http://localhost:4000",
-            options={
-                "api_key": "sk-test",
-                "litellm": {"upstream_model": "openai/qwen-rerank"},
-            },
-            is_active=True,
-        )
-
-        provider = get_rerank_provider()
-        result = provider.rerank(
-            query="capital of france",
-            documents=["Berlin is in Germany.", "Paris is in France."],
-            top_n=1,
-        )
-
-        self.assertEqual(result, [{"index": 1, "relevance_score": 0.91}, {"index": 0, "relevance_score": 0.55}])
-        request_obj = mock_urlopen.call_args.args[0]
-        self.assertTrue(request_obj.full_url.endswith("/v1/rerank"))
-
-    @patch("urllib.request.urlopen")
-    def test_litellm_chat_provider_records_distinct_alias_and_upstream_model(self, mock_urlopen):
-        """alias is the route name; upstream_model is resolved from options.litellm.upstream_model."""
-        mock_urlopen.return_value = _FakeHttpResponse({
-            "choices": [{"message": {"content": "hello"}}],
-            "usage": {"prompt_tokens": 5, "completion_tokens": 3},
-        })
-        model_config = ModelConfig.objects.create(
-            name="litellm-route-alias-test",
-            capability=ModelConfig.CAPABILITY_CHAT,
-            provider=ModelConfig.PROVIDER_LITELLM,
-            model_name="my-route-alias",
-            endpoint="http://localhost:4000",
-            options={
-                "api_key": "sk-test",
-                "litellm": {"upstream_model": "gpt-4o"},
-            },
-            is_active=True,
-        )
-        provider = LiteLLMChatProvider(
-            endpoint="http://localhost:4000",
-            model_name="my-route-alias",
-            options={"api_key": "sk-test", "litellm": {"upstream_model": "gpt-4o"}},
-            model_config=model_config,
-        )
-
-        provider.chat(messages=[{"role": "user", "content": "hi"}], trace_id="alias-trace", request_id="alias-req")
-
-        log = ModelInvocationLog.objects.get(trace_id="alias-trace")
-        self.assertEqual(log.alias, "my-route-alias")
-        self.assertEqual(log.upstream_model, "gpt-4o")
-        self.assertEqual(log.status, "success")
-
-    @patch("urllib.request.urlopen")
-    def test_litellm_embedding_provider_records_distinct_alias_and_upstream_model(self, mock_urlopen):
-        """alias is the route name; upstream_model is resolved from options.litellm.upstream_model for embeddings."""
-        mock_urlopen.return_value = _FakeHttpResponse({
-            "data": [{"embedding": [0.1, 0.2, 0.3]}],
-            "usage": {"prompt_tokens": 4, "total_tokens": 4},
-        })
-        model_config = ModelConfig.objects.create(
-            name="litellm-embed-alias-test",
-            capability=ModelConfig.CAPABILITY_EMBEDDING,
-            provider=ModelConfig.PROVIDER_LITELLM,
-            model_name="my-embed-alias",
-            endpoint="http://localhost:4000",
-            options={
-                "api_key": "sk-test",
-                "litellm": {"upstream_model": "text-embedding-3-small"},
-            },
-            is_active=True,
-        )
-        provider = LiteLLMEmbeddingProvider(
-            endpoint="http://localhost:4000",
-            model_name="my-embed-alias",
-            options={"api_key": "sk-test", "litellm": {"upstream_model": "text-embedding-3-small"}},
-            model_config=model_config,
-        )
-
-        provider.embed(texts=["hello"], trace_id="embed-alias-trace", request_id="embed-alias-req")
-
-        log = ModelInvocationLog.objects.get(trace_id="embed-alias-trace")
-        self.assertEqual(log.alias, "my-embed-alias")
-        self.assertEqual(log.upstream_model, "text-embedding-3-small")
-        self.assertEqual(log.capability, "embedding")
-        self.assertEqual(log.status, "success")
-
-    @patch("urllib.request.urlopen")
-    def test_litellm_chat_provider_does_not_break_on_logging_failure(self, mock_urlopen):
-        """A DB error during invocation logging must not break the successful response."""
-        mock_urlopen.return_value = _FakeHttpResponse({
-            "choices": [{"message": {"content": "fine"}}],
-            "usage": {"prompt_tokens": 2, "completion_tokens": 1},
-        })
-        model_config = ModelConfig.objects.create(
-            name="litellm-log-guard-test",
-            capability=ModelConfig.CAPABILITY_CHAT,
-            provider=ModelConfig.PROVIDER_LITELLM,
-            model_name="guard-route",
-            endpoint="http://localhost:4000",
-            options={"api_key": "sk-test"},
-            is_active=True,
-        )
-        provider = LiteLLMChatProvider(
-            endpoint="http://localhost:4000",
-            model_name="guard-route",
-            options={"api_key": "sk-test"},
-            model_config=model_config,
-        )
-
-        with patch("llm.services.providers.litellm_provider.record_model_invocation", side_effect=Exception("db error")):
-            result = provider.chat(messages=[{"role": "user", "content": "hi"}])
-
-        self.assertEqual(result, "fine")
-
-    @patch("urllib.request.urlopen")
-    def test_unsaved_model_config_skips_invocation_logging_entirely(self, mock_urlopen):
-        """An unsaved ModelConfig (pk=None) must never call record_model_invocation."""
-        mock_urlopen.return_value = _FakeHttpResponse({
-            "choices": [{"message": {"content": "ok"}}],
-            "usage": {"prompt_tokens": 5, "completion_tokens": 3},
-        })
-        unsaved_config = ModelConfig(
-            name="connection-test-unsaved",
-            capability=ModelConfig.CAPABILITY_CHAT,
-            provider=ModelConfig.PROVIDER_LITELLM,
-            model_name="test-route",
-            endpoint="http://localhost:4000",
-            options={"api_key": "sk-test"},
-        )
-        self.assertIsNone(unsaved_config.pk, "ModelConfig must be unsaved (no pk)")
-        provider = LiteLLMChatProvider(
-            endpoint="http://localhost:4000",
-            model_name="test-route",
-            options={"api_key": "sk-test"},
-            model_config=unsaved_config,
-        )
-
-        with patch("llm.services.providers.litellm_provider.record_model_invocation") as mock_log:
-            provider.chat(messages=[{"role": "user", "content": "ping"}])
-
-        mock_log.assert_not_called()
-
-
-# ---------------------------------------------------------------------------
-# LiteLLM Gateway Query Service Tests
-# ---------------------------------------------------------------------------
-
 class GatewayQueryServiceTests(TestCase):
-    """Service-level tests for litellm_gateway_query_service."""
+    """Service-level tests for model_usage_query_service."""
 
     def setUp(self):
         self.model_config = ModelConfig.objects.create(
             name="gw-chat",
             capability=ModelConfig.CAPABILITY_CHAT,
-            provider=ModelConfig.PROVIDER_LITELLM,
+            provider=ModelConfig.PROVIDER_DEEPSEEK,
             model_name="gw-chat",
             endpoint="http://localhost:4000",
             is_active=True,
+            input_price_per_million=5.0,
+            output_price_per_million=15.0,
             options={
                 "api_key": "sk-test",
-                "litellm": {
-                    "upstream_provider": "openai",
-                    "upstream_model": "gpt-4o",
-                    "input_price_per_million": 5.0,
-                    "output_price_per_million": 15.0,
-                },
             },
         )
 
@@ -2765,7 +1723,7 @@ class GatewayQueryServiceTests(TestCase):
         return ModelInvocationLog.objects.create(**defaults)
 
     def test_summary_returns_gateway_health_and_traffic(self):
-        from llm.services.litellm_gateway_query_service import get_gateway_summary
+        from llm.services.model_usage_query_service import get_gateway_summary
 
         self._make_log()
         self._make_log(status=ModelInvocationLog.STATUS_FAILED, error_code="500")
@@ -2774,7 +1732,6 @@ class GatewayQueryServiceTests(TestCase):
 
         self.assertIn("gateway", result)
         self.assertIn("status", result["gateway"])
-        self.assertIn("recent_sync", result)
         self.assertIn("traffic", result)
         self.assertGreaterEqual(result["traffic"]["request_count"], 2)
         self.assertGreaterEqual(result["traffic"]["failed_count"], 1)
@@ -2782,25 +1739,8 @@ class GatewayQueryServiceTests(TestCase):
         self.assertIn("top_models", result)
         self.assertIn("recent_errors", result)
 
-    def test_summary_includes_recent_sync_info(self):
-        from llm.services.litellm_gateway_query_service import get_gateway_summary
-
-        LiteLLMSyncEvent.objects.create(status=LiteLLMSyncEvent.STATUS_SUCCESS, message="ok")
-
-        result = get_gateway_summary()
-
-        self.assertIsNotNone(result["recent_sync"])
-        self.assertEqual(result["recent_sync"]["status"], "success")
-
-    def test_summary_recent_sync_is_none_when_no_events(self):
-        from llm.services.litellm_gateway_query_service import get_gateway_summary
-
-        result = get_gateway_summary()
-
-        self.assertIsNone(result["recent_sync"])
-
     def test_summary_top_models_ordered_by_count(self):
-        from llm.services.litellm_gateway_query_service import get_gateway_summary
+        from llm.services.model_usage_query_service import get_gateway_summary
 
         for _ in range(3):
             self._make_log(alias="model-a")
@@ -2812,7 +1752,7 @@ class GatewayQueryServiceTests(TestCase):
         self.assertEqual(aliases[0], "model-a")
 
     def test_get_logs_returns_filtered_rows(self):
-        from llm.services.litellm_gateway_query_service import get_logs
+        from llm.services.model_usage_query_service import get_logs
 
         self._make_log(alias="chat-model", status=ModelInvocationLog.STATUS_SUCCESS)
         self._make_log(alias="embed-model", status=ModelInvocationLog.STATUS_FAILED, error_code="503")
@@ -2827,7 +1767,7 @@ class GatewayQueryServiceTests(TestCase):
             self.assertNotIn("response", log)
 
     def test_get_logs_status_filter(self):
-        from llm.services.litellm_gateway_query_service import get_logs
+        from llm.services.model_usage_query_service import get_logs
 
         self._make_log(status=ModelInvocationLog.STATUS_SUCCESS)
         self._make_log(status=ModelInvocationLog.STATUS_FAILED, error_code="503")
@@ -2838,7 +1778,7 @@ class GatewayQueryServiceTests(TestCase):
         self.assertEqual(result["logs"][0]["status"], "failed")
 
     def test_get_logs_includes_required_fields(self):
-        from llm.services.litellm_gateway_query_service import get_logs
+        from llm.services.model_usage_query_service import get_logs
 
         self._make_log(
             alias="gw-chat",
@@ -2860,7 +1800,7 @@ class GatewayQueryServiceTests(TestCase):
             self.assertIn(field, log, f"Missing field: {field}")
 
     def test_get_logs_summary_aggregates_correctly(self):
-        from llm.services.litellm_gateway_query_service import get_logs_summary
+        from llm.services.model_usage_query_service import get_logs_summary
 
         self._make_log(latency_ms=100, status=ModelInvocationLog.STATUS_SUCCESS)
         self._make_log(latency_ms=300, status=ModelInvocationLog.STATUS_FAILED, error_code="500")
@@ -2874,7 +1814,7 @@ class GatewayQueryServiceTests(TestCase):
         self.assertIn("latency_buckets", result)
 
     def test_get_logs_summary_latency_buckets_structure(self):
-        from llm.services.litellm_gateway_query_service import get_logs_summary
+        from llm.services.model_usage_query_service import get_logs_summary
 
         for ms in [50, 150, 600, 1500]:
             self._make_log(latency_ms=ms)
@@ -2889,7 +1829,7 @@ class GatewayQueryServiceTests(TestCase):
             self.assertIn("count", bucket)
 
     def test_get_trace_returns_ordered_logs(self):
-        from llm.services.litellm_gateway_query_service import get_trace
+        from llm.services.model_usage_query_service import get_trace
 
         tid = "trace-xyz"
         self._make_log(trace_id=tid, alias="first-model")
@@ -2903,14 +1843,14 @@ class GatewayQueryServiceTests(TestCase):
         self.assertEqual(len(result["logs"]), 2)
 
     def test_get_trace_returns_none_for_unknown_trace(self):
-        from llm.services.litellm_gateway_query_service import get_trace
+        from llm.services.model_usage_query_service import get_trace
 
         result = get_trace("does-not-exist")
 
         self.assertIsNone(result)
 
     def test_get_errors_returns_aggregated_types(self):
-        from llm.services.litellm_gateway_query_service import get_errors
+        from llm.services.model_usage_query_service import get_errors
 
         self._make_log(status=ModelInvocationLog.STATUS_FAILED, error_code="500")
         self._make_log(status=ModelInvocationLog.STATUS_FAILED, error_code="500")
@@ -2926,7 +1866,7 @@ class GatewayQueryServiceTests(TestCase):
         self.assertIn("recent_errors", result)
 
     def test_get_costs_summary_uses_model_pricing(self):
-        from llm.services.litellm_gateway_query_service import get_costs_summary
+        from llm.services.model_usage_query_service import get_costs_summary
 
         self._make_log(request_tokens=1_000_000, response_tokens=500_000)
 
@@ -2943,12 +1883,12 @@ class GatewayQueryServiceTests(TestCase):
         self.assertAlmostEqual(result["estimated_output_cost"], 7.5, delta=0.01)
 
     def test_get_costs_summary_no_pricing_yields_zero_cost(self):
-        from llm.services.litellm_gateway_query_service import get_costs_summary
+        from llm.services.model_usage_query_service import get_costs_summary
 
         model_no_price = ModelConfig.objects.create(
             name="no-price",
             capability=ModelConfig.CAPABILITY_CHAT,
-            provider=ModelConfig.PROVIDER_LITELLM,
+            provider=ModelConfig.PROVIDER_DEEPSEEK,
             model_name="no-price",
             endpoint="http://localhost:4000",
             options={},
@@ -2967,7 +1907,7 @@ class GatewayQueryServiceTests(TestCase):
         self.assertEqual(result["estimated_total_cost"], 0.0)
 
     def test_get_costs_timeseries_returns_points(self):
-        from llm.services.litellm_gateway_query_service import get_costs_timeseries
+        from llm.services.model_usage_query_service import get_costs_timeseries
 
         self._make_log(request_tokens=100, response_tokens=50)
 
@@ -2982,13 +1922,13 @@ class GatewayQueryServiceTests(TestCase):
             self.assertIn("estimated_cost", point)
 
     def test_get_costs_models_returns_per_model_breakdown(self):
-        from llm.services.litellm_gateway_query_service import get_costs_models
+        from llm.services.model_usage_query_service import get_costs_models
 
         self._make_log(request_tokens=500_000, response_tokens=250_000)
         other_config = ModelConfig.objects.create(
             name="gw-embed",
             capability=ModelConfig.CAPABILITY_EMBEDDING,
-            provider=ModelConfig.PROVIDER_LITELLM,
+            provider=ModelConfig.PROVIDER_DEEPSEEK,
             model_name="gw-embed",
             endpoint="http://localhost:4000",
             options={"api_key": "sk-test"},
@@ -3012,145 +1952,8 @@ class GatewayQueryServiceTests(TestCase):
             self.assertIn("estimated_total_cost", m)
 
     # ------------------------------------------------------------------
-    # Provider-scope regression: non-LiteLLM logs must be excluded
+    # Time-series bucketing regression tests
     # ------------------------------------------------------------------
-
-    def _make_non_litellm_log(self, **kwargs):
-        """Create an invocation log for a non-LiteLLM provider (e.g. Ollama).
-
-        Uses get_or_create for the ModelConfig so the helper is safe to call
-        multiple times within a single test without hitting the
-        (capability, name) unique constraint.
-        """
-        ollama_config, _ = ModelConfig.objects.get_or_create(
-            capability=ModelConfig.CAPABILITY_CHAT,
-            name="ollama-chat",
-            defaults=dict(
-                provider=ModelConfig.PROVIDER_OLLAMA,
-                model_name="llama3",
-                endpoint="http://localhost:11434",
-                is_active=False,
-            ),
-        )
-        defaults = dict(
-            model_config=ollama_config,
-            provider=ModelConfig.PROVIDER_OLLAMA,
-            capability="chat",
-            alias="ollama-chat",
-            upstream_model="llama3",
-            status=ModelInvocationLog.STATUS_SUCCESS,
-            latency_ms=50,
-            request_tokens=5,
-            response_tokens=3,
-        )
-        defaults.update(kwargs)
-        return ModelInvocationLog.objects.create(**defaults)
-
-    def test_provider_scope_get_logs_excludes_non_litellm(self):
-        """Non-LiteLLM invocation logs must not appear in gateway log results."""
-        from llm.services.litellm_gateway_query_service import get_logs
-
-        self._make_log(alias="gw-chat")
-        self._make_non_litellm_log()
-
-        result = get_logs({"model": None, "status": None, "time": "24h"})
-
-        aliases = [log["alias"] for log in result["logs"]]
-        self.assertNotIn("ollama-chat", aliases)
-        self.assertEqual(result["total"], 1)
-
-    def test_provider_scope_get_logs_summary_excludes_non_litellm(self):
-        """Non-LiteLLM logs must not inflate gateway aggregate metrics."""
-        from llm.services.litellm_gateway_query_service import get_logs_summary
-
-        self._make_log(latency_ms=100)
-        self._make_non_litellm_log(latency_ms=9000)
-
-        result = get_logs_summary({"model": None, "status": None, "time": "24h"})
-
-        self.assertEqual(result["total_requests"], 1)
-        # avg latency should reflect only the LiteLLM log
-        self.assertAlmostEqual(result["avg_latency_ms"], 100.0, delta=1.0)
-
-    def test_provider_scope_get_errors_excludes_non_litellm(self):
-        """Non-LiteLLM failed logs must not appear in gateway error totals."""
-        from llm.services.litellm_gateway_query_service import get_errors
-
-        self._make_log(status=ModelInvocationLog.STATUS_FAILED, error_code="500")
-        self._make_non_litellm_log(status=ModelInvocationLog.STATUS_FAILED, error_code="503")
-
-        result = get_errors()
-
-        self.assertEqual(result["total_failed_requests"], 1)
-        codes = {e["error_code"] for e in result["error_types"]}
-        self.assertNotIn("503", codes)
-
-    def test_provider_scope_get_costs_summary_excludes_non_litellm(self):
-        """Non-LiteLLM logs must not contribute to gateway cost summaries."""
-        from llm.services.litellm_gateway_query_service import get_costs_summary
-
-        self._make_log(request_tokens=1_000_000, response_tokens=0)
-        self._make_non_litellm_log(request_tokens=999_000_000, response_tokens=999_000_000)
-
-        result = get_costs_summary({"time": "24h"})
-
-        self.assertEqual(result["total_requests"], 1)
-        self.assertEqual(result["total_request_tokens"], 1_000_000)
-
-    def test_provider_scope_get_costs_models_excludes_non_litellm(self):
-        """Non-LiteLLM logs must not appear in the per-model cost breakdown."""
-        from llm.services.litellm_gateway_query_service import get_costs_models
-
-        self._make_log()
-        self._make_non_litellm_log()
-
-        result = get_costs_models({"time": "24h"})
-
-        aliases = [m["alias"] for m in result["models"]]
-        self.assertNotIn("ollama-chat", aliases)
-        self.assertEqual(result["total_requests"], 1)
-
-    def test_provider_scope_get_gateway_summary_excludes_non_litellm(self):
-        """Non-LiteLLM logs must not inflate gateway dashboard traffic counts."""
-        from llm.services.litellm_gateway_query_service import get_gateway_summary
-
-        self._make_log()
-        self._make_non_litellm_log()
-
-        result = get_gateway_summary()
-
-        self.assertEqual(result["traffic"]["request_count"], 1)
-
-    def test_provider_scope_get_trace_excludes_non_litellm(self):
-        """A trace lookup must not return logs from non-LiteLLM providers."""
-        from llm.services.litellm_gateway_query_service import get_trace
-
-        tid = "shared-trace-001"
-        self._make_log(trace_id=tid, alias="gw-chat")
-        # Same trace_id, but belongs to a non-LiteLLM provider.
-        self._make_non_litellm_log(trace_id=tid)
-
-        result = get_trace(tid)
-
-        self.assertIsNotNone(result, "Trace must be found via its LiteLLM log")
-        aliases = [log["alias"] for log in result["logs"]]
-        self.assertIn("gw-chat", aliases)
-        self.assertNotIn("ollama-chat", aliases)
-        self.assertEqual(len(result["logs"]), 1)
-
-    def test_provider_scope_get_costs_timeseries_excludes_non_litellm(self):
-        """Non-LiteLLM logs must not appear in the costs time-series points."""
-        from llm.services.litellm_gateway_query_service import get_costs_timeseries
-
-        self._make_log(request_tokens=1_000, response_tokens=500)
-        # Non-LiteLLM log with huge token counts — must not pollute the series.
-        self._make_non_litellm_log(request_tokens=999_000_000, response_tokens=999_000_000)
-
-        result = get_costs_timeseries({"time": "24h"})
-
-        self.assertIn("points", result)
-        total_requests = sum(p["request_count"] for p in result["points"])
-        self.assertEqual(total_requests, 1, "Only the LiteLLM log should be counted")
 
     def test_1h_timeseries_distinct_minute_buckets(self):
         """Two logs in the same hour but different minutes must produce
@@ -3160,7 +1963,7 @@ class GatewayQueryServiceTests(TestCase):
         collapsing all traffic within an hour into a single coarse bucket.
         """
         from datetime import datetime, timedelta, timezone as dt_tz
-        from llm.services.litellm_gateway_query_service import get_costs_timeseries
+        from llm.services.model_usage_query_service import get_costs_timeseries
 
         now = datetime.now(tz=dt_tz.utc)
         t0 = now.replace(second=0, microsecond=0)
@@ -3183,7 +1986,7 @@ class GatewayQueryServiceTests(TestCase):
         )
 
     def test_1h_timeseries_reports_minute_granularity_metadata(self):
-        from llm.services.litellm_gateway_query_service import get_costs_timeseries
+        from llm.services.model_usage_query_service import get_costs_timeseries
 
         self._make_log(request_tokens=100, response_tokens=50)
 
@@ -3192,10 +1995,10 @@ class GatewayQueryServiceTests(TestCase):
         self.assertEqual(result["granularity_minutes"], 1)
         self.assertIsNone(result["granularity_hours"])
 
-    def test_non_litellm_helper_does_not_deactivate_active_litellm_config(self):
+    def test_log_creation_does_not_deactivate_model_config(self):
         self.assertTrue(self.model_config.is_active)
 
-        self._make_non_litellm_log()
+        self._make_log()
         self.model_config.refresh_from_db()
 
         self.assertTrue(self.model_config.is_active)
@@ -3341,396 +2144,3 @@ class ModelConfigConnectionApiTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["data"]["ok"], True)
-
-
-class LiteLLMAliasYamlRegressionTests(TestCase):
-    """Regression tests for YAML generation in litellm_alias_service."""
-
-    def setUp(self):
-        seed_roles_and_permissions()
-        self.sync_litellm_route_for_config = sync_litellm_route_for_config
-        self.sync_litellm_routes = sync_litellm_routes
-        self.temp_dir = Path(tempfile.mkdtemp(dir=Path.cwd()))
-        self.admin_user = User.objects.create_user(
-            username="alias-test-admin",
-            password="secret",
-            email="alias-test@example.com",
-        )
-
-    def tearDown(self):
-        shutil.rmtree(self.temp_dir, ignore_errors=True)
-
-    def _make_litellm_model_config(self, upstream_model=None, model_name="my-route", upstream_provider=None):
-        options = {"api_base": "http://localhost:8001"}
-        if upstream_model is not None or upstream_provider is not None:
-            options["litellm"] = {}
-            if upstream_model is not None:
-                options["litellm"]["upstream_model"] = upstream_model
-            if upstream_provider is not None:
-                options["litellm"]["upstream_provider"] = upstream_provider
-        return ModelConfig.objects.create(
-            name="Test Route",
-            model_name=model_name,
-            provider=ModelConfig.PROVIDER_LITELLM,
-            capability=ModelConfig.CAPABILITY_CHAT,
-            endpoint="http://localhost:8001",
-            is_active=True,
-            options=options,
-        )
-
-    def _sync_and_read_yaml(self, model_config):
-        with override_settings(
-            LITELLM_GENERATED_CONFIG_ROOT=str(self.temp_dir),
-            LITELLM_BASE_CONFIG_PATH=str(self.temp_dir / "base.yaml"),
-            LITELLM_RENDERED_CONFIG_PATH=str(self.temp_dir / "rendered.yaml"),
-        ):
-            self.sync_litellm_route_for_config(model_config, triggered_by=self.admin_user)
-        route_key = f"route-{model_config.capability}-{model_config.id}"
-        config_path = self.temp_dir / f"{route_key}.yaml"
-        return config_path.read_text(encoding="utf-8")
-
-    def test_prefixed_upstream_model_is_not_double_prefixed(self):
-        """options.litellm.upstream_model='openai/gpt-4o' must produce model: openai/gpt-4o."""
-        model_config = self._make_litellm_model_config(upstream_model="openai/gpt-4o")
-        yaml_text = self._sync_and_read_yaml(model_config)
-
-        self.assertIn("model: openai/gpt-4o", yaml_text,
-                      "Already-prefixed upstream model must appear exactly once")
-        self.assertNotIn("model: openai/openai/", yaml_text,
-                         "Double prefix openai/openai/ must not appear in YAML")
-
-    def test_bare_upstream_model_gets_openai_prefix(self):
-        """options.litellm.upstream_model='gpt-4o' must produce model: openai/gpt-4o."""
-        model_config = self._make_litellm_model_config(upstream_model="gpt-4o")
-        yaml_text = self._sync_and_read_yaml(model_config)
-
-        self.assertIn("model: openai/gpt-4o", yaml_text,
-                      "Bare model name must be prefixed with openai/")
-
-    def test_dashscope_embedding_upstream_is_rendered_as_openai_compatible_model(self):
-        model_config = self._make_litellm_model_config(
-            upstream_model="dashscope/text-embedding-v4",
-            model_name="text-embedding-v4",
-        )
-        model_config.capability = ModelConfig.CAPABILITY_EMBEDDING
-        model_config.save(update_fields=["capability", "updated_at"])
-
-        yaml_text = self._sync_and_read_yaml(model_config)
-
-        self.assertIn("model: openai/text-embedding-v4", yaml_text)
-        self.assertNotIn("model: dashscope/text-embedding-v4", yaml_text)
-
-    def test_absent_upstream_model_falls_back_to_model_name(self):
-        """When options.litellm.upstream_model is absent, model_name is used as the upstream."""
-        model_config = self._make_litellm_model_config(upstream_model=None, model_name="my-fallback-route")
-        yaml_text = self._sync_and_read_yaml(model_config)
-
-        self.assertIn("model: openai/my-fallback-route", yaml_text,
-                      "Absent upstream_model must fall back to openai/<model_name>")
-
-    def test_yaml_includes_api_key_when_present(self):
-        model_config = self._make_litellm_model_config(upstream_model="deepseek/deepseek-chat")
-        model_config.options["api_key"] = "sk-upstream"
-        model_config.save(update_fields=["options", "updated_at"])
-
-        yaml_text = self._sync_and_read_yaml(model_config)
-
-        self.assertIn("api_key: sk-upstream", yaml_text)
-
-    def test_yaml_uses_provider_env_api_key_when_explicit_key_is_absent(self):
-        model_config = self._make_litellm_model_config(
-            upstream_model="deepseek/deepseek-chat",
-            upstream_provider=ModelConfig.PROVIDER_DEEPSEEK,
-        )
-
-        yaml_text = self._sync_and_read_yaml(model_config)
-
-        self.assertIn("api_key: os.environ/DEEPSEEK_API_KEY", yaml_text)
-
-    def test_yaml_infers_dashscope_env_api_key_from_upstream_model_prefix(self):
-        model_config = self._make_litellm_model_config(
-            upstream_model="dashscope/text-embedding-v4",
-            model_name="text-embedding-v4",
-        )
-        model_config.capability = ModelConfig.CAPABILITY_EMBEDDING
-        model_config.save(update_fields=["capability", "updated_at"])
-
-        yaml_text = self._sync_and_read_yaml(model_config)
-
-        self.assertIn("api_key: os.environ/DASHSCOPE_API_KEY", yaml_text)
-
-    def test_sync_routes_prunes_stale_route_snippets(self):
-        base_config_path = self.temp_dir / "base.yaml"
-        rendered_config_path = self.temp_dir / "rendered.yaml"
-        base_config_path.write_text(
-            "model_list:\n"
-            "litellm_settings:\n"
-            "  drop_params: true\n",
-            encoding="utf-8",
-        )
-        (self.temp_dir / "route-chat-999.yaml").write_text(
-            "model_list:\n"
-            "  - model_name: stale-chat\n"
-            "    litellm_params:\n"
-            "      model: openai/stale-chat\n"
-            "      api_base: http://stale\n",
-            encoding="utf-8",
-        )
-        (self.temp_dir / "fine-tune-alias.yaml").write_text(
-            "model_list:\n"
-            "  - model_name: tuned-chat\n"
-            "    litellm_params:\n"
-            "      model: openai/tuned-chat\n"
-            "      api_base: http://fine-tune\n",
-            encoding="utf-8",
-        )
-        model_config = self._make_litellm_model_config(upstream_model="deepseek/deepseek-chat")
-
-        with override_settings(
-            LITELLM_GENERATED_CONFIG_ROOT=str(self.temp_dir),
-            LITELLM_BASE_CONFIG_PATH=str(base_config_path),
-            LITELLM_RENDERED_CONFIG_PATH=str(rendered_config_path),
-        ):
-            result = self.sync_litellm_routes(triggered_by=self.admin_user)
-
-        route_key = f"route-{model_config.capability}-{model_config.id}.yaml"
-        self.assertEqual(result["route_count"], 1)
-        self.assertFalse((self.temp_dir / "route-chat-999.yaml").exists())
-        self.assertTrue((self.temp_dir / route_key).exists())
-        self.assertTrue((self.temp_dir / "fine-tune-alias.yaml").exists())
-        rendered = rendered_config_path.read_text(encoding="utf-8")
-        self.assertIn("model_name: my-route", rendered)
-        self.assertIn("model_name: tuned-chat", rendered)
-
-
-class SyncLiteLLMRoutesCommandTests(TestCase):
-    def setUp(self):
-        self.temp_dir = Path(tempfile.mkdtemp(dir=Path.cwd()))
-
-    def tearDown(self):
-        shutil.rmtree(self.temp_dir, ignore_errors=True)
-
-    def test_command_rebuilds_routes_and_rendered_config(self):
-        base_config_path = self.temp_dir / "base.yaml"
-        rendered_config_path = self.temp_dir / "rendered.yaml"
-        base_config_path.write_text(
-            "model_list:\n"
-            "litellm_settings:\n"
-            "  drop_params: true\n",
-            encoding="utf-8",
-        )
-        stdout = StringIO()
-
-        with override_settings(
-            LITELLM_GENERATED_CONFIG_ROOT=str(self.temp_dir),
-            LITELLM_BASE_CONFIG_PATH=str(base_config_path),
-            LITELLM_RENDERED_CONFIG_PATH=str(rendered_config_path),
-        ):
-            call_command("sync_litellm_routes", stdout=stdout)
-
-        output = stdout.getvalue()
-        self.assertIn('"migrated_capabilities"', output)
-        self.assertTrue(rendered_config_path.exists())
-        self.assertTrue(any(path.name.startswith("route-chat-") for path in self.temp_dir.glob("route-*.yaml")))
-
-
-class LiteLLMGatewaySettingsTests(TestCase):
-    def test_litellm_render_defaults_match_deploy_paths(self):
-        self.assertTrue(str(settings.LITELLM_BASE_CONFIG_PATH).endswith("deploy/litellm/config.yaml"))
-        self.assertTrue(str(settings.LITELLM_RENDERED_CONFIG_PATH).endswith("deploy/litellm/rendered.config.yaml"))
-        self.assertTrue(str(settings.LIGHTRAG_INTERNAL_URL).startswith("http"))
-
-
-@override_settings(GRAPH_BACKEND="lightrag")
-class LightRAGBridgeApiTests(TestCase):
-    def setUp(self):
-        self.client = Client()
-        seed_roles_and_permissions()
-
-        self.admin_user = User.objects.create_user(
-            username="graph-admin",
-            password="secret123",
-            email="graph-admin@example.com",
-        )
-        self.admin_user.groups.add(Group.objects.get(name=ROLE_ADMIN))
-        self.admin_access_token = generate_access_token(self.admin_user)
-
-        self.member_user = User.objects.create_user(
-            username="graph-member",
-            password="secret123",
-            email="graph-member@example.com",
-        )
-        self.member_user.groups.add(Group.objects.get(name=ROLE_MEMBER))
-        self.member_access_token = generate_access_token(self.member_user)
-
-    @patch("llm.services.lightrag_proxy_service.requests.request")
-    def test_bridge_requires_manage_permission(self, mocked_request):
-        response = self.client.get(
-            "/api/ops/lightrag/health/",
-            HTTP_AUTHORIZATION=f"Bearer {self.member_access_token}",
-        )
-
-        self.assertEqual(response.status_code, 403)
-        self.assertEqual(response.json()["message"], "无权限。")
-        mocked_request.assert_not_called()
-
-    @patch("llm.services.lightrag_proxy_service.requests.request")
-    def test_bridge_proxies_get_requests_with_query_params(self, mocked_request):
-        mocked_request.return_value = self._build_response(
-            status_code=200,
-            payload={"nodes": [], "edges": [], "is_truncated": False},
-        )
-
-        response = self.client.get(
-            "/api/ops/lightrag/graphs/",
-            {"label": "流动性风险", "max_nodes": 60},
-            HTTP_AUTHORIZATION=f"Bearer {self.admin_access_token}",
-        )
-
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json()["data"]["is_truncated"], False)
-        _, kwargs = mocked_request.call_args
-        self.assertEqual(kwargs["method"], "GET")
-        self.assertTrue(kwargs["url"].endswith("/graphs"))
-        self.assertEqual(kwargs["params"]["label"], "流动性风险")
-        self.assertEqual(kwargs["params"]["max_nodes"], "60")
-
-    @patch("llm.services.lightrag_proxy_service.requests.request")
-    def test_bridge_proxies_json_posts(self, mocked_request):
-        mocked_request.return_value = self._build_response(
-            status_code=200,
-            payload={"response": "No relevant context found for the query.", "references": []},
-        )
-
-        response = self.client.post(
-            "/api/ops/lightrag/query/",
-            data=json.dumps({"query": "测试问题", "mode": "hybrid"}),
-            content_type="application/json",
-            HTTP_AUTHORIZATION=f"Bearer {self.admin_access_token}",
-        )
-
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(
-            response.json()["data"]["response"],
-            "No relevant context found for the query.",
-        )
-        _, kwargs = mocked_request.call_args
-        self.assertEqual(kwargs["method"], "POST")
-        self.assertEqual(kwargs["json"], {"query": "测试问题", "mode": "hybrid"})
-
-    @patch("llm.services.lightrag_proxy_service.requests.request")
-    def test_bridge_proxies_multipart_uploads(self, mocked_request):
-        mocked_request.return_value = self._build_response(
-            status_code=200,
-            payload={"status": "success", "message": "Uploaded"},
-        )
-        upload = SimpleUploadedFile("graph.txt", b"graph payload", content_type="text/plain")
-
-        response = self.client.post(
-            "/api/ops/lightrag/documents/upload/",
-            data={"file": upload},
-            HTTP_AUTHORIZATION=f"Bearer {self.admin_access_token}",
-        )
-
-        self.assertEqual(response.status_code, 200)
-        _, kwargs = mocked_request.call_args
-        self.assertEqual(kwargs["method"], "POST")
-        self.assertTrue(kwargs["files"])
-        self.assertEqual(kwargs["files"][0][0], "file")
-
-    @patch("llm.services.lightrag_proxy_service.requests.request")
-    def test_overview_aggregates_lightrag_summary(self, mocked_request):
-        mocked_request.side_effect = [
-            self._build_response(status_code=200, payload={"status": "healthy"}),
-            self._build_response(status_code=200, payload={"auth_mode": "disabled"}),
-            self._build_response(status_code=200, payload={"status_counts": {"all": 4}}),
-            self._build_response(status_code=200, payload=["风险", "债务"]),
-        ]
-
-        response = self.client.get(
-            "/api/ops/lightrag/",
-            HTTP_AUTHORIZATION=f"Bearer {self.admin_access_token}",
-        )
-
-        self.assertEqual(response.status_code, 200)
-        payload = response.json()["data"]
-        self.assertEqual(payload["health"]["status"], "healthy")
-        self.assertEqual(payload["auth_status"]["auth_mode"], "disabled")
-        self.assertEqual(payload["status_counts"]["status_counts"]["all"], 4)
-        self.assertEqual(payload["popular_labels"], ["风险", "债务"])
-        self.assertIn("configuration", payload)
-
-    def _build_response(self, *, status_code, payload):
-        class _MockResponse:
-            def __init__(self, status_code, payload):
-                self.status_code = status_code
-                self.payload = payload
-                self.ok = status_code < 400
-                self.headers = {"Content-Type": "application/json"}
-                self.text = json.dumps(payload)
-
-            def json(self):
-                return self.payload
-
-        return _MockResponse(status_code, payload)
-
-
-class LiteLLMConfigRenderRegressionTests(TestCase):
-    def setUp(self):
-        self.temp_dir = Path(tempfile.mkdtemp(dir=Path.cwd()))
-
-    def tearDown(self):
-        shutil.rmtree(self.temp_dir, ignore_errors=True)
-
-    def test_render_normalizes_stale_dashscope_embedding_snippet(self):
-        base_config_path = self.temp_dir / "base.yaml"
-        generated_root = self.temp_dir / "generated"
-        output_path = self.temp_dir / "rendered.yaml"
-        generated_root.mkdir(parents=True, exist_ok=True)
-        base_config_path.write_text(
-            "model_list:\n"
-            "litellm_settings:\n"
-            "  drop_params: true\n",
-            encoding="utf-8",
-        )
-        (generated_root / "route-embedding-7.yaml").write_text(
-            "model_list:\n"
-            "  - model_name: text-embedding-v4\n"
-            "    litellm_params:\n"
-            "      model: dashscope/text-embedding-v4\n"
-            "      api_base: https://dashscope.aliyuncs.com/compatible-mode/v1\n",
-            encoding="utf-8",
-        )
-
-        build_rendered_litellm_config(
-            base_config_path=str(base_config_path),
-            generated_root=str(generated_root),
-            output_path=str(output_path),
-        )
-
-        rendered = output_path.read_text(encoding="utf-8")
-        self.assertIn("model: openai/text-embedding-v4", rendered)
-        self.assertNotIn("model: dashscope/text-embedding-v4", rendered)
-
-    def test_render_service_imports_without_django_settings(self):
-        env = os.environ.copy()
-        env.pop("DJANGO_SETTINGS_MODULE", None)
-        python_path = env.get("PYTHONPATH", "")
-        env["PYTHONPATH"] = (
-            f"{Path.cwd()}:{python_path}" if python_path else str(Path.cwd())
-        )
-
-        result = subprocess.run(
-            [
-                sys.executable,
-                "-c",
-                "import llm.services.litellm_config_render_service",
-            ],
-            cwd=Path.cwd(),
-            env=env,
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-
-        self.assertEqual(result.returncode, 0, result.stderr)

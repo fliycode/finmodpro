@@ -20,7 +20,7 @@ def parse_args():
     parser.add_argument("--token", required=True, help="Fine-tune callback token")
     parser.add_argument("--work-dir", default=str(REPO_ROOT / ".runner-workdir"), help="Working directory for bundle/artifacts")
     parser.add_argument("--deployment-endpoint", default="", help="Inference endpoint to report back on success")
-    parser.add_argument("--deployment-model-name", default="", help="LiteLLM alias or upstream model name to report back on success")
+    parser.add_argument("--deployment-model-name", default="", help="Model name to report back on success")
     parser.add_argument("--dry-run", action="store_true", help="Fetch spec and build command without executing or posting callbacks")
     return parser.parse_args()
 

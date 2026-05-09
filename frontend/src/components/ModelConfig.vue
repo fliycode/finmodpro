@@ -57,12 +57,9 @@ const dispatchingFineTuneId = ref(null);
 const defaultFormState = () => ({
   name: "",
   capability: "chat",
-  provider: "litellm",
-  model_name: "chat-default",
-  endpoint: "http://localhost:4000",
-  api_base: "https://api.deepseek.com",
-  upstream_provider: "deepseek",
-  upstream_model: "deepseek-chat",
+  provider: "deepseek",
+  model_name: "deepseek-chat",
+  endpoint: "https://api.deepseek.com",
   api_key: "",
   temperature: 0.2,
   max_tokens: 1024,
@@ -74,25 +71,22 @@ const defaultFormState = () => ({
 const getCapabilityRouteDefaults = (capability = "chat") => {
   if (capability === "embedding") {
     return {
-      model_name: "embed-default",
-      api_base: "https://dashscope.aliyuncs.com/compatible-mode/v1",
-      upstream_provider: "dashscope",
-      upstream_model: "text-embedding-v4",
+      provider: "dashscope",
+      model_name: "text-embedding-v4",
+      endpoint: "https://dashscope.aliyuncs.com/compatible-mode/v1",
     };
   }
   if (capability === "rerank") {
     return {
-      model_name: "rerank-default",
-      api_base: "https://dashscope.aliyuncs.com/api/v1/services/rerank/text-rerank/text-rerank",
-      upstream_provider: "dashscope",
-      upstream_model: "qwen3-vl-rerank",
+      provider: "dashscope",
+      model_name: "qwen3-vl-rerank",
+      endpoint: "https://dashscope.aliyuncs.com/api/v1/services/rerank/text-rerank/text-rerank",
     };
   }
   return {
-    model_name: "chat-default",
-    api_base: "https://api.deepseek.com",
-    upstream_provider: "deepseek",
-    upstream_model: "deepseek-chat",
+    provider: "deepseek",
+    model_name: "deepseek-chat",
+    endpoint: "https://api.deepseek.com",
   };
 };
 
@@ -156,7 +150,7 @@ const pageCopy = computed(() => {
       return {
         eyebrow: "LLM 中台 / 模型配置",
         title: "模型配置与路由",
-        subtitle: "统一通过 LiteLLM 管理对话、向量和重排路由，上游模型只作为 LiteLLM route metadata 存在，不再直连 provider。",
+        subtitle: "管理对话、向量和重排模型的直连 provider 配置，控制请求路由与定价。",
       };
 });
 const isQlorStrategy = computed(() => fineTuneForm.training?.strategy === "qlora");
@@ -239,7 +233,6 @@ const resetForm = () => {
 const openCreate = (capability = "chat") => {
   resetForm();
   form.capability = capability;
-  form.provider = "litellm";
   Object.assign(form, getCapabilityRouteDefaults(capability));
   drawerVisible.value = true;
 };
@@ -252,9 +245,6 @@ const openEdit = (config) => {
   form.provider = config.provider;
   form.model_name = config.model_name;
   form.endpoint = config.endpoint;
-  form.api_base = config.options?.api_base || config.endpoint;
-  form.upstream_provider = config.upstream_provider || "deepseek";
-  form.upstream_model = config.upstream_model || config.model_name;
   form.is_active = config.is_active;
   form.temperature = Number(config.options?.temperature ?? 0.2);
   form.max_tokens = Number(config.options?.max_tokens ?? 1024);
@@ -264,24 +254,18 @@ const openEdit = (config) => {
 };
 
 const buildPayload = () => {
-  const options = {
-    api_base: form.api_base.trim(),
-    litellm: {
-      upstream_provider: form.upstream_provider,
-      upstream_model: form.upstream_model.trim(),
-    },
-  };
+  const options = {};
+  if (form.api_key.trim()) {
+    options.api_key = form.api_key.trim();
+  }
   if (supportsTokenOptions.value) {
-    if (form.api_key.trim()) {
-      options.api_key = form.api_key.trim();
-    }
     options.temperature = Number(form.temperature);
     options.max_tokens = Number(form.max_tokens);
   }
   return {
     name: form.name.trim(),
     capability: form.capability,
-    provider: "litellm",
+    provider: form.provider,
     model_name: form.model_name.trim(),
     endpoint: form.endpoint.trim(),
     is_active: Boolean(form.is_active),
@@ -298,8 +282,6 @@ watch(
     Object.assign(form, {
       ...getCapabilityRouteDefaults(capability),
       capability,
-      provider: "litellm",
-      endpoint: "http://localhost:4000",
     });
   },
 );
@@ -429,8 +411,8 @@ const toggleActivation = async (config) => {
 };
 
 const submitForm = async () => {
-  if (!form.name.trim() || !form.model_name.trim() || !form.endpoint.trim() || !form.api_base.trim() || !form.upstream_model.trim()) {
-    flash.error("请完整填写配置名称、路由名、LiteLLM 地址和上游模型信息");
+  if (!form.name.trim() || !form.model_name.trim() || !form.endpoint.trim()) {
+    flash.error("请完整填写配置名称、模型名和接口地址");
     return;
   }
   isSaving.value = true;
@@ -455,7 +437,7 @@ const submitForm = async () => {
 
 const runConnectionTest = async () => {
   if (!form.model_name.trim() || !form.endpoint.trim()) {
-    flash.error("请先填写 LiteLLM 路由名和地址");
+    flash.error("请先填写模型名和接口地址");
     return;
   }
   isTesting.value = true;
@@ -639,7 +621,7 @@ onMounted(async () => {
 
     <template v-if="isModelsMode">
       <OpsCommandDeck>
-      <AppSectionCard title="对话模型" desc="支持 LiteLLM 与 DeepSeek。启用新模型后，智能问答和其它 chat 能力会自动切换。" admin>
+      <AppSectionCard title="对话模型" desc="管理对话模型的直连 provider 配置。启用新模型后，智能问答和其它 chat 能力会自动切换。" admin>
       <div v-if="isLoading && chatConfigs.length === 0" class="admin-empty-state">加载中...</div>
       <div v-else-if="chatConfigs.length === 0" class="admin-empty-state">暂无对话模型配置</div>
       <el-table v-else :data="chatConfigs" stripe style="width: 100%">
@@ -686,7 +668,7 @@ onMounted(async () => {
       </el-table>
       </AppSectionCard>
 
-      <AppSectionCard title="向量模型" desc="支持 LiteLLM 与 DashScope embedding 配置。" admin>
+      <AppSectionCard title="向量模型" desc="管理向量和重排序模型的直连 provider 配置。" admin>
       <template #header>
         <el-button type="primary" @click="openCreate('embedding')">新增向量模型</el-button>
       </template>
@@ -924,28 +906,18 @@ onMounted(async () => {
             </el-select>
           </el-form-item>
           <el-form-item label="Provider">
-            <el-input model-value="LiteLLM" disabled />
+            <el-select v-model="form.provider" style="width: 100%">
+              <el-option label="DeepSeek" value="deepseek" />
+              <el-option label="DashScope" value="dashscope" />
+              <el-option label="OpenAI Compatible" value="openai_compatible" />
+              <el-option label="Ollama" value="ollama" />
+            </el-select>
           </el-form-item>
-          <el-form-item label="LiteLLM 路由名">
-            <el-input v-model="form.model_name" placeholder="例如：chat-default / embed-default / rerank-default" />
+          <el-form-item label="模型名">
+            <el-input v-model="form.model_name" placeholder="例如：deepseek-chat / text-embedding-v4" />
           </el-form-item>
-          <el-form-item label="LiteLLM 地址">
-            <el-input v-model="form.endpoint" placeholder="例如：http://localhost:4000" />
-          </el-form-item>
-          <div class="form-grid">
-            <el-form-item label="上游 Provider">
-              <el-select v-model="form.upstream_provider" style="width: 100%">
-                <el-option label="DeepSeek" value="deepseek" />
-                <el-option label="DashScope" value="dashscope" />
-                <el-option label="OpenAI Compatible" value="openai" />
-              </el-select>
-            </el-form-item>
-            <el-form-item label="上游模型">
-              <el-input v-model="form.upstream_model" placeholder="例如：deepseek-chat / text-embedding-v4 / qwen3-vl-rerank" />
-            </el-form-item>
-          </div>
-          <el-form-item label="上游 API Base">
-            <el-input v-model="form.api_base" placeholder="例如：https://api.deepseek.com" />
+          <el-form-item label="接口地址">
+            <el-input v-model="form.endpoint" placeholder="例如：https://api.deepseek.com" />
           </el-form-item>
 
           <template v-if="supportsTokenOptions">

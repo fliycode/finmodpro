@@ -30,7 +30,6 @@ const fetchModelOptions = async () => {
   const data = await llmApi.getModelConfigs();
   const uniqueOptions = new Map();
   normalizeModelConfigPayload(data)
-    .filter((item) => item.provider === 'litellm')
     .forEach((item) => {
       const alias = item.alias || item.model_name;
       if (!alias || uniqueOptions.has(alias)) {

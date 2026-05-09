@@ -1,6 +1,0 @@
-model_list:
-  - model_name: qwen3-vl-rerank
-    litellm_params:
-      model: openai/qwen3-vl-rerank
-      api_base: https://dashscope.aliyuncs.com/api/v1/services/rerank/text-rerank/text-rerank
-      api_key: os.environ/DASHSCOPE_API_KEY

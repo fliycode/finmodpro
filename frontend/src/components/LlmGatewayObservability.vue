@@ -36,7 +36,6 @@ const pageSize = ref(20);
 const fetchModelOptions = async () => {
   const data = await llmApi.getModelConfigs();
   modelOptions.value = normalizeModelConfigPayload(data)
-    .filter((item) => item.provider === 'litellm')
     .map((item) => ({ label: item.alias || item.model_name, value: item.alias || item.model_name }));
 };
 
