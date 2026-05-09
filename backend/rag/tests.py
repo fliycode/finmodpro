@@ -2,6 +2,7 @@ import json
 import shutil
 import tempfile
 from io import StringIO
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from django.contrib.auth.models import Group
@@ -21,6 +22,7 @@ from rag.services.retrieval_backend_service import (
 )
 from rag.services.retrieval_evaluation_service import evaluate_retrieval_cases
 from rag.services.embedding_service import tokenize
+from rag.services.llamaindex_store_service import LlamaIndexStoreService
 from rag.services.retrieval_service import retrieve
 from rag.services.vector_store_service import clear_store, index_document
 from rbac.services.rbac_service import ROLE_ADMIN, seed_roles_and_permissions
@@ -117,6 +119,21 @@ class RetrievalBackendSelectionTests(SimpleTestCase):
             top_k=4,
             query_variants=["risk margin"],
         )
+
+
+class LlamaIndexStoreServiceTests(SimpleTestCase):
+    def test_delete_existing_nodes_skips_missing_nodes(self):
+        deleted_node_ids = []
+        index = SimpleNamespace(
+            index_struct=SimpleNamespace(nodes_dict={"chunk:1": object()}),
+            delete_nodes=lambda node_ids, delete_from_docstore=True: deleted_node_ids.extend(
+                node_ids
+            ),
+        )
+
+        LlamaIndexStoreService()._delete_existing_nodes(index, ["chunk:1", "chunk:2"])
+
+        self.assertEqual(deleted_node_ids, ["chunk:1"])
 
 
 @override_settings(

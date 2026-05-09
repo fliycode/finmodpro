@@ -96,6 +96,15 @@ class LlamaIndexStoreService:
             },
         )
 
+    def _delete_existing_nodes(self, index, node_ids):
+        if not node_ids:
+            return
+
+        nodes_dict = getattr(getattr(index, "index_struct", None), "nodes_dict", None) or {}
+        existing_node_ids = [node_id for node_id in node_ids if node_id in nodes_dict]
+        if existing_node_ids:
+            index.delete_nodes(existing_node_ids, delete_from_docstore=True)
+
     def sync_document(self, document):
         index = self._load_index()
         chunks = list(
@@ -104,8 +113,7 @@ class LlamaIndexStoreService:
             .order_by("chunk_index")
         )
         node_ids = [self._build_node_id(chunk.id) for chunk in chunks]
-        if node_ids:
-            index.delete_nodes(node_ids, delete_from_docstore=True)
+        self._delete_existing_nodes(index, node_ids)
         if chunks:
             index.insert_nodes([self._build_chunk_node(chunk) for chunk in chunks])
         self._persist_index(index)
@@ -125,9 +133,9 @@ class LlamaIndexStoreService:
             return
 
         index = self._load_index()
-        index.delete_nodes(
+        self._delete_existing_nodes(
+            index,
             [self._build_node_id(chunk_id) for chunk_id in resolved_chunk_ids],
-            delete_from_docstore=True,
         )
         self._persist_index(index)
 
