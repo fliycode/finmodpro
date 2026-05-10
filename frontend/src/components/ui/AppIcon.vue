@@ -11,16 +11,16 @@ const props = defineProps({
 /** Iconify Lucide icon mappings. Add new icons here as needed. */
 const iconMap = {
   // Navigation — workspace
-  'spark': 'lucide:sparkles',
+  'spark': 'lucide:sparkle',
   'message-square': 'lucide:message-square',
-  'database': 'lucide:database',
-  'history': 'lucide:clock-arrow-up',
-  'shield': 'lucide:shield-check',
+  'database': 'lucide:library',
+  'history': 'lucide:clock',
+  'shield': 'lucide:shield-alert',
   'trending-up': 'lucide:trending-up',
   'user': 'lucide:user',
   // Navigation — admin
-  'dashboard': 'lucide:layout-dashboard',
-  'layout-dashboard': 'lucide:layout-dashboard',
+  'dashboard': 'lucide:gauge',
+  'layout-dashboard': 'lucide:gauge',
   'users': 'lucide:users',
   'network': 'lucide:network',
   'brain-circuit': 'lucide:brain-circuit',
@@ -60,7 +60,7 @@ const iconMap = {
   'mic': 'lucide:mic',
   'zap': 'lucide:zap',
   'file': 'lucide:file-text',
-  'clipboard': 'lucide:clipboard-list',
+  'clipboard': 'lucide:scroll-text',
   'pie-chart': 'lucide:chart-pie',
   'layers': 'lucide:layers-3',
   'home': 'lucide:home',
