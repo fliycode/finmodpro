@@ -292,8 +292,8 @@ watch(() => props.activeTab, () => {
   --entry-border: rgba(15, 23, 42, 0.09);
   --entry-ink: #0f172a;
   --entry-muted: #5f6b7d;
-  --entry-accent: #1d4ed8;
-  --entry-accent-soft: rgba(29, 78, 216, 0.12);
+  --entry-accent: #2457c5;
+  --entry-accent-soft: rgba(36, 87, 197, 0.12);
   --entry-danger: #b42318;
   min-height: 100vh;
   position: relative;
@@ -346,7 +346,7 @@ watch(() => props.activeTab, () => {
   width: 300px;
   height: 300px;
   background:
-    radial-gradient(circle, rgba(59, 130, 246, 0.28) 0%, rgba(96, 165, 250, 0.14) 36%, rgba(59, 130, 246, 0) 72%);
+    radial-gradient(circle, rgba(96, 106, 180, 0.2) 0%, rgba(96, 106, 180, 0.1) 36%, rgba(96, 106, 180, 0) 72%);
   animation: orbFloatOne 14s ease-in-out infinite;
 }
 
@@ -356,7 +356,7 @@ watch(() => props.activeTab, () => {
   width: 360px;
   height: 360px;
   background:
-    radial-gradient(circle, rgba(15, 23, 42, 0.18) 0%, rgba(37, 99, 235, 0.12) 42%, rgba(15, 23, 42, 0) 76%);
+    radial-gradient(circle, rgba(60, 70, 100, 0.14) 0%, rgba(60, 70, 100, 0.08) 42%, rgba(60, 70, 100, 0) 76%);
   animation: orbFloatTwo 16s ease-in-out infinite;
 }
 
@@ -375,13 +375,13 @@ watch(() => props.activeTab, () => {
     0 28px 80px rgba(15, 23, 42, 0.1),
     inset 0 1px 0 rgba(255, 255, 255, 0.76);
   backdrop-filter: blur(18px);
-  animation: shellReveal 560ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  animation: shellReveal 560ms cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
 .brand-column,
 .form-card {
   opacity: 0;
-  animation: contentReveal 480ms ease both;
+  animation: contentReveal 480ms cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
 .brand-column {
@@ -447,7 +447,7 @@ watch(() => props.activeTab, () => {
 .panel-intro h2 {
   margin: 0;
   color: var(--entry-ink);
-  font-family: 'Iowan Old Style', 'Palatino Linotype', 'Noto Serif SC', serif;
+  font-family: 'DM Sans', 'Noto Sans SC', sans-serif;
 }
 
 .brand-lockup__copy {
@@ -503,7 +503,7 @@ watch(() => props.activeTab, () => {
   margin-left: 0.08em;
   vertical-align: -0.08em;
   border-radius: 999px;
-  background: rgba(29, 78, 216, 0.72);
+  background: rgba(36, 87, 197, 0.72);
   animation: caretBlink 1s steps(1) infinite;
 }
 
@@ -557,9 +557,9 @@ watch(() => props.activeTab, () => {
 }
 
 .tab-btn.active {
-  background: linear-gradient(180deg, #1e293b, #0f172a);
+  background: #111111;
   color: #f8fafc;
-  box-shadow: 0 10px 22px rgba(15, 23, 42, 0.18);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.08);
 }
 
 .tab-btn:hover:not(:disabled) {
@@ -589,7 +589,7 @@ watch(() => props.activeTab, () => {
 .auth-panel-leave-active {
   transition:
     opacity 260ms ease,
-    transform 320ms cubic-bezier(0.2, 0.8, 0.2, 1),
+    transform 320ms cubic-bezier(0.16, 1, 0.3, 1),
     filter 320ms ease;
 }
 
@@ -635,7 +635,16 @@ watch(() => props.activeTab, () => {
   display: flex;
   flex-direction: column;
   gap: 9px;
+  opacity: 0;
+  animation: formGroupReveal 480ms cubic-bezier(0.16, 1, 0.3, 1) both;
 }
+
+.auth-form .form-group:nth-child(1) { animation-delay: 60ms; }
+.auth-form .form-group:nth-child(2) { animation-delay: 120ms; }
+.auth-form .form-group:nth-child(3) { animation-delay: 180ms; }
+.auth-form .form-group:nth-child(4) { animation-delay: 240ms; }
+.auth-form .form-group:nth-child(5) { animation-delay: 300ms; }
+.auth-form .primary-button { animation-delay: 360ms; }
 
 .form-group label,
 .label-row {
@@ -670,7 +679,7 @@ watch(() => props.activeTab, () => {
 }
 
 .form-group input:focus {
-  border-color: rgba(29, 78, 216, 0.45);
+  border-color: rgba(36, 87, 197, 0.45);
   background: #ffffff;
   box-shadow: 0 0 0 4px var(--entry-accent-soft);
   transform: translateY(-1px);
@@ -717,7 +726,7 @@ watch(() => props.activeTab, () => {
 }
 
 .toggle-pwd:hover:not(:disabled) {
-  background: rgba(29, 78, 216, 0.08);
+  background: rgba(36, 87, 197, 0.08);
   color: var(--entry-accent);
 }
 
@@ -773,21 +782,23 @@ watch(() => props.activeTab, () => {
 
 .primary-button {
   border: 0;
-  border-radius: 16px;
+  border-radius: 8px;
   padding: 15px 20px;
-  background: linear-gradient(180deg, #2563eb, #1d4ed8);
+  background: #111111;
   color: #f8fafc;
   cursor: pointer;
   font-size: 0.98rem;
   font-weight: 700;
   letter-spacing: 0.01em;
-  transition: transform 180ms ease, box-shadow 180ms ease, filter 180ms ease;
+  opacity: 0;
+  animation: formGroupReveal 480ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  transition: transform 180ms ease, box-shadow 180ms ease, background-color 180ms ease;
 }
 
 .primary-button:hover:not(:disabled) {
-  transform: translateY(-2px);
-  filter: brightness(1.02);
-  box-shadow: 0 16px 28px rgba(37, 99, 235, 0.24);
+  background: #1a1a1a;
+  transform: translateY(-1px);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
 }
 
 .primary-button:disabled,
@@ -823,6 +834,18 @@ watch(() => props.activeTab, () => {
   from {
     opacity: 0;
     transform: translateY(14px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes formGroupReveal {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
   }
 
   to {
@@ -969,6 +992,8 @@ watch(() => props.activeTab, () => {
   .auth-entry__orb,
   .brand-column,
   .form-card,
+  .form-group,
+  .primary-button,
   .brand-lockup__icon,
   .stream-caret,
   .status-box,
