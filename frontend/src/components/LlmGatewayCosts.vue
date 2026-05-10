@@ -1,7 +1,8 @@
 <script setup>
-import { computed, onMounted, ref } from 'vue';
+import { computed, onMounted, reactive, ref } from 'vue';
 
 import { llmGatewayApi } from '../api/llm-gateway.js';
+import { llmApi, normalizeModelConfigPayload } from '../api/llm.js';
 import {
   normalizeGatewayCostsModels,
   normalizeGatewayCostsSummary,
@@ -17,8 +18,36 @@ const timeseries = ref(normalizeGatewayCostsTimeseries());
 const models = ref(normalizeGatewayCostsModels());
 const errorMsg = ref('');
 const isLoading = ref(false);
-const editingModel = ref(null);
+const isSaving = ref(false);
 const editDrawerVisible = ref(false);
+
+const modelConfigMap = ref(new Map());
+
+const editForm = reactive({
+  alias: '',
+  input_price_per_million: 0,
+  output_price_per_million: 0,
+  request_price: 0,
+  price_currency: 'USD',
+});
+let editingConfigId = null;
+
+const fetchModelConfigs = async () => {
+  try {
+    const data = await llmApi.getModelConfigs();
+    const configs = normalizeModelConfigPayload(data);
+    const map = new Map();
+    for (const config of configs) {
+      const alias = config.alias || config.model_name;
+      if (alias) {
+        map.set(alias, config);
+      }
+    }
+    modelConfigMap.value = map;
+  } catch {
+    // silently ignore — edit will be unavailable
+  }
+};
 
 const fetchCosts = async () => {
   isLoading.value = true;
@@ -39,6 +68,9 @@ const fetchCosts = async () => {
     isLoading.value = false;
   }
 };
+
+const hasRequests = computed(() => summary.value.total_requests > 0);
+const hasTokens = computed(() => summary.value.total_request_tokens > 0 || summary.value.total_response_tokens > 0);
 
 const costChartOption = computed(() => {
   const input = summary.value.estimated_input_cost;
@@ -61,6 +93,33 @@ const costChartOption = computed(() => {
         data: [
           { value: input, name: '输入成本', itemStyle: { color: 'rgba(36,87,197,0.82)' } },
           { value: output, name: '输出成本', itemStyle: { color: 'rgba(36,87,197,0.38)' } },
+        ],
+      },
+    ],
+  };
+});
+
+const tokenChartOption = computed(() => {
+  const input = summary.value.total_request_tokens;
+  const output = summary.value.total_response_tokens;
+  if (input === 0 && output === 0) {
+    return {};
+  }
+  return {
+    tooltip: { trigger: 'item', formatter: '{b}: {c} Token ({d}%)' },
+    legend: { bottom: 0, textStyle: { color: '#8a95a7', fontSize: 11 } },
+    series: [
+      {
+        type: 'pie',
+        radius: ['42%', '68%'],
+        center: ['50%', '44%'],
+        avoidLabelOverlap: true,
+        itemStyle: { borderRadius: 6, borderColor: 'var(--surface-1)', borderWidth: 2 },
+        label: { show: false },
+        emphasis: { label: { show: true, fontSize: 13, fontWeight: 'bold' } },
+        data: [
+          { value: input, name: '输入 Token', itemStyle: { color: 'rgba(36,87,197,0.82)' } },
+          { value: output, name: '输出 Token', itemStyle: { color: 'rgba(36,87,197,0.38)' } },
         ],
       },
     ],
@@ -121,11 +180,42 @@ const timeseriesChartOption = computed(() => {
 });
 
 const openEditDrawer = (model) => {
-  editingModel.value = { ...model };
+  const config = modelConfigMap.value.get(model.alias);
+  editingConfigId = config?.id ?? null;
+  editForm.alias = model.alias;
+  editForm.input_price_per_million = Number(config?.input_price_per_million ?? 0);
+  editForm.output_price_per_million = Number(config?.output_price_per_million ?? 0);
+  editForm.request_price = Number(config?.request_price ?? 0);
+  editForm.price_currency = config?.price_currency || 'USD';
   editDrawerVisible.value = true;
 };
 
-onMounted(fetchCosts);
+const savePricing = async () => {
+  if (!editingConfigId) {
+    return;
+  }
+  isSaving.value = true;
+  try {
+    await llmApi.updateModelConfig(editingConfigId, {
+      input_price_per_million: Number(editForm.input_price_per_million || 0),
+      output_price_per_million: Number(editForm.output_price_per_million || 0),
+      request_price: Number(editForm.request_price || 0),
+      price_currency: editForm.price_currency,
+    });
+    editDrawerVisible.value = false;
+    await fetchModelConfigs();
+    await fetchCosts();
+  } catch (error) {
+    errorMsg.value = error.message || '保存定价失败';
+  } finally {
+    isSaving.value = false;
+  }
+};
+
+onMounted(async () => {
+  await fetchModelConfigs();
+  await fetchCosts();
+});
 </script>
 
 <template>
@@ -148,7 +238,15 @@ onMounted(fetchCosts);
             <p>{{ summary.total_request_tokens }} 输入 · {{ summary.total_response_tokens }} 输出</p>
           </div>
         </div>
-        <div v-else class="admin-empty-state">当前窗口暂无成本数据</div>
+        <div v-else-if="hasTokens" class="cost-structure-wrap">
+          <AdminChart :option="tokenChartOption" height="240px" />
+          <div class="cost-structure-leader">
+            <span class="section-kicker">Token 消耗</span>
+            <strong>{{ summary.total_request_tokens + summary.total_response_tokens }}</strong>
+            <p>尚未配置定价，当前显示 Token 消耗</p>
+          </div>
+        </div>
+        <div v-else class="admin-empty-state">当前窗口暂无请求数据</div>
       </AppSectionCard>
 
       <AppSectionCard title="时间分布" :desc="`粒度：${timeseries.granularity_minutes ? timeseries.granularity_minutes + ' 分钟' : timeseries.granularity_hours ? timeseries.granularity_hours + ' 小时' : '自动'}`" admin>
@@ -197,26 +295,33 @@ onMounted(fetchCosts);
     </OpsInspectorDrawer>
 
     <el-drawer v-model="editDrawerVisible" size="420px" title="编辑模型定价" destroy-on-close>
-      <div v-if="editingModel" class="edit-pricing-panel">
+      <div v-if="editForm.alias" class="edit-pricing-panel">
         <div class="edit-pricing-field">
           <span class="section-kicker">模型别名</span>
-          <strong>{{ editingModel.alias }}</strong>
+          <strong>{{ editForm.alias }}</strong>
         </div>
-        <div class="edit-pricing-field">
-          <span class="section-kicker">当前请求占比</span>
-          <p>{{ editingModel.request_share_pct }}% · {{ editingModel.request_count }} 次请求</p>
+        <el-form label-position="top" class="edit-pricing-form">
+          <el-form-item label="输入价格 (per million tokens)">
+            <el-input-number v-model="editForm.input_price_per_million" :min="0" :step="0.01" controls-position="right" style="width: 100%;" />
+          </el-form-item>
+          <el-form-item label="输出价格 (per million tokens)">
+            <el-input-number v-model="editForm.output_price_per_million" :min="0" :step="0.01" controls-position="right" style="width: 100%;" />
+          </el-form-item>
+          <el-form-item label="单次请求价格">
+            <el-input-number v-model="editForm.request_price" :min="0" :step="0.001" controls-position="right" style="width: 100%;" />
+          </el-form-item>
+          <el-form-item label="货币">
+            <el-select v-model="editForm.price_currency" style="width: 100%;">
+              <el-option label="USD" value="USD" />
+              <el-option label="CNY" value="CNY" />
+              <el-option label="EUR" value="EUR" />
+            </el-select>
+          </el-form-item>
+        </el-form>
+        <div class="edit-pricing-actions">
+          <el-button @click="editDrawerVisible = false">取消</el-button>
+          <el-button type="primary" :loading="isSaving" @click="savePricing">保存</el-button>
         </div>
-        <div class="edit-pricing-field">
-          <span class="section-kicker">Token 统计</span>
-          <p>输入 {{ editingModel.total_request_tokens }} · 输出 {{ editingModel.total_response_tokens }}</p>
-        </div>
-        <div class="edit-pricing-field">
-          <span class="section-kicker">当前估算成本</span>
-          <p>输入 ${{ editingModel.estimated_input_cost.toFixed(4) }} · 输出 ${{ editingModel.estimated_output_cost.toFixed(4) }} · 总计 ${{ editingModel.estimated_total_cost.toFixed(4) }}</p>
-        </div>
-        <el-alert type="info" :closable="false" show-icon>
-          定价配置需到「模型总览」页面设置 input/output price per million。
-        </el-alert>
       </div>
     </el-drawer>
   </OpsSectionFrame>
@@ -293,9 +398,16 @@ onMounted(fetchCosts);
   color: var(--text-primary);
 }
 
-.edit-pricing-field p {
-  margin: 6px 0 0;
-  color: var(--text-secondary);
+.edit-pricing-form {
+  margin-top: 8px;
+}
+
+.edit-pricing-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line-soft);
 }
 
 @media (max-width: 900px) {
