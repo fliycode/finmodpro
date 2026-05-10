@@ -42,6 +42,7 @@ const activeSessionLoadFailed = ref(false);
 const historyDrawerOpen = ref(false);
 const memoryDrawerOpen = ref(false);
 const activeSessionFilters = ref({});
+const ragSteps = ref([]);
 
 const hasStreamingAssistant = computed(() =>
   messages.value.some((message) => message.isStreaming),
@@ -57,6 +58,19 @@ const showEmptyState = computed(() => shouldShowFinancialQaEmptyState({
 const qaChromeState = getQaChromeState();
 const userAvatar = getQaMessageAvatar('user');
 const assistantAvatar = getQaMessageAvatar('assistant');
+
+const RAG_STEP_LABELS = {
+  route: (d) => `路由决策: ${d.route_guard || d.route}`,
+  rewrite_query: () => '查询改写完成',
+  retrieve: (d) => `检索到 ${d.retrieved_count ?? 0} 条结果`,
+  score_filter: (d) => `评分过滤: ${d.filtered_count ?? 0} 条通过`,
+  build_context: (d) => `构建上下文: ${d.citation_count ?? 0} 篇引用`,
+  direct_context: () => '直接回答模式',
+};
+const getStepLabel = (step) => {
+  const fn = RAG_STEP_LABELS[step?.step];
+  return fn ? fn(step) : step?.step || '处理中';
+};
 const sessionLoadFailureNotice = computed(() =>
   getSessionLoadFailureNotice(activeSessionLoadFailed.value),
 );
@@ -296,6 +310,7 @@ const handleAsk = async () => {
   query.value = '';
   messages.value.push({ role: 'user', content: currentQuery });
   isAsking.value = true;
+  ragSteps.value = [];
   await scrollToBottom();
 
   try {
@@ -332,6 +347,9 @@ const handleAsk = async () => {
     const finalState = await qaApi.streamQuestion(currentQuery, {
       sessionId: currentSessionId.value,
       filters: activeSessionFilters.value,
+      onStep(stepData) {
+        ragSteps.value.push(stepData);
+      },
       onMeta(meta) {
         updateAssistantMessage({
           citations: meta.citations,
@@ -498,8 +516,16 @@ const handleAsk = async () => {
                     </div>
 
                     <!-- Loading indicator -->
-                    <div v-if="msg.isStreaming && !msg.content" class="qa-loading">
+                    <div v-if="msg.isStreaming && !msg.content && ragSteps.length === 0" class="qa-loading">
                       <span /><span /><span />
+                    </div>
+
+                    <!-- RAG pipeline steps -->
+                    <div v-if="msg.isStreaming && ragSteps.length > 0" class="qa-steps">
+                      <div v-for="(step, i) in ragSteps" :key="i" class="qa-step">
+                        <span class="qa-step__icon">&#10003;</span>
+                        <span class="qa-step__label">{{ getStepLabel(step) }}</span>
+                      </div>
                     </div>
 
                     <!-- Answer notice -->
@@ -1032,6 +1058,41 @@ const handleAsk = async () => {
 @keyframes dotPulse {
   0%, 100% { opacity: 0.4; transform: scaleX(0.8); }
   50% { opacity: 1; transform: scaleX(1); }
+}
+
+/* RAG Pipeline Steps */
+
+.qa-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 0;
+}
+
+.qa-step {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: rgba(162, 180, 216, 0.8);
+  animation: stepFadeIn 0.25s ease-out;
+}
+
+.qa-step__icon {
+  color: #486cff;
+  font-size: 11px;
+  flex-shrink: 0;
+}
+
+.qa-step__label {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+@keyframes stepFadeIn {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
 }
 
 /* Answer Notice */

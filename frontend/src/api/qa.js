@@ -164,6 +164,11 @@ export const qaApi = {
 
       buffer += decoder.decode(value, { stream: true });
       buffer = parseSse(buffer, (eventName, data) => {
+        if (eventName === 'step') {
+          onStep?.(data);
+          return;
+        }
+
         if (eventName === 'meta') {
           aggregated.citations = normalizeCitations(data.citations);
           aggregated.answer_mode = data.answer_mode || aggregated.answer_mode;

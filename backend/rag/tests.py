@@ -5,6 +5,7 @@ from io import StringIO
 from types import SimpleNamespace
 from unittest.mock import patch
 
+
 from django.contrib.auth.models import Group
 from django.core.management import call_command
 from django.core.files.uploadedfile import SimpleUploadedFile
@@ -508,50 +509,48 @@ class RetrievalEvaluationServiceTests(TestCase):
         self.assertEqual(result["summary"]["mrr"], 1.0)
         self.assertEqual(result["summary"]["ndcg_at_k"], 1.0)
 
-    @patch("rag.services.retrieval_evaluation_service.evaluate_retrieval_fixture")
-    def test_evaluate_retrieval_command_prints_summary(self, mocked_evaluate_fixture):
-        mocked_evaluate_fixture.return_value = {
-            "total_cases": 1,
-            "summary": {
-                "recall_at_k": 1.0,
-                "mrr": 1.0,
-                "ndcg_at_k": 1.0,
-                "average_latency_ms": 12.5,
-            },
-            "cases": [],
-        }
-        stdout = StringIO()
+    def test_evaluate_retrieval_command_prints_summary(self):
+        import rag.management.commands.evaluate_retrieval as eval_cmd
 
-        call_command("evaluate_retrieval", stdout=stdout)
+        with patch.object(eval_cmd, "evaluate_retrieval_fixture") as mock_eval:
+            mock_eval.return_value = {
+                "total_cases": 1,
+                "summary": {
+                    "recall_at_k": 1.0,
+                    "mrr": 1.0,
+                    "ndcg_at_k": 1.0,
+                    "average_latency_ms": 12.5,
+                },
+                "cases": [],
+            }
+            stdout = StringIO()
+            call_command("evaluate_retrieval", stdout=stdout)
+            output = stdout.getvalue()
+            self.assertIn("RETRIEVAL EVALUATION", output)
+            self.assertIn("recall_at_k", output)
 
-        output = json.loads(stdout.getvalue())
-        self.assertEqual(output["total_cases"], 1)
-        self.assertEqual(output["summary"]["recall_at_k"], 1.0)
+    def test_evaluate_retrieval_command_all_mode_runs_both(self):
+        import rag.management.commands.evaluate_retrieval as eval_cmd
 
-    @patch("rag.services.retrieval_evaluation_service.evaluate_generation_fixture")
-    @patch("rag.services.retrieval_evaluation_service.evaluate_retrieval_fixture")
-    def test_evaluate_retrieval_command_all_mode_runs_both(
-        self, mocked_retrieval, mocked_generation
-    ):
-        mocked_retrieval.return_value = {
-            "total_cases": 1,
-            "summary": {"recall_at_k": 1.0, "mrr": 1.0, "ndcg_at_k": 1.0, "average_latency_ms": 10.0},
-            "cases": [],
-        }
-        mocked_generation.return_value = {
-            "total_cases": 1,
-            "summary": {"avg_faithfulness": 0.9, "avg_relevancy": 0.8},
-            "cases": [],
-        }
-        stdout = StringIO()
-
-        call_command("evaluate_retrieval", "--mode", "all", stdout=stdout)
-
-        output = stdout.getvalue()
-        self.assertIn("RETRIEVAL EVALUATION", output)
-        self.assertIn("GENERATION EVALUATION", output)
-        mocked_retrieval.assert_called_once()
-        mocked_generation.assert_called_once()
+        with patch.object(eval_cmd, "evaluate_retrieval_fixture") as mock_retrieval, \
+             patch.object(eval_cmd, "evaluate_generation_fixture") as mock_generation:
+            mock_retrieval.return_value = {
+                "total_cases": 1,
+                "summary": {"recall_at_k": 1.0, "mrr": 1.0, "ndcg_at_k": 1.0, "average_latency_ms": 10.0},
+                "cases": [],
+            }
+            mock_generation.return_value = {
+                "total_cases": 1,
+                "summary": {"avg_faithfulness": 0.9, "avg_relevancy": 0.8},
+                "cases": [],
+            }
+            stdout = StringIO()
+            call_command("evaluate_retrieval", "--mode", "all", stdout=stdout)
+            output = stdout.getvalue()
+            self.assertIn("RETRIEVAL EVALUATION", output)
+            self.assertIn("GENERATION EVALUATION", output)
+            mock_retrieval.assert_called_once()
+            mock_generation.assert_called_once()
 
 
 class BM25RetrieverTests(TestCase):
