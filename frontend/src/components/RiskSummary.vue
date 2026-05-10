@@ -1,16 +1,15 @@
 <script setup>
-import { computed, onMounted, onBeforeUnmount, ref, watch } from "vue";
+import { computed, defineAsyncComponent, onMounted, onBeforeUnmount, ref, watch } from "vue";
 import { riskApi } from "../api/risk.js";
 import { kbApi } from "../api/knowledgebase.js";
 import { useFlash } from "../lib/flash.js";
 import {
   buildRiskLevelChartOption,
-  buildRiskTypeChartOption,
-  buildRiskTrendChartOption,
   normalizeRiskAnalytics,
 } from "../lib/risk-workspace.js";
-import AdminChart from "./admin/AdminChart.vue";
 import AppIcon from "./ui/AppIcon.vue";
+
+const AdminChart = defineAsyncComponent(() => import("./admin/AdminChart.vue"));
 
 const flash = useFlash();
 
@@ -44,8 +43,6 @@ const isUploading = ref(false);
 const analytics = computed(() => normalizeRiskAnalytics(analyticsPayload.value));
 
 const riskLevelOption = computed(() => buildRiskLevelChartOption(analytics.value));
-const riskTypeOption = computed(() => buildRiskTypeChartOption(analytics.value));
-const riskTrendOption = computed(() => buildRiskTrendChartOption(analytics.value));
 
 const riskLevelDist = computed(() => analytics.value.risk_level_distribution || []);
 const riskTypeDist = computed(() => analytics.value.risk_type_distribution || []);
@@ -601,7 +598,7 @@ const downloadGeneratedReport = async (format = "markdown") => {
     </div>
 
     <!-- Events Drawer -->
-    <el-drawer v-model="eventsDrawerOpen" direction="rtl" size="700px" :with-header="false" aria-label="风险事件列表">
+    <el-drawer v-model="eventsDrawerOpen" direction="rtl" size="700px" :with-header="false" destroy-on-close aria-label="风险事件列表">
       <div class="risk-events-drawer">
         <div class="risk-events-drawer__head">
           <h3>风险事件列表</h3>
