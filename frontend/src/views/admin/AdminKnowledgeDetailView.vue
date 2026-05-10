@@ -3,6 +3,7 @@ import { computed, onMounted, onUnmounted, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 
 import KnowledgeBaseDetailPanel from '../../components/knowledgebase/KnowledgeBaseDetailPanel.vue';
+import KnowledgeBasePreviewModal from '../../components/knowledgebase/KnowledgeBasePreviewModal.vue';
 import { kbApi } from '../../api/knowledgebase.js';
 import { useFlash } from '../../lib/flash.js';
 import { getIngestionAction } from '../../lib/knowledgebase-actions.js';
@@ -190,6 +191,10 @@ onUnmounted(() => {
       @open-original="openLink(document?.originalUrl)"
       @change-tab="activeTab = $event"
       @toggle-chunk="expandedChunkIds = buildChunkExpansionState(expandedChunkIds, $event)"
+    />
+    <KnowledgeBasePreviewModal
+      v-model="isPreviewOpen"
+      :preview-state="previewState"
     />
   </div>
 </template>

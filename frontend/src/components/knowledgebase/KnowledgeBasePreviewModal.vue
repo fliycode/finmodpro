@@ -35,21 +35,25 @@ defineEmits(['update:modelValue']);
   margin: 0;
   max-height: 60vh;
   overflow: auto;
-  border-radius: 16px;
-  padding: 16px;
-  background: #f6f8fb;
-  color: #263246;
+  border-radius: 12px;
+  padding: 14px;
+  background: var(--surface-3);
+  color: var(--text-primary);
+  font-family: 'PingFang SC', 'Noto Sans SC', 'Microsoft YaHei', sans-serif;
+  font-size: 14px;
   line-height: 1.7;
   white-space: pre-wrap;
 }
 
 .kb-preview-modal__empty h4 {
   margin: 0 0 8px;
-  color: #142033;
+  color: var(--text-primary);
+  font-family: 'DM Sans', 'Noto Sans SC', sans-serif;
+  font-weight: 600;
 }
 
 .kb-preview-modal__empty p {
   margin: 0;
-  color: #5a677d;
+  color: var(--text-secondary);
 }
 </style>

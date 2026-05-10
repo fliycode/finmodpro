@@ -73,19 +73,21 @@ const tabs = [
   <div class="kb-detail ui-card">
     <template v-if="document">
       <div class="kb-detail__header">
-        <div>
-          <p class="eyebrow">文档详情</p>
+        <div class="kb-detail__title-area">
           <h3>{{ document.title }}</h3>
-          <p class="kb-detail__summary">{{ document.processResult }}</p>
+          <span :class="['status-chip', `tone-${document.statusTone || 'neutral'}`]">
+            {{ document.processStep.label }}
+          </span>
         </div>
         <div class="kb-detail__header-actions">
+          <button class="kb-ghost-btn" @click="$emit('preview')">预览</button>
+          <button class="kb-ghost-btn" @click="$emit('open-original')">原文</button>
           <button
-            v-if="document"
             class="kb-secondary-btn"
             :disabled="isUploadingVersion"
             @click="$emit('upload-version')"
           >
-            {{ isUploadingVersion ? '上传中...' : '上传新版本' }}
+            {{ isUploadingVersion ? '上传中...' : '新版本' }}
           </button>
           <button
             v-if="primaryAction"
@@ -95,58 +97,18 @@ const tabs = [
           >
             {{ isSubmittingTask ? '提交中...' : primaryAction.label }}
           </button>
-          <span :class="['status-chip', `tone-${document.statusTone || 'neutral'}`]">
-            {{ document.processStep.label }}
-          </span>
         </div>
       </div>
 
-      <div class="kb-detail__quick-actions">
-        <button class="kb-secondary-btn" @click="$emit('preview')">查看预览</button>
-        <button class="kb-secondary-btn" @click="$emit('open-original')">查看原文</button>
-      </div>
+      <p v-if="document.processResult" class="kb-detail__summary">{{ document.processResult }}</p>
 
-      <div class="kb-meta-grid">
-        <div class="meta-item">
-          <span>上传者</span>
-          <strong>{{ document.uploaderName }}</strong>
-        </div>
-        <div class="meta-item">
-          <span>归属人</span>
-          <strong>{{ document.ownerName }}</strong>
-        </div>
-        <div class="meta-item">
-          <span>上传时间</span>
-          <strong>{{ document.uploadTime }}</strong>
-        </div>
-        <div class="meta-item">
-          <span>更新时间</span>
-          <strong>{{ document.updateTime }}</strong>
-        </div>
-        <div class="meta-item">
-          <span>数据集</span>
-          <strong>{{ document.datasetName }}</strong>
-        </div>
-        <div class="meta-item">
-          <span>当前版本</span>
-          <strong>v{{ document.currentVersion }}</strong>
-        </div>
-        <div class="meta-item">
-          <span>来源类型</span>
-          <strong>{{ document.sourceType || '未标记' }}</strong>
-        </div>
-        <div class="meta-item">
-          <span>来源标签</span>
-          <strong>{{ document.sourceLabel || '未标记' }}</strong>
-        </div>
-        <div class="meta-item">
-          <span>切块数量</span>
-          <strong>{{ document.chunkCount }}</strong>
-        </div>
-        <div class="meta-item">
-          <span>向量数量</span>
-          <strong>{{ document.vectorCount }}</strong>
-        </div>
+      <div class="kb-meta-row">
+        <span class="kb-meta-chip">{{ document.datasetName || '未分组' }}</span>
+        <span class="kb-meta-chip">v{{ document.currentVersion }}</span>
+        <span class="kb-meta-chip">{{ document.uploaderName }}</span>
+        <span class="kb-meta-chip">{{ document.uploadTime }}</span>
+        <span class="kb-meta-chip">{{ document.chunkCount }} 块 / {{ document.vectorCount }} 向量</span>
+        <span class="kb-meta-chip">{{ document.size }}</span>
       </div>
 
       <div class="kb-tabs">
@@ -291,59 +253,80 @@ const tabs = [
 .kb-detail {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 20px;
   background: var(--surface-2);
-  padding: 22px;
+  padding: 24px;
 }
 
-.eyebrow {
-  margin: 0 0 8px;
-  font-family: 'PingFang SC', 'Noto Sans SC', 'Microsoft YaHei', sans-serif;
-  font-size: 11px;
-  font-weight: 500;
-  letter-spacing: 0.16em;
-  text-transform: uppercase;
-  color: var(--brand);
+.kb-detail__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
 }
 
-.kb-detail h3 {
+.kb-detail__title-area {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.kb-detail__title-area h3 {
   margin: 0;
   font-family: 'DM Sans', 'Noto Sans SC', sans-serif;
   font-size: 1.25rem;
   font-weight: 600;
   line-height: 1.35;
   color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.kb-detail__header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
 }
 
 .kb-detail__summary {
-  margin: 8px 0 0;
+  margin: 0;
   font-family: 'PingFang SC', 'Noto Sans SC', 'Microsoft YaHei', sans-serif;
   color: var(--text-secondary);
   line-height: 1.6;
+  font-size: 14px;
 }
 
-.kb-detail__header,
-.kb-detail__header-actions,
-.kb-detail__quick-actions {
+.kb-meta-row {
   display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 12px;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
-.kb-detail__header-actions,
-.kb-detail__quick-actions {
-  justify-content: flex-end;
+.kb-meta-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 10px;
+  border-radius: 8px;
+  background: var(--surface-3);
+  font-family: 'PingFang SC', 'Noto Sans SC', 'Microsoft YaHei', sans-serif;
+  font-size: 12px;
+  color: var(--text-secondary);
 }
 
 .kb-primary-btn,
-.kb-secondary-btn {
-  height: 40px;
-  border-radius: 12px;
-  padding: 0 16px;
+.kb-secondary-btn,
+.kb-ghost-btn {
+  height: 36px;
+  border-radius: 10px;
+  padding: 0 14px;
   font-family: 'PingFang SC', 'Noto Sans SC', 'Microsoft YaHei', sans-serif;
+  font-size: 13px;
   font-weight: 600;
   cursor: pointer;
+  white-space: nowrap;
 }
 
 .kb-primary-btn {
@@ -358,17 +341,16 @@ const tabs = [
   color: var(--text-primary);
 }
 
-.kb-meta-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
+.kb-ghost-btn {
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  padding: 0 10px;
 }
 
-.meta-item {
-  border: 1px solid var(--line-soft);
-  border-radius: 16px;
-  padding: 14px;
-  background: var(--surface-3);
+.kb-ghost-btn:hover {
+  color: var(--brand);
+  background: var(--brand-soft);
 }
 
 .kb-version-summary,
@@ -384,8 +366,8 @@ const tabs = [
 .kb-provenance-card,
 .kb-version-card {
   border: 1px solid var(--line-soft);
-  border-radius: 16px;
-  padding: 16px;
+  border-radius: 12px;
+  padding: 14px;
   background: var(--surface-3);
 }
 
@@ -410,7 +392,6 @@ const tabs = [
   line-height: 1.6;
 }
 
-.meta-item span,
 .meta-label {
   display: block;
   margin-bottom: 6px;
@@ -421,11 +402,6 @@ const tabs = [
   letter-spacing: 0.02em;
 }
 
-.meta-item strong {
-  font-family: 'PingFang SC', 'Noto Sans SC', 'Microsoft YaHei', sans-serif;
-  color: var(--text-primary);
-}
-
 .task-grid strong {
   font-family: 'PingFang SC', 'Noto Sans SC', 'Microsoft YaHei', sans-serif;
   color: var(--text-primary);
@@ -433,32 +409,35 @@ const tabs = [
 
 .kb-tabs {
   display: flex;
-  gap: 10px;
+  gap: 6px;
   border-bottom: 1px solid var(--line-soft);
   padding-bottom: 12px;
 }
 
 .kb-tab {
-  border: 1px solid var(--line-soft);
-  border-radius: 999px;
-  padding: 8px 14px;
-  background: var(--surface-2);
+  border: 1px solid transparent;
+  border-radius: 8px;
+  padding: 6px 12px;
+  background: transparent;
   color: var(--text-secondary);
   font-family: 'PingFang SC', 'Noto Sans SC', 'Microsoft YaHei', sans-serif;
   font-size: 13px;
   font-weight: 500;
   cursor: pointer;
-  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.kb-tab:hover {
+  background: var(--surface-3);
 }
 
 .kb-tab.active {
-  border-color: var(--brand-soft);
   background: var(--brand-soft);
   color: var(--brand);
 }
 
 .kb-detail__section {
-  min-height: 220px;
+  min-height: 180px;
 }
 
 .kb-progress__meta {
@@ -472,7 +451,7 @@ const tabs = [
 
 .kb-progress__track {
   overflow: hidden;
-  height: 10px;
+  height: 8px;
   border-radius: 999px;
   background: var(--surface-3);
 }
@@ -484,10 +463,10 @@ const tabs = [
 }
 
 .kb-task-card {
-  margin-top: 16px;
+  margin-top: 14px;
   border: 1px solid var(--line-soft);
-  border-radius: 16px;
-  padding: 16px;
+  border-radius: 12px;
+  padding: 14px;
   background: var(--surface-3);
 }
 
@@ -496,13 +475,14 @@ const tabs = [
   font-family: 'PingFang SC', 'Noto Sans SC', 'Microsoft YaHei', sans-serif;
   color: var(--text-secondary);
   line-height: 1.6;
+  font-size: 14px;
 }
 
 .task-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 14px;
-  margin-top: 14px;
+  gap: 12px;
+  margin-top: 12px;
 }
 
 .kb-empty-state h4 {
@@ -519,25 +499,26 @@ const tabs = [
 
 .kb-error-log {
   border: 1px solid rgba(181, 58, 58, 0.15);
-  border-radius: 16px;
-  padding: 16px;
+  border-radius: 12px;
+  padding: 14px;
   background: rgba(181, 58, 58, 0.06);
   font-family: 'PingFang SC', 'Noto Sans SC', 'Microsoft YaHei', sans-serif;
   color: #8d3030;
   line-height: 1.6;
   white-space: pre-wrap;
+  font-size: 14px;
 }
 
 .status-chip {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-width: 72px;
-  padding: 6px 10px;
+  padding: 4px 10px;
   border-radius: 999px;
   font-family: 'PingFang SC', 'Noto Sans SC', 'Microsoft YaHei', sans-serif;
   font-size: 12px;
   font-weight: 600;
+  white-space: nowrap;
 }
 
 .tone-neutral {

@@ -157,7 +157,7 @@ const showReingest = (item) => {
 .kb-table__header,
 .kb-table__row {
   display: grid;
-  grid-template-columns: 30px minmax(180px, 1.5fr) 108px 78px 96px 108px 110px 120px;
+  grid-template-columns: 30px minmax(160px, 1fr) 100px 78px 88px 100px 100px 110px;
   gap: 8px;
   align-items: center;
   padding: 10px 14px;
@@ -359,7 +359,7 @@ const showReingest = (item) => {
 @media (max-width: 1160px) {
   .kb-table__header,
   .kb-table__row {
-    grid-template-columns: 30px minmax(160px, 1fr) 108px 96px 110px;
+    grid-template-columns: 30px minmax(140px, 1fr) 100px 88px 100px;
   }
 
   .kb-col-size,
@@ -371,7 +371,7 @@ const showReingest = (item) => {
 @media (max-width: 900px) {
   .kb-table__header,
   .kb-table__row {
-    grid-template-columns: 30px minmax(140px, 1fr) 96px 110px;
+    grid-template-columns: 30px minmax(120px, 1fr) 100px 110px;
   }
 
   .kb-col-time,

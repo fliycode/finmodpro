@@ -35,6 +35,8 @@ const isSubmittingTask = ref(false);
 const isLoadingDatasets = ref(false);
 const isCreatingDataset = ref(false);
 const isDatasetComposerOpen = ref(false);
+const isUploadDialogOpen = ref(false);
+const uploadSelectedDatasetId = ref('');
 const selectedDatasetId = ref('all');
 const searchKeyword = ref('');
 const statusFilter = ref('all');
@@ -192,6 +194,12 @@ const navigateToDetail = (item) => {
 };
 
 const triggerUpload = () => {
+  uploadSelectedDatasetId.value = selectedDatasetId.value !== 'all' ? selectedDatasetId.value : '';
+  isUploadDialogOpen.value = true;
+};
+
+const confirmUploadDataset = () => {
+  isUploadDialogOpen.value = false;
   fileInput.value?.click();
 };
 
@@ -199,14 +207,16 @@ const handleFileChange = async (event) => {
   const file = event.target.files?.[0];
   if (!file) return;
 
+  const datasetId = uploadSelectedDatasetId.value || undefined;
   isUploading.value = true;
   try {
-    const uploadResult = await kbApi.uploadDocument(file, {
-      datasetId: selectedDatasetId.value,
-    });
+    const uploadResult = await kbApi.uploadDocument(file, { datasetId });
+    const datasetName = datasetId
+      ? datasets.value.find((d) => String(d.id) === String(datasetId))?.name
+      : null;
     flash.success(
-      selectedDatasetId.value !== 'all'
-        ? `文件已上传到"${activeDataset.value?.name || '当前数据集'}"。请启动入库任务。`
+      datasetName
+        ? `文件已上传到"${datasetName}"。请启动入库任务。`
         : '文件已上传。请启动入库任务，后台会异步完成解析、切块和向量化。',
     );
     if (uploadResult.document?.id) {
@@ -392,6 +402,39 @@ onUnmounted(() => {
 <template>
   <div :class="['kb-page', { 'kb-page--admin': showAdminMetrics }]">
     <input ref="fileInput" type="file" hidden @change="handleFileChange" />
+
+    <Teleport to="body">
+      <div v-if="isUploadDialogOpen" class="kb-dialog-overlay" @click.self="isUploadDialogOpen = false">
+        <div class="kb-dialog">
+          <h3>选择目标数据集</h3>
+          <p class="kb-dialog__desc">上传的文档将归入所选数据集，也可稍后在文档详情中修改。</p>
+          <div class="kb-dialog__datasets">
+            <button
+              type="button"
+              :class="['kb-dataset-option', { active: !uploadSelectedDatasetId }]"
+              @click="uploadSelectedDatasetId = ''"
+            >
+              <span class="kb-dataset-option__name">不指定数据集</span>
+              <span class="kb-dataset-option__hint">文档将归入"未分组"</span>
+            </button>
+            <button
+              v-for="ds in datasets"
+              :key="ds.id"
+              type="button"
+              :class="['kb-dataset-option', { active: String(uploadSelectedDatasetId) === String(ds.id) }]"
+              @click="uploadSelectedDatasetId = String(ds.id)"
+            >
+              <span class="kb-dataset-option__name">{{ ds.name }}</span>
+              <span class="kb-dataset-option__hint">{{ ds.document_count ?? 0 }} 个文档</span>
+            </button>
+          </div>
+          <div class="kb-dialog__actions">
+            <button class="kb-secondary-btn" @click="isUploadDialogOpen = false">取消</button>
+            <button class="kb-primary-btn" @click="confirmUploadDataset">选择文件上传</button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
 
     <section class="kb-overview">
       <div class="kb-overview__stats">
@@ -729,6 +772,97 @@ onUnmounted(() => {
   .kb-overview__stats {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
+}
+
+.kb-dialog-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.4);
+  backdrop-filter: blur(4px);
+}
+
+.kb-dialog {
+  width: min(440px, 90vw);
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 24px;
+  border: 1px solid var(--line-soft);
+  border-radius: 18px;
+  background: var(--surface-2);
+  box-shadow: var(--shadow-lg);
+}
+
+.kb-dialog h3 {
+  margin: 0;
+  font-family: 'DM Sans', 'Noto Sans SC', sans-serif;
+  font-size: 1.15rem;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.kb-dialog__desc {
+  margin: 0;
+  font-family: 'PingFang SC', 'Noto Sans SC', 'Microsoft YaHei', sans-serif;
+  font-size: 13px;
+  color: var(--text-secondary);
+  line-height: 1.6;
+}
+
+.kb-dialog__datasets {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+.kb-dataset-option {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  padding: 10px 14px;
+  border: 1px solid var(--line-soft);
+  border-radius: 12px;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.kb-dataset-option:hover {
+  border-color: var(--brand-soft);
+  background: var(--surface-3);
+}
+
+.kb-dataset-option.active {
+  border-color: var(--brand);
+  background: var(--brand-soft);
+}
+
+.kb-dataset-option__name {
+  font-family: 'PingFang SC', 'Noto Sans SC', 'Microsoft YaHei', sans-serif;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.kb-dataset-option__hint {
+  font-family: 'PingFang SC', 'Noto Sans SC', 'Microsoft YaHei', sans-serif;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.kb-dialog__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
 }
 
 @media (max-width: 720px) {
