@@ -24,8 +24,6 @@ const timeseries = ref(normalizeGatewayCostsTimeseries());
 const models = ref(normalizeGatewayCostsModels());
 const errorMsg = ref('');
 const isLoading = ref(false);
-const refreshedAt = ref('');
-
 const fetchModelOptions = async () => {
   const data = await llmApi.getModelConfigs();
   const uniqueOptions = new Map();
@@ -56,46 +54,12 @@ const fetchCosts = async () => {
     summary.value = summaryPayload;
     timeseries.value = timeseriesPayload;
     models.value = modelsPayload;
-    refreshedAt.value = new Date().toLocaleString();
   } catch (error) {
     errorMsg.value = error.message || '加载用量统计失败';
   } finally {
     isLoading.value = false;
   }
 };
-
-const metricCards = computed(() => ([
-  {
-    key: 'total-cost',
-    label: '总成本估算',
-    value: `$${summary.value.estimated_total_cost.toFixed(4)}`,
-    note: `最近刷新：${refreshedAt.value || '尚未刷新'}`,
-  },
-  {
-    key: 'requests',
-    label: '请求量',
-    value: summary.value.total_requests,
-    note: '当前筛选窗口内的请求总数。',
-  },
-  {
-    key: 'input',
-    label: '输入 Token',
-    value: summary.value.total_request_tokens,
-    note: `约 $${summary.value.estimated_input_cost.toFixed(4)}`,
-  },
-  {
-    key: 'output',
-    label: '输出 Token',
-    value: summary.value.total_response_tokens,
-    note: `约 $${summary.value.estimated_output_cost.toFixed(4)}`,
-  },
-]));
-
-const frameMeta = computed(() => [
-  `最近刷新：${refreshedAt.value || '尚未刷新'}`,
-  `请求总数：${summary.value.total_requests}`,
-  `窗口：${filters.time}`,
-]);
 
 const maxSeriesRequests = computed(() => {
   const counts = timeseries.value.points.map((item) => item.request_count);
@@ -130,9 +94,7 @@ onMounted(async () => {
 </script>
 
 <template>
-  <OpsSectionFrame
-    :meta="frameMeta"
-  >
+  <OpsSectionFrame>
     <template #actions>
       <div class="gateway-page__hero-actions">
         <el-select v-model="filters.model" clearable placeholder="按 alias 筛选" style="width: 180px;">

@@ -29,7 +29,6 @@ const traceDrawerVisible = ref(false);
 const isLoading = ref(false);
 const isTraceLoading = ref(false);
 const errorMsg = ref('');
-const refreshedAt = ref('');
 const page = ref(1);
 const pageSize = ref(20);
 
@@ -58,7 +57,6 @@ const fetchObservability = async () => {
     logs.value = logsPayload;
     summary.value = summaryPayload;
     errors.value = errorsPayload;
-    refreshedAt.value = new Date().toLocaleString();
   } catch (error) {
     errorMsg.value = error.message || '加载模型日志失败';
   } finally {
@@ -86,39 +84,6 @@ const refreshAll = async () => {
   await fetchObservability();
 };
 
-const metricCards = computed(() => ([
-  {
-    key: 'requests',
-    label: '请求量',
-    value: summary.value.total_requests,
-    note: `最近刷新：${refreshedAt.value || '尚未刷新'}`,
-  },
-  {
-    key: 'error-rate',
-    label: '错误率',
-    value: `${summary.value.error_rate_pct}%`,
-    note: `失败请求 ${errors.value.total_failed_requests} 次`,
-  },
-  {
-    key: 'latency',
-    label: '平均延迟',
-    value: `${summary.value.avg_latency_ms} ms`,
-    note: '当前筛选窗口下的平均耗时。',
-  },
-  {
-    key: 'error-types',
-    label: '错误类型',
-    value: errors.value.error_types.length,
-    note: '用于区分是配额、路由还是上游异常。',
-  },
-]));
-
-const frameMeta = computed(() => [
-  `最近刷新：${refreshedAt.value || '尚未刷新'}`,
-  `日志总量：${logs.value.total}`,
-  `窗口：${filters.time}`,
-]);
-
 const maxLatencyBucket = computed(() => {
   const counts = summary.value.latency_buckets.map((item) => item.count);
   return counts.length ? Math.max(...counts) : 1;
@@ -136,9 +101,7 @@ onMounted(async () => {
 </script>
 
 <template>
-  <OpsSectionFrame
-    :meta="frameMeta"
-  >
+  <OpsSectionFrame>
     <template #actions>
       <div class="gateway-page__hero-actions">
         <el-select v-model="filters.model" clearable placeholder="按 alias 筛选" style="width: 180px;">
