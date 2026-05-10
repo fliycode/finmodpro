@@ -37,7 +37,6 @@ const analyticsErrorMsg = ref("");
 
 let workspaceAbort = null;
 const reviewingId = ref(null);
-const isExportingJson = ref(false);
 
 const fileInput = ref(null);
 const isUploading = ref(false);
@@ -316,8 +315,7 @@ const exportEventsAsJson = () => {
 
 const downloadGeneratedReport = async (format = "markdown") => {
   if (!generatedReport.value?.id) { flash.error("请先生成报告后再导出"); return; }
-  const loadingRef = format === "json" ? isExportingJson : isReportExporting;
-  loadingRef.value = true;
+  isReportExporting.value = true;
   try {
     const p = await riskApi.exportReport(generatedReport.value.id, { format });
     const blob = new Blob([p.content], { type: p.contentType });
@@ -328,7 +326,7 @@ const downloadGeneratedReport = async (format = "markdown") => {
   } catch (error) {
     flash.error(error.message || "导出失败");
   } finally {
-    loadingRef.value = false;
+    isReportExporting.value = false;
   }
 };
 </script>
@@ -575,6 +573,19 @@ const downloadGeneratedReport = async (format = "markdown") => {
             <h3><AppIcon name="download" :size="14" /> 导出与分享</h3>
           </div>
           <div v-if="reportErrorMsg" class="risk-err" role="alert" style="margin:0 12px 8px">{{ reportErrorMsg }}</div>
+          <div class="risk-export__form">
+            <div class="risk-export__type-row">
+              <button :class="['risk-export__type-btn', { 'is-active': reportType === 'company' }]" @click="reportType = 'company'">公司报告</button>
+              <button :class="['risk-export__type-btn', { 'is-active': reportType === 'time_range' }]" @click="reportType = 'time_range'">时间范围</button>
+            </div>
+            <div v-if="reportType === 'company'" class="risk-export__fields">
+              <el-input v-model="reportForm.company_name" placeholder="公司名称" size="small" clearable />
+            </div>
+            <div v-else class="risk-export__fields risk-export__fields--dates">
+              <el-date-picker v-model="reportForm.period_start" type="date" placeholder="开始日期" size="small" value-format="YYYY-MM-DD" style="width:100%" />
+              <el-date-picker v-model="reportForm.period_end" type="date" placeholder="结束日期" size="small" value-format="YYYY-MM-DD" style="width:100%" />
+            </div>
+          </div>
           <div class="risk-export__grid">
             <button class="risk-export__btn" @click="generateReport" :disabled="isReportLoading" :aria-busy="isReportLoading">
               <AppIcon name="file-text" :size="15" aria-hidden="true" />
@@ -1376,6 +1387,46 @@ const downloadGeneratedReport = async (format = "markdown") => {
 /* Export */
 
 .risk-export { flex-shrink: 0; }
+
+.risk-export__form {
+  padding: 8px 12px 0;
+}
+
+.risk-export__type-row {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 8px;
+}
+
+.risk-export__type-btn {
+  flex: 1;
+  padding: 5px 0;
+  border: 1px solid rgba(111, 144, 205, 0.12);
+  border-radius: 6px;
+  background: transparent;
+  color: #8492aa;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: border-color 0.2s, color 0.2s, background 0.2s;
+}
+
+.risk-export__type-btn.is-active {
+  border-color: rgba(233, 76, 89, 0.3);
+  background: rgba(233, 76, 89, 0.08);
+  color: #ff949b;
+}
+
+.risk-export__fields {
+  display: flex;
+  gap: 6px;
+}
+
+.risk-export__fields--dates {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
 
 .risk-export__grid {
   display: grid;
