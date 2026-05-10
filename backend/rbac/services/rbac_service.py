@@ -165,6 +165,8 @@ def get_avatar_url(user):
 
 
 def serialize_user_rbac_profile(user):
+    from rbac.services.profile_stats_service import get_user_stats
+
     return {
         "id": user.id,
         "username": user.username,
@@ -172,6 +174,8 @@ def serialize_user_rbac_profile(user):
         "avatar_url": get_avatar_url(user),
         "groups": collect_user_groups(user),
         "permissions": collect_user_permission_names(user),
+        "date_joined": user.date_joined.isoformat() if user.date_joined else None,
+        "stats": get_user_stats(user),
     }
 
 

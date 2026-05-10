@@ -98,6 +98,32 @@ export const createAuthApi = (overrides = {}) => {
         body: formData,
       });
     },
+    async updateProfile(payload) {
+      await ensureCsrfCookie(config);
+      return config.fetchJson('/api/auth/me', {
+        method: 'PATCH',
+        auth: true,
+        credentials: 'include',
+        headers: withCsrfHeaders(),
+        body: JSON.stringify({
+          username: payload.username,
+          email: payload.email,
+        }),
+      });
+    },
+    async changePassword(payload) {
+      await ensureCsrfCookie(config);
+      return config.fetchJson('/api/auth/me/password/', {
+        method: 'POST',
+        auth: true,
+        credentials: 'include',
+        headers: withCsrfHeaders(),
+        body: JSON.stringify({
+          old_password: payload.oldPassword,
+          new_password: payload.newPassword,
+        }),
+      });
+    },
   };
 };
 

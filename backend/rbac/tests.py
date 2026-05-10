@@ -52,15 +52,79 @@ class RbacApiTests(TestCase):
         )
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json()["id"], self.user.id)
-        self.assertEqual(response.json()["username"], "alice")
-        self.assertEqual(response.json()["email"], "alice@example.com")
-        self.assertEqual(response.json()["groups"], ["member"])
+        data = response.json()
+        self.assertEqual(data["id"], self.user.id)
+        self.assertEqual(data["username"], "alice")
+        self.assertEqual(data["email"], "alice@example.com")
+        self.assertEqual(data["groups"], ["member"])
         self.assertTrue(
             {"view_dashboard", "view_document", "ask_financial_qa"}.issubset(
-                set(response.json()["permissions"])
+                set(data["permissions"])
             )
         )
+        self.assertIn("date_joined", data)
+        self.assertIn("stats", data)
+        self.assertIn("question_count", data["stats"])
+        self.assertIn("question_count_today", data["stats"])
+        self.assertIn("document_count", data["stats"])
+        self.assertIn("usage_days", data["stats"])
+
+    def test_patch_me_updates_username_and_email(self):
+        seed_roles_and_permissions()
+        self.user.groups.add(Group.objects.get(name=ROLE_MEMBER))
+
+        response = self.client.patch(
+            "/api/auth/me",
+            data=json.dumps({"username": "alice-updated", "email": "new@example.com"}),
+            content_type="application/json",
+            HTTP_AUTHORIZATION=f"Bearer {self.access_token}",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(data["username"], "alice-updated")
+        self.assertEqual(data["email"], "new@example.com")
+        self.user.refresh_from_db()
+        self.assertEqual(self.user.username, "alice-updated")
+        self.assertEqual(self.user.email, "new@example.com")
+
+    def test_patch_me_rejects_duplicate_username(self):
+        seed_roles_and_permissions()
+        User.objects.create_user(username="taken", password="secret123", email="taken@example.com")
+
+        response = self.client.patch(
+            "/api/auth/me",
+            data=json.dumps({"username": "taken", "email": "alice@example.com"}),
+            content_type="application/json",
+            HTTP_AUTHORIZATION=f"Bearer {self.access_token}",
+        )
+
+        self.assertEqual(response.status_code, 409)
+        self.assertIn("用户名", response.json()["message"])
+
+    def test_change_password_with_valid_old_password(self):
+        response = self.client.post(
+            "/api/auth/me/password",
+            data=json.dumps({"old_password": "secret123", "new_password": "newpass456"}),
+            content_type="application/json",
+            HTTP_AUTHORIZATION=f"Bearer {self.access_token}",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["message"], "密码已修改。")
+        self.user.refresh_from_db()
+        self.assertTrue(self.user.check_password("newpass456"))
+
+    def test_change_password_rejects_wrong_old_password(self):
+        response = self.client.post(
+            "/api/auth/me/password",
+            data=json.dumps({"old_password": "wrong", "new_password": "newpass456"}),
+            content_type="application/json",
+            HTTP_AUTHORIZATION=f"Bearer {self.access_token}",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("旧密码", response.json()["message"])
 
 
 @override_settings(
