@@ -147,9 +147,8 @@ const documentHighlights = computed(() => ([
     <section class="ops-board__hero">
       <header class="ops-board__hero-header">
         <div>
-          <span class="ops-board__eyebrow">近 7 天主视图</span>
-          <h2>模型调用趋势</h2>
-          <p>这一屏只保留调用量主轴，辅以审计操作节奏，避免把低价值模块挤进核心视野。</p>
+          <h2>模型调用趋势 <span class="ops-board__eyebrow">近 7 天</span></h2>
+          <p>调用量与审计操作节奏概览。</p>
         </div>
 
         <div class="ops-board__hero-aside">
@@ -164,7 +163,7 @@ const documentHighlights = computed(() => ([
         </div>
       </header>
 
-      <AdminChart :option="trendOption" height="320px" />
+      <AdminChart :option="trendOption" height="240px" />
     </section>
 
     <section class="ops-board__secondary">
@@ -172,11 +171,11 @@ const documentHighlights = computed(() => ([
         <header class="board-panel__header">
           <div>
             <strong>文档处理状态</strong>
-            <span>只保留入库管线当前状态，用来判断知识资产是否拖慢调用链路。</span>
+            <span>入库管线当前各阶段数量。</span>
           </div>
         </header>
 
-        <AdminChart :option="documentOption" height="220px" />
+        <AdminChart :option="documentOption" height="180px" />
 
         <div class="board-panel__metrics">
           <div v-for="item in documentHighlights" :key="item.label" class="board-panel__metric">
@@ -190,7 +189,7 @@ const documentHighlights = computed(() => ([
         <header class="board-panel__header">
           <div>
             <strong>最近审计操作</strong>
-            <span>把近期治理动作压成一列，保留行动上下文，不再混排成通用 TOP 列表。</span>
+            <span>近期治理动作时间线。</span>
           </div>
         </header>
 
@@ -215,7 +214,7 @@ const documentHighlights = computed(() => ([
 <style scoped>
 .ops-board {
   display: grid;
-  gap: 24px;
+  gap: 20px;
   color: var(--text-secondary);
 }
 
@@ -227,10 +226,9 @@ const documentHighlights = computed(() => ([
 
 .summary-tile {
   display: grid;
-  gap: 16px;
+  gap: 12px;
   min-width: 0;
-  min-height: 154px;
-  padding: 22px 22px 20px;
+  padding: 18px 20px 16px;
   border: 1px solid var(--line-soft);
   border-radius: var(--radius-card);
   background: var(--surface-1);
@@ -253,9 +251,9 @@ const documentHighlights = computed(() => ([
 }
 
 .summary-tile__icon {
-  width: 34px;
-  height: 34px;
-  border-radius: 12px;
+  width: 30px;
+  height: 30px;
+  border-radius: 10px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -264,14 +262,14 @@ const documentHighlights = computed(() => ([
 }
 
 .summary-tile__icon :deep(.app-icon) {
-  width: 16px;
-  height: 16px;
+  width: 14px;
+  height: 14px;
 }
 
 .summary-tile strong {
   color: var(--text-primary);
   font-family: var(--heading);
-  font-size: 2rem;
+  font-size: 1.5rem;
   line-height: 1;
   font-weight: 600;
 }
@@ -286,10 +284,10 @@ const documentHighlights = computed(() => ([
 .summary-tile__delta {
   display: inline-flex;
   align-items: center;
-  min-height: 28px;
-  padding: 0 10px;
+  min-height: 24px;
+  padding: 0 8px;
   border-radius: var(--radius-pill);
-  font-size: 0.75rem;
+  font-size: 0.6875rem;
   font-style: normal;
   font-weight: 700;
   white-space: nowrap;
@@ -331,7 +329,7 @@ const documentHighlights = computed(() => ([
 
 .ops-board__hero,
 .board-panel {
-  padding: 28px;
+  padding: 22px;
   border: 1px solid var(--line-soft);
   border-radius: var(--radius-card);
   background: var(--surface-1);
@@ -340,7 +338,7 @@ const documentHighlights = computed(() => ([
 
 .ops-board__hero {
   display: grid;
-  gap: 18px;
+  gap: 14px;
 }
 
 .ops-board__hero-header,
@@ -351,28 +349,28 @@ const documentHighlights = computed(() => ([
 }
 
 .ops-board__hero-header h2 {
-  margin: 6px 0 8px;
+  margin: 0 0 4px;
   color: var(--text-primary);
   font-family: var(--heading);
-  font-size: 1.75rem;
-  line-height: 1.15;
+  font-size: 1.25rem;
+  line-height: 1.3;
   font-weight: 600;
 }
 
 .ops-board__hero-header p,
 .board-panel__header span {
   margin: 0;
-  max-width: 62ch;
   color: var(--text-muted);
-  font-size: 0.875rem;
-  line-height: 1.6;
+  font-size: 0.8125rem;
+  line-height: 1.5;
 }
 
 .ops-board__eyebrow {
   color: var(--brand);
-  font-size: 0.75rem;
+  font-size: 0.6875rem;
   font-weight: 700;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.06em;
+  vertical-align: middle;
 }
 
 .ops-board__hero-aside {
@@ -382,7 +380,7 @@ const documentHighlights = computed(() => ([
 }
 
 .ops-board__hero-stat {
-  padding: 14px 16px;
+  padding: 10px 14px;
   border-radius: var(--radius-lg);
   background: rgba(36, 87, 197, 0.08);
 }
@@ -397,9 +395,9 @@ const documentHighlights = computed(() => ([
 
 .ops-board__hero-stat strong {
   display: block;
-  margin-top: 6px;
+  margin-top: 4px;
   color: var(--text-primary);
-  font-size: 1.5rem;
+  font-size: 1.25rem;
   line-height: 1.1;
   font-weight: 600;
 }
@@ -412,14 +410,14 @@ const documentHighlights = computed(() => ([
 
 .board-panel {
   display: grid;
-  gap: 18px;
+  gap: 14px;
 }
 
 .board-panel__header strong {
   display: block;
-  margin-bottom: 6px;
+  margin-bottom: 4px;
   color: var(--text-primary);
-  font-size: 1rem;
+  font-size: 0.9375rem;
   font-weight: 700;
 }
 
@@ -430,7 +428,7 @@ const documentHighlights = computed(() => ([
 }
 
 .board-panel__metric {
-  padding: 14px 16px;
+  padding: 10px 14px;
   border-radius: var(--radius-lg);
   background: var(--surface-2);
 }
@@ -445,9 +443,9 @@ const documentHighlights = computed(() => ([
 
 .board-panel__metric strong {
   display: block;
-  margin-top: 6px;
+  margin-top: 4px;
   color: var(--text-primary);
-  font-size: 1.25rem;
+  font-size: 1.125rem;
   line-height: 1.1;
   font-weight: 600;
 }
@@ -460,9 +458,9 @@ const documentHighlights = computed(() => ([
 .audit-feed__item {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
-  gap: 16px;
+  gap: 12px;
   align-items: center;
-  padding: 16px 18px;
+  padding: 12px 14px;
   border-radius: var(--radius-lg);
   background: var(--surface-2);
 }

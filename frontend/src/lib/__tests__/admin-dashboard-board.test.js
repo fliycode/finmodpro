@@ -32,7 +32,7 @@ test('dashboard board exposes four headline metrics backed by real week-over-wee
   assert.equal(metrics[0].value, '2,843');
   assert.equal(metrics[0].delta, '较上周 +19.0%');
   assert.equal(metrics[1].value, '188');
-  assert.equal(metrics[2].note, '近 7 天新增 4 份');
+  assert.equal(metrics[2].note, '近 7 天 +4');
   assert.equal(metrics[3].delta, '较上周 +50.0%');
 });
 
