@@ -374,6 +374,8 @@ class OpenAICompatibleEmbeddingProvider(OpenAICompatibleApiMixin, BaseEmbeddingP
             "input": texts[0] if len(texts) == 1 else texts,
             "encoding_format": merged_options.get("encoding_format") or "float",
         }
+        if "dimensions" in merged_options:
+            payload["dimensions"] = int(merged_options["dimensions"])
         try:
             response_payload = self._post_json(
                 "/embeddings",

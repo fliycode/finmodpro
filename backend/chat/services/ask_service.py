@@ -1,7 +1,7 @@
 import logging
 import re
 
-from chat.services.rag_graph_service import prepare_chat_payload
+from chat.services.rag_graph_service import prepare_chat_payload, prepare_chat_payload_streaming
 from chat.services.session_service import (
     dispatch_session_maintenance_tasks,
     fail_session_message,
@@ -130,15 +130,25 @@ def ask_question(*, question, filters=None, top_k=5, session=None):
 
 def stream_question(*, question, filters=None, top_k=5, session=None):
     provider = get_chat_provider()
-    payload = prepare_chat_payload(
-        question=question,
-        filters=filters,
-        top_k=top_k,
-        session=session,
-        provider=provider,
-    )
 
     def event_stream():
+        payload = None
+        for event_type, data in prepare_chat_payload_streaming(
+            question=question,
+            filters=filters,
+            top_k=top_k,
+            session=session,
+            provider=provider,
+        ):
+            if event_type == "step":
+                yield {"event": "step", "data": data}
+            elif event_type == "payload":
+                payload = data
+
+        if payload is None:
+            yield {"event": "error", "data": {"message": "RAG pipeline produced no output"}}
+            return
+
         assistant_message = None
         with trace_span(
             "chat.ask.stream",

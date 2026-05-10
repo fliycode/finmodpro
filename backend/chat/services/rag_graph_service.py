@@ -5,6 +5,7 @@ import time
 from typing import TypedDict
 
 from django.conf import settings
+from langgraph.config import get_stream_writer
 from langgraph.graph import END, START, StateGraph
 
 from chat.services.context_service import build_chat_messages
@@ -291,6 +292,14 @@ def _select_relevant_results(results, *, limit=MAX_CHAT_CITATIONS):
 # --- Graph nodes ---
 
 
+def _emit_step(data: dict):
+    """Safely push a step event via LangGraph stream writer."""
+    try:
+        get_stream_writer()(data)
+    except Exception:
+        pass
+
+
 def _route_by_rules(state: ChatRagState):
     question = state["question"]
     resolved_filters = state.get("resolved_filters") or {}
@@ -313,6 +322,7 @@ def _route_by_rules(state: ChatRagState):
         "chat rag route",
         extra={"question": question, "route": route, "route_guard": route_guard},
     )
+    _emit_step({"step": "route", "route": route, "route_guard": route_guard})
     return {"route": route, "route_guard": route_guard}
 
 
@@ -362,6 +372,7 @@ def _rewrite_query(state: ChatRagState):
             "query_variants": query_variants,
         },
     )
+    _emit_step({"step": "rewrite_query", "rewritten_query": rewritten_query, "query_variants": query_variants})
     return {
         "rewritten_query": rewritten_query,
         "query_variants": query_variants,
@@ -404,6 +415,7 @@ def _retrieve_and_merge(state: ChatRagState):
             "retrieval_source": "llamaindex" if raw_results else "none",
         },
     )
+    _emit_step({"step": "retrieve", "retrieved_count": len(retrieval_results)})
     return {"retrieval_results": retrieval_results}
 
 
@@ -419,6 +431,7 @@ def _score_filter(state: ChatRagState):
             "threshold": _score_threshold(),
         },
     )
+    _emit_step({"step": "score_filter", "input_count": len(results), "filtered_count": len(filtered), "threshold": _score_threshold()})
     return {"retrieval_results": filtered}
 
 
@@ -429,6 +442,7 @@ def _build_retrieval_context(state: ChatRagState):
         results=retrieval_results,
     )["citations"]
     answer_mode = "cited" if citations else "fallback"
+    _emit_step({"step": "build_context", "citation_count": len(citations), "answer_mode": answer_mode})
     return {
         "retrieval_results": retrieval_results,
         "citations": citations,
@@ -443,6 +457,7 @@ def _build_retrieval_context(state: ChatRagState):
 
 
 def _direct_answer_context(state: ChatRagState):
+    _emit_step({"step": "direct_context", "answer_mode": "direct"})
     return {
         "retrieval_results": [],
         "citations": [],
@@ -528,3 +543,59 @@ def prepare_chat_payload(*, question, filters=None, top_k=5, session=None, provi
         "filters": resolved_filters,
         "top_k": top_k,
     }
+
+
+def prepare_chat_payload_streaming(*, question, filters=None, top_k=5, session=None, provider=None):
+    """Yield (event_type, data) tuples. event_type is 'step' or 'payload'.
+
+    'step' events carry RAG pipeline progress from get_stream_writer().
+    'payload' is the final prepared payload for LLM streaming.
+    """
+    started_at = time.monotonic()
+    resolved_filters = {}
+    if session is not None:
+        resolved_filters.update(normalize_context_filters(session.context_filters))
+    resolved_filters.update(normalize_context_filters(filters))
+
+    input_state = {
+        "question": question,
+        "filters": filters or {},
+        "top_k": top_k,
+        "session": session,
+        "provider": provider,
+        "resolved_filters": resolved_filters,
+    }
+
+    final_result = {}
+    for mode, chunk in _RAG_GRAPH.stream(input_state, stream_mode=["updates", "custom"]):
+        if mode == "custom":
+            yield ("step", chunk)
+        elif mode == "updates":
+            for node_output in chunk.values():
+                if node_output:
+                    final_result.update(node_output)
+
+    duration_ms = int((time.monotonic() - started_at) * 1000)
+    payload = {
+        "question": question,
+        "query": final_result.get("rewritten_query") or question,
+        "query_variants": final_result.get("query_variants")
+        or _normalize_query_variants(
+            final_result.get("rewritten_query") or question,
+            limit=_chat_query_variant_limit(),
+        ),
+        "messages": final_result["messages"],
+        "citations": final_result["citations"],
+        "answer_mode": final_result["answer_mode"],
+        "answer_notice": _build_answer_notice(final_result["answer_mode"]),
+        "duration_ms": duration_ms,
+        "retrieval_results": final_result.get("retrieval_results") or [],
+        "route": final_result.get("route") or "direct",
+        "route_guard": final_result.get("route_guard") or "default_direct",
+        "grading_mode": "score_filter" if (final_result.get("route") or "direct") == "retrieve" else "none",
+        "retrieved_count": len(final_result.get("retrieval_results") or []),
+        "citation_count": len(final_result.get("citations") or []),
+        "filters": resolved_filters,
+        "top_k": top_k,
+    }
+    yield ("payload", payload)

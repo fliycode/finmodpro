@@ -3,6 +3,7 @@ import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
 import { useRouter } from 'vue-router';
 
 import { kbApi } from '../api/knowledgebase.js';
+import { ElMessageBox } from 'element-plus';
 import KnowledgeBaseTable from './knowledgebase/KnowledgeBaseTable.vue';
 import KnowledgeBaseToolbar from './knowledgebase/KnowledgeBaseToolbar.vue';
 import AppIcon from './ui/AppIcon.vue';
@@ -276,6 +277,15 @@ const handleRowAction = async ({ item, action }) => {
   }
   if (action === 'delete') {
     try {
+      await ElMessageBox.confirm(
+        `确认删除文档"${item.title}"吗？删除后不可恢复。`,
+        '删除文档',
+        { confirmButtonText: '删除', cancelButtonText: '取消', type: 'warning' }
+      );
+    } catch {
+      return;
+    }
+    try {
       await kbApi.deleteDocument(item.id);
       flash.success(`文档"${item.title}"已删除。`);
       await fetchDocuments();
@@ -324,7 +334,15 @@ const handleBatchIngest = async () => {
 
 const handleBatchDelete = async () => {
   if (checkedDocumentIds.value.length === 0) return;
-
+  try {
+    await ElMessageBox.confirm(
+      `确认删除选中的 ${checkedDocumentIds.value.length} 个文档吗？删除后不可恢复。`,
+      '批量删除',
+      { confirmButtonText: '删除', cancelButtonText: '取消', type: 'warning' }
+    );
+  } catch {
+    return;
+  }
   try {
     const payload = await kbApi.batchDeleteDocuments(checkedDocumentIds.value);
     flash.success(summarizeBatchResult(payload, '批量删除'));

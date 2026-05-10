@@ -1,5 +1,6 @@
 import hashlib
 
+from django.conf import settings
 from django.core.cache import cache
 from pydantic import ConfigDict, Field
 
@@ -11,8 +12,9 @@ _CACHE_PREFIX = "emb:"
 _CACHE_TTL = 86400  # 24 hours
 
 
-def _cache_key(text: str) -> str:
-    return _CACHE_PREFIX + hashlib.sha256(text.encode()).hexdigest()
+def _cache_key(text: str, dimension: int) -> str:
+    raw = f"{dimension}:{text}"
+    return _CACHE_PREFIX + hashlib.sha256(raw.encode()).hexdigest()
 
 
 class FinModProEmbeddingAdapter(BaseEmbedding):
@@ -20,6 +22,11 @@ class FinModProEmbeddingAdapter(BaseEmbedding):
 
     provider: object | None = Field(default=None, exclude=True)
     model_name: str = "finmodpro-embedding"
+    dimension: int = Field(default=0, exclude=True)
+
+    def model_post_init(self, __context):
+        if self.dimension <= 0:
+            object.__setattr__(self, "dimension", settings.KB_EMBEDDING_DIMENSION)
 
     @classmethod
     def class_name(cls) -> str:
@@ -33,7 +40,7 @@ class FinModProEmbeddingAdapter(BaseEmbedding):
         return provider
 
     def _get_query_embedding(self, query: str) -> list[float]:
-        key = _cache_key(query)
+        key = _cache_key(query, self.dimension)
         cached = cache.get(key)
         if cached is not None:
             return cached
@@ -48,7 +55,7 @@ class FinModProEmbeddingAdapter(BaseEmbedding):
         return self._get_query_embedding(text)
 
     def _get_text_embeddings(self, texts: list[str]) -> list[list[float]]:
-        keys = [_cache_key(t) for t in texts]
+        keys = [_cache_key(t, self.dimension) for t in texts]
         cached = cache.get_many(keys)
 
         results: list[list[float] | None] = [None] * len(texts)

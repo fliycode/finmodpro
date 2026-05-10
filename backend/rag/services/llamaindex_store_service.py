@@ -1,15 +1,36 @@
+import copy
 import logging
+import threading
+import time
 
 from django.conf import settings
 
 from llama_index.core import StorageContext, VectorStoreIndex
 from llama_index.core.schema import TextNode
+from llama_index.core.vector_stores.types import (
+    FilterOperator,
+    MetadataFilter,
+    MetadataFilters,
+)
 from llama_index.vector_stores.milvus import MilvusVectorStore
 
 from knowledgebase.models import DocumentChunk
 from rag.services.llamaindex_embedding_adapter import FinModProEmbeddingAdapter
 
 logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# BM25 retriever cache (thread-safe, TTL-based)
+# ---------------------------------------------------------------------------
+
+_bm25_cache_lock = threading.Lock()
+_bm25_cache = {"retriever": None, "built_at": 0.0}
+
+
+def invalidate_bm25_cache():
+    with _bm25_cache_lock:
+        _bm25_cache["retriever"] = None
+        _bm25_cache["built_at"] = 0.0
 
 
 def _build_milvus_vector_store():
@@ -115,6 +136,7 @@ def sync_document(document):
     from knowledgebase.services.vector_service import VectorService
 
     VectorService().index(document)
+    invalidate_bm25_cache()
 
 
 def delete_document(*, document_id, chunk_ids=None):
@@ -134,6 +156,7 @@ def delete_document(*, document_id, chunk_ids=None):
             vector_store.delete(str(chunk_id))
     except Exception:
         logger.exception("failed to delete llamaindex nodes for document %s", document_id)
+    invalidate_bm25_cache()
 
 
 def clear_store():
@@ -142,6 +165,161 @@ def clear_store():
         vector_store.clear()
     except Exception:
         logger.exception("failed to clear llamaindex milvus store")
+    invalidate_bm25_cache()
+
+
+# ---------------------------------------------------------------------------
+# BM25 retrieval
+# ---------------------------------------------------------------------------
+
+
+def _build_bm25_retriever_from_db():
+    from llama_index.retrievers.bm25 import BM25Retriever
+
+    chunks = list(
+        DocumentChunk.objects.select_related("document")
+        .exclude(search_text="")
+        .iterator(chunk_size=1000)
+    )
+    if not chunks:
+        return None
+
+    nodes = []
+    for chunk in chunks:
+        node = _build_chunk_node(chunk)
+        nodes.append(node)
+
+    language = getattr(settings, "RAG_BM25_LANGUAGE", "zh")
+    return BM25Retriever(
+        nodes=nodes,
+        similarity_top_k=20,
+        language=language,
+        verbose=False,
+    )
+
+
+def _get_or_build_bm25_retriever():
+    cache_ttl = max(int(getattr(settings, "RAG_BM25_CACHE_TTL", 600) or 600), 60)
+    now = time.monotonic()
+
+    with _bm25_cache_lock:
+        cached = _bm25_cache
+        if cached["retriever"] is not None and (now - cached["built_at"]) < cache_ttl:
+            return cached["retriever"]
+
+    retriever = _build_bm25_retriever_from_db()
+    if retriever is None:
+        return None
+
+    with _bm25_cache_lock:
+        _bm25_cache["retriever"] = retriever
+        _bm25_cache["built_at"] = time.monotonic()
+
+    return retriever
+
+
+def _build_bm25_metadata_filters(filters):
+    if not filters:
+        return None
+
+    metadata_filters = []
+
+    document_id = filters.get("document_id")
+    if document_id not in (None, ""):
+        metadata_filters.append(
+            MetadataFilter(key="document_id", value=int(document_id), operator=FilterOperator.EQ)
+        )
+
+    doc_type = filters.get("doc_type")
+    if doc_type:
+        metadata_filters.append(
+            MetadataFilter(key="doc_type", value=doc_type, operator=FilterOperator.EQ)
+        )
+
+    source_date_from = filters.get("source_date_from")
+    if source_date_from:
+        metadata_filters.append(
+            MetadataFilter(key="source_date", value=source_date_from, operator=FilterOperator.GTE)
+        )
+
+    source_date_to = filters.get("source_date_to")
+    if source_date_to:
+        metadata_filters.append(
+            MetadataFilter(key="source_date", value=source_date_to, operator=FilterOperator.LTE)
+        )
+
+    if not metadata_filters:
+        return None
+    return MetadataFilters(filters=metadata_filters)
+
+
+def _serialize_bm25_results(nodes):
+    if not nodes:
+        return []
+
+    score_by_chunk_id = {}
+    for node_with_score in nodes:
+        metadata = node_with_score.node.metadata or {}
+        chunk_id = metadata.get("chunk_id")
+        if chunk_id in (None, ""):
+            continue
+        score_by_chunk_id[int(chunk_id)] = max(
+            score_by_chunk_id.get(int(chunk_id), 0.0),
+            float(node_with_score.score or 0.0),
+        )
+
+    if not score_by_chunk_id:
+        return []
+
+    chunks_by_id = {
+        chunk.id: chunk
+        for chunk in DocumentChunk.objects.select_related("document").filter(
+            id__in=score_by_chunk_id.keys()
+        )
+    }
+    results = []
+    for chunk_id, score in score_by_chunk_id.items():
+        chunk = chunks_by_id.get(chunk_id)
+        if chunk is None:
+            continue
+        metadata = chunk.metadata or {}
+        results.append({
+            "document_id": chunk.document_id,
+            "chunk_id": chunk.id,
+            "section_chunk_id": chunk.section_chunk_id,
+            "document_title": metadata.get("document_title") or chunk.document.title,
+            "doc_type": metadata.get("doc_type") or chunk.document.doc_type,
+            "source_date": metadata.get("source_date")
+            or (chunk.document.source_date.isoformat() if chunk.document.source_date else None),
+            "page_label": metadata.get("page_label", f"chunk-{chunk.chunk_index + 1}"),
+            "snippet": chunk.content,
+            "metadata": metadata,
+            "section_context_summary": None,
+            "score": score,
+            "vector_score": 0.0,
+            "keyword_score": score,
+            "matched_queries": [],
+        })
+    return results
+
+
+def _bm25_search(query, filters=None, limit=5):
+    if not getattr(settings, "RAG_BM25_ENABLED", False):
+        return []
+
+    retriever = _get_or_build_bm25_retriever()
+    if retriever is None:
+        return []
+
+    retriever_copy = copy.copy(retriever)
+    retriever_copy.similarity_top_k = max(int(limit), 1)
+
+    metadata_filters = _build_bm25_metadata_filters(filters)
+    if metadata_filters:
+        retriever_copy.filters = metadata_filters
+
+    nodes = retriever_copy.retrieve(query)
+    return _serialize_bm25_results(nodes)
 
 
 def search(*, query, filters=None, top_k=5):
@@ -487,6 +665,14 @@ def query_llamaindex_store(
         if vector_results:
             ranked_lists.append(("llamaindex_vector", query_text, vector_results))
 
+        bm25_results = _bm25_search(
+            query_text,
+            filters=filters,
+            limit=candidate_limit,
+        )
+        if bm25_results:
+            ranked_lists.append(("bm25", query_text, bm25_results))
+
         mysql_fulltext_results = _mysql_full_text_search(
             query_text,
             filters=filters,
@@ -496,7 +682,7 @@ def query_llamaindex_store(
             ranked_lists.append(("mysql_fulltext", query_text, mysql_fulltext_results))
 
         should_run_keyword_fallback = allow_keyword_fallback and not (
-            vector_results or mysql_fulltext_results
+            vector_results or bm25_results or mysql_fulltext_results
         )
         if should_run_keyword_fallback:
             fallback_keyword_results = _fallback_keyword_search(

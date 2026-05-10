@@ -1,9 +1,24 @@
 import asyncio
+import logging
+import math
 from typing import Iterable
 
 from langgraph.store.base import BaseStore, GetOp, Item, ListNamespacesOp, Op, PutOp, SearchOp
 
 from chat.models import MemoryItem
+from knowledgebase.services.embedding_service import build_dense_embedding
+
+logger = logging.getLogger(__name__)
+
+
+def _cosine_similarity(vec_a: list, vec_b: list) -> float:
+    """Pure-Python cosine similarity for two float vectors."""
+    dot = sum(a * b for a, b in zip(vec_a, vec_b))
+    norm_a = math.sqrt(sum(a * a for a in vec_a))
+    norm_b = math.sqrt(sum(b * b for b in vec_b))
+    if norm_a == 0 or norm_b == 0:
+        return 0.0
+    return dot / (norm_a * norm_b)
 
 
 def _namespace_to_user_id(namespace: tuple) -> int:
@@ -77,14 +92,15 @@ class DjangoMemoryStore(BaseStore):
             return None
 
         value = op.value
-        MemoryItem.objects.update_or_create(
+        content = value.get("content", "")
+        obj, created = MemoryItem.objects.update_or_create(
             user_id=user_id,
             fingerprint=op.key,
             scope_type=scope_type,
             scope_key=scope_key,
             defaults={
                 "title": str(value.get("title", ""))[:255],
-                "content": value.get("content", ""),
+                "content": content,
                 "memory_type": value.get("memory_type", MemoryItem.TYPE_CONFIRMED_FACT),
                 "confidence_score": value.get("confidence_score", 0.0),
                 "pinned": value.get("pinned", False),
@@ -92,6 +108,13 @@ class DjangoMemoryStore(BaseStore):
                 "status": MemoryItem.STATUS_ACTIVE,
             },
         )
+        if content and (created or obj.embedding in (None, [])):
+            try:
+                vec = build_dense_embedding(content)
+                obj.embedding = vec
+                obj.save(update_fields=["embedding"])
+            except Exception:
+                logger.warning("Failed to compute memory embedding", exc_info=True)
         return None
 
     def _handle_get(self, op: GetOp):
@@ -128,11 +151,27 @@ class DjangoMemoryStore(BaseStore):
         else:
             queryset = queryset.filter(scope_type=MemoryItem.SCOPE_USER_GLOBAL)
 
-        # No vector/semantic search available — return pinned items first, then by recency.
-        # Callers may pass a `query` for future semantic ranking; we intentionally ignore it
-        # here to avoid dropping memories that don't lexically match the current question.
         limit = op.limit or 10
         offset = op.offset or 0
+
+        # Try semantic ranking when a query is provided.
+        query = getattr(op, "query", None)
+        if query:
+            try:
+                query_vec = build_dense_embedding(query)
+                memories = list(queryset)
+                if any(m.embedding for m in memories):
+                    scored = []
+                    for m in memories:
+                        sim = _cosine_similarity(query_vec, m.embedding) if m.embedding else 0.0
+                        score = sim + (1.0 if m.pinned else 0.0)
+                        scored.append((score, m))
+                    scored.sort(key=lambda x: x[0], reverse=True)
+                    return [_memory_to_item(m) for _, m in scored[offset : offset + limit]]
+            except Exception:
+                logger.warning("Memory semantic search failed, falling back to recency", exc_info=True)
+
+        # Fallback: pinned items first, then by recency.
         memories = list(queryset.order_by("-pinned", "-updated_at")[offset : offset + limit])
         return [_memory_to_item(m) for m in memories]
 

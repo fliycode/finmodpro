@@ -165,6 +165,7 @@ class MemoryItem(models.Model):
     )
     pinned = models.BooleanField(default=False)
     fingerprint = models.CharField(max_length=255, blank=True, default="")
+    embedding = models.JSONField(default=list, blank=True)
     last_verified_at = models.DateTimeField(blank=True, null=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

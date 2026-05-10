@@ -35,7 +35,7 @@ def tokenize(text):
 
 class FakeEmbeddingProvider:
     def embed(self, *, texts, options=None):
-        return SimpleNamespace(vectors=[[float(index + 1) for index in range(64)] for _ in texts])
+        return SimpleNamespace(vectors=[[float(index + 1) for index in range(1024)] for _ in texts])
 
 
 def fake_vector_search(*, query, filters=None, top_k=5):
@@ -129,14 +129,17 @@ class RetrievalBackendSelectionTests(SimpleTestCase):
 class LlamaIndexQueryStrategyTests(SimpleTestCase):
     @patch("rag.services.llamaindex_store_service._fallback_keyword_search")
     @patch("rag.services.llamaindex_store_service._mysql_full_text_search")
+    @patch("rag.services.llamaindex_store_service._bm25_search")
     @patch("rag.services.llamaindex_store_service.search")
     def test_query_llamaindex_store_skips_keyword_fallback_when_other_hits_exist(
         self,
         mocked_search,
+        mocked_bm25,
         mocked_fulltext,
         mocked_fallback,
     ):
         mocked_search.return_value = [{"document_id": 1, "chunk_id": 10, "score": 0.8}]
+        mocked_bm25.return_value = []
         mocked_fulltext.return_value = []
         mocked_fallback.return_value = [{"document_id": 1, "chunk_id": 11, "score": 0.7}]
 
@@ -151,14 +154,17 @@ class LlamaIndexQueryStrategyTests(SimpleTestCase):
 
     @patch("rag.services.llamaindex_store_service._fallback_keyword_search")
     @patch("rag.services.llamaindex_store_service._mysql_full_text_search")
+    @patch("rag.services.llamaindex_store_service._bm25_search")
     @patch("rag.services.llamaindex_store_service.search")
     def test_query_llamaindex_store_runs_keyword_fallback_only_when_enabled_and_needed(
         self,
         mocked_search,
+        mocked_bm25,
         mocked_fulltext,
         mocked_fallback,
     ):
         mocked_search.return_value = []
+        mocked_bm25.return_value = []
         mocked_fulltext.return_value = []
         mocked_fallback.return_value = [{"document_id": 1, "chunk_id": 11, "score": 0.7}]
 
@@ -202,6 +208,11 @@ class RagRetrievalApiTests(TestCase):
             side_effect=sync_document,
         )
         self.vector_index_patcher.start()
+        self.bm25_search_patcher = patch(
+            "rag.services.llamaindex_store_service._bm25_search",
+            return_value=[],
+        )
+        self.bm25_search_patcher.start()
         self.media_root = tempfile.mkdtemp()
         self.override = override_settings(
             MEDIA_ROOT=self.media_root,
@@ -255,6 +266,7 @@ class RagRetrievalApiTests(TestCase):
     def tearDown(self):
         self.embedding_provider_patcher.stop()
         self.vector_search_patcher.stop()
+        self.bm25_search_patcher.stop()
         self.override.disable()
         self.vector_index_patcher.stop()
         shutil.rmtree(self.media_root, ignore_errors=True)
@@ -496,7 +508,7 @@ class RetrievalEvaluationServiceTests(TestCase):
         self.assertEqual(result["summary"]["mrr"], 1.0)
         self.assertEqual(result["summary"]["ndcg_at_k"], 1.0)
 
-    @patch("rag.management.commands.evaluate_retrieval.evaluate_retrieval_fixture")
+    @patch("rag.services.retrieval_evaluation_service.evaluate_retrieval_fixture")
     def test_evaluate_retrieval_command_prints_summary(self, mocked_evaluate_fixture):
         mocked_evaluate_fixture.return_value = {
             "total_cases": 1,
@@ -515,3 +527,102 @@ class RetrievalEvaluationServiceTests(TestCase):
         output = json.loads(stdout.getvalue())
         self.assertEqual(output["total_cases"], 1)
         self.assertEqual(output["summary"]["recall_at_k"], 1.0)
+
+    @patch("rag.services.retrieval_evaluation_service.evaluate_generation_fixture")
+    @patch("rag.services.retrieval_evaluation_service.evaluate_retrieval_fixture")
+    def test_evaluate_retrieval_command_all_mode_runs_both(
+        self, mocked_retrieval, mocked_generation
+    ):
+        mocked_retrieval.return_value = {
+            "total_cases": 1,
+            "summary": {"recall_at_k": 1.0, "mrr": 1.0, "ndcg_at_k": 1.0, "average_latency_ms": 10.0},
+            "cases": [],
+        }
+        mocked_generation.return_value = {
+            "total_cases": 1,
+            "summary": {"avg_faithfulness": 0.9, "avg_relevancy": 0.8},
+            "cases": [],
+        }
+        stdout = StringIO()
+
+        call_command("evaluate_retrieval", "--mode", "all", stdout=stdout)
+
+        output = stdout.getvalue()
+        self.assertIn("RETRIEVAL EVALUATION", output)
+        self.assertIn("GENERATION EVALUATION", output)
+        mocked_retrieval.assert_called_once()
+        mocked_generation.assert_called_once()
+
+
+class BM25RetrieverTests(TestCase):
+    @override_settings(RAG_BM25_ENABLED=False)
+    @patch("rag.services.llamaindex_store_service._get_or_build_bm25_retriever")
+    def test_bm25_search_returns_empty_when_disabled(self, mock_retriever):
+        from rag.services.llamaindex_store_service import _bm25_search
+
+        results = _bm25_search("test query")
+        self.assertEqual(results, [])
+        mock_retriever.assert_not_called()
+
+    @patch("rag.services.llamaindex_store_service._get_or_build_bm25_retriever")
+    def test_bm25_search_returns_empty_when_no_retriever(self, mock_retriever):
+        mock_retriever.return_value = None
+        from rag.services.llamaindex_store_service import _bm25_search
+
+        results = _bm25_search("test query")
+        self.assertEqual(results, [])
+
+    def test_bm25_cache_invalidation(self):
+        from rag.services.llamaindex_store_service import (
+            _bm25_cache,
+            invalidate_bm25_cache,
+        )
+
+        _bm25_cache["retriever"] = object()
+        _bm25_cache["built_at"] = 999999.0
+        invalidate_bm25_cache()
+        self.assertIsNone(_bm25_cache["retriever"])
+        self.assertEqual(_bm25_cache["built_at"], 0.0)
+
+
+class GenerationEvaluationTests(TestCase):
+    def test_evaluate_generation_case_requires_query(self):
+        from rag.services.retrieval_evaluation_service import evaluate_generation_case
+
+        with self.assertRaises(ValueError):
+            evaluate_generation_case({"query": ""})
+
+    @patch("rag.services.retrieval_evaluation_service._build_eval_llm")
+    def test_evaluate_generation_case_returns_faithfulness_and_relevancy(self, mock_build_llm):
+        from types import SimpleNamespace
+
+        from rag.services.retrieval_evaluation_service import evaluate_generation_case
+
+        mock_llm = SimpleNamespace(
+            complete=lambda prompt: SimpleNamespace(text="test answer"),
+        )
+        mock_build_llm.return_value = mock_llm
+
+        mock_faithfulness = SimpleNamespace(score=0.9, passing=True)
+        mock_relevancy = SimpleNamespace(score=0.85, passing=True)
+
+        with patch(
+            "llama_index.core.evaluation.FaithfulnessEvaluator"
+        ) as MockFaith, patch(
+            "llama_index.core.evaluation.RelevancyEvaluator"
+        ) as MockRel:
+            MockFaith.return_value.evaluate.return_value = mock_faithfulness
+            MockRel.return_value.evaluate.return_value = mock_relevancy
+
+            result = evaluate_generation_case(
+                {"query": "test query", "top_k": 3},
+                retrieve_fn=lambda **kwargs: [
+                    {"document_title": "Doc", "page_label": "p1", "snippet": "text"}
+                ],
+                llm=mock_llm,
+            )
+
+        self.assertEqual(result["faithfulness_score"], 0.9)
+        self.assertEqual(result["relevancy_score"], 0.85)
+        self.assertTrue(result["faithfulness_passing"])
+        self.assertTrue(result["relevancy_passing"])

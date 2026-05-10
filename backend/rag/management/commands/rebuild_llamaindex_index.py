@@ -1,3 +1,5 @@
+from django.conf import settings
+from django.core.cache import cache
 from django.core.management.base import BaseCommand
 
 from knowledgebase.models import Document
@@ -15,9 +17,11 @@ class Command(BaseCommand):
         )
 
     def handle(self, *args, **options):
+        self.stdout.write(f"Embedding dimension: {settings.KB_EMBEDDING_DIMENSION}")
+        cache.clear()
         clear_store()
         if options["clear_only"]:
-            self.stdout.write(self.style.SUCCESS("Cleared vector store."))
+            self.stdout.write(self.style.SUCCESS("Cleared vector store and embedding cache."))
             return
 
         documents = Document.objects.filter(status=Document.STATUS_INDEXED).order_by("id")

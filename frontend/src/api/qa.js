@@ -122,7 +122,7 @@ export const qaApi = {
 
   async streamQuestion(
     query,
-    { filters = {}, top_k = 5, sessionId = null, onMeta, onChunk, onDone } = {},
+    { filters = {}, top_k = 5, sessionId = null, onStep, onMeta, onChunk, onDone } = {},
   ) {
     const payload = {
       question: query,

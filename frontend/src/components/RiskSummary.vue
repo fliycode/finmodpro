@@ -3,6 +3,7 @@ import { computed, defineAsyncComponent, onMounted, onBeforeUnmount, ref, watch 
 import { riskApi } from "../api/risk.js";
 import { kbApi } from "../api/knowledgebase.js";
 import { useFlash } from "../lib/flash.js";
+import { ElMessageBox } from 'element-plus';
 import {
   buildRiskLevelChartOption,
   normalizeRiskAnalytics,
@@ -279,16 +280,34 @@ const generatedReport = ref(null);
 const reportForm = ref({ company_name: "", period_start: "", period_end: "" });
 
 const generateReport = async () => {
-  isReportLoading.value = true;
   reportErrorMsg.value = "";
+  if (reportType.value === "company" && !reportForm.value.company_name) {
+    reportErrorMsg.value = "请输入公司名称";
+    return;
+  }
+  if (reportType.value === "time_range" && (!reportForm.value.period_start || !reportForm.value.period_end)) {
+    reportErrorMsg.value = "请输入开始和结束日期";
+    return;
+  }
+  try {
+    const reportLabel = reportType.value === "company"
+      ? `公司"${reportForm.value.company_name}"的风险报告`
+      : `${reportForm.value.period_start} 至 ${reportForm.value.period_end} 的风险报告`;
+    await ElMessageBox.confirm(`确认生成${reportLabel}吗？`, '生成风险报告', {
+      confirmButtonText: '生成',
+      cancelButtonText: '取消',
+      type: 'info',
+    });
+  } catch {
+    return;
+  }
+  isReportLoading.value = true;
   generatedReport.value = null;
   try {
     let data;
     if (reportType.value === "company") {
-      if (!reportForm.value.company_name) throw new Error("请输入公司名称");
       data = await riskApi.generateCompanyReport({ company_name: reportForm.value.company_name, period_start: reportForm.value.period_start || undefined, period_end: reportForm.value.period_end || undefined });
     } else {
-      if (!reportForm.value.period_start || !reportForm.value.period_end) throw new Error("请输入开始和结束日期");
       data = await riskApi.generateTimeRangeReport({ period_start: reportForm.value.period_start, period_end: reportForm.value.period_end });
     }
     generatedReport.value = data.data?.report || data.report || data;
