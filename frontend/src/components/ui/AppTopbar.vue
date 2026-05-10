@@ -169,6 +169,17 @@ onBeforeUnmount(() => {
     <div v-else class="app-topbar__title-spacer" aria-hidden="true"></div>
 
     <div class="app-topbar__actions">
+      <div class="app-topbar__search" @click="openPalette">
+        <AppIcon name="search" class="app-topbar__search-icon" />
+        <input
+          type="text"
+          class="app-topbar__search-input"
+          placeholder="搜索页面... (Ctrl+K)"
+          readonly
+          @focus="openPalette"
+        />
+      </div>
+
       <div class="app-topbar__utility-group">
         <ThemeToggle />
 
@@ -224,17 +235,6 @@ onBeforeUnmount(() => {
             </div>
           </Transition>
         </div>
-      </div>
-
-      <div class="app-topbar__search" @click="openPalette">
-        <AppIcon name="search" class="app-topbar__search-icon" />
-        <input
-          type="text"
-          class="app-topbar__search-input"
-          placeholder="搜索页面... (Ctrl+K)"
-          readonly
-          @focus="openPalette"
-        />
       </div>
     </div>
   </header>
