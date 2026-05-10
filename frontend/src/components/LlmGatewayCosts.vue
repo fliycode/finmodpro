@@ -9,9 +9,7 @@ import {
   normalizeGatewayCostsTimeseries,
 } from '../lib/llm-gateway.js';
 import AdminChart from './admin/AdminChart.vue';
-import OpsInspectorDrawer from './admin/ops/OpsInspectorDrawer.vue';
 import OpsSectionFrame from './admin/ops/OpsSectionFrame.vue';
-import AppSectionCard from './ui/AppSectionCard.vue';
 
 const summary = ref(normalizeGatewayCostsSummary());
 const timeseries = ref(normalizeGatewayCostsTimeseries());
@@ -220,84 +218,82 @@ onMounted(async () => {
 
 <template>
   <OpsSectionFrame>
-    <template #actions>
-      <el-button :loading="isLoading" @click="fetchCosts">刷新</el-button>
-    </template>
-
     <template #alerts>
       <el-alert v-if="errorMsg" :title="errorMsg" type="error" show-icon :closable="false" />
     </template>
 
     <div class="cost-chart-grid">
-      <AppSectionCard title="成本结构" desc="输入与输出成本占比，以及当前窗口最高成本模型。" admin>
+      <section class="cost-chart-panel">
+        <header class="cost-chart-panel__head">
+          <h3 class="cost-chart-panel__title">成本结构</h3>
+          <p class="cost-chart-panel__desc">输入与输出成本占比</p>
+        </header>
         <div v-if="summary.estimated_total_cost > 0" class="cost-structure-wrap">
-          <AdminChart :option="costChartOption" height="240px" />
+          <AdminChart :option="costChartOption" height="220px" />
           <div class="cost-structure-leader">
-            <span class="section-kicker">总成本</span>
-            <strong>${{ summary.estimated_total_cost.toFixed(4) }}</strong>
-            <p>{{ summary.total_request_tokens }} 输入 · {{ summary.total_response_tokens }} 输出</p>
+            <span class="cost-kicker">总成本</span>
+            <strong class="cost-leader-num">${{ summary.estimated_total_cost.toFixed(4) }}</strong>
+            <p class="cost-leader-meta">{{ summary.total_request_tokens }} 输入 · {{ summary.total_response_tokens }} 输出</p>
           </div>
         </div>
         <div v-else-if="hasTokens" class="cost-structure-wrap">
-          <AdminChart :option="tokenChartOption" height="240px" />
+          <AdminChart :option="tokenChartOption" height="220px" />
           <div class="cost-structure-leader">
-            <span class="section-kicker">Token 消耗</span>
-            <strong>{{ summary.total_request_tokens + summary.total_response_tokens }}</strong>
-            <p>尚未配置定价，当前显示 Token 消耗</p>
+            <span class="cost-kicker">Token 消耗</span>
+            <strong class="cost-leader-num">{{ summary.total_request_tokens + summary.total_response_tokens }}</strong>
+            <p class="cost-leader-meta">尚未配置定价</p>
           </div>
         </div>
-        <div v-else class="admin-empty-state">当前窗口暂无请求数据</div>
-      </AppSectionCard>
+        <div v-else class="cost-empty">当前窗口暂无请求数据</div>
+      </section>
 
-      <AppSectionCard title="时间分布" :desc="`粒度：${timeseries.granularity_minutes ? timeseries.granularity_minutes + ' 分钟' : timeseries.granularity_hours ? timeseries.granularity_hours + ' 小时' : '自动'}`" admin>
-        <AdminChart v-if="timeseries.points.length > 0" :option="timeseriesChartOption" height="260px" />
-        <div v-else class="admin-empty-state">当前窗口暂无时间序列</div>
-      </AppSectionCard>
+      <section class="cost-chart-panel">
+        <header class="cost-chart-panel__head">
+          <h3 class="cost-chart-panel__title">时间分布</h3>
+          <p class="cost-chart-panel__desc">{{ timeseries.granularity_minutes ? timeseries.granularity_minutes + ' 分钟粒度' : timeseries.granularity_hours ? timeseries.granularity_hours + ' 小时粒度' : '自动粒度' }}</p>
+        </header>
+        <AdminChart v-if="timeseries.points.length > 0" :option="timeseriesChartOption" height="240px" />
+        <div v-else class="cost-empty">当前窗口暂无时间序列</div>
+      </section>
     </div>
 
-    <OpsInspectorDrawer title="模型占比" desc="按模型展示请求占比、Token 与估算成本。">
-      <el-table :data="models.models" stripe border class="cost-model-table">
+    <section class="cost-models">
+      <header class="cost-models__head">
+        <div>
+          <h3 class="cost-models__title">模型占比</h3>
+          <p class="cost-models__desc">按模型展示请求占比、Token 与估算成本</p>
+        </div>
+      </header>
+      <el-table :data="models.models" class="cost-model-table" :header-cell-style="{ background: 'var(--surface-3)', color: 'var(--text-secondary)', fontWeight: 600, fontSize: '11px', letterSpacing: '0.04em', textTransform: 'uppercase' }">
         <el-table-column prop="alias" label="模型别名" min-width="160" />
-        <el-table-column prop="request_count" label="请求数" width="100" />
-        <el-table-column prop="request_share_pct" label="请求占比" width="100">
+        <el-table-column prop="request_count" label="请求数" width="90" align="right" />
+        <el-table-column prop="request_share_pct" label="占比" width="80" align="right">
           <template #default="{ row }">
             {{ row.request_share_pct }}%
           </template>
         </el-table-column>
-        <el-table-column label="Token" min-width="160">
+        <el-table-column label="输入 / 输出 Token" min-width="150" align="right">
           <template #default="{ row }">
-            {{ row.total_request_tokens }} / {{ row.total_response_tokens }}
+            <span class="cost-token-pair">{{ row.total_request_tokens }} <span class="cost-token-sep">/</span> {{ row.total_response_tokens }}</span>
           </template>
         </el-table-column>
-        <el-table-column label="输入成本" width="110">
+        <el-table-column label="总成本" width="110" align="right">
           <template #default="{ row }">
-            ${{ row.estimated_input_cost.toFixed(4) }}
+            <span class="cost-value">${{ row.estimated_total_cost.toFixed(4) }}</span>
           </template>
         </el-table-column>
-        <el-table-column label="输出成本" width="110">
+        <el-table-column label="" width="70" fixed="right" align="center">
           <template #default="{ row }">
-            ${{ row.estimated_output_cost.toFixed(4) }}
-          </template>
-        </el-table-column>
-        <el-table-column label="总成本" width="110">
-          <template #default="{ row }">
-            ${{ row.estimated_total_cost.toFixed(4) }}
-          </template>
-        </el-table-column>
-        <el-table-column label="操作" width="90" fixed="right">
-          <template #default="{ row }">
-            <el-button link type="primary" size="small" @click="openEditDrawer(row)">
-              编辑
-            </el-button>
+            <el-button link type="primary" size="small" @click="openEditDrawer(row)">编辑</el-button>
           </template>
         </el-table-column>
       </el-table>
-    </OpsInspectorDrawer>
+    </section>
 
     <el-drawer v-model="editDrawerVisible" size="420px" title="编辑模型定价" destroy-on-close>
       <div v-if="editForm.alias" class="edit-pricing-panel">
         <div class="edit-pricing-field">
-          <span class="section-kicker">模型别名</span>
+          <span class="cost-kicker">模型别名</span>
           <strong>{{ editForm.alias }}</strong>
         </div>
         <el-form label-position="top" class="edit-pricing-form">
@@ -328,31 +324,51 @@ onMounted(async () => {
 </template>
 
 <style scoped>
+/* ---- Chart Grid ---- */
+
 .cost-chart-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 0;
+  gap: 12px;
+}
+
+.cost-chart-panel {
   border: 1px solid var(--line-soft);
-  border-radius: 28px;
-  background: var(--surface-1);
-  overflow: hidden;
+  border-radius: 6px;
+  background: var(--surface-2);
+  padding: 20px 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
 }
 
-.cost-chart-grid :deep(.admin-section-card) {
-  min-height: 100%;
-  padding: 24px 26px;
-  border-left: 1px solid var(--line-soft);
-  background: transparent;
+.cost-chart-panel__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
 }
 
-.cost-chart-grid :deep(.admin-section-card:first-child) {
-  border-left: 0;
+.cost-chart-panel__title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text-primary);
+  letter-spacing: -0.01em;
 }
+
+.cost-chart-panel__desc {
+  margin: 0;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+/* ---- Cost Structure ---- */
 
 .cost-structure-wrap {
   display: grid;
   grid-template-columns: 1fr auto;
-  gap: 20px;
+  gap: 16px;
   align-items: center;
 }
 
@@ -360,31 +376,86 @@ onMounted(async () => {
   text-align: right;
 }
 
-.cost-structure-leader strong {
+.cost-kicker {
   display: block;
-  margin-top: 8px;
-  font-size: 22px;
-  color: var(--text-primary);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-muted);
 }
 
-.cost-structure-leader p {
-  margin: 6px 0 0;
-  font-size: 12px;
+.cost-leader-num {
+  display: block;
+  margin-top: 6px;
+  font-size: 24px;
+  font-weight: 800;
+  color: var(--text-primary);
+  letter-spacing: -0.02em;
+  line-height: 1;
+}
+
+.cost-leader-meta {
+  margin: 8px 0 0;
+  font-size: 11px;
   color: var(--text-secondary);
 }
 
-.section-kicker {
-  display: block;
+.cost-empty {
+  padding: 32px 0;
+  text-align: center;
   font-size: 12px;
+  color: var(--text-muted);
+}
+
+/* ---- Model Table ---- */
+
+.cost-models {
+  border: 1px solid var(--line-soft);
+  border-radius: 6px;
+  background: var(--surface-2);
+  overflow: hidden;
+}
+
+.cost-models__head {
+  padding: 16px 20px 12px;
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.cost-models__title {
+  margin: 0;
+  font-size: 14px;
   font-weight: 700;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
+  color: var(--text-primary);
+  letter-spacing: -0.01em;
+}
+
+.cost-models__desc {
+  margin: 4px 0 0;
+  font-size: 11px;
   color: var(--text-muted);
 }
 
 .cost-model-table {
   width: 100%;
 }
+
+.cost-token-pair {
+  font-variant-numeric: tabular-nums;
+}
+
+.cost-token-sep {
+  color: var(--text-muted);
+  margin: 0 2px;
+}
+
+.cost-value {
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-primary);
+}
+
+/* ---- Edit Drawer ---- */
 
 .edit-pricing-panel {
   display: grid;
@@ -410,18 +481,11 @@ onMounted(async () => {
   border-top: 1px solid var(--line-soft);
 }
 
+/* ---- Responsive ---- */
+
 @media (max-width: 900px) {
   .cost-chart-grid {
     grid-template-columns: 1fr;
-  }
-
-  .cost-chart-grid :deep(.admin-section-card) {
-    border-left: 0;
-    border-top: 1px solid var(--line-soft);
-  }
-
-  .cost-chart-grid :deep(.admin-section-card:first-child) {
-    border-top: 0;
   }
 
   .cost-structure-wrap {
