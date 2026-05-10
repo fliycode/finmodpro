@@ -41,20 +41,21 @@ export const authStorage = {
     return currentToken;
   },
   saveProfile(profile) {
+    const user = profile?.user || profile;
+    const id = user?.id ?? profile?.id;
+    if (id === undefined || id === null) {
+      return;
+    }
     currentProfile = {
       user: {
-        id: profile?.id ?? profile?.user?.id,
-        username: profile?.username ?? profile?.user?.username,
-        email: profile?.email ?? profile?.user?.email,
-        avatar_url: profile?.avatar_url ?? profile?.user?.avatar_url ?? null,
+        id,
+        username: user?.username ?? profile?.username ?? '',
+        email: user?.email ?? profile?.email ?? '',
+        avatar_url: user?.avatar_url ?? profile?.avatar_url ?? null,
       },
       groups: profile?.groups || [],
       permissions: profile?.permissions || [],
     };
-
-    if (currentProfile.user.id === undefined) {
-      currentProfile = EMPTY_PROFILE;
-    }
   },
   getProfile() {
     return currentProfile;
