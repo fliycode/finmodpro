@@ -21,6 +21,7 @@ export const navigationMap = {
         { id: 'admin-llm-model-overview', label: '模型总览', to: '/admin/llm/models' },
         { id: 'admin-llm-logs', label: '模型日志', to: '/admin/llm/logs' },
         { id: 'admin-llm-usage', label: '用量统计', to: '/admin/llm/usage' },
+        { id: 'admin-llm-rag-eval', label: 'RAG 评测', to: '/admin/llm/rag-evaluation' },
       ],
     },
     { id: 'admin-audit-logs', label: '操作日志', to: '/admin/audit-logs', icon: 'clipboard', group: 'admin-governance' },
