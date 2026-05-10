@@ -676,6 +676,14 @@ watch(() => props.activeTab, () => {
   transform: translateY(-1px);
 }
 
+.form-group input:-webkit-autofill,
+.form-group input:-webkit-autofill:hover,
+.form-group input:-webkit-autofill:focus {
+  -webkit-box-shadow: 0 0 0 1000px var(--entry-panel) inset;
+  -webkit-text-fill-color: var(--entry-ink);
+  transition: background-color 5000s ease-in-out 0s;
+}
+
 .input-error {
   border-color: rgba(180, 35, 24, 0.35) !important;
   box-shadow: 0 0 0 4px rgba(180, 35, 24, 0.08) !important;
