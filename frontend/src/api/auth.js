@@ -86,6 +86,18 @@ export const createAuthApi = (overrides = {}) => {
         headers: withCsrfHeaders(),
       });
     },
+    async uploadAvatar(file) {
+      await ensureCsrfCookie(config);
+      const formData = new FormData();
+      formData.append('avatar', file);
+      return config.fetchJson('/api/auth/me/avatar/', {
+        method: 'POST',
+        auth: true,
+        credentials: 'include',
+        headers: withCsrfHeaders(),
+        body: formData,
+      });
+    },
   };
 };
 

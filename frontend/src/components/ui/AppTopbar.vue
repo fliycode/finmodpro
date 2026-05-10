@@ -2,6 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { RouterLink, useRouter } from 'vue-router';
 
+import AppAvatar from './AppAvatar.vue';
 import AppIcon from './AppIcon.vue';
 import { getNavItems, getTopbarActions } from '../../config/navigation.js';
 import { authSession } from '../../lib/auth-session.js';
@@ -28,6 +29,7 @@ const profile = computed(() => authStorage.getProfile());
 const profileName = computed(() => profile.value?.user?.username || '当前用户');
 const profileEmail = computed(() => profile.value?.user?.email || '');
 const profileInitial = computed(() => profileName.value.trim().slice(0, 1).toUpperCase() || 'U');
+const profileAvatarUrl = computed(() => profile.value?.user?.avatar_url || '');
 const roleLabel = computed(() => (props.area === 'admin' ? '管理员端' : '用户端'));
 
 const dropdownOpen = ref(false);
@@ -190,13 +192,13 @@ onBeforeUnmount(() => {
             :aria-label="`账号菜单：${profileName}`"
             @click.stop="toggleDropdown"
           >
-            <span class="app-topbar__avatar">{{ profileInitial }}</span>
+            <AppAvatar :src="profileAvatarUrl" :name="profileName" size="sm" />
           </button>
 
           <Transition name="dropdown">
             <div v-if="dropdownOpen" class="app-topbar__dropdown" role="menu">
               <div class="app-topbar__dropdown-summary">
-                <span class="app-topbar__avatar app-topbar__avatar--lg">{{ profileInitial }}</span>
+                <AppAvatar :src="profileAvatarUrl" :name="profileName" size="md" />
                 <div>
                   <strong>{{ profileName }}</strong>
                   <span v-if="profileEmail">{{ profileEmail }}</span>

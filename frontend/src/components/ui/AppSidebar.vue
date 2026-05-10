@@ -2,6 +2,7 @@
 import { computed, ref } from 'vue';
 import { RouterLink, useRoute, useRouter } from 'vue-router';
 
+import AppAvatar from './AppAvatar.vue';
 import AppIcon from './AppIcon.vue';
 import finmodproMark from '../../assets/finmodpro-mark.svg';
 import { getNavItems, getTopbarActions } from '../../config/navigation.js';
@@ -31,6 +32,7 @@ const profileName = computed(() => profile.value?.user?.username || '当前用�
 const profileEmail = computed(() => profile.value?.user?.email || '未设置邮箱');
 const roleLabel = computed(() => (props.area === 'admin' ? '管理员端' : '用户端'));
 const profileInitial = computed(() => profileName.value.trim().slice(0, 1).toUpperCase() || 'U');
+const profileAvatarUrl = computed(() => profile.value?.user?.avatar_url || '');
 const profileActions = computed(() => [
   { id: 'profile', label: '个人信息', to: '/workspace/profile' },
   ...getTopbarActions(props.area, profile.value),
@@ -161,7 +163,7 @@ const isItemActive = (item) => {
 
     <div v-if="props.area === 'workspace' || props.area === 'admin'" class="app-sidebar__profile">
       <button class="app-sidebar__profile-trigger" type="button" :aria-label="`账号菜单：${profileName}`">
-        <span class="app-sidebar__avatar">{{ profileInitial }}</span>
+        <AppAvatar :src="profileAvatarUrl" :name="profileName" size="sm" />
         <span class="app-sidebar__profile-copy">
           <strong>{{ profileName }}</strong>
           <span>{{ profileEmail }}</span>
@@ -170,7 +172,7 @@ const isItemActive = (item) => {
 
       <div class="app-sidebar__profile-menu" role="menu">
         <div class="app-sidebar__profile-summary">
-          <span class="app-sidebar__avatar app-sidebar__avatar--menu">{{ profileInitial }}</span>
+          <AppAvatar :src="profileAvatarUrl" :name="profileName" size="md" />
           <div>
             <strong>{{ profileName }}</strong>
             <span>{{ profileEmail }}</span>

@@ -46,6 +46,7 @@ export const authStorage = {
         id: profile?.id ?? profile?.user?.id,
         username: profile?.username ?? profile?.user?.username,
         email: profile?.email ?? profile?.user?.email,
+        avatar_url: profile?.avatar_url ?? profile?.user?.avatar_url ?? null,
       },
       groups: profile?.groups || [],
       permissions: profile?.permissions || [],

@@ -1,7 +1,7 @@
 from django.contrib.auth import authenticate
 
 from authentication.models import User
-from rbac.services.rbac_service import assign_default_member_group, ensure_user_role_bindings
+from rbac.services.rbac_service import assign_default_member_group, ensure_user_role_bindings, get_avatar_url
 
 
 def build_user_summary(user):
@@ -9,6 +9,7 @@ def build_user_summary(user):
         "id": user.id,
         "username": user.username,
         "email": user.email,
+        "avatar_url": get_avatar_url(user),
     }
 
 

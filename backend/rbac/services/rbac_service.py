@@ -1,7 +1,7 @@
 from django.contrib.auth.models import Group, Permission
 from django.contrib.contenttypes.models import ContentType
 
-from authentication.models import User
+from authentication.models import User, UserProfile
 
 
 ROLE_SUPER_ADMIN = "super_admin"
@@ -154,11 +154,22 @@ def collect_user_permission_names(user):
     return sorted(permission_name.split(".", 1)[1] for permission_name in user.get_all_permissions())
 
 
+def get_avatar_url(user):
+    try:
+        profile = user.profile
+    except UserProfile.DoesNotExist:
+        return None
+    if profile.avatar:
+        return profile.avatar.url
+    return None
+
+
 def serialize_user_rbac_profile(user):
     return {
         "id": user.id,
         "username": user.username,
         "email": user.email,
+        "avatar_url": get_avatar_url(user),
         "groups": collect_user_groups(user),
         "permissions": collect_user_permission_names(user),
     }

@@ -4,7 +4,7 @@ from rbac.controllers.admin_controller import (
     admin_group_list_view,
     admin_user_groups_update_view,
 )
-from rbac.controllers.profile_controller import current_user_profile_view
+from rbac.controllers.profile_controller import current_user_profile_view, upload_avatar_view
 
 
 __all__ = [
@@ -13,4 +13,5 @@ __all__ = [
     "admin_group_list_view",
     "admin_user_groups_update_view",
     "current_user_profile_view",
+    "upload_avatar_view",
 ]
