@@ -5,6 +5,7 @@ import { useRoute, useRouter } from 'vue-router';
 import { chatApi } from '../../api/chat.js';
 import ChatHistory from '../../components/ChatHistory.vue';
 import HistoryWorkbench from '../../components/workspace/support/HistoryWorkbench.vue';
+import AppIcon from '../../components/ui/AppIcon.vue';
 import {
   buildSessionExportDownload,
   getSessionTitleSourceLabel,
@@ -25,15 +26,32 @@ const selectedSession = computed(() =>
   historyItems.value.find((item) => String(item.id) === String(activeSessionId.value)) || null,
 );
 
+/* ---- Pagination ---- */
+
+const currentPage = ref(1);
+const pageSize = ref(15);
+
+const totalPages = computed(() => Math.max(1, Math.ceil(historyItems.value.length / pageSize.value)));
+const pagedItems = computed(() => {
+  const start = (currentPage.value - 1) * pageSize.value;
+  return historyItems.value.slice(start, start + pageSize.value);
+});
+const goToPage = (page) => {
+  if (page < 1 || page > totalPages.value) return;
+  currentPage.value = page;
+};
+
+/* ---- Data ---- */
+
 const refreshHistory = async () => {
   isLoading.value = true;
   errorMessage.value = '';
-
   try {
     historyItems.value = await chatApi.listHistory({
       datasetId: activeDatasetId.value,
       keyword: keyword.value,
     });
+    currentPage.value = 1;
   } catch (error) {
     console.error('加载历史会话失败:', error);
     errorMessage.value = '加载历史会话失败，请稍后重试。';
@@ -46,13 +64,11 @@ const refreshHistory = async () => {
 const applySearch = async () => {
   const nextQuery = { ...route.query };
   const normalizedKeyword = keyword.value.trim();
-
   if (normalizedKeyword) {
     nextQuery.keyword = normalizedKeyword;
   } else {
     delete nextQuery.keyword;
   }
-
   await router.replace({ query: nextQuery });
   await refreshHistory();
 };
@@ -68,18 +84,12 @@ const clearSearch = async () => {
 const openSession = (sessionId) => {
   router.push({
     path: '/workspace/qa',
-    query: {
-      ...route.query,
-      session: sessionId,
-    },
+    query: { ...route.query, session: sessionId },
   });
 };
 
 const downloadExportPayload = ({ filename, content }) => {
-  if (typeof window === 'undefined') {
-    return;
-  }
-
+  if (typeof window === 'undefined') return;
   const blob = new Blob([content], { type: 'application/json;charset=utf-8' });
   const url = window.URL.createObjectURL(blob);
   const link = window.document.createElement('a');
@@ -105,9 +115,7 @@ const deleteSession = async (sessionId) => {
   const confirmed = typeof window === 'undefined'
     ? true
     : window.confirm('确定删除这条历史会话吗？删除后不可恢复。');
-  if (!confirmed) {
-    return;
-  }
+  if (!confirmed) return;
 
   try {
     await chatApi.deleteSession(sessionId);
@@ -123,24 +131,15 @@ const deleteSession = async (sessionId) => {
   }
 };
 
+watch(() => route.query.keyword, (value) => {
+  keyword.value = String(value || '');
+});
 
-watch(
-  () => route.query.keyword,
-  (value) => {
-    keyword.value = String(value || '');
-  },
-);
-
-watch(
-  () => route.query.dataset,
-  async () => {
-    await refreshHistory();
-  },
-);
-
-onMounted(async () => {
+watch(() => route.query.dataset, async () => {
   await refreshHistory();
 });
+
+onMounted(() => refreshHistory());
 </script>
 
 <template>
@@ -148,31 +147,26 @@ onMounted(async () => {
     <HistoryWorkbench>
       <template #filters>
         <div class="history-filters">
-          <label class="history-filters__field">
-            <span>关键词筛选</span>
+          <div class="history-search">
+            <AppIcon name="search" :size="14" class="history-search__icon" aria-hidden="true" />
             <input
               v-model="keyword"
               type="text"
+              class="history-search__input"
               placeholder="搜索会话标题或消息内容"
               @keydown.enter.prevent="applySearch"
             />
-          </label>
-
-          <div class="history-filters__actions">
-            <button type="button" class="ghost-btn ghost-btn--primary" @click="applySearch">
-              搜索
-            </button>
-            <button type="button" class="ghost-btn" @click="clearSearch">清空</button>
+            <button v-if="keyword" type="button" class="history-search__clear" @click="clearSearch" aria-label="清空搜索">&times;</button>
           </div>
 
           <p v-if="activeDatasetId" class="history-filters__hint">
-            当前按数据集 {{ activeDatasetId }} 查看相关会话。
+            当前按数据集 {{ activeDatasetId }} 查看相关会话
           </p>
 
-          <div v-if="selectedSession" class="history-session-summary">
-            <span class="history-session-summary__eyebrow">当前选中会话</span>
-            <strong>{{ selectedSession.title }}</strong>
-            <div class="history-session-summary__meta">
+          <div v-if="selectedSession" class="history-selected">
+            <span class="history-selected__eyebrow">当前选中</span>
+            <strong class="history-selected__title">{{ selectedSession.title }}</strong>
+            <div class="history-selected__meta">
               <span>{{ getSessionTitleSourceLabel(selectedSession.titleSource) }}</span>
               <span>{{ getSessionTitleStatusLabel(selectedSession.titleStatus) }}</span>
               <span>{{ selectedSession.messageCount }} 条消息</span>
@@ -182,22 +176,26 @@ onMounted(async () => {
             </div>
           </div>
 
-          <div v-if="errorMessage" class="history-error">
+          <div v-if="errorMessage" class="history-error" role="alert">
             {{ errorMessage }}
           </div>
         </div>
       </template>
 
       <ChatHistory
-        :items="historyItems"
+        :items="pagedItems"
         :is-loading="isLoading"
         :active-session-id="activeSessionId"
         :enable-export="true"
         :show-session-metadata="true"
-        @refresh="refreshHistory"
+        :current-page="currentPage"
+        :page-size="pageSize"
+        :total="historyItems.length"
+        :total-pages="totalPages"
         @open-session="openSession"
         @export-session="exportSession"
         @delete-session="deleteSession"
+        @go-to-page="goToPage"
       />
     </HistoryWorkbench>
   </section>
@@ -207,97 +205,124 @@ onMounted(async () => {
 .workspace-support-page {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 12px;
 }
 
-.history-session-summary__eyebrow {
-  margin: 0 0 6px;
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.16em;
-  text-transform: uppercase;
-  color: #7f95bf;
-}
+/* ---- Search ---- */
 
 .history-filters {
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 12px;
 }
 
-.history-filters__field {
+.history-search {
+  position: relative;
   display: flex;
-  flex-direction: column;
-  gap: 8px;
-  color: #93a8cb;
-  font-size: 13px;
+  align-items: center;
 }
 
-.history-filters__field input {
-  min-height: 42px;
-  border: 1px solid rgba(96, 126, 255, 0.18);
-  border-radius: 12px;
-  padding: 0 14px;
+.history-search__icon {
+  position: absolute;
+  left: 12px;
+  color: var(--text-muted);
+  pointer-events: none;
+}
+
+.history-search__input {
+  width: 100%;
+  height: 36px;
+  padding: 0 32px 0 34px;
+  border: 1px solid var(--line-soft);
+  border-radius: 6px;
+  background: var(--surface-3);
+  color: var(--text-primary);
   font: inherit;
-  background: rgba(11, 20, 35, 0.94);
-  color: #eef4ff;
-}
-
-.history-filters__actions {
-  display: flex;
-  gap: 10px;
-}
-
-.ghost-btn {
-  min-height: 38px;
-  padding: 0 14px;
-  border-radius: 12px;
-  border: 1px solid rgba(96, 126, 255, 0.16);
-  background: rgba(14, 23, 39, 0.82);
-  color: #d1def7;
-  font-weight: 700;
-  cursor: pointer;
-}
-
-.ghost-btn--primary {
-  background: linear-gradient(135deg, #2f63ff, #596cff 65%, #785fff);
-  border-color: rgba(122, 147, 255, 0.62);
-  color: #f7fbff;
-}
-
-.history-filters__hint,
-.history-error {
-  margin: 0;
-  color: #93a8cb;
   font-size: 13px;
+  outline: none;
+  transition: border-color 0.2s;
 }
 
-.history-session-summary {
+.history-search__input::placeholder {
+  color: var(--text-muted);
+}
+
+.history-search__input:focus {
+  border-color: var(--brand, #2457c5);
+}
+
+.history-search__clear {
+  position: absolute;
+  right: 8px;
+  width: 22px;
+  height: 22px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 16px;
+  cursor: pointer;
+  transition: color 0.15s;
+}
+
+.history-search__clear:hover {
+  color: var(--text-primary);
+}
+
+.history-filters__hint {
+  margin: 0;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+/* ---- Selected Session ---- */
+
+.history-selected {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  padding: 14px;
-  border-radius: 14px;
-  background: rgba(14, 22, 37, 0.88);
-  color: #eef4ff;
-  border: 1px solid rgba(96, 126, 255, 0.14);
+  gap: 6px;
+  padding: 12px 14px;
+  border-radius: 6px;
+  border: 1px solid var(--line-soft);
+  background: var(--surface-3);
 }
 
-.history-session-summary__meta {
+.history-selected__eyebrow {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.history-selected__title {
+  font-size: 13px;
+  color: var(--text-primary);
+}
+
+.history-selected__meta {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
-  color: #93a8cb;
-  font-size: 12px;
+  font-size: 11px;
+  color: var(--text-secondary);
 }
 
 .history-error {
-  color: #ffb4c1;
+  margin: 0;
+  padding: 8px 12px;
+  border-radius: 6px;
+  border: 1px solid rgba(196, 73, 61, 0.2);
+  background: rgba(196, 73, 61, 0.06);
+  color: var(--risk-red, #c4493d);
+  font-size: 12px;
 }
 
 @media (max-width: 720px) {
-  .history-filters__actions {
-    flex-wrap: wrap;
+  .history-selected__meta {
+    gap: 6px;
   }
 }
 </style>

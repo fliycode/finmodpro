@@ -109,14 +109,24 @@ const scrollTrendRight = () => { if (canScrollTrendRight.value) trendOffset.valu
 const activeExtractTab = ref('results');
 const highlightEnabled = ref(true);
 
-const dominantLevelForType = (typeName) => {
-  const typeEvents = events.value.filter(e => e.risk_type === typeName);
-  if (!typeEvents.length) return 'low';
+const eventsByType = computed(() => {
+  const map = {};
+  events.value.forEach(e => {
+    if (!map[e.risk_type]) map[e.risk_type] = [];
+    map[e.risk_type].push(e);
+  });
+  return map;
+});
+
+const dominantLevelMap = computed(() => {
   const priority = { critical: 4, high: 3, medium: 2, low: 1 };
-  return typeEvents.reduce((best, e) =>
-    (priority[e.risk_level] || 0) > (priority[best] || 0) ? e.risk_level : best
-  , 'low');
-};
+  const map = {};
+  for (const [type, typeEvents] of Object.entries(eventsByType.value)) {
+    map[type] = typeEvents.reduce((best, e) =>
+      (priority[e.risk_level] || 0) > (priority[best] || 0) ? e.risk_level : best, 'low');
+  }
+  return map;
+});
 
 const docPage = ref(1);
 const docPageSize = 5;
@@ -196,6 +206,18 @@ const resetFilters = () => { filters.value = buildDefaultFilters(); refreshWorks
 
 const triggerUpload = () => fileInput.value?.click();
 
+const pollDocumentIndexed = async (docId, { timeout = 60000, interval = 2000 } = {}) => {
+  const deadline = Date.now() + timeout;
+  while (Date.now() < deadline) {
+    const doc = await kbApi.getDocumentDetail(docId);
+    const status = (doc.status || "").toLowerCase();
+    if (status === "indexed") return doc;
+    if (status === "failed") throw new Error("文档处理失败");
+    await new Promise((r) => setTimeout(r, interval));
+  }
+  throw new Error("文档处理超时，请稍后重试");
+};
+
 const handleFileChange = async (event) => {
   const file = event.target.files?.[0];
   if (!file) return;
@@ -205,7 +227,10 @@ const handleFileChange = async (event) => {
     const result = await kbApi.uploadDocument(file);
     const docId = result.document?.id;
     if (docId) {
-      flash.success("上传完成，正在提取风险事件...");
+      flash.success("上传完成，文档处理中...");
+      await kbApi.ingestDocument(docId);
+      await pollDocumentIndexed(docId);
+      flash.success("文档就绪，正在提取风险事件...");
       await riskApi.extractDocument(docId);
       flash.success("风险提取完成");
     }
@@ -278,6 +303,15 @@ const generateReport = async () => {
   } finally {
     isReportLoading.value = false;
   }
+};
+
+const exportEventsAsJson = () => {
+  if (!events.value.length) { flash.warning("暂无风险事件可导出"); return; }
+  const blob = new Blob([JSON.stringify(events.value, null, 2)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a"); a.href = url; a.download = "risk-events.json"; a.click();
+  URL.revokeObjectURL(url);
+  flash.success("已导出风险事件 JSON");
 };
 
 const downloadGeneratedReport = async (format = "markdown") => {
@@ -366,7 +400,7 @@ const downloadGeneratedReport = async (format = "markdown") => {
               <template v-for="(group, gi) in pagedRiskTypes" :key="group.key">
                 <h4>{{ (docPage - 1) * docPageSize + gi + 1 }}. {{ group.key }}</h4>
                 <p class="risk-doc__hl" :class="[getHlCls(gi), { 'no-highlight': !highlightEnabled }]">
-                  {{ events.filter(e => e.risk_type === group.key).slice(0, 1).map(e => e.evidence_text || e.summary).join('') || '暂无证据文本。' }}
+                  {{ (eventsByType[group.key] || []).slice(0, 1).map(e => e.evidence_text || e.summary).join('') || '暂无证据文本。' }}
                 </p>
               </template>
               <p v-if="riskTypeDist.length === 0" class="risk-doc__empty">
@@ -398,8 +432,8 @@ const downloadGeneratedReport = async (format = "markdown") => {
                   :aria-checked="highlightEnabled"
                   aria-labelledby="hl-toggle-label"
                 />
-                <button class="risk-extract__download" @click="downloadGeneratedReport('json')" :disabled="isExportingJson" :aria-busy="isExportingJson">
-                  <AppIcon name="download" :size="12" aria-hidden="true" /> {{ isExportingJson ? '导出中...' : '导出' }}
+                <button class="risk-extract__download" @click="exportEventsAsJson">
+                  <AppIcon name="download" :size="12" aria-hidden="true" /> 导出
                 </button>
               </div>
             </div>
@@ -418,12 +452,12 @@ const downloadGeneratedReport = async (format = "markdown") => {
                   <div class="risk-extract__body">
                     <div class="risk-extract__name">{{ item.key }}</div>
                     <div class="risk-extract__desc">
-                      {{ events.filter(e => e.risk_type === item.key).slice(0, 1).map(e => e.summary).join('') || '暂无描述' }}
+                      {{ (eventsByType[item.key] || []).slice(0, 1).map(e => e.summary).join('') || '暂无描述' }}
                     </div>
                   </div>
                   <div class="risk-extract__meta">
                     <span>{{ item.value }} 条</span>
-                    <span class="risk-extract__level" :class="getRiskLevelClass(dominantLevelForType(item.key))">{{ getRiskLevelText(dominantLevelForType(item.key)) }}</span>
+                    <span class="risk-extract__level" :class="getRiskLevelClass(dominantLevelMap[item.key] || 'low')">{{ getRiskLevelText(dominantLevelMap[item.key] || 'low') }}</span>
                   </div>
                   <span class="risk-extract__chev">&rsaquo;</span>
                 </div>

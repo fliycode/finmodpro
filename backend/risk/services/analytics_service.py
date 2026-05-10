@@ -16,15 +16,19 @@ def _build_distribution(queryset, *, field_name):
 def build_risk_analytics_overview(*, filters):
     queryset = build_risk_event_queryset(filters=filters)
 
-    total_events = queryset.count()
+    agg = queryset.aggregate(
+        total_events=Count("id"),
+        high_risk_events=Count("id", filter=Q(risk_level__in=[RiskEvent.LEVEL_HIGH, RiskEvent.LEVEL_CRITICAL])),
+        pending_reviews=Count("id", filter=Q(review_status=RiskEvent.STATUS_PENDING)),
+        unique_companies=Count("company_name", distinct=True),
+        document_count=Count("document_id", distinct=True),
+    )
     summary = {
-        "total_events": total_events,
-        "high_risk_events": queryset.filter(
-            Q(risk_level=RiskEvent.LEVEL_HIGH) | Q(risk_level=RiskEvent.LEVEL_CRITICAL)
-        ).count(),
-        "pending_reviews": queryset.filter(review_status=RiskEvent.STATUS_PENDING).count(),
-        "unique_companies": queryset.values("company_name").distinct().count(),
-        "document_count": queryset.exclude(document_id__isnull=True).values("document_id").distinct().count(),
+        "total_events": agg["total_events"],
+        "high_risk_events": agg["high_risk_events"],
+        "pending_reviews": agg["pending_reviews"],
+        "unique_companies": agg["unique_companies"],
+        "document_count": agg["document_count"],
     }
 
     trend = [

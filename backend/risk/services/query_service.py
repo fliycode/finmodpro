@@ -26,11 +26,11 @@ def build_risk_event_queryset(*, filters):
 
     period_start = filters.get("period_start")
     if period_start:
-        queryset = queryset.filter(event_time__date__gte=period_start)
+        queryset = queryset.filter(event_time__gte=period_start)
 
     period_end = filters.get("period_end")
     if period_end:
-        queryset = queryset.filter(event_time__date__lte=period_end)
+        queryset = queryset.filter(event_time__lte=period_end)
 
     return queryset
 

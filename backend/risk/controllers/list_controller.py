@@ -20,10 +20,10 @@ class RiskEventListView(APIView):
         serializer = RiskEventListQuerySerializer(data=request.query_params)
         serializer.is_valid(raise_exception=True)
 
-        risk_events = list_risk_events(filters=serializer.validated_data)
+        risk_events = list(list_risk_events(filters=serializer.validated_data))
         return success_response(
             data={
-                "total": risk_events.count(),
+                "total": len(risk_events),
                 "risk_events": RiskEventSummarySerializer(risk_events, many=True).data,
             }
         )
