@@ -144,6 +144,17 @@ const buildProcessStep = (document, task) => {
     };
   }
 
+  if (status === 'cleaning' || step === 'cleaning') {
+    return {
+      code: 'cleaning',
+      label: '清洗中',
+      detail: '正在执行文档清洗与质量评估。',
+      progress: 50,
+      isTerminal: false,
+      isSearchReady: false,
+    };
+  }
+
   if ((status === 'parsed' && hasTask) || step === 'parsing' || taskStatus === 'running') {
     return {
       code: 'parsing',

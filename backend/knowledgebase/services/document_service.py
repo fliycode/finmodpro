@@ -787,6 +787,23 @@ def ingest_document(document, ingestion_task=None):
     ) as observation:
         try:
             parser_result = parse_document(document)
+
+            if ingestion_task is not None:
+                _update_ingestion_task_step(
+                    ingestion_task,
+                    current_step=IngestionTask.STEP_CLEANING,
+                )
+            _update_document_status(
+                document,
+                status=Document.STATUS_CLEANING,
+            )
+            try:
+                from knowledgebase.services.cleaning_engine_service import clean_document
+                clean_document(document=document)
+                parser_result["parsed_text"] = document.parsed_text
+            except Exception as cleaning_exc:
+                logger.warning("Document cleaning failed for %s: %s", document.id, cleaning_exc)
+
             if ingestion_task is not None:
                 _update_ingestion_task_step(
                     ingestion_task,

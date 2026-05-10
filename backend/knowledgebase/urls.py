@@ -1,11 +1,14 @@
 from django.urls import path
 
 from knowledgebase.controllers import (
+    cleaning_rule_detail_view,
+    cleaning_rule_list_create_view,
     dataset_detail_view,
     dataset_list_create_view,
     document_batch_delete_view,
     document_batch_ingest_view,
     document_chunks_view,
+    document_cleaning_view,
     document_detail_view,
     document_ingest_view,
     document_list_create_view,
@@ -56,5 +59,20 @@ urlpatterns = [
         "documents/<int:document_id>/ingest",
         document_ingest_view,
         name="knowledgebase-document-ingest",
+    ),
+    path(
+        "documents/<int:document_id>/cleaning",
+        document_cleaning_view,
+        name="knowledgebase-document-cleaning",
+    ),
+    path(
+        "cleaning/rules",
+        cleaning_rule_list_create_view,
+        name="knowledgebase-cleaning-rule-list-create",
+    ),
+    path(
+        "cleaning/rules/<int:rule_id>",
+        cleaning_rule_detail_view,
+        name="knowledgebase-cleaning-rule-detail",
     ),
 ]
