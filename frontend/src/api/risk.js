@@ -23,25 +23,27 @@ const resolveFilenameFromDisposition = (contentDisposition, fallback) => {
 export const createRiskApi = (overrides = {}) => {
   const apiConfig = createApiConfig(overrides);
 
-  const requestJson = async (path, { method = 'GET', body } = {}) => {
+  const requestJson = async (path, { method = 'GET', body, signal } = {}) => {
     return apiConfig.fetchJson(path, {
       method,
       body: body ? JSON.stringify(body) : undefined,
       auth: true,
+      signal,
     });
   };
 
   return {
-    getEvents(params = {}) {
+    getEvents(params = {}, { signal } = {}) {
       const queryString = buildQueryString(params);
       const path = queryString ? `/api/risk/events?${queryString}` : '/api/risk/events';
-      return requestJson(path);
+      return requestJson(path, { signal });
     },
 
-    reviewEvent(eventId, reviewStatus) {
+    reviewEvent(eventId, reviewStatus, { signal } = {}) {
       return requestJson(`/api/risk/events/${eventId}/review`, {
         method: 'POST',
         body: { review_status: reviewStatus },
+        signal,
       });
     },
 
@@ -59,26 +61,28 @@ export const createRiskApi = (overrides = {}) => {
       });
     },
 
-    generateCompanyReport(data) {
+    generateCompanyReport(data, { signal } = {}) {
       return requestJson('/api/risk/reports/company', {
         method: 'POST',
         body: data,
+        signal,
       });
     },
 
-    generateTimeRangeReport(data) {
+    generateTimeRangeReport(data, { signal } = {}) {
       return requestJson('/api/risk/reports/time-range', {
         method: 'POST',
         body: data,
+        signal,
       });
     },
 
-    getAnalytics(params = {}) {
+    getAnalytics(params = {}, { signal } = {}) {
       const queryString = buildQueryString(params);
       const path = queryString
         ? `/api/risk/analytics/overview?${queryString}`
         : '/api/risk/analytics/overview';
-      return requestJson(path);
+      return requestJson(path, { signal });
     },
 
     async exportReport(reportId, { format = 'markdown' } = {}) {

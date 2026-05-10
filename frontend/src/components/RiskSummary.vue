@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onMounted, ref, watch } from "vue";
+import { computed, onMounted, onBeforeUnmount, ref, watch } from "vue";
 import { riskApi } from "../api/risk.js";
 import { useFlash } from "../lib/flash.js";
 import {
@@ -12,6 +12,8 @@ import AdminChart from "./admin/AdminChart.vue";
 import AppIcon from "./ui/AppIcon.vue";
 
 const flash = useFlash();
+
+const fmt = new Intl.NumberFormat("zh-CN");
 
 const buildDefaultFilters = () => ({
   company_name: "",
@@ -31,6 +33,10 @@ const eventsErrorMsg = ref("");
 const analyticsPayload = ref(null);
 const isAnalyticsLoading = ref(false);
 const analyticsErrorMsg = ref("");
+
+let workspaceAbort = null;
+const reviewingId = ref(null);
+const isExportingJson = ref(false);
 
 const analytics = computed(() => normalizeRiskAnalytics(analyticsPayload.value));
 
@@ -121,13 +127,16 @@ watch(riskTypeDist, () => { docPage.value = 1; trendOffset.value = 0; });
 
 /* ---- API calls ---- */
 
-const fetchEvents = async () => {
+const isAbortError = (err) => err?.name === "AbortError";
+
+const fetchEvents = async (signal) => {
   isEventsLoading.value = true;
   eventsErrorMsg.value = "";
   try {
-    const data = await riskApi.getEvents(filters.value);
+    const data = await riskApi.getEvents(filters.value, { signal });
     events.value = data.data?.risk_events || data.risk_events || [];
   } catch (error) {
+    if (isAbortError(error)) return;
     console.error("Failed to fetch risk events:", error);
     eventsErrorMsg.value = error.message || "加载风险事件失败";
   } finally {
@@ -135,12 +144,13 @@ const fetchEvents = async () => {
   }
 };
 
-const fetchAnalytics = async () => {
+const fetchAnalytics = async (signal) => {
   isAnalyticsLoading.value = true;
   analyticsErrorMsg.value = "";
   try {
-    analyticsPayload.value = await riskApi.getAnalytics(filters.value);
+    analyticsPayload.value = await riskApi.getAnalytics(filters.value, { signal });
   } catch (error) {
+    if (isAbortError(error)) return;
     console.error("Failed to fetch analytics:", error);
     analyticsErrorMsg.value = error.message || "加载风险分析失败";
   } finally {
@@ -149,18 +159,31 @@ const fetchAnalytics = async () => {
 };
 
 const refreshWorkspace = async () => {
-  await Promise.all([fetchEvents(), fetchAnalytics()]);
+  if (workspaceAbort) workspaceAbort.abort();
+  const controller = new AbortController();
+  workspaceAbort = controller;
+  try {
+    await Promise.all([fetchEvents(controller.signal), fetchAnalytics(controller.signal)]);
+  } finally {
+    if (workspaceAbort === controller) workspaceAbort = null;
+  }
 };
 
 onMounted(() => refreshWorkspace());
+onBeforeUnmount(() => { if (workspaceAbort) workspaceAbort.abort(); });
 
 const handleReview = async (event, status) => {
+  const eventId = event.id || event.event_id;
+  if (reviewingId.value === eventId) return;
+  reviewingId.value = eventId;
   try {
-    await riskApi.reviewEvent(event.id || event.event_id, status);
+    await riskApi.reviewEvent(eventId, status);
     flash.success(`风险事件已${status === "approved" ? "确认" : "忽略"}`);
     await refreshWorkspace();
   } catch (error) {
     flash.error(error.message || "审核失败");
+  } finally {
+    reviewingId.value = null;
   }
 };
 
@@ -231,7 +254,8 @@ const generateReport = async () => {
 
 const downloadGeneratedReport = async (format = "markdown") => {
   if (!generatedReport.value?.id) { flash.error("请先生成报告后再导出"); return; }
-  isReportExporting.value = true;
+  const loadingRef = format === "json" ? isExportingJson : isReportExporting;
+  loadingRef.value = true;
   try {
     const p = await riskApi.exportReport(generatedReport.value.id, { format });
     const blob = new Blob([p.content], { type: p.contentType });
@@ -242,7 +266,7 @@ const downloadGeneratedReport = async (format = "markdown") => {
   } catch (error) {
     flash.error(error.message || "导出失败");
   } finally {
-    isReportExporting.value = false;
+    loadingRef.value = false;
   }
 };
 </script>
@@ -254,16 +278,16 @@ const downloadGeneratedReport = async (format = "markdown") => {
       <div class="risk-topbar__center">
         <span class="risk-topbar__badge">
           <AppIcon name="shield" :size="14" />
-          已识别 {{ riskTypeDist.length }} 类风险 · {{ totalEvents }} 条信息
+          已识别 {{ riskTypeDist.length }} 类风险 · {{ fmt.format(totalEvents) }} 条信息
         </span>
       </div>
       <div class="risk-topbar__actions">
-        <button type="button" class="risk-action-btn" @click="eventsDrawerOpen = true">
-          <AppIcon name="search" :size="14" />
+        <button type="button" class="risk-action-btn" @click="eventsDrawerOpen = true" aria-label="查看全部风险事件">
+          <AppIcon name="search" :size="14" aria-hidden="true" />
           查看全部事件
         </button>
-        <button type="button" class="risk-action-btn risk-action-btn--primary" @click="refreshWorkspace" :disabled="isAnalyticsLoading">
-          <AppIcon name="refresh" :size="14" />
+        <button type="button" class="risk-action-btn risk-action-btn--primary" @click="refreshWorkspace" :disabled="isAnalyticsLoading || isEventsLoading" :aria-busy="isAnalyticsLoading || isEventsLoading" aria-label="刷新风险数据">
+          <AppIcon name="refresh" :size="14" aria-hidden="true" />
           刷新
         </button>
       </div>
@@ -281,9 +305,9 @@ const downloadGeneratedReport = async (format = "markdown") => {
             </div>
             <div class="risk-source__file">
               <div class="risk-source__info">
-                <span class="risk-source__pdf">PDF</span>
+                <span class="risk-source__pdf" aria-hidden="true">PDF</span>
                 <div>
-                  <strong>{{ sourceDoc.title }}</strong>
+                  <strong :title="sourceDoc.title">{{ sourceDoc.title }}</strong>
                   <p>{{ sourceDoc.size }} · {{ sourceDoc.date }}</p>
                 </div>
               </div>
@@ -296,11 +320,11 @@ const downloadGeneratedReport = async (format = "markdown") => {
           <!-- Document Panel -->
           <div class="risk-doc" v-loading="isEventsLoading">
             <div class="risk-doc__bar">
-              <span>已识别 {{ riskTypeDist.length }} 类风险，共 {{ totalEvents }} 条风险信息</span>
-              <span class="risk-doc__pager">
-                <button @click="prevDocPage" :disabled="docPage <= 1">&lt;</button>
-                <span class="risk-doc__page-num">{{ riskTypeDist.length ? `${docPage} / ${docTotalPages}` : '- / -' }}</span>
-                <button @click="nextDocPage" :disabled="docPage >= docTotalPages">&gt;</button>
+              <span>已识别 {{ riskTypeDist.length }} 类风险，共 {{ fmt.format(totalEvents) }} 条风险信息</span>
+              <span class="risk-doc__pager" role="navigation" aria-label="风险类别分页">
+                <button @click="prevDocPage" :disabled="docPage <= 1" aria-label="上一页">&lt;</button>
+                <span class="risk-doc__page-num" aria-live="polite">{{ riskTypeDist.length ? `${docPage} / ${docTotalPages}` : '- / -' }}</span>
+                <button @click="nextDocPage" :disabled="docPage >= docTotalPages" aria-label="下一页">&gt;</button>
               </span>
             </div>
             <div class="risk-doc__page">
@@ -332,16 +356,17 @@ const downloadGeneratedReport = async (format = "markdown") => {
                 >原文片段</button>
               </div>
               <div class="risk-extract__tools">
-                <span class="risk-extract__toggle-label">高亮</span>
-                <span
+                <span class="risk-extract__toggle-label" id="hl-toggle-label">高亮</span>
+                <button
                   class="risk-extract__toggle"
                   :class="{ 'is-off': !highlightEnabled }"
                   @click="highlightEnabled = !highlightEnabled"
                   role="switch"
                   :aria-checked="highlightEnabled"
+                  aria-labelledby="hl-toggle-label"
                 />
-                <button class="risk-extract__download" @click="downloadGeneratedReport('json')">
-                  <AppIcon name="download" :size="12" /> 导出
+                <button class="risk-extract__download" @click="downloadGeneratedReport('json')" :disabled="isExportingJson" :aria-busy="isExportingJson">
+                  <AppIcon name="download" :size="12" aria-hidden="true" /> {{ isExportingJson ? '导出中...' : '导出' }}
                 </button>
               </div>
             </div>
@@ -401,8 +426,8 @@ const downloadGeneratedReport = async (format = "markdown") => {
           <div class="risk-panel__head">
             <h3><AppIcon name="history" :size="14" /> 风险信息时间轴</h3>
           </div>
-          <div class="risk-timeline__track">
-            <button class="risk-timeline__arr" :class="{ 'is-disabled': !canScrollTrendLeft }" :disabled="!canScrollTrendLeft" @click="scrollTrendLeft">&lsaquo;</button>
+          <div class="risk-timeline__track" role="navigation" aria-label="风险时间轴">
+            <button class="risk-timeline__arr" :class="{ 'is-disabled': !canScrollTrendLeft }" :disabled="!canScrollTrendLeft" @click="scrollTrendLeft" aria-label="向前滚动">&lsaquo;</button>
             <template v-for="(node, i) in trendNodes" :key="i">
               <div class="risk-timeline__node" :class="{ 'is-active': node.active }">
                 <strong>{{ node.date }}</strong>
@@ -411,7 +436,7 @@ const downloadGeneratedReport = async (format = "markdown") => {
               </div>
             </template>
             <div v-if="trendNodes.length === 0" class="risk-timeline__empty">暂无时间轴数据</div>
-            <button class="risk-timeline__arr" :class="{ 'is-disabled': !canScrollTrendRight }" :disabled="!canScrollTrendRight" @click="scrollTrendRight">&rsaquo;</button>
+            <button class="risk-timeline__arr" :class="{ 'is-disabled': !canScrollTrendRight }" :disabled="!canScrollTrendRight" @click="scrollTrendRight" aria-label="向后滚动">&rsaquo;</button>
           </div>
         </section>
       </div>
@@ -425,27 +450,28 @@ const downloadGeneratedReport = async (format = "markdown") => {
             <span class="risk-panel__update">更新于 {{ formatDate(new Date().toISOString()) }}</span>
           </div>
 
-          <div v-if="analyticsErrorMsg" class="risk-err">{{ analyticsErrorMsg }}</div>
+          <div v-if="analyticsErrorMsg" class="risk-err" role="alert">{{ analyticsErrorMsg }}</div>
+          <div v-else-if="eventsErrorMsg" class="risk-err" role="alert">{{ eventsErrorMsg }}</div>
 
           <div v-else class="risk-overview__inner" v-loading="isAnalyticsLoading">
             <div class="risk-overview__total">
-              <span class="risk-overview__num">{{ totalEvents }}</span>
+              <span class="risk-overview__num">{{ fmt.format(totalEvents) }}</span>
               <span class="risk-overview__label">风险总数</span>
             </div>
             <div class="risk-overview__chart">
-              <div class="risk-overview__donut" :style="donutStyle" />
+              <div v-if="totalEvents > 0" class="risk-overview__donut" :style="donutStyle" role="img" :aria-label="`高风险 ${highPct}%，中风险 ${medPct}%，低风险 ${lowPct}%`" />
               <div class="risk-overview__legend">
-                <div><i class="risk-dot" style="background:#e94c59" />高风险 {{ highCount }} ({{ highPct }}%)</div>
-                <div><i class="risk-dot" style="background:#f0a51a" />中风险 {{ medCount }} ({{ medPct }}%)</div>
-                <div><i class="risk-dot" style="background:#2f7bff" />低风险 {{ lowCount }} ({{ lowPct }}%)</div>
+                <div><i class="risk-dot" style="background:#e94c59" aria-hidden="true" />高风险 {{ fmt.format(highCount) }} ({{ highPct }}%)</div>
+                <div><i class="risk-dot" style="background:#f0a51a" aria-hidden="true" />中风险 {{ fmt.format(medCount) }} ({{ medPct }}%)</div>
+                <div><i class="risk-dot" style="background:#2f7bff" aria-hidden="true" />低风险 {{ fmt.format(lowCount) }} ({{ lowPct }}%)</div>
               </div>
             </div>
           </div>
 
           <div class="risk-overview__kpis">
-            <div class="risk-kpi"><strong>{{ riskTypeDist.length }}</strong><span>风险类别</span></div>
-            <div class="risk-kpi"><strong>{{ totalEvents }}</strong><span>风险信息</span></div>
-            <div class="risk-kpi"><strong>{{ analytics.summary.pending_reviews }}</strong><span>待审核</span></div>
+            <div class="risk-kpi"><strong>{{ fmt.format(riskTypeDist.length) }}</strong><span>风险类别</span></div>
+            <div class="risk-kpi"><strong>{{ fmt.format(totalEvents) }}</strong><span>风险信息</span></div>
+            <div class="risk-kpi"><strong>{{ fmt.format(analytics.summary.pending_reviews) }}</strong><span>待审核</span></div>
           </div>
         </section>
 
@@ -466,10 +492,10 @@ const downloadGeneratedReport = async (format = "markdown") => {
             <h3><AppIcon name="alert-triangle" :size="14" /> 高风险信息 TOP5</h3>
             <button class="risk-panel__all" @click="eventsDrawerOpen = true">查看全部</button>
           </div>
-          <div class="risk-top5__list">
-            <div v-for="(ev, i) in highRiskEvents" :key="ev.id || i" class="risk-top5__row">
-              <span class="risk-top5__rank">{{ i + 1 }}</span>
-              <span class="risk-top5__text">{{ ev.summary || ev.evidence_text || '无描述' }}</span>
+          <div class="risk-top5__list" role="list" aria-label="高风险事件列表">
+            <div v-for="(ev, i) in highRiskEvents" :key="ev.id || i" class="risk-top5__row" role="listitem">
+              <span class="risk-top5__rank" aria-hidden="true">{{ i + 1 }}</span>
+              <span class="risk-top5__text" :title="ev.summary || ev.evidence_text || '无描述'">{{ ev.summary || ev.evidence_text || '无描述' }}</span>
               <span class="risk-top5__tag" :class="getRiskTagCls(i)">{{ ev.risk_type }}</span>
             </div>
             <div v-if="highRiskEvents.length === 0" class="risk-top5__empty">暂无高风险事件</div>
@@ -481,14 +507,15 @@ const downloadGeneratedReport = async (format = "markdown") => {
           <div class="risk-panel__head">
             <h3><AppIcon name="download" :size="14" /> 导出与分享</h3>
           </div>
+          <div v-if="reportErrorMsg" class="risk-err" role="alert" style="margin:0 12px 8px">{{ reportErrorMsg }}</div>
           <div class="risk-export__grid">
-            <button class="risk-export__btn" @click="generateReport" :disabled="isReportLoading">
-              <AppIcon name="file-text" :size="15" />
-              <div>生成<span>风险报告</span></div>
+            <button class="risk-export__btn" @click="generateReport" :disabled="isReportLoading" :aria-busy="isReportLoading">
+              <AppIcon name="file-text" :size="15" aria-hidden="true" />
+              <div>{{ isReportLoading ? '生成中...' : '生成' }}<span>风险报告</span></div>
             </button>
-            <button class="risk-export__btn" @click="downloadGeneratedReport('markdown')" :disabled="!generatedReport">
-              <AppIcon name="download" :size="15" />
-              <div>导出<span>Markdown 格式</span></div>
+            <button class="risk-export__btn" @click="downloadGeneratedReport('markdown')" :disabled="!generatedReport || isReportExporting" :aria-busy="isReportExporting">
+              <AppIcon name="download" :size="15" aria-hidden="true" />
+              <div>{{ isReportExporting ? '导出中...' : '导出' }}<span>Markdown 格式</span></div>
             </button>
           </div>
         </section>
@@ -496,9 +523,12 @@ const downloadGeneratedReport = async (format = "markdown") => {
     </div>
 
     <!-- Events Drawer -->
-    <el-drawer v-model="eventsDrawerOpen" direction="rtl" size="700px" :with-header="false">
+    <el-drawer v-model="eventsDrawerOpen" direction="rtl" size="700px" :with-header="false" aria-label="风险事件列表">
       <div class="risk-events-drawer">
-        <h3>风险事件列表</h3>
+        <div class="risk-events-drawer__head">
+          <h3>风险事件列表</h3>
+          <button class="risk-events-drawer__close" @click="eventsDrawerOpen = false" aria-label="关闭事件列表">&times;</button>
+        </div>
         <el-form :inline="true" class="risk-filter-row">
           <el-form-item><el-input v-model="filters.company_name" placeholder="公司名称" size="small" clearable /></el-form-item>
           <el-form-item><el-input v-model="filters.risk_type" placeholder="风险类型" size="small" clearable /></el-form-item>
@@ -506,14 +536,14 @@ const downloadGeneratedReport = async (format = "markdown") => {
           <el-form-item><el-select v-model="filters.review_status" placeholder="状态" size="small" clearable><el-option label="待审核" value="pending" /><el-option label="已确认" value="approved" /><el-option label="已忽略" value="rejected" /></el-select></el-form-item>
           <el-form-item><el-button type="primary" size="small" @click="applyFilters" :loading="isEventsLoading">查询</el-button><el-button size="small" @click="resetFilters">重置</el-button></el-form-item>
         </el-form>
-        <el-table :data="events" stripe size="small" v-loading="isEventsLoading" max-height="calc(100vh - 200px)">
-          <el-table-column prop="company_name" label="公司" min-width="140" />
+        <el-table :data="events" stripe size="small" v-loading="isEventsLoading" max-height="calc(100vh - 200px)" empty-text="暂无风险事件">
+          <el-table-column prop="company_name" label="公司" min-width="140" show-overflow-tooltip />
           <el-table-column prop="risk_type" label="类型" width="100"><template #default="s"><el-tag size="small" effect="plain">{{ s.row.risk_type }}</el-tag></template></el-table-column>
-          <el-table-column label="等级" width="80"><template #default="s"><el-tag :type="getRiskTagType(s.row.risk_level)" size="small">{{ (s.row.risk_level || '').toUpperCase() }}</el-tag></template></el-table-column>
+          <el-table-column label="等级" width="80"><template #default="s"><el-tag :type="getRiskTagType(s.row.risk_level)" size="small">{{ getRiskLevelText(s.row.risk_level) }}</el-tag></template></el-table-column>
           <el-table-column label="时间" min-width="150"><template #default="s">{{ formatDate(s.row.event_time || s.row.created_at) }}</template></el-table-column>
-          <el-table-column label="摘要" min-width="240"><template #default="s"><div class="risk-events__summary">{{ s.row.summary }}</div></template></el-table-column>
+          <el-table-column label="摘要" min-width="240"><template #default="s"><div class="risk-events__summary" :title="s.row.summary">{{ s.row.summary }}</div></template></el-table-column>
           <el-table-column label="审核" width="90"><template #default="s"><el-tag :type="getReviewTagType((s.row.review_status || 'pending').toLowerCase())" size="small">{{ getReviewStatusText(s.row.review_status) }}</el-tag></template></el-table-column>
-          <el-table-column label="操作" width="140"><template #default="s"><template v-if="(s.row.review_status || 'pending').toLowerCase() === 'pending'"><el-button type="success" plain size="small" @click="handleReview(s.row, 'approved')">确认</el-button><el-button type="danger" plain size="small" @click="handleReview(s.row, 'rejected')">忽略</el-button></template><span v-else class="no-action">-</span></template></el-table-column>
+          <el-table-column label="操作" width="140"><template #default="s"><template v-if="(s.row.review_status || 'pending').toLowerCase() === 'pending'"><el-button type="success" plain size="small" @click="handleReview(s.row, 'approved')" :loading="reviewingId === (s.row.id || s.row.event_id)" :disabled="reviewingId !== null">确认</el-button><el-button type="danger" plain size="small" @click="handleReview(s.row, 'rejected')" :loading="reviewingId === (s.row.id || s.row.event_id)" :disabled="reviewingId !== null">忽略</el-button></template><span v-else class="no-action">-</span></template></el-table-column>
         </el-table>
       </div>
     </el-drawer>
@@ -878,6 +908,9 @@ const downloadGeneratedReport = async (format = "markdown") => {
   border-radius: 8px;
   position: relative;
   cursor: pointer;
+  border: 0;
+  padding: 0;
+  flex-shrink: 0;
 }
 
 .risk-extract__toggle::after {
@@ -898,6 +931,11 @@ const downloadGeneratedReport = async (format = "markdown") => {
 
 .risk-extract__toggle.is-off::after {
   right: 16px;
+}
+
+.risk-extract__toggle:focus-visible {
+  outline: 2px solid #2457c5;
+  outline-offset: 2px;
 }
 
 .risk-extract__download {
@@ -1306,9 +1344,40 @@ const downloadGeneratedReport = async (format = "markdown") => {
 }
 
 .risk-events-drawer h3 {
-  margin: 0 0 16px;
+  margin: 0;
   font-size: 18px;
   color: #edf4ff;
+}
+
+.risk-events-drawer__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+}
+
+.risk-events-drawer__close {
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  border: 1px solid rgba(111, 144, 205, 0.14);
+  border-radius: 8px;
+  background: rgba(16, 31, 58, 0.6);
+  color: #8492aa;
+  font-size: 20px;
+  cursor: pointer;
+  transition: color 0.2s, border-color 0.2s;
+}
+
+.risk-events-drawer__close:hover {
+  color: #dbe7ff;
+  border-color: rgba(111, 144, 205, 0.28);
+}
+
+.risk-events-drawer__close:focus-visible {
+  outline: 2px solid #2457c5;
+  outline-offset: 2px;
 }
 
 .risk-filter-row {
@@ -1378,6 +1447,32 @@ const downloadGeneratedReport = async (format = "markdown") => {
 .risk-timeline__arr.is-disabled {
   opacity: 0.3;
   cursor: not-allowed;
+}
+
+/* Focus-visible for keyboard navigation */
+
+.risk-action-btn:focus-visible,
+.risk-doc__pager button:focus-visible,
+.risk-timeline__arr:focus-visible,
+.risk-extract__tab:focus-visible,
+.risk-extract__download:focus-visible,
+.risk-export__btn:focus-visible,
+.risk-panel__all:focus-visible {
+  outline: 2px solid #2457c5;
+  outline-offset: 2px;
+}
+
+/* Reduced motion */
+
+@media (prefers-reduced-motion: reduce) {
+  .risk-action-btn,
+  .risk-extract__tab,
+  .risk-extract__toggle,
+  .risk-extract__toggle::after,
+  .risk-export__btn,
+  .risk-timeline__node::before {
+    transition-duration: 0.01ms !important;
+  }
 }
 
 /* ---- Responsive ---- */
