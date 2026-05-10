@@ -48,7 +48,7 @@ def tokenize(text):
 
 class FakeEmbeddingProvider:
     def embed(self, *, texts, options=None):
-        return [[float(index + 1) for index in range(64)] for _ in texts]
+        return SimpleNamespace(vectors=[[float(index + 1) for index in range(64)] for _ in texts])
 
 
 class FakeChatProvider:

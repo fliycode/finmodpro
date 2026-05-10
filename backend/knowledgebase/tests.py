@@ -32,7 +32,7 @@ from knowledgebase.services.document_service import (
     vectorize_document,
 )
 from knowledgebase.services.vector_service import VectorService
-from rag.services.llamaindex_store_service import clear_store, sync_document
+from rag.services.llamaindex_store_service import clear_store, sync_document, query_llamaindex_store
 from knowledgebase.services.parser_service import ParserService, parse_document_file
 from knowledgebase.tasks import ingest_document_task
 from rbac.services.rbac_service import ROLE_ADMIN, seed_roles_and_permissions
@@ -40,7 +40,7 @@ from rbac.services.rbac_service import ROLE_ADMIN, seed_roles_and_permissions
 
 class FakeEmbeddingProvider:
     def embed(self, *, texts, options=None):
-        return [[float(index + 1) for index in range(64)] for _ in texts]
+        return SimpleNamespace(vectors=[[float(index + 1) for index in range(64)] for _ in texts])
 
 
 class RecordingEmbeddingProvider:
@@ -49,7 +49,7 @@ class RecordingEmbeddingProvider:
 
     def embed(self, *, texts, options=None):
         self.calls.append(list(texts))
-        return [[float(index + 1) for index in range(64)] for _ in texts]
+        return SimpleNamespace(vectors=[[float(index + 1) for index in range(64)] for _ in texts])
 
 
 def fake_index_document_chunks(document):
@@ -1672,7 +1672,7 @@ class RagHierarchicalRetrievalTests(TestCase):
         shutil.rmtree(self.media_root, ignore_errors=True)
         clear_store()
 
-    @patch("knowledgebase.services.vector_service.VectorService.search")
+    @patch("rag.services.llamaindex_store_service.search")
     def test_query_store_returns_child_snippet_from_matched_section(self, mock_search):
         document = Document.objects.create(
             title="Annual report",
@@ -1708,21 +1708,24 @@ class RagHierarchicalRetrievalTests(TestCase):
         mock_search.return_value = [
             {
                 "document_id": document.id,
+                "chunk_id": matching_child.id,
                 "section_chunk_id": section.id,
                 "document_title": document.title,
                 "doc_type": document.doc_type,
                 "source_date": None,
-                "page_label": "section-1",
-                "content": section.content,
-                "metadata": {"page_label": "section-1"},
+                "page_label": "chunk-2",
+                "snippet": matching_child.content,
+                "metadata": {"page_label": "chunk-2"},
                 "score": 0.9,
                 "vector_score": 0.9,
                 "keyword_score": 0.0,
+                "section_context_summary": None,
+                "matched_queries": [],
             }
         ]
 
         try:
-            results = query_store("revenue growth", top_k=1)
+            results = query_llamaindex_store("revenue growth", top_k=1)
         except Exception:
             results = []
 
