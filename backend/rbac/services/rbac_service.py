@@ -157,7 +157,7 @@ def collect_user_permission_names(user):
 def get_avatar_url(user):
     try:
         profile = user.profile
-    except UserProfile.DoesNotExist:
+    except (UserProfile.DoesNotExist, AttributeError):
         return None
     if profile.avatar:
         return profile.avatar.url

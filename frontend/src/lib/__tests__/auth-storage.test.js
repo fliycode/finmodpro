@@ -55,6 +55,7 @@ test('saveProfile keeps profile in memory only', () => {
       id: 1,
       username: 'alice',
       email: 'alice@example.com',
+      avatar_url: null,
     },
     groups: ['member'],
     permissions: ['view_dashboard'],

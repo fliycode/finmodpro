@@ -1,8 +1,10 @@
 <script setup>
-import { computed } from 'vue';
+import { computed, ref } from 'vue';
 import { RouterLink } from 'vue-router';
 
+import AppAvatar from '../../components/ui/AppAvatar.vue';
 import ProfileIdentitySheet from '../../components/workspace/support/ProfileIdentitySheet.vue';
+import { authApi } from '../../api/auth.js';
 import { authStorage } from '../../lib/auth-storage.js';
 import { isAdminProfile } from '../../lib/session-state.js';
 
@@ -10,7 +12,7 @@ const profile = computed(() => authStorage.getProfile());
 const user = computed(() => profile.value?.user || {});
 const displayName = computed(() => user.value.username || '当前用户');
 const email = computed(() => user.value.email || '未设置邮箱');
-const initials = computed(() => displayName.value.trim().slice(0, 1).toUpperCase() || 'U');
+const avatarUrl = computed(() => user.value.avatar_url || '');
 const roleLabel = computed(() => (isAdminProfile(profile.value) ? '管理员' : '用户'));
 const groupsLabel = computed(() => {
   const groups = profile.value?.groups || [];
@@ -20,6 +22,37 @@ const permissionsLabel = computed(() => {
   const permissions = profile.value?.permissions || [];
   return permissions.length > 0 ? `${permissions.length} 项权限` : '暂无显式权限';
 });
+
+const fileInput = ref(null);
+const uploading = ref(false);
+const uploadError = ref('');
+
+const openFilePicker = () => {
+  uploadError.value = '';
+  fileInput.value?.click();
+};
+
+const handleFileChange = async (event) => {
+  const file = event.target.files?.[0];
+  if (!file) return;
+
+  if (file.size > 2 * 1024 * 1024) {
+    uploadError.value = '头像文件不能超过 2MB';
+    return;
+  }
+
+  uploading.value = true;
+  uploadError.value = '';
+  try {
+    const updatedProfile = await authApi.uploadAvatar(file);
+    authStorage.saveProfile(updatedProfile);
+  } catch (error) {
+    uploadError.value = error.message || '上传失败，请重试';
+  } finally {
+    uploading.value = false;
+    if (fileInput.value) fileInput.value.value = '';
+  }
+};
 </script>
 
 <template>
@@ -27,11 +60,34 @@ const permissionsLabel = computed(() => {
     <ProfileIdentitySheet>
       <template #identity>
         <section class="profile-panel">
-          <div class="profile-panel__avatar">{{ initials }}</div>
+          <button
+            type="button"
+            class="profile-panel__avatar-btn"
+            :aria-label="avatarUrl ? '更换头像' : '上传头像'"
+            @click="openFilePicker"
+          >
+            <AppAvatar :src="avatarUrl" :name="displayName" size="xl" />
+            <span class="profile-panel__avatar-overlay">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/>
+                <circle cx="12" cy="13" r="4"/>
+              </svg>
+            </span>
+            <span v-if="uploading" class="profile-panel__avatar-loading">上传中...</span>
+          </button>
+          <input
+            ref="fileInput"
+            type="file"
+            accept="image/jpeg,image/png,image/gif,image/webp"
+            class="profile-panel__file-input"
+            @change="handleFileChange"
+          />
+
           <div class="profile-panel__identity">
             <span>{{ roleLabel }}</span>
             <h2>{{ displayName }}</h2>
             <p>{{ email }}</p>
+            <p v-if="uploadError" class="profile-panel__error">{{ uploadError }}</p>
           </div>
           <div class="profile-panel__actions">
             <RouterLink v-if="isAdminProfile(profile)" to="/admin/overview">进入管理台</RouterLink>
@@ -78,17 +134,49 @@ const permissionsLabel = computed(() => {
   gap: 18px;
 }
 
-.profile-panel__avatar {
-  width: 72px;
-  height: 72px;
-  border-radius: 24px;
+.profile-panel__avatar-btn {
+  position: relative;
   display: inline-flex;
+  padding: 0;
+  border: none;
+  background: none;
+  cursor: pointer;
+  border-radius: 28px;
+  overflow: hidden;
+}
+
+.profile-panel__avatar-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
   align-items: center;
   justify-content: center;
-  background: linear-gradient(135deg, #315fff, #725dff);
-  color: #f5f9ff;
-  font-size: 28px;
-  font-weight: 800;
+  background: rgba(0, 0, 0, 0.45);
+  color: #fff;
+  opacity: 0;
+  transition: opacity 0.2s ease-out;
+  border-radius: inherit;
+}
+
+.profile-panel__avatar-btn:hover .profile-panel__avatar-overlay {
+  opacity: 1;
+}
+
+.profile-panel__avatar-loading {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.6);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 700;
+  border-radius: inherit;
+}
+
+.profile-panel__file-input {
+  display: none;
 }
 
 .profile-panel__identity {
@@ -116,6 +204,11 @@ const permissionsLabel = computed(() => {
 .profile-panel__identity p {
   margin: 6px 0 0;
   color: #93a8cb;
+}
+
+.profile-panel__error {
+  color: #ff8a8a !important;
+  font-size: 13px;
 }
 
 .profile-panel__actions {
@@ -171,6 +264,10 @@ const permissionsLabel = computed(() => {
 @media (max-width: 720px) {
   .profile-panel {
     grid-template-columns: 1fr;
+  }
+
+  .profile-panel__avatar-btn {
+    justify-self: start;
   }
 
   .profile-panel__actions {
