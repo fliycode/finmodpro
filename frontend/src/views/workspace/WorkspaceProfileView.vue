@@ -45,6 +45,11 @@ const handleFileChange = async (event) => {
   uploadError.value = '';
   try {
     const updatedProfile = await authApi.uploadAvatar(file);
+    // Cache-bust: Nginx caches /media/ for 7 days, so append timestamp to force re-fetch
+    const user = updatedProfile?.user || updatedProfile;
+    if (user?.avatar_url) {
+      user.avatar_url = user.avatar_url.split('?')[0] + '?t=' + Date.now();
+    }
     authStorage.saveProfile(updatedProfile);
   } catch (error) {
     uploadError.value = error.message || '上传失败，请重试';
@@ -188,22 +193,27 @@ const handleFileChange = async (event) => {
   margin-bottom: 6px;
   padding: 3px 9px;
   border-radius: 999px;
-  background: rgba(59, 115, 255, 0.16);
-  color: #9db5ff;
+  background: rgba(59, 115, 255, 0.1);
+  color: #4a6fa5;
   font-size: 12px;
   font-weight: 700;
+}
+
+html[data-theme='dark'] .profile-panel__identity span {
+  background: rgba(59, 115, 255, 0.16);
+  color: #9db5ff;
 }
 
 .profile-panel__identity h2 {
   margin: 0;
   font-size: 26px;
   line-height: 1.2;
-  color: #eef4ff;
+  color: var(--text-primary);
 }
 
 .profile-panel__identity p {
   margin: 6px 0 0;
-  color: #93a8cb;
+  color: var(--text-muted);
 }
 
 .profile-panel__error {
@@ -223,10 +233,10 @@ const handleFileChange = async (event) => {
   align-items: center;
   min-height: 36px;
   padding: 0 12px;
-  border: 1px solid rgba(96, 126, 255, 0.16);
+  border: 1px solid var(--border);
   border-radius: 12px;
-  background: rgba(14, 23, 39, 0.82);
-  color: #d1def7;
+  background: var(--surface-1);
+  color: var(--text-primary);
   font-weight: 700;
   text-decoration: none;
 }
@@ -239,17 +249,17 @@ const handleFileChange = async (event) => {
 .profile-detail {
   min-width: 0;
   padding: 18px 20px;
-  border-bottom: 1px solid rgba(96, 126, 255, 0.12);
+  border-bottom: 1px solid var(--border);
 }
 
 .profile-detail:nth-child(odd) {
-  border-right: 1px solid rgba(96, 126, 255, 0.12);
+  border-right: 1px solid var(--border);
 }
 
 .profile-detail span {
   display: block;
   margin-bottom: 5px;
-  color: #7f95bf;
+  color: var(--text-muted);
   font-size: 12px;
   font-weight: 700;
 }
@@ -257,7 +267,7 @@ const handleFileChange = async (event) => {
 .profile-detail strong {
   display: block;
   overflow-wrap: anywhere;
-  color: #eef4ff;
+  color: var(--text-primary);
   font-size: 15px;
 }
 

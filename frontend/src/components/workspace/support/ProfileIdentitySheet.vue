@@ -21,12 +21,19 @@
 
 .profile-identity-sheet__hero,
 .profile-identity-sheet__access {
-  border: 1px solid rgba(96, 126, 255, 0.16);
+  border: 1px solid var(--border, rgba(96, 126, 255, 0.16));
   border-radius: 16px;
+  background: var(--surface-2);
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.06);
+}
+
+html[data-theme='dark'] .profile-identity-sheet__hero,
+html[data-theme='dark'] .profile-identity-sheet__access {
   background:
     linear-gradient(180deg, rgba(13, 22, 38, 0.9), rgba(10, 17, 31, 0.92)),
     radial-gradient(circle at top right, rgba(90, 106, 255, 0.12), transparent 38%);
   box-shadow: 0 24px 58px -42px rgba(4, 10, 22, 0.96);
+  border-color: rgba(96, 126, 255, 0.16);
 }
 
 .profile-identity-sheet__hero {
