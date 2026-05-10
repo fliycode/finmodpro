@@ -1,6 +1,7 @@
 <script setup>
 import { computed, onMounted, onBeforeUnmount, ref, watch } from "vue";
 import { riskApi } from "../api/risk.js";
+import { kbApi } from "../api/knowledgebase.js";
 import { useFlash } from "../lib/flash.js";
 import {
   buildRiskLevelChartOption,
@@ -37,6 +38,9 @@ const analyticsErrorMsg = ref("");
 let workspaceAbort = null;
 const reviewingId = ref(null);
 const isExportingJson = ref(false);
+
+const fileInput = ref(null);
+const isUploading = ref(false);
 
 const analytics = computed(() => normalizeRiskAnalytics(analyticsPayload.value));
 
@@ -190,6 +194,30 @@ const handleReview = async (event, status) => {
 const applyFilters = () => refreshWorkspace();
 const resetFilters = () => { filters.value = buildDefaultFilters(); refreshWorkspace(); };
 
+const triggerUpload = () => fileInput.value?.click();
+
+const handleFileChange = async (event) => {
+  const file = event.target.files?.[0];
+  if (!file) return;
+  isUploading.value = true;
+  try {
+    flash.success("文档上传中...");
+    const result = await kbApi.uploadDocument(file);
+    const docId = result.document?.id;
+    if (docId) {
+      flash.success("上传完成，正在提取风险事件...");
+      await riskApi.extractDocument(docId);
+      flash.success("风险提取完成");
+    }
+    await refreshWorkspace();
+  } catch (error) {
+    flash.error(error.message || "上传或提取失败");
+  } finally {
+    isUploading.value = false;
+    if (event.target) event.target.value = "";
+  }
+};
+
 const getReviewStatusText = (s) => ({ pending: "待审核", approved: "已确认", rejected: "已忽略" }[s?.toLowerCase()] || s || "待审核");
 const getRiskTagType = (l) => ({ high: "danger", critical: "danger", medium: "warning", low: "success" }[l] || "info");
 const getReviewTagType = (s) => ({ approved: "success", rejected: "danger", pending: "warning" }[s] || "info");
@@ -282,6 +310,11 @@ const downloadGeneratedReport = async (format = "markdown") => {
         </span>
       </div>
       <div class="risk-topbar__actions">
+        <input ref="fileInput" type="file" accept=".pdf,.docx,.txt" class="risk-topbar__file-input" @change="handleFileChange" aria-hidden="true" tabindex="-1" />
+        <button type="button" class="risk-action-btn" @click="triggerUpload" :disabled="isUploading" :aria-busy="isUploading" aria-label="上传风险文档">
+          <AppIcon name="upload" :size="14" aria-hidden="true" />
+          {{ isUploading ? '上传中...' : '上传文档' }}
+        </button>
         <button type="button" class="risk-action-btn" @click="eventsDrawerOpen = true" aria-label="查看全部风险事件">
           <AppIcon name="search" :size="14" aria-hidden="true" />
           查看全部事件
@@ -600,6 +633,14 @@ const downloadGeneratedReport = async (format = "markdown") => {
   display: flex;
   gap: 8px;
   flex-shrink: 0;
+}
+
+.risk-topbar__file-input {
+  position: absolute;
+  width: 0;
+  height: 0;
+  opacity: 0;
+  pointer-events: none;
 }
 
 .risk-action-btn {

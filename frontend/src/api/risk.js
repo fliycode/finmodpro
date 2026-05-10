@@ -47,6 +47,13 @@ export const createRiskApi = (overrides = {}) => {
       });
     },
 
+    extractDocument(documentId) {
+      return requestJson(`/api/risk/documents/${documentId}/extract`, {
+        method: 'POST',
+        body: {},
+      });
+    },
+
     retryExtractDocument(documentId) {
       return requestJson(`/api/risk/documents/${documentId}/extract/retry`, {
         method: 'POST',
