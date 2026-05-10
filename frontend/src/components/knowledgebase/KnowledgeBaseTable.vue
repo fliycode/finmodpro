@@ -168,8 +168,9 @@ const showReingest = (item) => {
   border-bottom: 1px solid var(--line-soft);
   background: var(--surface-3);
   color: var(--text-muted);
+  font-family: 'PingFang SC', 'Noto Sans SC', 'Microsoft YaHei', sans-serif;
   font-size: 11px;
-  font-weight: 600;
+  font-weight: 500;
   letter-spacing: 0.06em;
   text-transform: uppercase;
 }
@@ -180,6 +181,7 @@ const showReingest = (item) => {
   border-bottom: 1px solid var(--line-soft);
   background: transparent;
   color: var(--text-secondary);
+  font-family: 'PingFang SC', 'Noto Sans SC', 'Microsoft YaHei', sans-serif;
   text-align: left;
   cursor: pointer;
   transition: background 0.15s ease;
@@ -206,23 +208,34 @@ const showReingest = (item) => {
   color: var(--text-primary);
   text-overflow: ellipsis;
   white-space: nowrap;
+  font-family: 'DM Sans', 'Noto Sans SC', sans-serif;
   font-size: 14px;
+  font-weight: 600;
 }
 
 .kb-table__title span,
 .kb-table__cell {
   overflow: hidden;
   color: var(--text-secondary);
+  font-family: 'PingFang SC', 'Noto Sans SC', 'Microsoft YaHei', sans-serif;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
+.kb-col-vector {
+  font-family: 'JetBrains Mono', ui-monospace, Consolas, monospace;
+  font-variant-numeric: tabular-nums;
+}
+
 .kb-table__filename {
+  font-family: 'JetBrains Mono', ui-monospace, Consolas, monospace;
   font-size: 12px;
 }
 
 .kb-table__meta {
+  font-family: 'PingFang SC', 'Noto Sans SC', 'Microsoft YaHei', sans-serif;
   font-size: 11px;
+  font-weight: 500;
   color: var(--text-muted) !important;
 }
 
@@ -233,8 +246,9 @@ const showReingest = (item) => {
   border-radius: 6px;
   background: var(--surface-3);
   color: var(--text-secondary);
+  font-family: 'PingFang SC', 'Noto Sans SC', 'Microsoft YaHei', sans-serif;
   font-size: 11px;
-  font-weight: 600;
+  font-weight: 500;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -246,6 +260,7 @@ const showReingest = (item) => {
   gap: 6px;
   min-width: 0;
   color: var(--text-primary);
+  font-family: 'PingFang SC', 'Noto Sans SC', 'Microsoft YaHei', sans-serif;
   font-size: 12px;
   font-weight: 600;
 }
@@ -311,6 +326,7 @@ const showReingest = (item) => {
   gap: 16px;
   padding: 12px 14px;
   color: var(--text-muted);
+  font-family: 'PingFang SC', 'Noto Sans SC', 'Microsoft YaHei', sans-serif;
   font-size: 13px;
 }
 
@@ -327,13 +343,16 @@ const showReingest = (item) => {
   border-radius: 8px;
   background: var(--surface-2);
   color: var(--text-primary);
+  font-family: 'PingFang SC', 'Noto Sans SC', 'Microsoft YaHei', sans-serif;
   font-size: 12px;
+  font-weight: 600;
   cursor: pointer;
 }
 
 .kb-empty {
   padding: 28px 20px;
   color: var(--text-secondary);
+  font-family: 'PingFang SC', 'Noto Sans SC', 'Microsoft YaHei', sans-serif;
   font-size: 13px;
 }
 

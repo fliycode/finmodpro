@@ -237,12 +237,15 @@ const recentActivities = computed(() =>
 .metric-panel h3 {
   margin: 0;
   color: var(--text-primary);
-  font-size: 16px;
+  font-family: 'DM Sans', 'Noto Sans SC', sans-serif;
+  font-size: 1rem;
+  font-weight: 600;
 }
 
 .metric-panel__header span,
 .metric-note {
   color: var(--text-muted);
+  font-family: 'PingFang SC', 'Noto Sans SC', 'Microsoft YaHei', sans-serif;
   font-size: 12px;
 }
 
@@ -266,12 +269,16 @@ const recentActivities = computed(() =>
 
 .donut strong {
   color: var(--text-primary);
+  font-family: 'DM Sans', 'Noto Sans SC', sans-serif;
   font-size: 18px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
 }
 
 .donut span {
   margin-top: 32px;
   color: var(--text-muted);
+  font-family: 'PingFang SC', 'Noto Sans SC', 'Microsoft YaHei', sans-serif;
   font-size: 11px;
 }
 
@@ -290,12 +297,14 @@ const recentActivities = computed(() =>
   justify-content: space-between;
   gap: 8px;
   color: var(--text-secondary);
+  font-family: 'PingFang SC', 'Noto Sans SC', 'Microsoft YaHei', sans-serif;
   font-size: 12px;
 }
 
 .metric-list strong,
 .distribution-row strong {
   color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
 }
 
 .dot {
@@ -340,6 +349,8 @@ const recentActivities = computed(() =>
   padding: 4px 8px;
   border-radius: 999px;
   background: var(--surface-3);
+  font-size: 11px;
+  font-weight: 500;
 }
 
 .activity-item {
@@ -371,13 +382,16 @@ const recentActivities = computed(() =>
   display: block;
   overflow: hidden;
   color: var(--text-primary);
+  font-family: 'PingFang SC', 'Noto Sans SC', 'Microsoft YaHei', sans-serif;
   font-size: 12px;
+  font-weight: 600;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .activity-item span {
   color: var(--text-muted);
+  font-family: 'PingFang SC', 'Noto Sans SC', 'Microsoft YaHei', sans-serif;
   font-size: 11px;
 }
 </style>

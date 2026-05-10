@@ -191,8 +191,8 @@ onUnmounted(() => {
   background: var(--surface-3);
   color: var(--text-primary);
   cursor: pointer;
+  font-family: 'PingFang SC', 'Noto Sans SC', 'Microsoft YaHei', sans-serif;
   font-size: 14px;
-  font-family: inherit;
   transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
 
@@ -228,8 +228,8 @@ onUnmounted(() => {
   color: var(--text-primary);
   text-align: left;
   cursor: pointer;
+  font-family: 'PingFang SC', 'Noto Sans SC', 'Microsoft YaHei', sans-serif;
   font-size: 13px;
-  font-family: inherit;
   transition: background 0.12s ease;
 }
 
@@ -248,7 +248,8 @@ onUnmounted(() => {
   padding: 0 14px;
   background: var(--surface-3);
   color: var(--text-primary);
-  font-family: inherit;
+  font-family: 'PingFang SC', 'Noto Sans SC', 'Microsoft YaHei', sans-serif;
+  font-size: 14px;
   outline: none;
   transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
@@ -263,11 +264,11 @@ onUnmounted(() => {
   height: 40px;
   border-radius: 12px;
   padding: 0 18px;
+  font-family: 'PingFang SC', 'Noto Sans SC', 'Microsoft YaHei', sans-serif;
   font-size: 14px;
-  font-weight: 700;
+  font-weight: 600;
   cursor: pointer;
   flex: 0 0 auto;
-  font-family: inherit;
 }
 
 .kb-primary-btn {

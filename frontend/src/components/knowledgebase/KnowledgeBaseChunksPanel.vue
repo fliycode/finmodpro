@@ -48,7 +48,8 @@ defineEmits(['toggle-chunk']);
 <style scoped>
 .kb-empty-state {
   padding: 20px 0;
-  color: #5a677d;
+  font-family: 'PingFang SC', 'Noto Sans SC', 'Microsoft YaHei', sans-serif;
+  color: var(--text-secondary);
 }
 
 .kb-chunks {
@@ -57,10 +58,10 @@ defineEmits(['toggle-chunk']);
 }
 
 .kb-chunk {
-  border: 1px solid rgba(20, 32, 51, 0.08);
+  border: 1px solid var(--line-soft);
   border-radius: 16px;
   padding: 14px 16px;
-  background: #f9fbfd;
+  background: var(--surface-3);
 }
 
 .kb-chunk__meta {
@@ -78,25 +79,43 @@ defineEmits(['toggle-chunk']);
 }
 
 .kb-chunk__meta strong {
-  color: #142033;
+  font-family: 'JetBrains Mono', ui-monospace, Consolas, monospace;
+  font-size: 13px;
+  color: var(--text-primary);
 }
 
-.kb-chunk__meta span,
+.kb-chunk__meta span {
+  font-family: 'PingFang SC', 'Noto Sans SC', 'Microsoft YaHei', sans-serif;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
 .kb-chunk p {
-  color: #5a677d;
+  font-family: 'PingFang SC', 'Noto Sans SC', 'Microsoft YaHei', sans-serif;
+  color: var(--text-secondary);
+  line-height: 1.6;
 }
 
 .kb-chunk__vector {
+  font-family: 'JetBrains Mono', ui-monospace, Consolas, monospace;
   font-size: 12px;
-  color: #6b7b93;
+  color: var(--text-muted);
 }
 
 .kb-link-btn {
-  border: 1px solid rgba(20, 32, 51, 0.12);
+  border: 1px solid var(--line-strong);
   border-radius: 12px;
   padding: 6px 10px;
-  background: #fff;
-  color: #142033;
+  background: var(--surface-2);
+  color: var(--text-primary);
+  font-family: 'PingFang SC', 'Noto Sans SC', 'Microsoft YaHei', sans-serif;
+  font-size: 13px;
+  font-weight: 500;
   cursor: pointer;
+  transition: background 0.12s ease, border-color 0.12s ease;
+}
+
+.kb-link-btn:hover {
+  background: var(--surface-hover);
 }
 </style>

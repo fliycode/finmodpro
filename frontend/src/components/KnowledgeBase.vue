@@ -494,8 +494,9 @@ onUnmounted(() => {
 
 .eyebrow {
   margin: 0 0 8px;
+  font-family: 'PingFang SC', 'Noto Sans SC', 'Microsoft YaHei', sans-serif;
   font-size: 11px;
-  font-weight: 700;
+  font-weight: 500;
   letter-spacing: 0.16em;
   text-transform: uppercase;
   color: var(--brand);
@@ -504,14 +505,19 @@ onUnmounted(() => {
 .kb-overview h2,
 .kb-dataset-composer h3 {
   margin: 0;
+  font-family: 'DM Sans', 'Noto Sans SC', sans-serif;
+  font-size: 1.25rem;
+  font-weight: 600;
+  line-height: 1.35;
   color: var(--text-primary);
-  letter-spacing: -0.02em;
+  letter-spacing: -0.01em;
 }
 
 .kb-dataset-composer p {
   margin: 10px 0 0;
+  font-family: 'PingFang SC', 'Noto Sans SC', 'Microsoft YaHei', sans-serif;
   color: var(--text-secondary);
-  line-height: 1.75;
+  line-height: 1.6;
 }
 
 .kb-overview__stats {
@@ -570,14 +576,20 @@ onUnmounted(() => {
 .stat-label {
   display: block;
   color: var(--text-muted);
-  font-size: 12px;
+  font-family: 'PingFang SC', 'Noto Sans SC', 'Microsoft YaHei', sans-serif;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
   margin-bottom: 4px;
 }
 
 .stat-card strong {
   display: block;
   color: var(--text-primary);
+  font-family: 'DM Sans', 'Noto Sans SC', sans-serif;
   font-size: clamp(17px, 1.8vw, 20px);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
   line-height: 1.15;
 }
 
@@ -585,6 +597,7 @@ onUnmounted(() => {
   display: block;
   margin-top: 4px;
   color: var(--text-muted);
+  font-family: 'PingFang SC', 'Noto Sans SC', 'Microsoft YaHei', sans-serif;
   font-size: 11px;
 }
 
@@ -619,7 +632,8 @@ onUnmounted(() => {
   border: 1px solid var(--line-strong);
   border-radius: 12px;
   padding: 12px 14px;
-  font: inherit;
+  font-family: 'PingFang SC', 'Noto Sans SC', 'Microsoft YaHei', sans-serif;
+  font-size: 14px;
   color: var(--text-primary);
   background: var(--surface-3);
 }
@@ -654,7 +668,8 @@ onUnmounted(() => {
 
 .kb-batchbar span {
   color: var(--text-primary);
-  font-weight: 700;
+  font-family: 'PingFang SC', 'Noto Sans SC', 'Microsoft YaHei', sans-serif;
+  font-weight: 600;
   font-size: 13px;
 }
 
@@ -664,8 +679,9 @@ onUnmounted(() => {
   min-height: 36px;
   padding: 0 16px;
   border-radius: 10px;
+  font-family: 'PingFang SC', 'Noto Sans SC', 'Microsoft YaHei', sans-serif;
   font-size: 13px;
-  font-weight: 700;
+  font-weight: 600;
   cursor: pointer;
 }
 

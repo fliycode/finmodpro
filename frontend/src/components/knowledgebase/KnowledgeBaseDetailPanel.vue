@@ -292,26 +292,33 @@ const tabs = [
   display: flex;
   flex-direction: column;
   gap: 16px;
-  background: #fff;
+  background: var(--surface-2);
   padding: 22px;
 }
 
 .eyebrow {
   margin: 0 0 8px;
-  font-size: 12px;
-  letter-spacing: 0.08em;
+  font-family: 'PingFang SC', 'Noto Sans SC', 'Microsoft YaHei', sans-serif;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.16em;
   text-transform: uppercase;
-  color: #6b7b93;
+  color: var(--brand);
 }
 
 .kb-detail h3 {
   margin: 0;
-  color: #142033;
+  font-family: 'DM Sans', 'Noto Sans SC', sans-serif;
+  font-size: 1.25rem;
+  font-weight: 600;
+  line-height: 1.35;
+  color: var(--text-primary);
 }
 
 .kb-detail__summary {
   margin: 8px 0 0;
-  color: #5a677d;
+  font-family: 'PingFang SC', 'Noto Sans SC', 'Microsoft YaHei', sans-serif;
+  color: var(--text-secondary);
   line-height: 1.6;
 }
 
@@ -334,20 +341,21 @@ const tabs = [
   height: 40px;
   border-radius: 12px;
   padding: 0 16px;
-  font-weight: 700;
+  font-family: 'PingFang SC', 'Noto Sans SC', 'Microsoft YaHei', sans-serif;
+  font-weight: 600;
   cursor: pointer;
 }
 
 .kb-primary-btn {
   border: none;
-  background: #2457c5;
+  background: var(--brand);
   color: #fff;
 }
 
 .kb-secondary-btn {
-  border: 1px solid rgba(20, 32, 51, 0.12);
-  background: #fff;
-  color: #142033;
+  border: 1px solid var(--line-strong);
+  background: var(--surface-2);
+  color: var(--text-primary);
 }
 
 .kb-meta-grid {
@@ -357,10 +365,10 @@ const tabs = [
 }
 
 .meta-item {
-  border: 1px solid rgba(20, 32, 51, 0.08);
+  border: 1px solid var(--line-soft);
   border-radius: 16px;
   padding: 14px;
-  background: #f7f9fc;
+  background: var(--surface-3);
 }
 
 .kb-version-summary,
@@ -375,10 +383,10 @@ const tabs = [
 
 .kb-provenance-card,
 .kb-version-card {
-  border: 1px solid rgba(20, 32, 51, 0.08);
+  border: 1px solid var(--line-soft);
   border-radius: 16px;
   padding: 16px;
-  background: #f7f9fc;
+  background: var(--surface-3);
 }
 
 .kb-version-card__header {
@@ -388,11 +396,16 @@ const tabs = [
   gap: 12px;
 }
 
+.kb-version-card__header strong {
+  font-family: 'JetBrains Mono', ui-monospace, Consolas, monospace;
+}
+
 .kb-version-card__metadata pre,
 .kb-provenance-card pre {
   overflow-x: auto;
   white-space: pre-wrap;
   margin: 8px 0 0;
+  font-family: 'JetBrains Mono', ui-monospace, Consolas, monospace;
   font-size: 12px;
   line-height: 1.6;
 }
@@ -401,35 +414,47 @@ const tabs = [
 .meta-label {
   display: block;
   margin-bottom: 6px;
-  color: #6b7b93;
-  font-size: 12px;
+  font-family: 'PingFang SC', 'Noto Sans SC', 'Microsoft YaHei', sans-serif;
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
 }
 
-.meta-item strong,
+.meta-item strong {
+  font-family: 'PingFang SC', 'Noto Sans SC', 'Microsoft YaHei', sans-serif;
+  color: var(--text-primary);
+}
+
 .task-grid strong {
-  color: #142033;
+  font-family: 'PingFang SC', 'Noto Sans SC', 'Microsoft YaHei', sans-serif;
+  color: var(--text-primary);
 }
 
 .kb-tabs {
   display: flex;
   gap: 10px;
-  border-bottom: 1px solid rgba(20, 32, 51, 0.08);
+  border-bottom: 1px solid var(--line-soft);
   padding-bottom: 12px;
 }
 
 .kb-tab {
-  border: 1px solid rgba(20, 32, 51, 0.1);
+  border: 1px solid var(--line-soft);
   border-radius: 999px;
   padding: 8px 14px;
-  background: #fff;
-  color: #5a677d;
+  background: var(--surface-2);
+  color: var(--text-secondary);
+  font-family: 'PingFang SC', 'Noto Sans SC', 'Microsoft YaHei', sans-serif;
+  font-size: 13px;
+  font-weight: 500;
   cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
 }
 
 .kb-tab.active {
-  border-color: rgba(36, 87, 197, 0.15);
-  background: rgba(36, 87, 197, 0.08);
-  color: #2457c5;
+  border-color: var(--brand-soft);
+  background: var(--brand-soft);
+  color: var(--brand);
 }
 
 .kb-detail__section {
@@ -440,7 +465,8 @@ const tabs = [
   display: flex;
   justify-content: space-between;
   margin-bottom: 10px;
-  color: #6b7b93;
+  font-family: 'PingFang SC', 'Noto Sans SC', 'Microsoft YaHei', sans-serif;
+  color: var(--text-muted);
   font-size: 13px;
 }
 
@@ -448,28 +474,28 @@ const tabs = [
   overflow: hidden;
   height: 10px;
   border-radius: 999px;
-  background: #eef2f7;
+  background: var(--surface-3);
 }
 
 .kb-progress__value {
   height: 100%;
   border-radius: inherit;
-  background: linear-gradient(90deg, #2457c5, #4c7de0);
+  background: var(--brand);
 }
 
 .kb-task-card {
   margin-top: 16px;
-  border: 1px solid rgba(20, 32, 51, 0.08);
+  border: 1px solid var(--line-soft);
   border-radius: 16px;
   padding: 16px;
-  background: #f9fbfd;
+  background: var(--surface-3);
 }
 
 .kb-task-card__hint,
-.kb-empty-state,
-.kb-error-log {
-  color: #5a677d;
-  line-height: 1.7;
+.kb-empty-state {
+  font-family: 'PingFang SC', 'Noto Sans SC', 'Microsoft YaHei', sans-serif;
+  color: var(--text-secondary);
+  line-height: 1.6;
 }
 
 .task-grid {
@@ -481,7 +507,10 @@ const tabs = [
 
 .kb-empty-state h4 {
   margin: 0 0 8px;
-  color: #142033;
+  font-family: 'DM Sans', 'Noto Sans SC', sans-serif;
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--text-primary);
 }
 
 .kb-empty-state p {
@@ -493,7 +522,9 @@ const tabs = [
   border-radius: 16px;
   padding: 16px;
   background: rgba(181, 58, 58, 0.06);
+  font-family: 'PingFang SC', 'Noto Sans SC', 'Microsoft YaHei', sans-serif;
   color: #8d3030;
+  line-height: 1.6;
   white-space: pre-wrap;
 }
 
@@ -504,27 +535,28 @@ const tabs = [
   min-width: 72px;
   padding: 6px 10px;
   border-radius: 999px;
+  font-family: 'PingFang SC', 'Noto Sans SC', 'Microsoft YaHei', sans-serif;
   font-size: 12px;
-  font-weight: 700;
+  font-weight: 600;
 }
 
 .tone-neutral {
-  background: #eef2f7;
-  color: #516176;
+  background: var(--surface-3);
+  color: var(--text-secondary);
 }
 
 .tone-accent {
-  background: rgba(36, 87, 197, 0.12);
-  color: #2457c5;
+  background: var(--brand-soft);
+  color: var(--brand);
 }
 
 .tone-success {
-  background: rgba(35, 138, 86, 0.12);
-  color: #238a56;
+  background: var(--success-50);
+  color: var(--success);
 }
 
 .tone-danger {
-  background: rgba(204, 61, 61, 0.12);
-  color: #b53a3a;
+  background: var(--risk-50);
+  color: var(--risk);
 }
 </style>
