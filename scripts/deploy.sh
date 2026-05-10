@@ -95,6 +95,7 @@ git pull --ff-only origin main
 ensure_disk_headroom
 docker compose -f "$COMPOSE_FILE" up -d --build --remove-orphans
 docker compose -f "$COMPOSE_FILE" exec -T backend python3 manage.py migrate
+docker compose -f "$COMPOSE_FILE" exec -T backend python3 manage.py seed_periodic_tasks
 if [ "$REBUILD_LLAMAINDEX_INDEX_ON_DEPLOY" = "true" ]; then
   docker compose -f "$COMPOSE_FILE" exec -T backend python3 manage.py rebuild_llamaindex_index
 fi

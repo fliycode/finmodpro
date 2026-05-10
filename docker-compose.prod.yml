@@ -40,7 +40,7 @@ services:
       DB_PORT: ${DB_PORT:-3306}
       DB_USER: ${DB_USER:-finmodpro}
       DB_PASSWORD: ${DB_PASSWORD:-finmodpro}
-      DB_CONN_MAX_AGE: ${DB_CONN_MAX_AGE:-60}
+      DB_CONN_MAX_AGE: ${DB_CONN_MAX_AGE:-600}
       REDIS_ENABLED: "true"
       REDIS_HOST: redis
       REDIS_PORT: ${REDIS_PORT:-6379}
@@ -72,9 +72,9 @@ services:
       mysql:
         condition: service_healthy
       redis:
-        condition: service_started
+        condition: service_healthy
       milvus:
-        condition: service_started
+        condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "python -c \"import sys, urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health/', timeout=5); sys.exit(0)\""]
       interval: 15s
@@ -104,7 +104,7 @@ services:
       DB_PORT: ${DB_PORT:-3306}
       DB_USER: ${DB_USER:-finmodpro}
       DB_PASSWORD: ${DB_PASSWORD:-finmodpro}
-      DB_CONN_MAX_AGE: ${DB_CONN_MAX_AGE:-60}
+      DB_CONN_MAX_AGE: ${DB_CONN_MAX_AGE:-600}
       REDIS_ENABLED: "true"
       REDIS_HOST: redis
       REDIS_PORT: ${REDIS_PORT:-6379}
@@ -134,9 +134,9 @@ services:
       mysql:
         condition: service_healthy
       redis:
-        condition: service_started
+        condition: service_healthy
       milvus:
-        condition: service_started
+        condition: service_healthy
 
   celery-beat:
     build:
@@ -160,7 +160,7 @@ services:
       DB_PORT: ${DB_PORT:-3306}
       DB_USER: ${DB_USER:-finmodpro}
       DB_PASSWORD: ${DB_PASSWORD:-finmodpro}
-      DB_CONN_MAX_AGE: ${DB_CONN_MAX_AGE:-60}
+      DB_CONN_MAX_AGE: ${DB_CONN_MAX_AGE:-600}
       REDIS_ENABLED: "true"
       REDIS_HOST: redis
       REDIS_PORT: ${REDIS_PORT:-6379}
@@ -221,6 +221,11 @@ services:
       - redis_data:/data
     restart: unless-stopped
     logging: *default-logging
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
 
   etcd:
     image: quay.io/coreos/etcd:v3.5.18
@@ -266,6 +271,12 @@ services:
         condition: service_started
     restart: unless-stopped
     logging: *default-logging
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:9091/healthz || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
 
 volumes:
   backend_media:

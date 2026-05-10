@@ -38,7 +38,7 @@ DB_HOST = get_env("DB_HOST", "127.0.0.1")
 DB_PORT = get_int_env("DB_PORT", 3306)
 DB_USER = get_env("DB_USER", "root")
 DB_PASSWORD = get_env("DB_PASSWORD", "")
-DB_CONN_MAX_AGE = get_int_env("DB_CONN_MAX_AGE", 60)
+DB_CONN_MAX_AGE = get_int_env("DB_CONN_MAX_AGE", 600)
 
 if DB_ENGINE != "mysql":
     raise ImproperlyConfigured("Only MySQL is supported.")

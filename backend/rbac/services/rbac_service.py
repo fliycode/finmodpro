@@ -102,9 +102,17 @@ def ensure_custom_permissions():
 
 
 def ensure_role_groups():
+    from django.core.cache import cache
+
+    cache_key = "rbac:role_groups"
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return cached
+
     groups = {}
     for role_name in ROLE_PERMISSION_MAP:
         groups[role_name], _ = Group.objects.get_or_create(name=role_name)
+    cache.set(cache_key, groups, 3600)
     return groups
 
 
