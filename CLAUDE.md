@@ -54,6 +54,7 @@ FinModPro is a monorepo: Vue 3 + Vite frontend in `frontend/`, Django 5 + DRF ba
 - **`.env` is never auto-loaded.** Always `source .env` explicitly before Django commands.
 - **Preserve both trailing-slash and non-trailing-slash API routes** when extending Django URL modules.
 - **Conventional Commits:** `type(scope): summary` — scopes: `frontend`, `backend`, or a backend app name.
+- **Git Author:** All commits MUST use `fliycode <112712652+fliycode@users.noreply.github.com>` as the author. This is enforced by git config. Never use other author names (Dora, Codex, etc.).
 - **Design system:** Two-Desk Rule (warm tones in workspace, cool tones in admin, only Command Blue #2457c5 crosses both). One Accent Rule (Command Blue ≤10% of any screen). 24px card radius. No pure black/white, no nested cards, no gradient heroes.
 - **Frontend tests** live in `__tests__/` next to source, run with `node --test`.
 - **Backend tests** live in each app's `tests.py`, run with Django's test runner.
