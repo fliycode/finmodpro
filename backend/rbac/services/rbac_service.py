@@ -23,6 +23,11 @@ CUSTOM_PERMISSION_DEFINITIONS = (
     ("view_evaluation", "Can view evaluation"),
     ("run_evaluation", "Can run evaluation"),
     ("view_audit_log", "Can view audit log"),
+    ("view_monitoring", "Can view system monitoring"),
+    ("manage_alert_rules", "Can manage alert rules"),
+    ("acknowledge_alerts", "Can acknowledge alerts"),
+    ("manage_cleaning_rules", "Can manage cleaning rules"),
+    ("trigger_cleaning", "Can trigger document cleaning"),
 )
 
 ROLE_PERMISSION_MAP = {
@@ -45,6 +50,11 @@ ROLE_PERMISSION_MAP = {
         "auth.view_evaluation",
         "auth.run_evaluation",
         "auth.view_audit_log",
+        "auth.view_monitoring",
+        "auth.manage_alert_rules",
+        "auth.acknowledge_alerts",
+        "auth.manage_cleaning_rules",
+        "auth.trigger_cleaning",
     },
     ROLE_ADMIN: {
         "auth.view_dashboard",
@@ -62,6 +72,11 @@ ROLE_PERMISSION_MAP = {
         "auth.manage_model_config",
         "auth.view_evaluation",
         "auth.view_audit_log",
+        "auth.view_monitoring",
+        "auth.manage_alert_rules",
+        "auth.acknowledge_alerts",
+        "auth.manage_cleaning_rules",
+        "auth.trigger_cleaning",
     },
     ROLE_MEMBER: {
         "auth.view_dashboard",

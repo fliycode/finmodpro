@@ -11,6 +11,8 @@ export const navigationMap = {
     { id: 'admin-overview', label: '数据看板', to: '/admin/overview', icon: 'dashboard', group: 'admin-overview' },
     { id: 'admin-knowledge', label: '知识库管理', to: '/admin/knowledge', icon: 'database', group: 'admin-overview' },
     { id: 'admin-users', label: '用户管理', to: '/admin/users', icon: 'users', group: 'admin-governance' },
+    { id: 'admin-monitoring', label: '系统监控', to: '/admin/monitoring', icon: 'activity', group: 'admin-overview' },
+    { id: 'admin-cleaning', label: '数据清洗', to: '/admin/cleaning', icon: 'sparkles', group: 'admin-overview' },
     {
       id: 'admin-llm-management',
       label: '模型管理',

@@ -33,10 +33,12 @@ class Document(models.Model):
     STATUS_PARSED = "parsed"
     STATUS_CHUNKED = "chunked"
     STATUS_INDEXED = "indexed"
+    STATUS_CLEANING = "cleaning"
     STATUS_FAILED = "failed"
     STATUS_CHOICES = (
         (STATUS_UPLOADED, "Uploaded"),
         (STATUS_PARSED, "Parsed"),
+        (STATUS_CLEANING, "Cleaning"),
         (STATUS_CHUNKED, "Chunked"),
         (STATUS_INDEXED, "Indexed"),
         (STATUS_FAILED, "Failed"),
@@ -127,6 +129,7 @@ class IngestionTask(models.Model):
     )
     STEP_QUEUED = "queued"
     STEP_PARSING = "parsing"
+    STEP_CLEANING = "cleaning"
     STEP_CHUNKING = "chunking"
     STEP_INDEXING = "indexing"
     STEP_GRAPH_SYNC = "graph_sync"
@@ -135,6 +138,7 @@ class IngestionTask(models.Model):
     STEP_CHOICES = (
         (STEP_QUEUED, "Queued"),
         (STEP_PARSING, "Parsing"),
+        (STEP_CLEANING, "Cleaning"),
         (STEP_CHUNKING, "Chunking"),
         (STEP_INDEXING, "Indexing"),
         (STEP_GRAPH_SYNC, "Graph sync"),
@@ -251,3 +255,58 @@ class DocumentSectionChunk(models.Model):
     class Meta:
         ordering = ["section_index"]
         unique_together = ("document", "section_index")
+
+
+class CleaningRule(models.Model):
+    RULE_TYPE_CHOICES = (
+        ("clean_whitespace", "Clean whitespace"),
+        ("fix_encoding", "Fix encoding"),
+        ("normalize_quotes", "Normalize quotes"),
+        ("remove_bullets", "Remove bullets"),
+        ("group_broken_paragraphs", "Group broken paragraphs"),
+        ("remove_header_footer", "Remove header/footer"),
+        ("remove_page_numbers", "Remove page numbers"),
+        ("remove_boilerplate", "Remove boilerplate"),
+        ("remove_urls_emails", "Remove URLs and emails"),
+        ("dedup_exact", "Deduplicate exact"),
+        ("dedup_near", "Deduplicate near"),
+        ("fix_ocr_artifacts", "Fix OCR artifacts"),
+        ("normalize_financial_numbers", "Normalize financial numbers"),
+    )
+
+    name = models.CharField(max_length=255, unique=True)
+    rule_type = models.CharField(max_length=64, choices=RULE_TYPE_CHOICES, db_index=True)
+    config = models.JSONField(default=dict, blank=True)
+    enabled = models.BooleanField(default=True)
+    priority = models.PositiveIntegerField(default=100)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        related_name="created_cleaning_rules",
+        on_delete=models.SET_NULL,
+        blank=True,
+        null=True,
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["priority", "id"]
+
+
+class DocumentCleaningResult(models.Model):
+    document = models.ForeignKey(
+        Document,
+        related_name="cleaning_results",
+        on_delete=models.CASCADE,
+    )
+    rules_applied = models.JSONField(default=list, blank=True)
+    issues_found = models.JSONField(default=list, blank=True)
+    quality_score = models.FloatField(default=0.0)
+    quality_signals = models.JSONField(default=dict, blank=True)
+    original_length = models.PositiveIntegerField(default=0)
+    cleaned_length = models.PositiveIntegerField(default=0)
+    dedup_count = models.PositiveIntegerField(default=0)
+    cleaned_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-cleaned_at", "-id"]

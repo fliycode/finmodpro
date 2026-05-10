@@ -140,6 +140,16 @@ export const appRoutes = [
         redirect: '/admin/knowledge',
       },
       {
+        path: 'monitoring',
+        component: () => import('../views/admin/AdminMonitoringView.vue'),
+        meta: { title: '系统监控', subtitle: '系统资源、服务健康与告警管理。', breadcrumb: [{ label: '数据看板' }, { label: '系统监控' }] },
+      },
+      {
+        path: 'cleaning',
+        component: () => import('../views/admin/AdminCleaningView.vue'),
+        meta: { title: '数据清洗', subtitle: '配置清洗规则、查看清洗质量与问题报告。', breadcrumb: [{ label: '知识库管理' }, { label: '数据清洗' }] },
+      },
+      {
         path: 'audit-logs',
         component: () => import('../views/admin/AdminAuditLogsView.vue'),
         meta: { title: '操作日志', subtitle: '', breadcrumb: [{ label: '治理审阅' }, { label: '操作日志' }] },

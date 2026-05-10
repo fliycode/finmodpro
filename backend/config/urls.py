@@ -15,6 +15,7 @@ urlpatterns = [
     path("api/rag/", include("rag.urls")),
     path("api/chat/", include("chat.urls")),
     path("api/risk/", include("risk.urls")),
+    path("api/monitoring/", include("ops.urls")),
 ]
 
 urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
