@@ -173,11 +173,7 @@ class LlmConsoleApiTests(TestCase):
         self.assertEqual(payload["overview"]["avg_duration_ms_24h"], 180)
         self.assertIn("langfuse", payload)
 
-    @override_settings(
-        UNSTRUCTURED_API_URL="http://unstructured-api:8000",
-        UNSTRUCTURED_API_URL_CONFIGURED=False,
-    )
-    def test_summary_marks_unstructured_missing_when_config_flag_is_false(self):
+    def test_summary_marks_pymupdf4llm_configured(self):
         Document.objects.create(
             title="未入库文档",
             file=SimpleUploadedFile("report.pdf", b"pdf-content", content_type="application/pdf"),
@@ -193,8 +189,8 @@ class LlmConsoleApiTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         payload = response.json()["data"]
-        unstructured = next(item for item in payload["providers"] if item["key"] == "unstructured")
-        self.assertEqual(unstructured["status"], "missing")
+        pymupdf4llm = next(item for item in payload["providers"] if item["key"] == "pymupdf4llm")
+        self.assertEqual(pymupdf4llm["status"], "configured")
 
     def test_admin_can_fetch_llm_knowledge_summary(self):
         document = Document.objects.create(
@@ -219,7 +215,8 @@ class LlmConsoleApiTests(TestCase):
         self.assertEqual(response.status_code, 200)
         payload = response.json()["data"]
         self.assertEqual(payload["parser_capabilities"]["txt"]["parser"], "local")
-        self.assertEqual(payload["parser_capabilities"]["pdf"]["parser"], "unstructured")
+        self.assertEqual(payload["parser_capabilities"]["pdf"]["parser"], "pymupdf4llm")
+        self.assertEqual(payload["parser_capabilities"]["docx"]["parser"], "python-docx")
         self.assertTrue(payload["parser_capabilities"]["pdf"]["fallback"])
         self.assertFalse(payload["parser_capabilities"]["docx"]["fallback"])
         self.assertEqual(

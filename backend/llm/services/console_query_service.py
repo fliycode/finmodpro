@@ -39,7 +39,6 @@ def _build_provider_status():
     running_fine_tunes = FineTuneRun.objects.filter(status=FineTuneRun.STATUS_RUNNING).count()
     has_fine_tune_runs = FineTuneRun.objects.exists()
     langfuse = _langfuse_config()
-    unstructured_configured = getattr(settings, "UNSTRUCTURED_API_URL_CONFIGURED", False)
 
     providers = [
         {
@@ -65,9 +64,9 @@ def _build_provider_status():
                 "active_count": 0,
             },
             {
-                "key": "unstructured",
-                "label": "Unstructured",
-                "status": "configured" if unstructured_configured else "missing",
+                "key": "pymupdf4llm",
+                "label": "pymupdf4llm",
+                "status": "configured",
                 "active_count": 0,
             },
             {
@@ -190,11 +189,10 @@ def build_llm_knowledge_summary():
         "parser_capabilities": {
             "txt": {"parser": "local", "fallback": False},
             "pdf": {
-                "parser": "unstructured",
-                # Task 1 UI contract: PDF fallback stays enabled regardless of service config.
+                "parser": "pymupdf4llm",
                 "fallback": True,
             },
-            "docx": {"parser": "unstructured", "fallback": False},
+            "docx": {"parser": "python-docx", "fallback": False},
         },
         "ingestion_summary": {
             "total_documents": Document.objects.count(),

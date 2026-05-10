@@ -1099,12 +1099,12 @@ class ParserServiceTests(TestCase):
             {"type": "Title", "text": "Report", "metadata": {"page_number": 1}},
             {"type": "Paragraph", "text": "Body text.", "metadata": {"page_number": 1}},
         ]
-        result = ParserService()._elements_to_result(elements, strategy="fast")
+        result = ParserService()._elements_to_result(elements, source_parser="pymupdf4llm", strategy="auto")
 
         self.assertIn("Report", result["parsed_text"])
         self.assertIn("Body text.", result["parsed_text"])
-        self.assertEqual(result["document_metadata"]["source_parser"], "unstructured")
-        self.assertEqual(result["document_metadata"]["source_strategy"], "fast")
+        self.assertEqual(result["document_metadata"]["source_parser"], "pymupdf4llm")
+        self.assertEqual(result["document_metadata"]["source_strategy"], "auto")
         self.assertEqual(result["document_metadata"]["element_count"], 2)
         self.assertFalse(result["document_metadata"]["fallback_used"])
         self.assertEqual(result["chunk_metadata_defaults"]["page_number"], 1)
@@ -1118,7 +1118,7 @@ class ParserServiceTests(TestCase):
             {"type": "Paragraph", "text": "Real content", "metadata": {}},
             {"type": "Figure", "text": "", "metadata": {}},
         ]
-        result = ParserService()._elements_to_result(elements, strategy="auto")
+        result = ParserService()._elements_to_result(elements, source_parser="pymupdf4llm", strategy="auto")
         self.assertEqual(result["parsed_text"], "Real content")
 
     def test_elements_to_result_handles_multiple_pages(self):
@@ -1127,12 +1127,12 @@ class ParserServiceTests(TestCase):
             {"type": "Title", "text": "P2", "metadata": {"page_number": 2}},
             {"type": "Title", "text": "P3", "metadata": {"page_number": 3}},
         ]
-        result = ParserService()._elements_to_result(elements, strategy="fast")
+        result = ParserService()._elements_to_result(elements, source_parser="pymupdf4llm", strategy="auto")
         self.assertEqual(result["chunk_metadata_defaults"]["page_number"], 1)
 
     def test_elements_to_result_raises_on_empty_elements(self):
         with self.assertRaises(ValueError):
-            ParserService()._elements_to_result([], strategy="fast")
+            ParserService()._elements_to_result([], source_parser="pymupdf4llm", strategy="auto")
 
     def test_elements_to_result_raises_if_all_text_empty(self):
         elements = [
@@ -1140,7 +1140,7 @@ class ParserServiceTests(TestCase):
             {"type": "Table", "text": "", "metadata": {}},
         ]
         with self.assertRaises(ValueError):
-            ParserService()._elements_to_result(elements, strategy="fast")
+            ParserService()._elements_to_result(elements, source_parser="pymupdf4llm", strategy="auto")
 
     def test_clean_text_normalizes_whitespace(self):
         service = ParserService()
@@ -1164,8 +1164,8 @@ class ParserServiceTests(TestCase):
 
     # ── pdf path ────────────────────────────────────────────────────────
 
-    @patch("knowledgebase.services.parser_service.parse_via_unstructured")
-    def test_pdf_calls_unstructured_and_returns_elements(self, mock_parse):
+    @patch.object(ParserService, "_parse_pdf_via_pymupdf4llm")
+    def test_pdf_calls_pymupdf4llm_and_returns_elements(self, mock_parse):
         mock_parse.return_value = [
             {"type": "Paragraph", "text": "PDF content", "metadata": {"page_number": 1}},
         ]
@@ -1175,13 +1175,13 @@ class ParserServiceTests(TestCase):
             filename="test.pdf",
         )
         result = ParserService().parse(doc)
-        self.assertEqual(result["document_metadata"]["source_parser"], "unstructured")
+        self.assertEqual(result["document_metadata"]["source_parser"], "pymupdf4llm")
         self.assertIn("PDF content", result["parsed_text"])
 
-    @patch("knowledgebase.services.parser_service.parse_via_unstructured")
-    def test_pdf_falls_back_to_pypdf_when_unstructured_fails(self, mock_parse):
-        """When unstructured raises and PDF_FALLBACK_ENABLED, pypdf is used."""
-        mock_parse.side_effect = ValueError("Service unreachable")
+    @patch.object(ParserService, "_parse_pdf_via_pymupdf4llm")
+    def test_pdf_falls_back_to_pypdf_when_pymupdf4llm_fails(self, mock_parse):
+        """When pymupdf4llm raises and PDF_FALLBACK_ENABLED, pypdf is used."""
+        mock_parse.side_effect = ValueError("pymupdf4llm failed")
 
         with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as f:
             pdf_path = f.name
@@ -1198,7 +1198,7 @@ class ParserServiceTests(TestCase):
                 file=SimpleNamespace(path=pdf_path),
                 filename="fallback.pdf",
             )
-            with override_settings(UNSTRUCTURED_PDF_FALLBACK_ENABLED=True):
+            with override_settings(PDF_FALLBACK_ENABLED=True):
                 result = ParserService().parse(doc)
 
             self.assertEqual(result["document_metadata"]["source_parser"], "pypdf")
@@ -1207,19 +1207,19 @@ class ParserServiceTests(TestCase):
         finally:
             os.unlink(pdf_path)
 
-    @patch("knowledgebase.services.parser_service.parse_via_unstructured")
+    @patch.object(ParserService, "_parse_pdf_via_pymupdf4llm")
     def test_pdf_no_fallback_when_disabled(self, mock_parse):
-        mock_parse.side_effect = ValueError("Service unreachable")
+        mock_parse.side_effect = ValueError("pymupdf4llm failed")
         doc = SimpleNamespace(
             doc_type="pdf",
             file=SimpleNamespace(path="/fake/test.pdf"),
             filename="test.pdf",
         )
-        with override_settings(UNSTRUCTURED_PDF_FALLBACK_ENABLED=False):
+        with override_settings(PDF_FALLBACK_ENABLED=False):
             with self.assertRaises(ValueError):
                 ParserService().parse(doc)
 
-    @patch("knowledgebase.services.parser_service.parse_via_unstructured")
+    @patch.object(ParserService, "_parse_pdf_via_pymupdf4llm")
     def test_pdf_empty_elements_falls_back_when_enabled(self, mock_parse):
         """Empty elements list triggers fallback to pypdf when fallback enabled."""
         mock_parse.return_value = []
@@ -1237,7 +1237,7 @@ class ParserServiceTests(TestCase):
                 file=SimpleNamespace(path=pdf_path),
                 filename="empty.pdf",
             )
-            with override_settings(UNSTRUCTURED_PDF_FALLBACK_ENABLED=True):
+            with override_settings(PDF_FALLBACK_ENABLED=True):
                 result = ParserService().parse(doc)
 
             self.assertEqual(result["document_metadata"]["source_parser"], "pypdf")
@@ -1245,7 +1245,7 @@ class ParserServiceTests(TestCase):
         finally:
             os.unlink(pdf_path)
 
-    @patch("knowledgebase.services.parser_service.parse_via_unstructured")
+    @patch.object(ParserService, "_parse_pdf_via_pymupdf4llm")
     def test_pdf_empty_elements_raises_when_fallback_disabled(self, mock_parse):
         mock_parse.return_value = []
         doc = SimpleNamespace(
@@ -1253,14 +1253,14 @@ class ParserServiceTests(TestCase):
             file=SimpleNamespace(path="/fake/test.pdf"),
             filename="test.pdf",
         )
-        with override_settings(UNSTRUCTURED_PDF_FALLBACK_ENABLED=False):
+        with override_settings(PDF_FALLBACK_ENABLED=False):
             with self.assertRaises(ValueError):
                 ParserService().parse(doc)
 
     # ── docx path ───────────────────────────────────────────────────────
 
-    @patch("knowledgebase.services.parser_service.parse_via_unstructured")
-    def test_docx_calls_unstructured_and_returns_elements(self, mock_parse):
+    @patch.object(ParserService, "_parse_docx_via_python_docx")
+    def test_docx_calls_python_docx_and_returns_elements(self, mock_parse):
         mock_parse.return_value = [
             {"type": "Title", "text": "DOCX Title", "metadata": {}},
             {"type": "Paragraph", "text": "Word content.", "metadata": {}},
@@ -1271,13 +1271,13 @@ class ParserServiceTests(TestCase):
             filename="test.docx",
         )
         result = ParserService().parse(doc)
-        self.assertEqual(result["document_metadata"]["source_parser"], "unstructured")
+        self.assertEqual(result["document_metadata"]["source_parser"], "python-docx")
         self.assertIn("DOCX Title", result["parsed_text"])
 
-    @patch("knowledgebase.services.parser_service.parse_via_unstructured")
-    def test_docx_raises_when_unstructured_fails(self, mock_parse):
+    @patch.object(ParserService, "_parse_docx_via_python_docx")
+    def test_docx_raises_when_python_docx_fails(self, mock_parse):
         """docx has no fallback — failure propagates."""
-        mock_parse.side_effect = ValueError("Service unreachable")
+        mock_parse.side_effect = ValueError("python-docx failed")
         doc = SimpleNamespace(
             doc_type="docx",
             file=SimpleNamespace(path="/fake/test.docx"),
@@ -1286,7 +1286,7 @@ class ParserServiceTests(TestCase):
         with self.assertRaises(ValueError):
             ParserService().parse(doc)
 
-    @patch("knowledgebase.services.parser_service.parse_via_unstructured")
+    @patch.object(ParserService, "_parse_docx_via_python_docx")
     def test_docx_empty_elements_raises(self, mock_parse):
         mock_parse.return_value = []
         doc = SimpleNamespace(

@@ -59,12 +59,7 @@ services:
       KB_CHUNK_SIZE: ${KB_CHUNK_SIZE:-400}
       KB_CHUNK_OVERLAP: ${KB_CHUNK_OVERLAP:-50}
       KB_EMBEDDING_DIMENSION: ${KB_EMBEDDING_DIMENSION:-64}
-      UNSTRUCTURED_API_URL: ${UNSTRUCTURED_API_URL:-http://unstructured-api:8000}
-      UNSTRUCTURED_API_KEY: ${UNSTRUCTURED_API_KEY:-}
-      UNSTRUCTURED_TIMEOUT_SECONDS: ${UNSTRUCTURED_TIMEOUT_SECONDS:-30}
-      UNSTRUCTURED_PDF_STRATEGY: ${UNSTRUCTURED_PDF_STRATEGY:-fast}
-      UNSTRUCTURED_DOCX_STRATEGY: ${UNSTRUCTURED_DOCX_STRATEGY:-fast}
-      UNSTRUCTURED_PDF_FALLBACK_ENABLED: ${UNSTRUCTURED_PDF_FALLBACK_ENABLED:-true}
+      PDF_FALLBACK_ENABLED: ${PDF_FALLBACK_ENABLED:-false}
       MEDIA_ROOT: ${MEDIA_ROOT:-/app/media}
     ports:
       - "8000:8000"
@@ -79,8 +74,6 @@ services:
       redis:
         condition: service_started
       milvus:
-        condition: service_started
-      unstructured-api:
         condition: service_started
     healthcheck:
       test: ["CMD-SHELL", "python -c \"import sys, urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health/', timeout=5); sys.exit(0)\""]
@@ -130,12 +123,7 @@ services:
       KB_CHUNK_SIZE: ${KB_CHUNK_SIZE:-400}
       KB_CHUNK_OVERLAP: ${KB_CHUNK_OVERLAP:-50}
       KB_EMBEDDING_DIMENSION: ${KB_EMBEDDING_DIMENSION:-64}
-      UNSTRUCTURED_API_URL: ${UNSTRUCTURED_API_URL:-http://unstructured-api:8000}
-      UNSTRUCTURED_API_KEY: ${UNSTRUCTURED_API_KEY:-}
-      UNSTRUCTURED_TIMEOUT_SECONDS: ${UNSTRUCTURED_TIMEOUT_SECONDS:-30}
-      UNSTRUCTURED_PDF_STRATEGY: ${UNSTRUCTURED_PDF_STRATEGY:-fast}
-      UNSTRUCTURED_DOCX_STRATEGY: ${UNSTRUCTURED_DOCX_STRATEGY:-fast}
-      UNSTRUCTURED_PDF_FALLBACK_ENABLED: ${UNSTRUCTURED_PDF_FALLBACK_ENABLED:-true}
+      PDF_FALLBACK_ENABLED: ${PDF_FALLBACK_ENABLED:-false}
       MEDIA_ROOT: ${MEDIA_ROOT:-/app/media}
     volumes:
       - backend_media:/app/media
@@ -149,22 +137,6 @@ services:
         condition: service_started
       milvus:
         condition: service_started
-      unstructured-api:
-        condition: service_started
-
-  unstructured-api:
-    build:
-      context: ./deploy/unstructured-light
-      dockerfile: Dockerfile
-    environment:
-      UNSTRUCTURED_PARALLEL_MODE_ENABLED: "false"
-    mem_limit: 512m
-    mem_reservation: 128m
-    restart: unless-stopped
-    logging: *default-logging
-    # Lightweight build (~300 MB vs official ~10 GB).  Only supports
-    # strategy=fast, which is the FinModPro default.  No Detectron2,
-    # PyTorch, Tesseract, or LibreOffice.
 
   mysql:
     image: mysql:8.4
