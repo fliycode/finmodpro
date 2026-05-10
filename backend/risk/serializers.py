@@ -83,6 +83,7 @@ class RiskEventSummarySerializer(serializers.ModelSerializer):
     document_file_size = serializers.IntegerField(source="document.file_size", read_only=True, allow_null=True, default=0)
     document_source_date = serializers.DateField(source="document.source_date", read_only=True, allow_null=True, default=None)
     document_title = serializers.CharField(source="document.title", read_only=True, allow_null=True, default=None)
+    extraction_metadata = serializers.SerializerMethodField()
 
     class Meta:
         model = RiskEvent
@@ -102,9 +103,23 @@ class RiskEventSummarySerializer(serializers.ModelSerializer):
             "document_file_size",
             "document_source_date",
             "document_title",
+            "extraction_metadata",
             "created_at",
             "updated_at",
         ]
+
+    def get_extraction_metadata(self, obj):
+        meta = obj.metadata or {}
+        pipeline = meta.get("extraction_pipeline")
+        if not pipeline:
+            return None
+        return {
+            "rounds_completed": pipeline.get("rounds_completed", 1),
+            "verification_passed": pipeline.get("verification_passed", True),
+            "total_llm_calls": pipeline.get("total_llm_calls", 1),
+            "filtered_chunks": pipeline.get("chunk_filter", {}).get("filtered_chunks"),
+            "total_chunks": pipeline.get("chunk_filter", {}).get("total_chunks"),
+        }
 
 
 class RiskReportSerializer(serializers.ModelSerializer):

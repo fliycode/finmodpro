@@ -4,10 +4,10 @@ from common.exceptions import UpstreamServiceError
 from common.observability import trace_span
 from knowledgebase.models import Document
 from knowledgebase.models import DocumentChunk
-from llm.services.prompt_service import render_prompt
-from llm.services.runtime_service import get_chat_provider
 from risk.models import RiskEvent
-from risk.serializers import RiskEventSummarySerializer, parse_risk_extraction_payload
+from risk.serializers import RiskEventSummarySerializer
+from risk.services.chunk_filter_service import select_risk_relevant_chunks
+from risk.services.verification_service import run_extraction_with_verification
 
 
 def list_document_chunks(*, document):
@@ -29,17 +29,6 @@ def _resolve_chunk(*, raw_chunk_id, chunk_by_id):
         return None
 
 
-def _parse_provider_output(raw_content):
-    try:
-        return parse_risk_extraction_payload(raw_content)
-    except Exception as exc:
-        raise UpstreamServiceError(
-            "风险抽取结果格式非法。",
-            status_code=502,
-            code="risk_extraction_invalid_output",
-        ) from exc
-
-
 def extract_risk_events_for_document(*, document):
     chunks = list_document_chunks(document=document)
     if not chunks:
@@ -50,29 +39,17 @@ def extract_risk_events_for_document(*, document):
         metadata={"document_id": document.id, "chunk_count": len(chunks)},
         input_data={"document_title": document.title},
     ) as observation:
-        provider = get_chat_provider()
-        prompt = render_prompt(
-            "risk/extract.txt",
-            document_title=document.title,
-            document_type=document.doc_type,
-            chunk_context=_build_chunk_context(chunks),
+        filtered_chunks = select_risk_relevant_chunks(
+            document=document,
+            all_chunks=chunks,
         )
-        raw_content = provider.chat(
-            messages=[
-                {
-                    "role": "system",
-                    "content": "你是金融风险抽取助手。严格输出 JSON，不要输出 markdown 或额外解释。",
-                },
-                {
-                    "role": "user",
-                    "content": prompt,
-                },
-            ],
-            options={"temperature": 0},
-        ).content
-        extracted_events = _parse_provider_output(raw_content)
-        chunk_by_id = {chunk.id: chunk for chunk in chunks}
 
+        extracted_events, pipeline_meta = run_extraction_with_verification(
+            document=document,
+            chunks=filtered_chunks,
+        )
+
+        chunk_by_id = {chunk.id: chunk for chunk in chunks}
         created_events = []
         with transaction.atomic():
             for event_data in extracted_events:
@@ -95,11 +72,25 @@ def extract_risk_events_for_document(*, document):
                         metadata={
                             "source_document_id": document.id,
                             "source_chunk_id": event_data.get("chunk_id"),
+                            "extraction_pipeline": {
+                                "rounds_completed": pipeline_meta["rounds_completed"],
+                                "verification_passed": pipeline_meta["verification_passed"],
+                                "total_llm_calls": pipeline_meta["total_llm_calls"],
+                                "chunk_filter": {
+                                    "total_chunks": len(chunks),
+                                    "filtered_chunks": len(filtered_chunks),
+                                },
+                            },
                         },
                     )
                 )
 
-        observation.update(output={"created_count": len(created_events)})
+        observation.update(output={
+            "created_count": len(created_events),
+            "rounds_completed": pipeline_meta["rounds_completed"],
+            "verification_passed": pipeline_meta["verification_passed"],
+            "total_llm_calls": pipeline_meta["total_llm_calls"],
+        })
         return created_events
 
 

@@ -2,7 +2,7 @@ import json
 import shutil
 import tempfile
 from decimal import Decimal
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from django.contrib.auth.models import Group
 from django.core.files.uploadedfile import SimpleUploadedFile
@@ -15,6 +15,26 @@ from knowledgebase.models import Dataset, Document, DocumentChunk
 from rbac.services.rbac_service import ROLE_ADMIN, seed_roles_and_permissions
 from risk.models import RiskEvent, RiskReport
 from systemcheck.models import AuditRecord
+
+
+def _make_llm_response(payload_dict):
+    """Create a mock LLM response object with .content attribute."""
+    resp = MagicMock()
+    resp.content = json.dumps(payload_dict)
+    return resp
+
+
+def _make_extraction_response(events):
+    return _make_llm_response({"events": events})
+
+
+def _make_verification_response(is_complete=True):
+    return _make_llm_response({
+        "is_complete": is_complete,
+        "missing_aspects": [],
+        "suggestions": [],
+        "issues_found": [],
+    })
 
 
 @override_settings(
@@ -49,8 +69,9 @@ class RiskExtractionApiTests(TestCase):
             doc_type="pdf",
         )
 
-    @patch("risk.services.extraction_service.get_chat_provider")
-    def test_extract_document_creates_risk_events(self, mocked_get_chat_provider):
+    @patch("risk.services.extraction_service.select_risk_relevant_chunks")
+    @patch("risk.services.verification_service.get_chat_provider")
+    def test_extract_document_creates_risk_events(self, mocked_get_chat_provider, mocked_select_chunks):
         document = self.create_document()
         chunk = DocumentChunk.objects.create(
             document=document,
@@ -58,22 +79,22 @@ class RiskExtractionApiTests(TestCase):
             content="FinModPro Holdings 流动性风险上升，短债覆盖倍数下降。",
             metadata={"page": 2},
         )
-        mocked_get_chat_provider.return_value.chat.return_value = json.dumps(
-            {
-                "events": [
-                    {
-                        "company_name": "FinModPro Holdings",
-                        "risk_type": "liquidity",
-                        "risk_level": "high",
-                        "event_time": "2025-03-01T00:00:00+08:00",
-                        "summary": "流动性风险上升，短债覆盖倍数下降。",
-                        "evidence_text": "FinModPro Holdings 流动性风险上升，短债覆盖倍数下降。",
-                        "confidence_score": "0.910",
-                        "chunk_id": chunk.id,
-                    }
-                ]
-            }
-        )
+        mocked_select_chunks.side_effect = lambda document, all_chunks, **kw: list(all_chunks)
+        mocked_get_chat_provider.return_value.chat.side_effect = [
+            _make_extraction_response([
+                {
+                    "company_name": "FinModPro Holdings",
+                    "risk_type": "liquidity",
+                    "risk_level": "high",
+                    "event_time": "2025-03-01T00:00:00+08:00",
+                    "summary": "流动性风险上升，短债覆盖倍数下降。",
+                    "evidence_text": "FinModPro Holdings 流动性风险上升，短债覆盖倍数下降。",
+                    "confidence_score": "0.910",
+                    "chunk_id": chunk.id,
+                }
+            ]),
+            _make_verification_response(is_complete=True),
+        ]
 
         response = self.client.post(
             f"/api/risk/documents/{document.id}/extract",
@@ -110,7 +131,7 @@ class RiskExtractionApiTests(TestCase):
             {"code": 404, "message": "文档不存在。", "data": {}},
         )
 
-    @patch("risk.services.extraction_service.get_chat_provider")
+    @patch("risk.services.verification_service.get_chat_provider")
     def test_extract_document_returns_empty_result_when_document_has_no_chunks(self, mocked_get_chat_provider):
         document = self.create_document()
 
@@ -131,8 +152,9 @@ class RiskExtractionApiTests(TestCase):
         self.assertEqual(RiskEvent.objects.count(), 0)
         mocked_get_chat_provider.assert_not_called()
 
-    @patch("risk.services.extraction_service.get_chat_provider")
-    def test_extract_document_ignores_events_without_company_name(self, mocked_get_chat_provider):
+    @patch("risk.services.extraction_service.select_risk_relevant_chunks")
+    @patch("risk.services.verification_service.get_chat_provider")
+    def test_extract_document_ignores_events_without_company_name(self, mocked_get_chat_provider, mocked_select_chunks):
         document = self.create_document(title="匿名风险纪要", filename="anonymous-risk.pdf")
         DocumentChunk.objects.create(
             document=document,
@@ -140,22 +162,22 @@ class RiskExtractionApiTests(TestCase):
             content="再融资延迟导致流动性压力增加。",
             metadata={"page": 1},
         )
-        mocked_get_chat_provider.return_value.chat.return_value = json.dumps(
-            {
-                "events": [
-                    {
-                        "company_name": "",
-                        "risk_type": "liquidity",
-                        "risk_level": "medium",
-                        "event_time": None,
-                        "summary": "再融资延迟导致流动性压力增加。",
-                        "evidence_text": "再融资延迟导致流动性压力增加。",
-                        "confidence_score": "0.950",
-                        "chunk_id": None,
-                    }
-                ]
-            }
-        )
+        mocked_select_chunks.side_effect = lambda document, all_chunks, **kw: list(all_chunks)
+        mocked_get_chat_provider.return_value.chat.side_effect = [
+            _make_extraction_response([
+                {
+                    "company_name": "",
+                    "risk_type": "liquidity",
+                    "risk_level": "medium",
+                    "event_time": None,
+                    "summary": "再融资延迟导致流动性压力增加。",
+                    "evidence_text": "再融资延迟导致流动性压力增加。",
+                    "confidence_score": "0.950",
+                    "chunk_id": None,
+                }
+            ]),
+            _make_verification_response(is_complete=True),
+        ]
 
         response = self.client.post(
             f"/api/risk/documents/{document.id}/extract",
@@ -172,8 +194,9 @@ class RiskExtractionApiTests(TestCase):
         self.assertEqual(payload["data"]["risk_events"], [])
         self.assertEqual(RiskEvent.objects.count(), 0)
 
-    @patch("risk.services.extraction_service.get_chat_provider")
-    def test_extract_document_accepts_markdown_wrapped_json_payload(self, mocked_get_chat_provider):
+    @patch("risk.services.extraction_service.select_risk_relevant_chunks")
+    @patch("risk.services.verification_service.get_chat_provider")
+    def test_extract_document_accepts_markdown_wrapped_json_payload(self, mocked_get_chat_provider, mocked_select_chunks):
         document = self.create_document(title="带代码块风险纪要", filename="markdown-risk.pdf")
         chunk = DocumentChunk.objects.create(
             document=document,
@@ -181,7 +204,9 @@ class RiskExtractionApiTests(TestCase):
             content="FinModPro Holdings 流动性风险上升，短债覆盖倍数下降。",
             metadata={"page": 2},
         )
-        mocked_get_chat_provider.return_value.chat.return_value = (
+        mocked_select_chunks.side_effect = lambda document, all_chunks, **kw: list(all_chunks)
+        markdown_resp = MagicMock()
+        markdown_resp.content = (
             "```json\n"
             "{\n"
             '  "events": [\n'
@@ -199,6 +224,10 @@ class RiskExtractionApiTests(TestCase):
             "}\n"
             "```"
         )
+        mocked_get_chat_provider.return_value.chat.side_effect = [
+            markdown_resp,
+            _make_verification_response(is_complete=True),
+        ]
 
         response = self.client.post(
             f"/api/risk/documents/{document.id}/extract",
@@ -215,8 +244,9 @@ class RiskExtractionApiTests(TestCase):
         self.assertEqual(payload["data"]["risk_events"][0]["company_name"], "FinModPro Holdings")
         self.assertEqual(payload["data"]["risk_events"][0]["chunk_id"], chunk.id)
 
-    @patch("risk.services.extraction_service.get_chat_provider")
-    def test_retry_extract_document_records_retry_audit_and_creates_events(self, mocked_get_chat_provider):
+    @patch("risk.services.extraction_service.select_risk_relevant_chunks")
+    @patch("risk.services.verification_service.get_chat_provider")
+    def test_retry_extract_document_records_retry_audit_and_creates_events(self, mocked_get_chat_provider, mocked_select_chunks):
         document = self.create_document(title="重试文档", filename="retry-risk.pdf")
         chunk = DocumentChunk.objects.create(
             document=document,
@@ -224,22 +254,22 @@ class RiskExtractionApiTests(TestCase):
             content="FinModPro Holdings 流动性承压，需要重新触发提取。",
             metadata={"page": 1},
         )
-        mocked_get_chat_provider.return_value.chat.return_value = json.dumps(
-            {
-                "events": [
-                    {
-                        "company_name": "FinModPro Holdings",
-                        "risk_type": "liquidity",
-                        "risk_level": "high",
-                        "event_time": "2025-03-02T00:00:00+08:00",
-                        "summary": "重试后提取到流动性风险。",
-                        "evidence_text": "FinModPro Holdings 流动性承压，需要重新触发提取。",
-                        "confidence_score": "0.910",
-                        "chunk_id": chunk.id,
-                    }
-                ]
-            }
-        )
+        mocked_select_chunks.side_effect = lambda document, all_chunks, **kw: list(all_chunks)
+        mocked_get_chat_provider.return_value.chat.side_effect = [
+            _make_extraction_response([
+                {
+                    "company_name": "FinModPro Holdings",
+                    "risk_type": "liquidity",
+                    "risk_level": "high",
+                    "event_time": "2025-03-02T00:00:00+08:00",
+                    "summary": "重试后提取到流动性风险。",
+                    "evidence_text": "FinModPro Holdings 流动性承压，需要重新触发提取。",
+                    "confidence_score": "0.910",
+                    "chunk_id": chunk.id,
+                }
+            ]),
+            _make_verification_response(is_complete=True),
+        ]
 
         response = self.client.post(
             f"/api/risk/documents/{document.id}/extract/retry",
@@ -310,8 +340,9 @@ class RiskBatchExtractionApiTests(TestCase):
         self.assertIn("document_ids", payload["data"])
         self.assertEqual(RiskEvent.objects.count(), 0)
 
-    @patch("risk.services.extraction_service.get_chat_provider")
-    def test_batch_extract_returns_mixed_results_summary(self, mocked_get_chat_provider):
+    @patch("risk.services.extraction_service.select_risk_relevant_chunks")
+    @patch("risk.services.verification_service.get_chat_provider")
+    def test_batch_extract_returns_mixed_results_summary(self, mocked_get_chat_provider, mocked_select_chunks):
         extractable_document = self.create_document(title="可抽取文档", filename="extractable.pdf")
         empty_document = self.create_document(title="无切块文档", filename="empty.pdf")
         chunk = DocumentChunk.objects.create(
@@ -320,22 +351,22 @@ class RiskBatchExtractionApiTests(TestCase):
             content="FinModPro Holdings 信用风险升高，客户回款周期拉长。",
             metadata={"page": 5},
         )
-        mocked_get_chat_provider.return_value.chat.return_value = json.dumps(
-            {
-                "events": [
-                    {
-                        "company_name": "FinModPro Holdings",
-                        "risk_type": "credit",
-                        "risk_level": "medium",
-                        "event_time": None,
-                        "summary": "信用风险升高，客户回款周期拉长。",
-                        "evidence_text": "FinModPro Holdings 信用风险升高，客户回款周期拉长。",
-                        "confidence_score": "0.780",
-                        "chunk_id": chunk.id,
-                    }
-                ]
-            }
-        )
+        mocked_select_chunks.side_effect = lambda document, all_chunks, **kw: list(all_chunks)
+        mocked_get_chat_provider.return_value.chat.side_effect = [
+            _make_extraction_response([
+                {
+                    "company_name": "FinModPro Holdings",
+                    "risk_type": "credit",
+                    "risk_level": "medium",
+                    "event_time": None,
+                    "summary": "信用风险升高，客户回款周期拉长。",
+                    "evidence_text": "FinModPro Holdings 信用风险升高，客户回款周期拉长。",
+                    "confidence_score": "0.780",
+                    "chunk_id": chunk.id,
+                }
+            ]),
+            _make_verification_response(is_complete=True),
+        ]
 
         response = self.client.post(
             "/api/risk/documents/extract-batch",
@@ -359,10 +390,11 @@ class RiskBatchExtractionApiTests(TestCase):
         self.assertEqual(payload["data"]["results"][1]["document_id"], empty_document.id)
         self.assertEqual(payload["data"]["results"][2]["document_id"], 999999)
         self.assertEqual(RiskEvent.objects.count(), 1)
-        mocked_get_chat_provider.return_value.chat.assert_called_once()
+        self.assertEqual(mocked_get_chat_provider.return_value.chat.call_count, 2)
 
-    @patch("risk.services.extraction_service.get_chat_provider")
-    def test_retry_batch_extract_records_retry_audit_and_processes_documents(self, mocked_get_chat_provider):
+    @patch("risk.services.extraction_service.select_risk_relevant_chunks")
+    @patch("risk.services.verification_service.get_chat_provider")
+    def test_retry_batch_extract_records_retry_audit_and_processes_documents(self, mocked_get_chat_provider, mocked_select_chunks):
         extractable_document = self.create_document(title="批量重试文档", filename="retry-batch.pdf")
         chunk = DocumentChunk.objects.create(
             document=extractable_document,
@@ -370,22 +402,22 @@ class RiskBatchExtractionApiTests(TestCase):
             content="批量重试后抽取信用风险。",
             metadata={"page": 3},
         )
-        mocked_get_chat_provider.return_value.chat.return_value = json.dumps(
-            {
-                "events": [
-                    {
-                        "company_name": "FinModPro Holdings",
-                        "risk_type": "credit",
-                        "risk_level": "medium",
-                        "event_time": None,
-                        "summary": "批量重试成功。",
-                        "evidence_text": "批量重试后抽取信用风险。",
-                        "confidence_score": "0.780",
-                        "chunk_id": chunk.id,
-                    }
-                ]
-            }
-        )
+        mocked_select_chunks.side_effect = lambda document, all_chunks, **kw: list(all_chunks)
+        mocked_get_chat_provider.return_value.chat.side_effect = [
+            _make_extraction_response([
+                {
+                    "company_name": "FinModPro Holdings",
+                    "risk_type": "credit",
+                    "risk_level": "medium",
+                    "event_time": None,
+                    "summary": "批量重试成功。",
+                    "evidence_text": "批量重试后抽取信用风险。",
+                    "confidence_score": "0.780",
+                    "chunk_id": chunk.id,
+                }
+            ]),
+            _make_verification_response(is_complete=True),
+        ]
 
         response = self.client.post(
             "/api/risk/documents/extract-batch/retry",
@@ -1331,3 +1363,317 @@ class RiskSentimentApiTests(TestCase):
         self.assertEqual(payload["data"]["summary"]["overall_sentiment"], "neutral")
         self.assertEqual(payload["data"]["items"][0]["document_id"], document.id)
         self.assertEqual(payload["data"]["distribution"][1]["key"], "neutral")
+
+
+@override_settings(
+    JWT_SECRET_KEY="test-jwt-secret",
+    JWT_ACCESS_TOKEN_LIFETIME_SECONDS=3600,
+    RISK_EXTRACTION_SMALL_DOC_THRESHOLD=10,
+    RISK_EXTRACTION_MIN_FILTERED_CHUNKS=3,
+    RISK_EXTRACTION_MAX_ROUNDS=2,
+)
+class ChunkFilterTests(TestCase):
+    def setUp(self):
+        self.document = Document.objects.create(
+            title="筛选测试文档",
+            file=SimpleUploadedFile("filter-test.pdf", b"content", content_type="application/pdf"),
+            filename="filter-test.pdf",
+            doc_type="pdf",
+        )
+
+    def test_returns_all_chunks_for_small_document(self):
+        from risk.services.chunk_filter_service import select_risk_relevant_chunks
+
+        chunks = []
+        for i in range(5):
+            chunks.append(DocumentChunk.objects.create(
+                document=self.document,
+                chunk_index=i,
+                content=f"切块内容 {i}",
+                metadata={},
+            ))
+
+        result = select_risk_relevant_chunks(document=self.document, all_chunks=chunks)
+        self.assertEqual(len(result), 5)
+
+    @patch("risk.services.chunk_filter_service.query_llamaindex_store")
+    def test_calls_llamaindex_for_large_document(self, mocked_query):
+        from risk.services.chunk_filter_service import select_risk_relevant_chunks
+
+        chunks = []
+        for i in range(20):
+            chunks.append(DocumentChunk.objects.create(
+                document=self.document,
+                chunk_index=i,
+                content=f"切块内容 {i}",
+                metadata={},
+            ))
+
+        mocked_query.return_value = [
+            {"chunk_id": chunks[2].id, "score": 0.9},
+            {"chunk_id": chunks[5].id, "score": 0.8},
+            {"chunk_id": chunks[8].id, "score": 0.7},
+            {"chunk_id": chunks[15].id, "score": 0.6},
+        ]
+
+        result = select_risk_relevant_chunks(document=self.document, all_chunks=chunks)
+        self.assertEqual(len(result), 4)
+        self.assertEqual(result[0].id, chunks[2].id)
+        self.assertEqual(result[1].id, chunks[5].id)
+        mocked_query.assert_called_once()
+
+    @patch("risk.services.chunk_filter_service.query_llamaindex_store")
+    def test_falls_back_when_retrieval_too_sparse(self, mocked_query):
+        from risk.services.chunk_filter_service import select_risk_relevant_chunks
+
+        chunks = []
+        for i in range(15):
+            chunks.append(DocumentChunk.objects.create(
+                document=self.document,
+                chunk_index=i,
+                content=f"切块内容 {i}",
+                metadata={},
+            ))
+
+        mocked_query.return_value = [
+            {"chunk_id": chunks[0].id, "score": 0.5},
+        ]
+
+        result = select_risk_relevant_chunks(document=self.document, all_chunks=chunks)
+        self.assertEqual(len(result), 15)
+
+
+@override_settings(
+    JWT_SECRET_KEY="test-jwt-secret",
+    JWT_ACCESS_TOKEN_LIFETIME_SECONDS=3600,
+    RISK_EXTRACTION_MAX_ROUNDS=2,
+)
+class VerificationLoopTests(TestCase):
+    def setUp(self):
+        self.document = Document.objects.create(
+            title="验证测试文档",
+            file=SimpleUploadedFile("verify-test.pdf", b"content", content_type="application/pdf"),
+            filename="verify-test.pdf",
+            doc_type="pdf",
+        )
+        self.chunk = DocumentChunk.objects.create(
+            document=self.document,
+            chunk_index=0,
+            content="公司流动性风险上升，信用评级下调。",
+            metadata={},
+        )
+
+    @patch("risk.services.verification_service.get_chat_provider")
+    def test_verification_passes_first_round(self, mocked_get_chat_provider):
+        from risk.services.verification_service import run_extraction_with_verification
+
+        mocked_get_chat_provider.return_value.chat.side_effect = [
+            _make_extraction_response([
+                {
+                    "company_name": "Test Corp",
+                    "risk_type": "liquidity",
+                    "risk_level": "high",
+                    "event_time": None,
+                    "summary": "流动性风险上升。",
+                    "evidence_text": "公司流动性风险上升。",
+                    "confidence_score": "0.900",
+                    "chunk_id": self.chunk.id,
+                }
+            ]),
+            _make_verification_response(is_complete=True),
+        ]
+
+        events, meta = run_extraction_with_verification(
+            document=self.document,
+            chunks=[self.chunk],
+        )
+        self.assertEqual(len(events), 1)
+        self.assertEqual(meta["rounds_completed"], 1)
+        self.assertTrue(meta["verification_passed"])
+        self.assertEqual(meta["total_llm_calls"], 2)
+
+    @patch("risk.services.verification_service.get_chat_provider")
+    def test_verification_triggers_re_extraction(self, mocked_get_chat_provider):
+        from risk.services.verification_service import run_extraction_with_verification
+
+        mocked_get_chat_provider.return_value.chat.side_effect = [
+            _make_extraction_response([
+                {
+                    "company_name": "Test Corp",
+                    "risk_type": "liquidity",
+                    "risk_level": "high",
+                    "event_time": None,
+                    "summary": "流动性风险上升。",
+                    "evidence_text": "公司流动性风险上升。",
+                    "confidence_score": "0.900",
+                    "chunk_id": self.chunk.id,
+                }
+            ]),
+            _make_llm_response({
+                "is_complete": False,
+                "missing_aspects": ["信用评级下调未覆盖"],
+                "suggestions": ["请检查信用风险相关描述"],
+                "issues_found": ["缺少信用风险事件"],
+            }),
+            _make_extraction_response([
+                {
+                    "company_name": "Test Corp",
+                    "risk_type": "credit",
+                    "risk_level": "medium",
+                    "event_time": None,
+                    "summary": "信用评级下调。",
+                    "evidence_text": "信用评级下调。",
+                    "confidence_score": "0.850",
+                    "chunk_id": self.chunk.id,
+                }
+            ]),
+        ]
+
+        events, meta = run_extraction_with_verification(
+            document=self.document,
+            chunks=[self.chunk],
+        )
+        self.assertEqual(len(events), 2)
+        self.assertEqual(meta["rounds_completed"], 2)
+        self.assertEqual(meta["total_llm_calls"], 3)
+
+    @patch("risk.services.verification_service.get_chat_provider")
+    def test_events_deduplicated_across_rounds(self, mocked_get_chat_provider):
+        from risk.services.verification_service import run_extraction_with_verification
+
+        event_data = {
+            "company_name": "Test Corp",
+            "risk_type": "liquidity",
+            "risk_level": "high",
+            "event_time": "2025-03-01T00:00:00+08:00",
+            "summary": "流动性风险上升。",
+            "evidence_text": "公司流动性风险上升。",
+            "confidence_score": "0.900",
+            "chunk_id": self.chunk.id,
+        }
+
+        mocked_get_chat_provider.return_value.chat.side_effect = [
+            _make_extraction_response([event_data]),
+            _make_llm_response({
+                "is_complete": False,
+                "missing_aspects": ["测试"],
+                "suggestions": [],
+                "issues_found": [],
+            }),
+            _make_extraction_response([event_data]),
+        ]
+
+        events, meta = run_extraction_with_verification(
+            document=self.document,
+            chunks=[self.chunk],
+        )
+        self.assertEqual(len(events), 1)
+
+    @override_settings(RISK_EXTRACTION_MAX_ROUNDS=1)
+    @patch("risk.services.verification_service.get_chat_provider")
+    def test_max_rounds_respected(self, mocked_get_chat_provider):
+        from risk.services.verification_service import run_extraction_with_verification
+
+        mocked_get_chat_provider.return_value.chat.side_effect = [
+            _make_extraction_response([
+                {
+                    "company_name": "Test Corp",
+                    "risk_type": "liquidity",
+                    "risk_level": "high",
+                    "event_time": None,
+                    "summary": "流动性风险上升。",
+                    "evidence_text": "公司流动性风险上升。",
+                    "confidence_score": "0.900",
+                    "chunk_id": self.chunk.id,
+                }
+            ]),
+        ]
+
+        events, meta = run_extraction_with_verification(
+            document=self.document,
+            chunks=[self.chunk],
+        )
+        self.assertEqual(len(events), 1)
+        self.assertEqual(meta["rounds_completed"], 1)
+        self.assertTrue(meta["verification_passed"])
+        self.assertEqual(meta["total_llm_calls"], 1)
+
+
+@override_settings(
+    JWT_SECRET_KEY="test-jwt-secret",
+    JWT_ACCESS_TOKEN_LIFETIME_SECONDS=3600,
+    RISK_EXTRACTION_MAX_ROUNDS=2,
+)
+class ExtractionMetadataTests(TestCase):
+    def setUp(self):
+        self.client = Client()
+        seed_roles_and_permissions()
+        self.media_root = tempfile.mkdtemp()
+        self.override = override_settings(MEDIA_ROOT=self.media_root)
+        self.override.enable()
+
+        self.user = User.objects.create_user(
+            username="meta-admin",
+            password="secret123",
+            email="meta-admin@example.com",
+        )
+        self.user.groups.add(Group.objects.get(name=ROLE_ADMIN))
+        self.access_token = generate_access_token(self.user)
+
+    def tearDown(self):
+        self.override.disable()
+        shutil.rmtree(self.media_root, ignore_errors=True)
+
+    @patch("risk.services.extraction_service.select_risk_relevant_chunks")
+    @patch("risk.services.verification_service.get_chat_provider")
+    def test_extraction_metadata_stored_in_risk_event(self, mocked_get_chat_provider, mocked_select_chunks):
+        document = Document.objects.create(
+            title="元数据测试文档",
+            file=SimpleUploadedFile("meta-test.pdf", b"content", content_type="application/pdf"),
+            filename="meta-test.pdf",
+            doc_type="pdf",
+        )
+        chunk = DocumentChunk.objects.create(
+            document=document,
+            chunk_index=0,
+            content="测试内容。",
+            metadata={},
+        )
+        mocked_select_chunks.side_effect = lambda document, all_chunks, **kw: list(all_chunks)
+        mocked_get_chat_provider.return_value.chat.side_effect = [
+            _make_extraction_response([
+                {
+                    "company_name": "Test Corp",
+                    "risk_type": "liquidity",
+                    "risk_level": "high",
+                    "event_time": None,
+                    "summary": "测试风险。",
+                    "evidence_text": "测试内容。",
+                    "confidence_score": "0.900",
+                    "chunk_id": chunk.id,
+                }
+            ]),
+            _make_verification_response(is_complete=True),
+        ]
+
+        response = self.client.post(
+            f"/api/risk/documents/{document.id}/extract",
+            data=json.dumps({}),
+            content_type="application/json",
+            HTTP_AUTHORIZATION=f"Bearer {self.access_token}",
+        )
+
+        self.assertEqual(response.status_code, 201)
+        risk_event = RiskEvent.objects.get()
+        pipeline = risk_event.metadata["extraction_pipeline"]
+        self.assertEqual(pipeline["rounds_completed"], 1)
+        self.assertTrue(pipeline["verification_passed"])
+        self.assertEqual(pipeline["total_llm_calls"], 2)
+        self.assertEqual(pipeline["chunk_filter"]["total_chunks"], 1)
+        self.assertEqual(pipeline["chunk_filter"]["filtered_chunks"], 1)
+
+        payload = response.json()
+        event_data = payload["data"]["risk_events"][0]
+        self.assertIsNotNone(event_data["extraction_metadata"])
+        self.assertEqual(event_data["extraction_metadata"]["rounds_completed"], 1)
+        self.assertTrue(event_data["extraction_metadata"]["verification_passed"])

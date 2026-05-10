@@ -249,6 +249,41 @@ const formatDate = (d) => { try { return d ? new Date(d).toLocaleString() : "N/A
 const getRiskLevelText = (l) => ({ critical: "严重", high: "高", medium: "中", low: "低" }[l] || l);
 const getRiskLevelClass = (l) => ({ high: "lv-high", critical: "lv-high", medium: "lv-mid", low: "lv-low" }[l] || "lv-low");
 
+const formatConfidence = (score) => {
+  const pct = Math.round((parseFloat(score) || 0) * 100);
+  return `${pct}%`;
+};
+
+const getConfidenceClass = (score) => {
+  const val = parseFloat(score) || 0;
+  if (val >= 0.8) return 'confidence-high';
+  if (val >= 0.5) return 'confidence-mid';
+  return 'confidence-low';
+};
+
+const getSourceTooltip = (row) => {
+  const meta = row.extraction_metadata;
+  if (!meta) return `Chunk #${row.chunk_id}`;
+  return [
+    `Chunk #${row.chunk_id}`,
+    `提取轮次: ${meta.rounds_completed}`,
+    `验证: ${meta.verification_passed ? '通过' : '未通过'}`,
+    `筛选切块: ${meta.filtered_chunks || '?'}/${meta.total_chunks || '?'}`,
+  ].join('\n');
+};
+
+const extractionQuality = computed(() => {
+  const first = events.value.find(e => e.extraction_metadata);
+  if (!first) return null;
+  const meta = first.extraction_metadata;
+  return {
+    rounds: meta.rounds_completed,
+    verified: meta.verification_passed,
+    filteredChunks: meta.filtered_chunks,
+    totalChunks: meta.total_chunks,
+  };
+});
+
 const iconClasses = ["ri-red", "ri-orange", "ri-blue", "ri-green", "ri-purple", "ri-blue", "ri-brown", "ri-blue"];
 const tagClasses = ["tag-red", "tag-orange", "tag-blue", "tag-cyan"];
 const hlClasses = ["hl-red", "hl-orange", "hl-blue", "hl-green", "hl-purple"];
@@ -620,7 +655,18 @@ const downloadGeneratedReport = async (format = "markdown") => {
     <el-drawer v-model="eventsDrawerOpen" direction="rtl" size="700px" :with-header="false" destroy-on-close aria-label="风险事件列表">
       <div class="risk-events-drawer">
         <div class="risk-events-drawer__head">
-          <h3>风险事件列表</h3>
+          <div>
+            <h3>风险事件列表</h3>
+            <div v-if="extractionQuality" class="risk-extraction-quality">
+              <span class="risk-eq__badge">
+                {{ extractionQuality.rounds }}轮提取
+                <template v-if="extractionQuality.verified"> · 验证通过</template>
+              </span>
+              <span v-if="extractionQuality.totalChunks" class="risk-eq__detail">
+                筛选 {{ extractionQuality.filteredChunks }}/{{ extractionQuality.totalChunks }} 切块
+              </span>
+            </div>
+          </div>
           <button class="risk-events-drawer__close" @click="eventsDrawerOpen = false" aria-label="关闭事件列表">&times;</button>
         </div>
         <el-form :inline="true" class="risk-filter-row">
@@ -636,6 +682,8 @@ const downloadGeneratedReport = async (format = "markdown") => {
           <el-table-column label="等级" width="80"><template #default="s"><el-tag :type="getRiskTagType(s.row.risk_level)" size="small">{{ getRiskLevelText(s.row.risk_level) }}</el-tag></template></el-table-column>
           <el-table-column label="时间" min-width="150"><template #default="s">{{ formatDate(s.row.event_time || s.row.created_at) }}</template></el-table-column>
           <el-table-column label="摘要" min-width="240"><template #default="s"><div class="risk-events__summary" :title="s.row.summary">{{ s.row.summary }}</div></template></el-table-column>
+          <el-table-column label="置信度" width="90"><template #default="s"><span :class="getConfidenceClass(s.row.confidence_score)">{{ formatConfidence(s.row.confidence_score) }}</span></template></el-table-column>
+          <el-table-column label="来源" width="100"><template #default="s"><el-tooltip v-if="s.row.chunk_id" :content="getSourceTooltip(s.row)" placement="top"><span class="risk-source-chip">Chunk #{{ s.row.chunk_id }}</span></el-tooltip><span v-else class="risk-source-chip risk-source-chip--muted">--</span></template></el-table-column>
           <el-table-column label="审核" width="90"><template #default="s"><el-tag :type="getReviewTagType((s.row.review_status || 'pending').toLowerCase())" size="small">{{ getReviewStatusText(s.row.review_status) }}</el-tag></template></el-table-column>
           <el-table-column label="操作" width="140"><template #default="s"><template v-if="(s.row.review_status || 'pending').toLowerCase() === 'pending'"><el-button type="success" plain size="small" @click="handleReview(s.row, 'approved')" :loading="reviewingId === (s.row.id || s.row.event_id)" :disabled="reviewingId !== null">确认</el-button><el-button type="danger" plain size="small" @click="handleReview(s.row, 'rejected')" :loading="reviewingId === (s.row.id || s.row.event_id)" :disabled="reviewingId !== null">忽略</el-button></template><span v-else class="no-action">-</span></template></el-table-column>
         </el-table>
@@ -1537,6 +1585,45 @@ const downloadGeneratedReport = async (format = "markdown") => {
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
+}
+
+.confidence-high { color: #21ad7a; font-weight: 600; }
+.confidence-mid  { color: #f0a51a; font-weight: 600; }
+.confidence-low  { color: #e94c59; font-weight: 600; }
+
+.risk-source-chip {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 11px;
+  background: rgba(36, 87, 197, 0.1);
+  color: #2457c5;
+  cursor: default;
+}
+.risk-source-chip--muted {
+  background: rgba(125, 135, 152, 0.1);
+  color: #7d8798;
+}
+
+.risk-extraction-quality {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.risk-eq__badge {
+  font-size: 11px;
+  font-weight: 600;
+  color: #21ad7a;
+  background: rgba(33, 173, 122, 0.1);
+  padding: 2px 8px;
+  border-radius: 4px;
+}
+
+.risk-eq__detail {
+  font-size: 10px;
+  color: #8492aa;
 }
 
 /* Source Fragments */
