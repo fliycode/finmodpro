@@ -135,6 +135,7 @@ export function getQaMessageAvatar(role) {
     return {
       label: 'AI',
       imageSrc: '/image/bot.png',
+      imageSrcWebp: '/image/bot.webp',
       imageAlt: 'AI 助手头像',
     };
   }
@@ -143,6 +144,7 @@ export function getQaMessageAvatar(role) {
     return {
       label: '我',
       imageSrc: '',
+      imageSrcWebp: '',
       imageAlt: '',
     };
   }
@@ -150,6 +152,7 @@ export function getQaMessageAvatar(role) {
   return {
     label: '系统',
     imageSrc: '',
+    imageSrcWebp: '',
     imageAlt: '',
   };
 }

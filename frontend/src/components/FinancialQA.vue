@@ -18,6 +18,7 @@ import {
 import ChatHistory from './ChatHistory.vue';
 import ChatMemoryDrawer from './ChatMemoryDrawer.vue';
 import AppIcon from './ui/AppIcon.vue';
+import MarkdownRenderer from './MarkdownRenderer.vue';
 
 const props = defineProps({
   sessionId: {
@@ -58,6 +59,31 @@ const showEmptyState = computed(() => shouldShowFinancialQaEmptyState({
 const qaChromeState = getQaChromeState();
 const userAvatar = getQaMessageAvatar('user');
 const assistantAvatar = getQaMessageAvatar('assistant');
+const avatarImageLoaded = ref(false);
+
+// 预加载头像图片
+const preloadAvatarImage = () => {
+  if (!assistantAvatar.imageSrc) return;
+
+  const link = document.createElement('link');
+  link.rel = 'preload';
+  link.as = 'image';
+  link.href = assistantAvatar.imageSrcWebp || assistantAvatar.imageSrc;
+  if (assistantAvatar.imageSrcWebp) {
+    link.type = 'image/webp';
+  }
+  document.head.appendChild(link);
+
+  // 预加载图片以检测加载状态
+  const img = new Image();
+  img.onload = () => {
+    avatarImageLoaded.value = true;
+  };
+  img.onerror = () => {
+    avatarImageLoaded.value = true; // 加载失败也标记为已尝试
+  };
+  img.src = assistantAvatar.imageSrcWebp || assistantAvatar.imageSrc;
+};
 
 const RAG_STEP_LABELS = {
   route: (d) => `路由决策: ${d.route_guard || d.route}`,
@@ -284,6 +310,7 @@ watch(
 );
 
 onMounted(async () => {
+  preloadAvatarImage();
   activeSessionFilters.value = getDefaultSessionFilters(route.query.dataset);
   await refreshSessionOptions();
   if (currentSessionId.value) {
@@ -483,12 +510,19 @@ const handleAsk = async () => {
               <!-- Assistant Message -->
               <div v-else class="qa-msg qa-msg--assistant">
                 <div class="qa-msg__avatar qa-msg__avatar--ai">
-                  <img
-                    v-if="assistantAvatar.imageSrc"
-                    :src="assistantAvatar.imageSrc"
-                    :alt="assistantAvatar.imageAlt"
-                    class="qa-msg__avatar-image"
-                  >
+                  <picture v-if="assistantAvatar.imageSrc">
+                    <source
+                      v-if="assistantAvatar.imageSrcWebp"
+                      :srcset="assistantAvatar.imageSrcWebp"
+                      type="image/webp"
+                    >
+                    <img
+                      :src="assistantAvatar.imageSrc"
+                      :alt="assistantAvatar.imageAlt"
+                      class="qa-msg__avatar-image"
+                      :class="{ 'qa-msg__avatar-image--loading': !avatarImageLoaded }"
+                    >
+                  </picture>
                   <span v-else>{{ assistantAvatar.label }}</span>
                 </div>
                 <div class="qa-msg__body">
@@ -511,7 +545,11 @@ const handleAsk = async () => {
 
                     <!-- Answer content -->
                     <div class="qa-answer__content" :class="{ 'qa-answer__content--streaming': msg.isStreaming }">
-                      {{ msg.content }}
+                      <MarkdownRenderer
+                        v-if="msg.content"
+                        :content="msg.content"
+                        :streaming="msg.isStreaming"
+                      />
                       <span v-if="msg.isStreaming" class="qa-cursor" />
                     </div>
 
@@ -907,6 +945,11 @@ const handleAsk = async () => {
   height: 100%;
   object-fit: cover;
   border-radius: inherit;
+  transition: opacity 0.2s ease;
+}
+
+.qa-msg__avatar-image--loading {
+  opacity: 0.5;
 }
 
 .qa-msg__avatar--user {
@@ -1014,12 +1057,18 @@ const handleAsk = async () => {
 /* Answer Content */
 
 .qa-answer__content {
-  white-space: pre-wrap;
   min-height: 20px;
+  overflow: hidden;
 }
 
 .qa-answer__content--streaming {
   color: #c8d8f8;
+}
+
+/* 流式输出时，让光标紧跟最后一个段落 */
+.qa-answer__content--streaming .markdown-body p:last-child,
+.qa-answer__content--streaming .markdown-body li:last-child {
+  display: inline;
 }
 
 .qa-cursor {
