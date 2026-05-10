@@ -105,8 +105,19 @@ const submit = async (event) => {
     formData.password = '';
     formData.confirmPassword = '';
   } catch (error) {
-    status.message = error.message || '操作失败，请重试';
     status.type = 'error';
+
+    if (error.name === 'TypeError' && /fetch|network/i.test(error.message)) {
+      status.message = '网络连接失败，请检查网络后重试';
+    } else if (error.status === 429 || error.statusCode === 429) {
+      status.message = '操作过于频繁，请稍后再试';
+    } else if (error.status === 401 || error.statusCode === 401) {
+      status.message = activeTab.value === 'login'
+        ? '用户名或密码错误'
+        : '注册失败，请检查输入信息';
+    } else {
+      status.message = error.message || '操作失败，请重试';
+    }
   } finally {
     isLoading.value = false;
   }

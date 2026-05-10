@@ -52,9 +52,17 @@ const statementSegments = computed(() => buildBrandStatementSegments(streamedSta
 const passwordToggleLabel = computed(() => getPasswordToggleLabel(props.showPassword));
 const STATEMENT_STREAM_INTERVAL_MS = 56;
 
+const prefersReducedMotion = typeof window !== 'undefined'
+  && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
 const playStatementStream = () => {
   if (typingTimer) {
     clearInterval(typingTimer);
+  }
+
+  if (prefersReducedMotion) {
+    streamedStatement.value = AUTH_BRAND_STATEMENT;
+    return;
   }
 
   streamedStatement.value = '';
@@ -128,8 +136,11 @@ watch(() => props.activeTab, () => {
           <div class="tabs" role="tablist" aria-label="Authentication tabs">
             <button
               type="button"
+              role="tab"
               class="tab-btn"
               :class="{ active: activeTab === 'login' }"
+              :aria-selected="activeTab === 'login'"
+              :tabindex="activeTab === 'login' ? 0 : -1"
               :disabled="isLoading"
               @click="emit('toggle-tab', 'login')"
             >
@@ -137,8 +148,11 @@ watch(() => props.activeTab, () => {
             </button>
             <button
               type="button"
+              role="tab"
               class="tab-btn"
               :class="{ active: activeTab === 'register' }"
+              :aria-selected="activeTab === 'register'"
+              :tabindex="activeTab === 'register' ? 0 : -1"
               :disabled="isLoading"
               @click="emit('toggle-tab', 'register')"
             >
@@ -165,11 +179,15 @@ watch(() => props.activeTab, () => {
                     ref="usernameInput"
                     v-model="formData.username"
                     type="text"
+                    autocomplete="username"
+                    maxlength="64"
                     :placeholder="activeTab === 'register' ? '例如：finance.ops' : '请输入用户名'"
                     :class="{ 'input-error': errors.username }"
+                    :aria-invalid="!!errors.username"
+                    :aria-describedby="errors.username ? 'username-error' : undefined"
                     :disabled="isLoading"
                   />
-                  <span v-if="errors.username" class="error-msg">{{ errors.username }}</span>
+                  <span v-if="errors.username" id="username-error" class="error-msg" role="alert">{{ errors.username }}</span>
                 </div>
 
                 <div v-if="activeTab === 'register'" class="form-group">
@@ -178,25 +196,33 @@ watch(() => props.activeTab, () => {
                     id="email"
                     v-model="formData.email"
                     type="email"
+                    autocomplete="email"
+                    maxlength="254"
                     placeholder="name@company.com"
                     :class="{ 'input-error': errors.email }"
+                    :aria-invalid="!!errors.email"
+                    :aria-describedby="errors.email ? 'email-error' : undefined"
                     :disabled="isLoading"
                   />
-                  <span v-if="errors.email" class="error-msg">{{ errors.email }}</span>
+                  <span v-if="errors.email" id="email-error" class="error-msg" role="alert">{{ errors.email }}</span>
                 </div>
 
                 <div class="form-group">
                   <div class="label-row">
                     <label for="password">密码</label>
-                    <a v-if="activeTab === 'login'" href="#" class="inline-link">忘记密码？</a>
+                    <span v-if="activeTab === 'login'" class="inline-link inline-link--muted">忘记密码？</span>
                   </div>
                   <div class="password-input-wrapper">
                     <input
                       id="password"
                       v-model="formData.password"
                       :type="showPassword ? 'text' : 'password'"
+                      :autocomplete="activeTab === 'login' ? 'current-password' : 'new-password'"
+                      maxlength="128"
                       placeholder="••••••••"
                       :class="{ 'input-error': errors.password }"
+                      :aria-invalid="!!errors.password"
+                      :aria-describedby="errors.password ? 'password-error' : undefined"
                       :disabled="isLoading"
                     />
                     <button
@@ -210,7 +236,7 @@ watch(() => props.activeTab, () => {
                       <AppIcon :name="showPassword ? 'eye-off' : 'eye'" />
                     </button>
                   </div>
-                  <span v-if="errors.password" class="error-msg">{{ errors.password }}</span>
+                  <span v-if="errors.password" id="password-error" class="error-msg" role="alert">{{ errors.password }}</span>
                 </div>
 
                 <div v-if="activeTab === 'register'" class="form-group">
@@ -219,19 +245,23 @@ watch(() => props.activeTab, () => {
                     id="confirmPassword"
                     v-model="formData.confirmPassword"
                     :type="showPassword ? 'text' : 'password'"
+                    autocomplete="new-password"
+                    maxlength="128"
                     placeholder="再次输入密码"
                     :class="{ 'input-error': errors.confirmPassword }"
+                    :aria-invalid="!!errors.confirmPassword"
+                    :aria-describedby="errors.confirmPassword ? 'confirm-password-error' : undefined"
                     :disabled="isLoading"
                   />
-                  <span v-if="errors.confirmPassword" class="error-msg">{{ errors.confirmPassword }}</span>
+                  <span v-if="errors.confirmPassword" id="confirm-password-error" class="error-msg" role="alert">{{ errors.confirmPassword }}</span>
                 </div>
 
                 <div v-if="activeTab === 'register'" class="form-group checkbox-group">
                   <label class="checkbox-label" for="agreeTerms">
                     <input id="agreeTerms" v-model="formData.agreeTerms" type="checkbox" :disabled="isLoading" />
-                    <span>我同意 <a href="#" class="inline-link">服务条款</a> 与 <a href="#" class="inline-link">隐私政策</a></span>
+                    <span>我同意 <span class="inline-link inline-link--muted">服务条款</span> 与 <span class="inline-link inline-link--muted">隐私政策</span></span>
                   </label>
-                  <span v-if="errors.agreeTerms" class="error-msg">{{ errors.agreeTerms }}</span>
+                  <span v-if="errors.agreeTerms" class="error-msg" role="alert">{{ errors.agreeTerms }}</span>
                 </div>
 
                 <div v-if="activeTab === 'login'" class="form-group checkbox-group checkbox-group--compact">
@@ -718,8 +748,14 @@ watch(() => props.activeTab, () => {
   text-decoration: none;
 }
 
-.inline-link:hover {
+.inline-link[href]:hover {
   text-decoration: underline;
+}
+
+.inline-link--muted {
+  color: var(--entry-accent);
+  opacity: 0.7;
+  cursor: default;
 }
 
 .error-msg {
