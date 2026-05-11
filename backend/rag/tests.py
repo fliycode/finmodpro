@@ -625,3 +625,109 @@ class GenerationEvaluationTests(TestCase):
         self.assertEqual(result["relevancy_score"], 0.85)
         self.assertTrue(result["faithfulness_passing"])
         self.assertTrue(result["relevancy_passing"])
+
+
+class SentenceWindowRetrievalTests(TestCase):
+    def setUp(self):
+        self.media_root = tempfile.mkdtemp()
+        self.override = override_settings(MEDIA_ROOT=self.media_root)
+        self.override.enable()
+        self.user = User.objects.create_user(
+            username="swtest", password="testpass123", is_active=True,
+        )
+        self.group = Group.objects.create(name="member")
+        self.user.groups.add(self.group)
+        seed_roles_and_permissions()
+
+    def tearDown(self):
+        self.override.disable()
+        shutil.rmtree(self.media_root, ignore_errors=True)
+
+    @override_settings(KB_SENTENCE_WINDOW_ENABLED=True, KB_SENTENCE_WINDOW_SIZE=2)
+    @patch("knowledgebase.services.embedding_service.get_embedding_provider", return_value=FakeEmbeddingProvider())
+    @patch("rag.services.llamaindex_store_service._fallback_keyword_search", return_value=[])
+    @patch("rag.services.llamaindex_store_service._mysql_full_text_search", return_value=[])
+    @patch("rag.services.llamaindex_store_service._bm25_search", return_value=[])
+    @patch("rag.services.llamaindex_store_service.search")
+    def test_retrieved_results_contain_window_metadata(
+        self,
+        mock_search,
+        _mock_bm25,
+        _mock_fulltext,
+        _mock_fallback,
+        _mock_embedding,
+    ):
+        document = Document.objects.create(
+            title="Window Test",
+            file=SimpleUploadedFile("test.txt", b"test", content_type="text/plain"),
+            filename="test.txt",
+            doc_type="txt",
+            status=Document.STATUS_PARSED,
+            parsed_text="第一句。第二句。第三句。第四句。第五句。第六句。第七句。第八句。第九句。第十句。",
+            visibility=Document.VISIBILITY_INTERNAL,
+            owner=self.user,
+        )
+        chunk = DocumentChunk.objects.create(
+            document=document,
+            chunk_index=2,
+            content="第三句。",
+            search_text="title: Window Test\n第三句。",
+            metadata={"document_title": "Window Test", "window": "第一句。第二句。第三句。第四句。第五句。"},
+        )
+
+        mock_search.return_value = [
+            {
+                "document_id": document.id,
+                "chunk_id": chunk.id,
+                "section_chunk_id": None,
+                "document_title": document.title,
+                "doc_type": document.doc_type,
+                "source_date": None,
+                "page_label": "chunk-3",
+                "snippet": chunk.content,
+                "window": "第一句。第二句。第三句。第四句。第五句。",
+                "metadata": chunk.metadata,
+                "section_context_summary": None,
+                "score": 0.9,
+                "vector_score": 0.9,
+                "keyword_score": 0.0,
+                "matched_queries": [],
+            }
+        ]
+
+        results = query_llamaindex_store("测试查询", top_k=1)
+
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0]["window"], "第一句。第二句。第三句。第四句。第五句。")
+
+    @override_settings(KB_SENTENCE_WINDOW_ENABLED=True, KB_SENTENCE_WINDOW_SIZE=2)
+    @patch("knowledgebase.services.embedding_service.get_embedding_provider", return_value=FakeEmbeddingProvider())
+    @patch("rag.services.llamaindex_store_service._fallback_keyword_search", return_value=[])
+    @patch("rag.services.llamaindex_store_service._mysql_full_text_search", return_value=[])
+    @patch("rag.services.llamaindex_store_service._bm25_search", return_value=[])
+    @patch("rag.services.llamaindex_store_service.search")
+    def test_citation_includes_window(
+        self,
+        _mock_search,
+        _mock_bm25,
+        _mock_fulltext,
+        _mock_fallback,
+        _mock_embedding,
+    ):
+        from rag.services.retrieval_service import serialize_citation
+
+        item = {
+            "document_title": "Test Doc",
+            "doc_type": "pdf",
+            "source_date": None,
+            "page_label": "chunk-1",
+            "snippet": "短句。",
+            "window": "前文。短句。后文。",
+            "score": 0.8,
+            "rerank_score": 0.85,
+        }
+
+        citation = serialize_citation(item)
+
+        self.assertEqual(citation["snippet"], "短句。")
+        self.assertEqual(citation["window"], "前文。短句。后文。")

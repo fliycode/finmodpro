@@ -22,6 +22,8 @@ def serialize_citation(item):
         "page_label": item.get("page_label"),
         "snippet": item.get("snippet"),
     }
+    if item.get("window"):
+        citation["window"] = item["window"]
     if "score" in item:
         citation["score"] = item["score"]
     if "rerank_score" in item:

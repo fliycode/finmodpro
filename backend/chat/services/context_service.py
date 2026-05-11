@@ -62,7 +62,7 @@ def _format_citations(citations):
     for index, citation in enumerate(citations or [], start=1):
         document_title = citation.get("document_title", "未命名资料")
         page_label = citation.get("page_label") or "未标注位置"
-        snippet = _collapse_text(citation.get("snippet"))
+        snippet = _collapse_text(citation.get("window") or citation.get("snippet"))
         lines.append(f"[{index}] {document_title} {page_label}: {snippet}")
     return "\n".join(lines)
 

@@ -107,6 +107,7 @@ def _build_chunk_node(chunk):
                 "page_label", f"chunk-{chunk.chunk_index + 1}"
             ),
             "chunk_index": chunk.chunk_index,
+            "window": metadata.get("window", ""),
         },
     )
 
@@ -123,6 +124,7 @@ def _serialize_chunk_result(chunk, score):
         or (chunk.document.source_date.isoformat() if chunk.document.source_date else None),
         "page_label": metadata.get("page_label", f"chunk-{chunk.chunk_index + 1}"),
         "snippet": chunk.content,
+        "window": metadata.get("window", ""),
         "metadata": metadata,
         "section_context_summary": None,
         "score": score,
@@ -293,6 +295,7 @@ def _serialize_bm25_results(nodes):
             or (chunk.document.source_date.isoformat() if chunk.document.source_date else None),
             "page_label": metadata.get("page_label", f"chunk-{chunk.chunk_index + 1}"),
             "snippet": chunk.content,
+            "window": metadata.get("window", ""),
             "metadata": metadata,
             "section_context_summary": None,
             "score": score,
@@ -516,6 +519,7 @@ def _mysql_full_text_search(query, filters=None, limit=5):
             or (chunk.document.source_date.isoformat() if chunk.document.source_date else None),
             "page_label": metadata.get("page_label", f"chunk-{chunk.chunk_index + 1}"),
             "snippet": chunk.content,
+            "window": metadata.get("window", ""),
             "metadata": metadata,
             "section_context_summary": None,
             "score": lexical_score,
@@ -634,6 +638,7 @@ def _fallback_keyword_search(query, filters=None, limit=5):
             or (chunk.document.source_date.isoformat() if chunk.document.source_date else None),
             "page_label": metadata.get("page_label", f"chunk-{chunk.chunk_index + 1}"),
             "snippet": chunk.content,
+            "window": metadata.get("window", ""),
             "metadata": metadata,
             "section_context_summary": None,
             "score": keyword_score,

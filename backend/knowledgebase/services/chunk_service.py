@@ -185,3 +185,62 @@ def build_document_chunks_from_elements(elements, metadata_builder, max_chunk_si
         max_chunk_size=max_chunk_size,
         overlap=overlap,
     )
+
+
+# ---------------------------------------------------------------------------
+# Sentence-level window chunking
+# ---------------------------------------------------------------------------
+
+import re as _re
+
+_SENTENCE_PATTERN = _re.compile(
+    r"(?<=[。！？；\n.!?;])\s*",
+)
+
+
+def _split_sentences(text):
+    """Split text into sentences, supporting Chinese and English punctuation."""
+    parts = _SENTENCE_PATTERN.split(text)
+    return [p.strip() for p in parts if p.strip()]
+
+
+def build_sentence_window_chunks(text, metadata_builder, window_size=None):
+    """Split text into individual sentences, each carrying a surrounding context window.
+
+    Each returned chunk has:
+    - ``content``: the single sentence (used for embedding)
+    - ``metadata["window"]``: concatenation of up to *window_size* sentences
+      on each side of the target sentence (used for LLM synthesis context)
+    - ``metadata["sentence_index"]``: position of this sentence in the document
+    """
+    window_size = window_size if window_size is not None else settings.KB_SENTENCE_WINDOW_SIZE
+    cleaned_text = (text or "").strip()
+    if not cleaned_text:
+        raise ValueError("文档内容为空，无法摄取。")
+
+    sentences = _split_sentences(cleaned_text)
+    if not sentences:
+        raise ValueError("文档内容为空，无法摄取。")
+
+    # For very short documents, fall back to flat chunking to avoid
+    # creating too many tiny sentence-level chunks.
+    if len(sentences) <= window_size * 2 + 1:
+        return build_document_chunks(cleaned_text, metadata_builder)
+
+    chunks = []
+    total = len(sentences)
+    for i, sentence in enumerate(sentences):
+        window_start = max(0, i - window_size)
+        window_end = min(total, i + window_size + 1)
+        window_text = "".join(sentences[window_start:window_end])
+
+        metadata = metadata_builder(i)
+        metadata["window"] = window_text
+        metadata["sentence_index"] = i
+        chunks.append({
+            "chunk_index": i,
+            "content": sentence,
+            "metadata": metadata,
+        })
+
+    return chunks

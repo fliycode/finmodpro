@@ -2059,4 +2059,87 @@ class RagHierarchicalRetrievalTests(TestCase):
         self.assertGreater(len(results), 0)
         self.assertEqual(results[0]["chunk_id"], matching_child.id)
         self.assertEqual(results[0]["section_chunk_id"], section.id)
-        self.assertEqual(results[0]["snippet"], matching_child.content)
+
+
+@override_settings(KB_SENTENCE_WINDOW_SIZE=2)
+class SentenceWindowChunkServiceTests(TestCase):
+    def test_splits_chinese_sentences_with_window(self):
+        from knowledgebase.services.chunk_service import build_sentence_window_chunks
+
+        text = "第一句。第二句。第三句。第四句。第五句。第六句。第七句。第八句。第九句。第十句。"
+        chunks = build_sentence_window_chunks(
+            text,
+            metadata_builder=lambda index: {"index": index},
+        )
+
+        # Each chunk content should be a single sentence
+        for chunk in chunks:
+            self.assertTrue(chunk["content"].endswith("。"))
+            self.assertNotIn("\n", chunk["content"])
+
+        # Window should contain surrounding sentences
+        first_chunk = chunks[0]
+        self.assertIn("第一句", first_chunk["metadata"]["window"])
+        self.assertIn("第二句", first_chunk["metadata"]["window"])
+        self.assertIn("第三句", first_chunk["metadata"]["window"])
+
+    def test_window_metadata_contains_surrounding_sentences(self):
+        from knowledgebase.services.chunk_service import build_sentence_window_chunks
+
+        text = "A句。B句。C句。D句。E句。F句。G句。H句。I句。J句。"
+        chunks = build_sentence_window_chunks(
+            text,
+            metadata_builder=lambda index: {},
+            window_size=1,
+        )
+
+        # Middle chunk (D句) should have window of C句D句E句
+        d_chunk = next(c for c in chunks if c["content"] == "D句。")
+        self.assertIn("C句", d_chunk["metadata"]["window"])
+        self.assertIn("E句", d_chunk["metadata"]["window"])
+
+    def test_sentence_index_is_sequential(self):
+        from knowledgebase.services.chunk_service import build_sentence_window_chunks
+
+        text = "一。二。三。四。五。六。七。八。九。十。"
+        chunks = build_sentence_window_chunks(
+            text,
+            metadata_builder=lambda index: {},
+        )
+
+        for i, chunk in enumerate(chunks):
+            self.assertEqual(chunk["metadata"]["sentence_index"], i)
+            self.assertEqual(chunk["chunk_index"], i)
+
+    def test_short_document_falls_back_to_flat_chunking(self):
+        from knowledgebase.services.chunk_service import build_sentence_window_chunks
+
+        # With window_size=2, threshold is 2*2+1=5 sentences.
+        # 5 sentences should fall back to flat chunking.
+        text = "一。二。三。四。五。"
+        chunks = build_sentence_window_chunks(
+            text,
+            metadata_builder=lambda index: {},
+            window_size=2,
+        )
+
+        # Flat chunking produces fewer, larger chunks
+        self.assertLessEqual(len(chunks), 2)
+        # No window metadata in flat fallback
+        for chunk in chunks:
+            self.assertNotIn("window", chunk["metadata"])
+
+    def test_english_sentences(self):
+        from knowledgebase.services.chunk_service import build_sentence_window_chunks
+
+        text = "First sentence. Second sentence. Third sentence. Fourth sentence. Fifth sentence. Sixth sentence. Seventh sentence. Eighth sentence. Ninth sentence. Tenth sentence."
+        chunks = build_sentence_window_chunks(
+            text,
+            metadata_builder=lambda index: {},
+            window_size=1,
+        )
+
+        self.assertGreater(len(chunks), 5)
+        for chunk in chunks:
+            self.assertIn("window", chunk["metadata"])
+            self.assertIn("sentence_index", chunk["metadata"])

@@ -17,4 +17,7 @@ def build_contextual_search_text(*, content, metadata=None):
     body = _normalize_text(content)
     if body:
         lines.append(body)
+    window = _normalize_text(metadata.get("window"))
+    if window and window != body:
+        lines.append(window)
     return "\n".join(lines)
