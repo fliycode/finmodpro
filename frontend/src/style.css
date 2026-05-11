@@ -1013,13 +1013,6 @@ html[data-theme='dark'] body {
   }
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .theme-toggle__sun,
-  .theme-toggle__moon {
-    animation: none;
-  }
-}
-
 .app-sidebar__profile {
   position: relative;
   margin-top: auto;
@@ -1622,6 +1615,99 @@ html[data-theme='dark'] body {
   to {
     opacity: 1;
     transform: translateY(0);
+  }
+}
+
+/* ── Route transition ── */
+.route-enter-active {
+  transition: opacity 200ms cubic-bezier(0.25, 1, 0.5, 1),
+              transform 200ms cubic-bezier(0.25, 1, 0.5, 1);
+}
+.route-leave-active {
+  transition: opacity 150ms cubic-bezier(0.25, 1, 0.5, 1),
+              transform 150ms cubic-bezier(0.25, 1, 0.5, 1);
+}
+.route-enter-from {
+  opacity: 0;
+  transform: translateY(4px);
+}
+.route-leave-to {
+  opacity: 0;
+  transform: translateY(-4px);
+}
+
+/* ── Flash toast exit ── */
+.flash-leave-active {
+  transition: opacity 150ms cubic-bezier(0.25, 1, 0.5, 1),
+              transform 150ms cubic-bezier(0.25, 1, 0.5, 1);
+}
+.flash-leave-to {
+  opacity: 0;
+  transform: translateY(-8px);
+}
+.flash-move {
+  transition: transform 200ms cubic-bezier(0.25, 1, 0.5, 1);
+}
+
+/* ── QA message entrance ── */
+.qa-msg-enter-active {
+  transition: opacity 200ms cubic-bezier(0.25, 1, 0.5, 1),
+              transform 200ms cubic-bezier(0.25, 1, 0.5, 1);
+}
+.qa-msg-enter-from {
+  opacity: 0;
+  transform: translateY(8px);
+}
+
+/* ── Empty state entrance ── */
+@keyframes emptyFadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes orbBreathe {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.02); }
+}
+
+/* ── List item animation ── */
+.list-item-enter-active {
+  transition: opacity 200ms cubic-bezier(0.25, 1, 0.5, 1),
+              transform 200ms cubic-bezier(0.25, 1, 0.5, 1);
+}
+.list-item-leave-active {
+  transition: opacity 150ms cubic-bezier(0.25, 1, 0.5, 1),
+              transform 150ms cubic-bezier(0.25, 1, 0.5, 1);
+  position: absolute;
+  width: 100%;
+}
+.list-item-enter-from {
+  opacity: 0;
+  transform: translateY(8px);
+}
+.list-item-leave-to {
+  opacity: 0;
+  transform: translateY(-8px);
+}
+.list-item-move {
+  transition: transform 200ms cubic-bezier(0.25, 1, 0.5, 1);
+}
+
+/* ── Global reduced motion ── */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
   }
 }
 

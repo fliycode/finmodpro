@@ -164,6 +164,7 @@ const getDatasetLabel = (item) => {
   gap: 6px;
   padding: 48px 16px;
   color: var(--text-muted);
+  animation: emptyFadeIn 300ms cubic-bezier(0.25, 1, 0.5, 1) both;
 }
 
 .history-empty__icon {

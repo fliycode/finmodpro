@@ -17,7 +17,11 @@ const pageTitle = computed(() => route.meta?.title || '');
       <AppTopbar area="workspace" :title="pageTitle" />
       <FlashStack />
       <section class="workspace-frame__body">
-        <RouterView />
+        <RouterView v-slot="{ Component }">
+          <Transition name="route" mode="out-in">
+            <component :is="Component" />
+          </Transition>
+        </RouterView>
       </section>
     </main>
   </div>

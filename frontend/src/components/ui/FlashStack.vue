@@ -14,7 +14,7 @@ const iconFor = (type) => {
 </script>
 
 <template>
-  <div v-if="flash.items.length" class="flash-stack">
+  <TransitionGroup name="flash" tag="div" class="flash-stack">
     <div
       v-for="item in flash.items"
       :key="item.id"
@@ -25,5 +25,5 @@ const iconFor = (type) => {
       <span>{{ item.message }}</span>
       <button type="button" @click="flash.dismiss(item.id)">关闭</button>
     </div>
-  </div>
+  </TransitionGroup>
 </template>

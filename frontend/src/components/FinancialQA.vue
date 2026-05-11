@@ -483,106 +483,112 @@ const handleAsk = async () => {
               </p>
             </div>
 
-            <template v-for="(msg, index) in visibleMessages" :key="`msg-${index}`">
-              <!-- System Message -->
-              <div v-if="msg.role === 'system'" class="qa-msg-system">
-                <span>{{ msg.content }}</span>
-              </div>
+            <TransitionGroup name="qa-msg">
+              <div
+                v-for="(msg, index) in visibleMessages"
+                :key="`msg-${index}`"
+                :class="msg.role === 'system' ? 'qa-msg-system' : `qa-msg qa-msg--${msg.role === 'user' ? 'user' : 'assistant'}`"
+              >
+                <!-- System Message -->
+                <template v-if="msg.role === 'system'">
+                  <span>{{ msg.content }}</span>
+                </template>
 
-              <!-- User Message -->
-              <div v-else-if="msg.role === 'user'" class="qa-msg qa-msg--user">
-                <div class="qa-msg__body qa-msg__body--user">
-                  <div class="qa-msg__bubble qa-msg__bubble--user">
-                    {{ msg.content }}
+                <!-- User Message -->
+                <template v-else-if="msg.role === 'user'">
+                  <div class="qa-msg__body qa-msg__body--user">
+                    <div class="qa-msg__bubble qa-msg__bubble--user">
+                      {{ msg.content }}
+                    </div>
                   </div>
-                </div>
-                <div class="qa-msg__avatar qa-msg__avatar--user">
-                  <img
-                    v-if="userAvatar.imageSrc"
-                    :src="userAvatar.imageSrc"
-                    :alt="userAvatar.imageAlt"
-                    class="qa-msg__avatar-image"
-                  >
-                  <span v-else>{{ userAvatar.label }}</span>
-                </div>
-              </div>
-
-              <!-- Assistant Message -->
-              <div v-else class="qa-msg qa-msg--assistant">
-                <div class="qa-msg__avatar qa-msg__avatar--ai">
-                  <picture v-if="assistantAvatar.imageSrc">
-                    <source
-                      v-if="assistantAvatar.imageSrcWebp"
-                      :srcset="assistantAvatar.imageSrcWebp"
-                      type="image/webp"
-                    >
+                  <div class="qa-msg__avatar qa-msg__avatar--user">
                     <img
-                      :src="assistantAvatar.imageSrc"
-                      :alt="assistantAvatar.imageAlt"
+                      v-if="userAvatar.imageSrc"
+                      :src="userAvatar.imageSrc"
+                      :alt="userAvatar.imageAlt"
                       class="qa-msg__avatar-image"
-                      :class="{ 'qa-msg__avatar-image--loading': !avatarImageLoaded }"
                     >
-                  </picture>
-                  <span v-else>{{ assistantAvatar.label }}</span>
-                </div>
-                <div class="qa-msg__body">
-                  <div
-                    class="qa-msg__bubble qa-msg__bubble--ai"
-                    :class="{ 'qa-msg__bubble--error': msg.isError }"
-                  >
-                    <!-- Answer header with badges -->
-                    <div v-if="!msg.isStreaming && !msg.isError && msg.content" class="qa-answer__meta">
-                      <span v-if="msg.answer_mode" class="qa-badge qa-badge--mode">
-                        {{ msg.answer_mode === 'direct' ? '直接回答' : '引用回答' }}
-                      </span>
-                      <span v-if="msg.citations && msg.citations.length > 0" class="qa-badge qa-badge--citations">
-                        引用 {{ msg.citations.length }} 篇资料
-                      </span>
-                      <span v-if="msg.duration_ms" class="qa-badge qa-badge--time">
-                        {{ (msg.duration_ms / 1000).toFixed(1) }}s
-                      </span>
-                    </div>
-
-                    <!-- Answer content -->
-                    <div class="qa-answer__content" :class="{ 'qa-answer__content--streaming': msg.isStreaming }">
-                      <MarkdownRenderer
-                        v-if="msg.content"
-                        :content="msg.content"
-                        :streaming="msg.isStreaming"
-                      />
-                      <span v-if="msg.isStreaming" class="qa-cursor" />
-                    </div>
-
-                    <!-- Loading indicator -->
-                    <div v-if="msg.isStreaming && !msg.content && ragSteps.length === 0" class="qa-loading">
-                      <span /><span /><span />
-                    </div>
-
-                    <!-- RAG pipeline steps -->
-                    <div v-if="msg.isStreaming && ragSteps.length > 0" class="qa-steps">
-                      <div v-for="(step, i) in ragSteps" :key="i" class="qa-step">
-                        <span class="qa-step__icon">&#10003;</span>
-                        <span class="qa-step__label">{{ getStepLabel(step) }}</span>
-                      </div>
-                    </div>
-
-                    <!-- Answer notice -->
-                    <div v-if="msg.answer_notice" class="qa-answer__notice">
-                      {{ msg.answer_notice }}
-                    </div>
-
-                    <!-- Jump to citations -->
-                    <button
-                      v-if="msg.citations && msg.citations.length > 0"
-                      type="button"
-                      class="qa-cite-jump"
-                    >
-                      {{ getCitationDisclosureLabel(msg.citations) }}
-                    </button>
+                    <span v-else>{{ userAvatar.label }}</span>
                   </div>
-                </div>
+                </template>
+
+                <!-- Assistant Message -->
+                <template v-else>
+                  <div class="qa-msg__avatar qa-msg__avatar--ai">
+                    <picture v-if="assistantAvatar.imageSrc">
+                      <source
+                        v-if="assistantAvatar.imageSrcWebp"
+                        :srcset="assistantAvatar.imageSrcWebp"
+                        type="image/webp"
+                      >
+                      <img
+                        :src="assistantAvatar.imageSrc"
+                        :alt="assistantAvatar.imageAlt"
+                        class="qa-msg__avatar-image"
+                        :class="{ 'qa-msg__avatar-image--loading': !avatarImageLoaded }"
+                      >
+                    </picture>
+                    <span v-else>{{ assistantAvatar.label }}</span>
+                  </div>
+                  <div class="qa-msg__body">
+                    <div
+                      class="qa-msg__bubble qa-msg__bubble--ai"
+                      :class="{ 'qa-msg__bubble--error': msg.isError }"
+                    >
+                      <!-- Answer header with badges -->
+                      <div v-if="!msg.isStreaming && !msg.isError && msg.content" class="qa-answer__meta">
+                        <span v-if="msg.answer_mode" class="qa-badge qa-badge--mode">
+                          {{ msg.answer_mode === 'direct' ? '直接回答' : '引用回答' }}
+                        </span>
+                        <span v-if="msg.citations && msg.citations.length > 0" class="qa-badge qa-badge--citations">
+                          引用 {{ msg.citations.length }} 篇资料
+                        </span>
+                        <span v-if="msg.duration_ms" class="qa-badge qa-badge--time">
+                          {{ (msg.duration_ms / 1000).toFixed(1) }}s
+                        </span>
+                      </div>
+
+                      <!-- Answer content -->
+                      <div class="qa-answer__content" :class="{ 'qa-answer__content--streaming': msg.isStreaming }">
+                        <MarkdownRenderer
+                          v-if="msg.content"
+                          :content="msg.content"
+                          :streaming="msg.isStreaming"
+                        />
+                        <span v-if="msg.isStreaming" class="qa-cursor" />
+                      </div>
+
+                      <!-- Loading indicator -->
+                      <div v-if="msg.isStreaming && !msg.content && ragSteps.length === 0" class="qa-loading">
+                        <span /><span /><span />
+                      </div>
+
+                      <!-- RAG pipeline steps -->
+                      <div v-if="msg.isStreaming && ragSteps.length > 0" class="qa-steps">
+                        <div v-for="(step, i) in ragSteps" :key="i" class="qa-step">
+                          <span class="qa-step__icon">&#10003;</span>
+                          <span class="qa-step__label">{{ getStepLabel(step) }}</span>
+                        </div>
+                      </div>
+
+                      <!-- Answer notice -->
+                      <div v-if="msg.answer_notice" class="qa-answer__notice">
+                        {{ msg.answer_notice }}
+                      </div>
+
+                      <!-- Jump to citations -->
+                      <button
+                        v-if="msg.citations && msg.citations.length > 0"
+                        type="button"
+                        class="qa-cite-jump"
+                      >
+                        {{ getCitationDisclosureLabel(msg.citations) }}
+                      </button>
+                    </div>
+                  </div>
+                </template>
               </div>
-            </template>
+            </TransitionGroup>
 
             <!-- Initial loading -->
             <div v-if="isAsking && !hasStreamingAssistant" class="qa-msg qa-msg--assistant">
@@ -857,6 +863,7 @@ const handleAsk = async () => {
   text-align: center;
   max-width: 380px;
   padding: 20px;
+  animation: emptyFadeIn 300ms cubic-bezier(0.25, 1, 0.5, 1) both;
 }
 
 .qa-empty__orb {
@@ -867,6 +874,7 @@ const handleAsk = async () => {
   border: 1.5px solid rgba(102, 140, 255, 0.18);
   box-shadow: 0 0 40px rgba(71, 109, 255, 0.2);
   margin-bottom: 20px;
+  animation: orbBreathe 4s cubic-bezier(0.25, 1, 0.5, 1) infinite;
 }
 
 .qa-empty__title {

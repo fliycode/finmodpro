@@ -18,7 +18,11 @@ const pageTitle = computed(() => route.meta?.title || '');
       <AppTopbar area="admin" :title="pageTitle" @toggle-sidebar="sidebarRef?.toggleMobile()" />
       <FlashStack />
       <section class="admin-frame__body">
-        <RouterView />
+        <RouterView v-slot="{ Component }">
+          <Transition name="route" mode="out-in">
+            <component :is="Component" />
+          </Transition>
+        </RouterView>
       </section>
     </main>
   </div>
