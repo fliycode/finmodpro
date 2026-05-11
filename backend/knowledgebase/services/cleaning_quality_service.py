@@ -1,5 +1,7 @@
 import re
 
+from django.conf import settings
+
 
 def compute_quality_score(*, text, issues):
     signals = {
@@ -11,6 +13,45 @@ def compute_quality_score(*, text, issues):
     weights = {"length": 0.2, "symbol_density": 0.25, "sentence_integrity": 0.3, "issue_density": 0.25}
     score = round(sum(signals[k] * weights[k] for k in signals), 1)
     return {"score": min(score, 100.0), "signals": signals}
+
+
+def get_quality_gate_settings():
+    min_quality_score = float(getattr(settings, "KB_CLEANING_MIN_QUALITY_SCORE", 60.0))
+    warn_quality_score = float(getattr(settings, "KB_CLEANING_WARN_QUALITY_SCORE", 80.0))
+    block_below_threshold = bool(getattr(settings, "KB_CLEANING_BLOCK_BELOW_THRESHOLD", True))
+    if warn_quality_score < min_quality_score:
+        warn_quality_score = min_quality_score
+    return {
+        "min_quality_score": min_quality_score,
+        "warn_quality_score": warn_quality_score,
+        "block_below_threshold": block_below_threshold,
+    }
+
+
+def evaluate_quality_gate(score):
+    quality_gate = get_quality_gate_settings()
+    normalized_score = float(score or 0.0)
+    if normalized_score < quality_gate["min_quality_score"]:
+        status = "blocked" if quality_gate["block_below_threshold"] else "warning"
+        reason = (
+            f"质量分低于最低阈值 {quality_gate['min_quality_score']:.1f}"
+        )
+    elif normalized_score < quality_gate["warn_quality_score"]:
+        status = "warning"
+        reason = (
+            f"质量分低于建议阈值 {quality_gate['warn_quality_score']:.1f}"
+        )
+    else:
+        status = "passed"
+        reason = "质量分通过当前门槛"
+
+    return {
+        **quality_gate,
+        "score": normalized_score,
+        "status": status,
+        "reason": reason,
+        "should_block": status == "blocked",
+    }
 
 
 def _score_text_length(text):
@@ -87,5 +128,6 @@ def serialize_cleaning_result(result):
         "original_length": result.original_length,
         "cleaned_length": result.cleaned_length,
         "dedup_count": result.dedup_count,
+        "quality_gate": evaluate_quality_gate(result.quality_score),
         "cleaned_at": result.cleaned_at.isoformat() if result.cleaned_at else None,
     }

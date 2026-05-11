@@ -1,8 +1,10 @@
 from django.urls import path
 
 from knowledgebase.controllers import (
+    cleaning_rule_bootstrap_view,
     cleaning_rule_detail_view,
     cleaning_rule_list_create_view,
+    cleaning_summary_view,
     dataset_detail_view,
     dataset_list_create_view,
     document_batch_delete_view,
@@ -74,5 +76,25 @@ urlpatterns = [
         "cleaning/rules/<int:rule_id>",
         cleaning_rule_detail_view,
         name="knowledgebase-cleaning-rule-detail",
+    ),
+    path(
+        "cleaning/rules/bootstrap",
+        cleaning_rule_bootstrap_view,
+        name="knowledgebase-cleaning-rule-bootstrap",
+    ),
+    path(
+        "cleaning/rules/bootstrap/",
+        cleaning_rule_bootstrap_view,
+        name="knowledgebase-cleaning-rule-bootstrap-slash",
+    ),
+    path(
+        "cleaning/summary",
+        cleaning_summary_view,
+        name="knowledgebase-cleaning-summary",
+    ),
+    path(
+        "cleaning/summary/",
+        cleaning_summary_view,
+        name="knowledgebase-cleaning-summary-slash",
     ),
 ]

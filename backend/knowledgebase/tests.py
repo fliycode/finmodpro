@@ -18,6 +18,7 @@ from authentication.models import User
 from authentication.services.jwt_service import generate_access_token
 from common.exceptions import UpstreamServiceError
 from knowledgebase.models import (
+    CleaningRule,
     Document,
     DocumentChunk,
     DocumentCleaningResult,
@@ -829,6 +830,149 @@ class KnowledgebaseApiTests(AuditRecordAssertionMixin, TestCase):
         )
         self.assertEqual(audit.detail_payload["name"], "Normalize quotes")
 
+    def test_cleaning_rule_bootstrap_is_idempotent_and_exposes_summary(self):
+        bootstrap_response = self.client.post(
+            "/api/knowledgebase/cleaning/rules/bootstrap",
+            HTTP_AUTHORIZATION=f"Bearer {self.access_token}",
+        )
+
+        self.assertEqual(bootstrap_response.status_code, 201)
+        bootstrap_payload = bootstrap_response.json()
+        self.assertEqual(
+            bootstrap_payload["created_count"],
+            bootstrap_payload["summary"]["default_rule_total"],
+        )
+        self.assertTrue(bootstrap_payload["summary"]["default_rules_initialized"])
+        self.assertEqual(
+            CleaningRule.objects.count(),
+            bootstrap_payload["summary"]["default_rule_total"],
+        )
+        audit = self.assert_latest_audit(
+            action="knowledgebase.cleaning_rule.bootstrap",
+            status=AuditRecord.STATUS_SUCCEEDED,
+            target_type="cleaning_rule",
+        )
+        self.assertEqual(
+            len(audit.detail_payload["rule_names"]),
+            bootstrap_payload["summary"]["default_rule_total"],
+        )
+
+        second_response = self.client.post(
+            "/api/knowledgebase/cleaning/rules/bootstrap",
+            HTTP_AUTHORIZATION=f"Bearer {self.access_token}",
+        )
+        self.assertEqual(second_response.status_code, 200)
+        second_payload = second_response.json()
+        self.assertEqual(second_payload["created_count"], 0)
+        self.assertEqual(
+            second_payload["existing_count"],
+            second_payload["summary"]["default_rule_total"],
+        )
+        audit = self.assert_latest_audit(
+            action="knowledgebase.cleaning_rule.bootstrap",
+            status=AuditRecord.STATUS_SKIPPED,
+            target_type="cleaning_rule",
+        )
+        self.assertEqual(audit.detail_payload["created_count"], 0)
+
+    def test_cleaning_summary_returns_gate_settings_and_recent_results(self):
+        document_one = create_document_from_upload(
+            uploaded_file=SimpleUploadedFile(
+                "summary-one.txt",
+                b"summary one",
+                content_type="text/plain",
+            ),
+            title="Summary doc one",
+            source_date="2026-04-10",
+            uploaded_by=self.user,
+        )
+        document_two = create_document_from_upload(
+            uploaded_file=SimpleUploadedFile(
+                "summary-two.txt",
+                b"summary two",
+                content_type="text/plain",
+            ),
+            title="Summary doc two",
+            source_date="2026-04-11",
+            uploaded_by=self.user,
+        )
+        DocumentCleaningResult.objects.create(
+            document=document_one,
+            rules_applied=[],
+            issues_found=[],
+            quality_score=55.0,
+            quality_signals={},
+            original_length=100,
+            cleaned_length=90,
+            dedup_count=0,
+        )
+        DocumentCleaningResult.objects.create(
+            document=document_two,
+            rules_applied=[],
+            issues_found=[],
+            quality_score=88.0,
+            quality_signals={},
+            original_length=200,
+            cleaned_length=180,
+            dedup_count=1,
+        )
+
+        response = self.client.get(
+            "/api/knowledgebase/cleaning/summary",
+            HTTP_AUTHORIZATION=f"Bearer {self.access_token}",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        summary = response.json()["summary"]
+        self.assertEqual(summary["recent_result_count"], 2)
+        self.assertEqual(summary["average_quality_score"], 71.5)
+        self.assertEqual(summary["quality_gate"]["min_quality_score"], 60.0)
+        self.assertFalse(summary["quality_gate"]["block_below_threshold"])
+        self.assertEqual(summary["recent_results"][0]["document_title"], "Summary doc two")
+        self.assertEqual(summary["recent_results"][0]["quality_gate"]["status"], "passed")
+        self.assertEqual(summary["recent_results"][1]["quality_gate"]["status"], "warning")
+
+    @override_settings(
+        KB_CLEANING_MIN_QUALITY_SCORE=95,
+        KB_CLEANING_WARN_QUALITY_SCORE=98,
+        KB_CLEANING_BLOCK_BELOW_THRESHOLD=True,
+    )
+    def test_document_ingest_returns_422_when_cleaning_quality_is_blocked(self):
+        document = create_document_from_upload(
+            uploaded_file=SimpleUploadedFile(
+                "quality-gate.txt",
+                b"tiny",
+                content_type="text/plain",
+            ),
+            title="Quality gate doc",
+            source_date="2025-03-01",
+            uploaded_by=self.user,
+        )
+
+        response = self.client.post(
+            f"/api/knowledgebase/documents/{document.id}/ingest",
+            HTTP_AUTHORIZATION=f"Bearer {self.access_token}",
+        )
+
+        self.assertEqual(response.status_code, 422)
+        self.assertIn("质量不足", response.json()["message"])
+
+        document.refresh_from_db()
+        ingestion_task = IngestionTask.objects.filter(document=document).latest("id")
+        self.assertEqual(document.status, Document.STATUS_FAILED)
+        self.assertEqual(ingestion_task.status, IngestionTask.STATUS_FAILED)
+        self.assertEqual(
+            DocumentCleaningResult.objects.filter(document=document).count(),
+            1,
+        )
+        audit = self.assert_latest_audit(
+            action="knowledgebase.ingest",
+            status=AuditRecord.STATUS_FAILED,
+            target_type="document",
+            target_id=document.id,
+        )
+        self.assertEqual(audit.detail_payload["quality_gate_status"], "blocked")
+
     def test_batch_ingest_rejects_non_integer_document_ids(self):
         response = self.client.post(
             "/api/knowledgebase/documents/batch/ingest",
@@ -1506,10 +1650,9 @@ class VectorServiceBatchingTests(TestCase):
         self.override.disable()
         shutil.rmtree(self.media_root, ignore_errors=True)
 
-    @patch("knowledgebase.services.vector_service.index_document_chunks")
     @patch.object(VectorService, "_delete_existing_document_vectors")
     @patch.object(VectorService, "ensure_collection")
-    def test_index_batches_chunk_embeddings(self, mock_ensure_collection, _mock_delete_existing_vectors, mock_index_document):
+    def test_index_batches_chunk_embeddings(self, mock_ensure_collection, _mock_delete_existing_vectors):
         provider = RecordingEmbeddingProvider()
         fake_client = _FakeMilvusClient()
         mock_ensure_collection.return_value = fake_client
@@ -1539,13 +1682,15 @@ class VectorServiceBatchingTests(TestCase):
         self.assertEqual(len(fake_client.insert_calls), 1)
         inserted_rows = fake_client.insert_calls[0][1]
         self.assertEqual(len(inserted_rows), 3)
-        mock_index_document.assert_called_once_with(document)
+        self.assertEqual(
+            DocumentChunk.objects.filter(document=document).exclude(vector_id="").count(),
+            3,
+        )
 
     @override_settings(KB_EMBEDDING_BATCH_SIZE=32)
-    @patch("knowledgebase.services.vector_service.index_document_chunks")
     @patch.object(VectorService, "_delete_existing_document_vectors")
     @patch.object(VectorService, "ensure_collection")
-    def test_index_caps_embedding_batch_size_at_provider_limit(self, mock_ensure_collection, _mock_delete_existing_vectors, mock_index_document):
+    def test_index_caps_embedding_batch_size_at_provider_limit(self, mock_ensure_collection, _mock_delete_existing_vectors):
         provider = RecordingEmbeddingProvider()
         fake_client = _FakeMilvusClient()
         mock_ensure_collection.return_value = fake_client
@@ -1573,12 +1718,14 @@ class VectorServiceBatchingTests(TestCase):
 
         self.assertEqual([len(batch) for batch in provider.calls], [10, 1])
         self.assertEqual(len(fake_client.insert_calls[0][1]), 11)
-        mock_index_document.assert_called_once_with(document)
+        self.assertEqual(
+            DocumentChunk.objects.filter(document=document).exclude(vector_id="").count(),
+            11,
+        )
 
-    @patch("knowledgebase.services.vector_service.index_document_chunks")
     @patch.object(VectorService, "_delete_existing_document_vectors")
     @patch.object(VectorService, "ensure_collection")
-    def test_index_hierarchical_document_embeds_only_unindexed_sections(self, mock_ensure_collection, _mock_delete_existing_vectors, mock_index_document):
+    def test_index_hierarchical_document_embeds_only_unindexed_sections(self, mock_ensure_collection, _mock_delete_existing_vectors):
         provider = RecordingEmbeddingProvider()
         fake_client = _FakeMilvusClient()
         mock_ensure_collection.return_value = fake_client
@@ -1623,12 +1770,14 @@ class VectorServiceBatchingTests(TestCase):
 
         self.assertEqual(provider.calls, [["section one"]])
         self.assertEqual(len(fake_client.insert_calls[0][1]), 1)
-        mock_index_document.assert_called_once_with(document)
+        self.assertEqual(
+            DocumentSectionChunk.objects.filter(document=document, is_indexed=True).count(),
+            2,
+        )
 
-    @patch("knowledgebase.services.vector_service.index_document_chunks")
     @patch.object(VectorService, "_delete_existing_document_vectors")
     @patch.object(VectorService, "ensure_collection")
-    def test_index_hierarchical_document_updates_section_progress(self, mock_ensure_collection, _mock_delete_existing_vectors, mock_index_document):
+    def test_index_hierarchical_document_updates_section_progress(self, mock_ensure_collection, _mock_delete_existing_vectors):
         provider = RecordingEmbeddingProvider()
         fake_client = _FakeMilvusClient()
         mock_ensure_collection.return_value = fake_client
@@ -1667,7 +1816,6 @@ class VectorServiceBatchingTests(TestCase):
         self.assertTrue(section.is_indexed)
         self.assertTrue(section.vector_id)
         self.assertEqual(task.indexed_section_count, 1)
-        mock_index_document.assert_called_once_with(document)
 
 
 

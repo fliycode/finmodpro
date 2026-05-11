@@ -59,6 +59,8 @@ KB_CHUNK_SIZE = get_int_env("KB_CHUNK_SIZE", 400)
 KB_CHUNK_OVERLAP = get_int_env("KB_CHUNK_OVERLAP", 50)
 KB_EMBEDDING_DIMENSION = get_int_env("KB_EMBEDDING_DIMENSION", 1024)
 KB_EMBEDDING_BATCH_SIZE = get_int_env("KB_EMBEDDING_BATCH_SIZE", 10)
+KB_SENTENCE_WINDOW_ENABLED = get_bool_env("KB_SENTENCE_WINDOW_ENABLED", False)
+KB_SENTENCE_WINDOW_SIZE = get_int_env("KB_SENTENCE_WINDOW_SIZE", 3)
 KB_HIERARCHICAL_TEXT_THRESHOLD = get_int_env("KB_HIERARCHICAL_TEXT_THRESHOLD", 500000)
 KB_HIERARCHICAL_CHUNK_THRESHOLD = get_int_env("KB_HIERARCHICAL_CHUNK_THRESHOLD", 3000)
 KB_SECTION_CHUNK_SIZE = get_int_env("KB_SECTION_CHUNK_SIZE", 2000)
@@ -79,7 +81,6 @@ RISK_EXTRACTION_CHUNK_TOP_K = get_int_env("RISK_EXTRACTION_CHUNK_TOP_K", 20)
 RISK_EXTRACTION_MAX_ROUNDS = get_int_env("RISK_EXTRACTION_MAX_ROUNDS", 2)
 RISK_EXTRACTION_SMALL_DOC_THRESHOLD = get_int_env("RISK_EXTRACTION_SMALL_DOC_THRESHOLD", 10)
 RISK_EXTRACTION_MIN_FILTERED_CHUNKS = get_int_env("RISK_EXTRACTION_MIN_FILTERED_CHUNKS", 3)
-RISK_EXTRACTION_RERANK_ENABLED = get_bool_env("RISK_EXTRACTION_RERANK_ENABLED", False)
 CHAT_RAG_QUERY_VARIANT_COUNT = get_int_env("CHAT_RAG_QUERY_VARIANT_COUNT", 1)
 CHAT_RAG_RETRIEVAL_TOP_K_MULTIPLIER = get_int_env("CHAT_RAG_RETRIEVAL_TOP_K_MULTIPLIER", 2)
 CHAT_RAG_RETRIEVAL_TOP_K_FLOOR = get_int_env("CHAT_RAG_RETRIEVAL_TOP_K_FLOOR", 8)
@@ -106,6 +107,16 @@ CELERY_TIMEZONE = TIME_ZONE = "Asia/Shanghai"
 CHAT_CONTEXT_RECENT_MESSAGES = get_int_env("CHAT_CONTEXT_RECENT_MESSAGES", 8)
 CHAT_MEMORY_RESULT_LIMIT = get_int_env("CHAT_MEMORY_RESULT_LIMIT", 5)
 CHAT_SUMMARY_TRIGGER_MESSAGES = get_int_env("CHAT_SUMMARY_TRIGGER_MESSAGES", 6)
+APP_LOG_LEVEL = get_env("APP_LOG_LEVEL", "INFO").upper()
+KNOWLEDGEBASE_LOG_LEVEL = get_env("KNOWLEDGEBASE_LOG_LEVEL", APP_LOG_LEVEL).upper()
+RISK_LOG_LEVEL = get_env("RISK_LOG_LEVEL", APP_LOG_LEVEL).upper()
+RAG_LOG_LEVEL = get_env("RAG_LOG_LEVEL", APP_LOG_LEVEL).upper()
+KB_CLEANING_MIN_QUALITY_SCORE = float(os.getenv("KB_CLEANING_MIN_QUALITY_SCORE", "60"))
+KB_CLEANING_WARN_QUALITY_SCORE = float(os.getenv("KB_CLEANING_WARN_QUALITY_SCORE", "80"))
+KB_CLEANING_BLOCK_BELOW_THRESHOLD = get_bool_env(
+    "KB_CLEANING_BLOCK_BELOW_THRESHOLD",
+    False,
+)
 
 JWT_SECRET_KEY = get_env("JWT_SECRET_KEY", SECRET_KEY)
 JWT_ALGORITHM = get_env("JWT_ALGORITHM", "HS256")
@@ -236,5 +247,53 @@ USE_I18N = True
 USE_TZ = True
 
 STATIC_URL = "static/"
+
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "formatters": {
+        "structured": {
+            "()": "common.logging.StructuredKeyValueFormatter",
+            "datefmt": "%Y-%m-%dT%H:%M:%S%z",
+        },
+    },
+    "handlers": {
+        "console": {
+            "class": "logging.StreamHandler",
+            "formatter": "structured",
+        },
+    },
+    "root": {
+        "handlers": ["console"],
+        "level": APP_LOG_LEVEL,
+    },
+    "loggers": {
+        "django": {
+            "handlers": ["console"],
+            "level": APP_LOG_LEVEL,
+            "propagate": False,
+        },
+        "knowledgebase": {
+            "handlers": ["console"],
+            "level": KNOWLEDGEBASE_LOG_LEVEL,
+            "propagate": False,
+        },
+        "risk": {
+            "handlers": ["console"],
+            "level": RISK_LOG_LEVEL,
+            "propagate": False,
+        },
+        "rag": {
+            "handlers": ["console"],
+            "level": RAG_LOG_LEVEL,
+            "propagate": False,
+        },
+        "common.observability": {
+            "handlers": ["console"],
+            "level": APP_LOG_LEVEL,
+            "propagate": False,
+        },
+    },
+}
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"

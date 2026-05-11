@@ -25,6 +25,7 @@ test('assistant avatar uses the dedicated bot image asset', () => {
   assert.deepEqual(getQaMessageAvatar('assistant'), {
     label: 'AI',
     imageSrc: '/image/bot.png',
+    imageSrcWebp: '/image/bot.webp',
     imageAlt: 'AI 助手头像',
   });
 });
@@ -33,6 +34,7 @@ test('user avatar remains text-only', () => {
   assert.deepEqual(getQaMessageAvatar('user'), {
     label: '我',
     imageSrc: '',
+    imageSrcWebp: '',
     imageAlt: '',
   });
 });

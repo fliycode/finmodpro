@@ -3,6 +3,7 @@ from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
 
+from common.exceptions import DocumentQualityGateError
 from knowledgebase.models import Document
 from knowledgebase.services.document_service import (
     build_document_response,
@@ -76,3 +77,27 @@ def document_ingest_view(request, document_id):
             detail_payload={"error": str(exc)},
         )
         return _build_schema_not_ready_response(exc)
+    except DocumentQualityGateError as exc:
+        _safe_record_audit_event(
+            actor=getattr(request, "user", None),
+            action="knowledgebase.ingest",
+            target_type="document",
+            target_id=document_id,
+            status="failed",
+            detail_payload={
+                "error": exc.message,
+                "quality_score": exc.score,
+                "quality_gate_status": exc.quality_gate["status"],
+            },
+        )
+        return JsonResponse({"message": exc.message}, status=422)
+    except Exception as exc:
+        _safe_record_audit_event(
+            actor=getattr(request, "user", None),
+            action="knowledgebase.ingest",
+            target_type="document",
+            target_id=document_id,
+            status="failed",
+            detail_payload={"error": str(exc)},
+        )
+        return JsonResponse({"message": str(exc) or "文档摄取失败。"}, status=500)

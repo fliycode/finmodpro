@@ -1,6 +1,7 @@
 from django.db import DatabaseError, OperationalError, ProgrammingError
 
 from knowledgebase.models import DocumentVersion
+from knowledgebase.services.cleaning_quality_service import evaluate_quality_gate
 from systemcheck.services.audit_service import record_audit_event
 
 _MAX_AUDIT_DOCUMENT_IDS = 20
@@ -139,12 +140,17 @@ def build_cleaning_rule_audit_payload(
 
 
 def build_document_cleaning_audit_payload(*, document, result):
+    quality_gate = evaluate_quality_gate(result.quality_score)
     payload = build_document_audit_payload(document=document)
     payload.update(
         {
             "rules_applied_count": len(result.rules_applied or []),
             "issues_found_count": len(result.issues_found or []),
             "quality_score": result.quality_score,
+            "quality_gate_status": quality_gate["status"],
+            "quality_gate_min_score": quality_gate["min_quality_score"],
+            "quality_gate_warn_score": quality_gate["warn_quality_score"],
+            "quality_gate_should_block": quality_gate["should_block"],
             "original_length": result.original_length,
             "cleaned_length": result.cleaned_length,
             "dedup_count": result.dedup_count,

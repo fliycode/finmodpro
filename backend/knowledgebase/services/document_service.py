@@ -1,5 +1,6 @@
 import hashlib
 import logging
+import time
 from datetime import date
 from datetime import timedelta
 from math import ceil
@@ -11,12 +12,20 @@ from django.db import DatabaseError, OperationalError, ProgrammingError, transac
 from django.db.models import Q, Count, Sum
 from django.utils import timezone
 
+from common.logging import build_log_extra
 from common.observability import trace_span
-from common.exceptions import DuplicateDocumentError, ServiceConfigurationError, UpstreamServiceError
+from common.exceptions import (
+    DocumentQualityGateError,
+    DuplicateDocumentError,
+    ServiceConfigurationError,
+    UpstreamServiceError,
+)
 from knowledgebase.models import Dataset, Document, DocumentChunk, DocumentSectionChunk, DocumentVersion, IngestionTask
+from knowledgebase.services.cleaning_quality_service import evaluate_quality_gate
 from knowledgebase.services.chunk_service import (
     build_document_chunks,
     build_document_chunks_from_elements,
+    build_sentence_window_chunks,
     choose_chunking_strategy,
     estimate_flat_chunk_count,
 )
@@ -736,6 +745,11 @@ def chunk_document(document, parser_result):
             elements,
             metadata_builder=lambda index: _build_chunk_metadata(document, index, parser_defaults),
         )
+    elif getattr(settings, "KB_SENTENCE_WINDOW_ENABLED", False):
+        chunks = build_sentence_window_chunks(
+            parsed_text,
+            metadata_builder=lambda index: _build_chunk_metadata(document, index, parser_defaults),
+        )
     else:
         chunks = build_document_chunks(
             parsed_text,
@@ -806,6 +820,15 @@ def _mark_ingestion_task_finished(ingestion_task, *, status, error_message=""):
 
 
 def ingest_document(document, ingestion_task=None):
+    started_at = time.monotonic()
+    log_base = build_log_extra(
+        document_id=document.id,
+        dataset_id=document.dataset_id,
+        task_id=getattr(ingestion_task, "id", None),
+        step="ingest",
+        status="running",
+    )
+    logger.info("Starting knowledgebase ingestion", extra=log_base)
     with trace_span(
         "knowledgebase.ingest",
         metadata={"document_id": document.id, "doc_type": document.doc_type},
@@ -813,6 +836,17 @@ def ingest_document(document, ingestion_task=None):
     ) as observation:
         try:
             parser_result = parse_document(document)
+            logger.info(
+                "Document parsing completed",
+                extra=build_log_extra(
+                    document_id=document.id,
+                    dataset_id=document.dataset_id,
+                    task_id=getattr(ingestion_task, "id", None),
+                    step="parsing",
+                    status="succeeded",
+                    duration_ms=round((time.monotonic() - started_at) * 1000, 1),
+                ),
+            )
 
             if ingestion_task is not None:
                 _update_ingestion_task_step(
@@ -823,12 +857,49 @@ def ingest_document(document, ingestion_task=None):
                 document,
                 status=Document.STATUS_CLEANING,
             )
+            from knowledgebase.services.cleaning_engine_service import clean_document
+
             try:
-                from knowledgebase.services.cleaning_engine_service import clean_document
-                clean_document(document=document)
-                parser_result["parsed_text"] = document.parsed_text
+                cleaning_result = clean_document(document=document)
             except Exception as cleaning_exc:
-                logger.warning("Document cleaning failed for %s: %s", document.id, cleaning_exc)
+                logger.exception(
+                    "Document cleaning failed during ingestion",
+                    extra=build_log_extra(
+                        document_id=document.id,
+                        dataset_id=document.dataset_id,
+                        task_id=getattr(ingestion_task, "id", None),
+                        step="cleaning",
+                        status="failed",
+                        duration_ms=round((time.monotonic() - started_at) * 1000, 1),
+                        error_code="cleaning_failed",
+                    ),
+                )
+                raise ValueError(f"文档清洗失败: {cleaning_exc}") from cleaning_exc
+
+            parser_result["parsed_text"] = document.parsed_text
+            quality_gate = evaluate_quality_gate(cleaning_result.quality_score)
+            logger.info(
+                "Document cleaning completed",
+                extra=build_log_extra(
+                    document_id=document.id,
+                    dataset_id=document.dataset_id,
+                    task_id=getattr(ingestion_task, "id", None),
+                    step="cleaning",
+                    status="succeeded",
+                    duration_ms=round((time.monotonic() - started_at) * 1000, 1),
+                    quality_score=cleaning_result.quality_score,
+                    quality_gate_status=quality_gate["status"],
+                ),
+            )
+            if quality_gate["should_block"]:
+                raise DocumentQualityGateError(
+                    (
+                        f"文档清洗质量不足（{cleaning_result.quality_score:.1f} 分），"
+                        f"低于当前阈值 {quality_gate['min_quality_score']:.1f}，已阻止入库。"
+                    ),
+                    score=cleaning_result.quality_score,
+                    quality_gate=quality_gate,
+                )
 
             if ingestion_task is not None:
                 _update_ingestion_task_step(
@@ -847,6 +918,20 @@ def ingest_document(document, ingestion_task=None):
                     ingestion_task,
                     status=IngestionTask.STATUS_SUCCEEDED,
                 )
+            duration_ms = round((time.monotonic() - started_at) * 1000, 1)
+            logger.info(
+                "Knowledgebase ingestion completed",
+                extra=build_log_extra(
+                    document_id=document.id,
+                    dataset_id=document.dataset_id,
+                    task_id=getattr(ingestion_task, "id", None),
+                    step="indexing",
+                    status="succeeded",
+                    duration_ms=duration_ms,
+                    quality_score=cleaning_result.quality_score,
+                    quality_gate_status=quality_gate["status"],
+                ),
+            )
             observation.update(
                 output={
                     "status": "succeeded",
@@ -869,6 +954,18 @@ def ingest_document(document, ingestion_task=None):
                     status=IngestionTask.STATUS_FAILED,
                     error_message=error_message,
                 )
+            logger.exception(
+                "Knowledgebase ingestion failed",
+                extra=build_log_extra(
+                    document_id=document.id,
+                    dataset_id=document.dataset_id,
+                    task_id=getattr(ingestion_task, "id", None),
+                    step=getattr(ingestion_task, "current_step", "ingest"),
+                    status="failed",
+                    duration_ms=round((time.monotonic() - started_at) * 1000, 1),
+                    error_code=exc.__class__.__name__,
+                ),
+            )
             observation.update(output={"status": "failed", "error_message": error_message})
             raise
 

@@ -54,6 +54,14 @@ class DuplicateDocumentError(Exception):
         self.existing_document = existing_document
 
 
+class DocumentQualityGateError(ValueError):
+    def __init__(self, message, *, score, quality_gate):
+        super().__init__(message)
+        self.message = message
+        self.score = score
+        self.quality_gate = quality_gate
+
+
 class UpstreamRateLimitError(UpstreamServiceError):
     def __init__(
         self,
