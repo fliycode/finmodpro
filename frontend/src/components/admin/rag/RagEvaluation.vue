@@ -79,7 +79,7 @@ async function handleRun() {
   generationResult.value = null;
 
   try {
-    const data = await ragEvalApi.runEvaluation(mode.value);
+    const data = await ragEvalApi.runEvaluationWithPolling(mode.value);
     if (data.retrieval) retrievalResult.value = data.retrieval;
     if (data.generation) generationResult.value = data.generation;
   } catch (error) {

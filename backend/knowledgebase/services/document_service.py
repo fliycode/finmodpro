@@ -1,3 +1,4 @@
+import hashlib
 import logging
 from datetime import date
 from datetime import timedelta
@@ -471,6 +472,14 @@ def build_document_chunks_response(document):
     }
 
 
+def _compute_file_hash(uploaded_file):
+    sha256 = hashlib.sha256()
+    for chunk in uploaded_file.chunks(chunk_size=8192):
+        sha256.update(chunk)
+    uploaded_file.seek(0)
+    return sha256.hexdigest()
+
+
 def create_document_from_upload(
     *,
     uploaded_file,
@@ -488,6 +497,15 @@ def create_document_from_upload(
     doc_type = _detect_doc_type(filename)
     if doc_type not in {"txt", "pdf", "docx"}:
         raise ValueError("当前仅支持 txt/pdf/docx 文件上传。")
+
+    file_hash = _compute_file_hash(uploaded_file)
+
+    existing_doc = Document.objects.filter(
+        file_hash=file_hash,
+        file_size=uploaded_file.size,
+    ).order_by("-id").first()
+    if existing_doc is not None:
+        raise ValueError(f"文件已存在（文档 #{existing_doc.id}: {existing_doc.title}），请勿重复上传。")
 
     resolved_owner = owner or uploaded_by
     parsed_owner_id = _parse_owner_id(owner_id)
@@ -510,6 +528,7 @@ def create_document_from_upload(
         title=title or Path(filename).stem,
         file=uploaded_file,
         file_size=uploaded_file.size,
+        file_hash=file_hash,
         filename=filename,
         doc_type=doc_type,
         uploaded_by=uploaded_by,

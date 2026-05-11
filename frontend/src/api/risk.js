@@ -54,6 +54,35 @@ export const createRiskApi = (overrides = {}) => {
       });
     },
 
+    getExtractStatus(taskId) {
+      return requestJson(`/api/risk/documents/extract/status/${taskId}`, {
+        method: 'GET',
+      });
+    },
+
+    async extractDocumentWithPolling(documentId, { timeout = 300000, interval = 3000 } = {}) {
+      const submitResult = await this.extractDocument(documentId);
+      const data = submitResult.data || submitResult;
+
+      if (data.task_id) {
+        const deadline = Date.now() + timeout;
+        while (Date.now() < deadline) {
+          await new Promise((r) => setTimeout(r, interval));
+          const statusResult = await this.getExtractStatus(data.task_id);
+          const statusData = statusResult.data || statusResult;
+          if (statusData.status === 'SUCCESS') {
+            return statusData.result;
+          }
+          if (statusData.status === 'FAILURE') {
+            throw new Error(statusData.message || '风险抽取任务失败');
+          }
+        }
+        throw new Error('风险抽取任务超时，请稍后查看结果');
+      }
+
+      return data;
+    },
+
     generateCompanyReport(data, { signal } = {}) {
       return requestJson('/api/risk/reports/company', {
         method: 'POST',

@@ -22,6 +22,34 @@ export const createRagEvalApi = (overrides = {}) => {
         body: JSON.stringify({ mode }),
       }));
     },
+
+    async getEvaluationStatus(taskId) {
+      return unwrap(await fetchJson(`/api/rag/evaluations/${taskId}/status`, {
+        method: 'GET',
+        auth: true,
+      }));
+    },
+
+    async runEvaluationWithPolling(mode = 'all', { timeout = 300000, interval = 3000 } = {}) {
+      const submitResult = await this.runEvaluation(mode);
+
+      if (submitResult.task_id) {
+        const deadline = Date.now() + timeout;
+        while (Date.now() < deadline) {
+          await new Promise((r) => setTimeout(r, interval));
+          const statusResult = await this.getEvaluationStatus(submitResult.task_id);
+          if (statusResult.status === 'SUCCESS') {
+            return statusResult.result;
+          }
+          if (statusResult.status === 'FAILURE') {
+            throw new Error(statusResult.message || '评测任务失败');
+          }
+        }
+        throw new Error('评测任务超时，请稍后查看结果');
+      }
+
+      return submitResult;
+    },
   };
 };
 

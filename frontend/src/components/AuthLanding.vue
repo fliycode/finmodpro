@@ -267,7 +267,7 @@ watch(() => props.activeTab, () => {
                 <div v-if="activeTab === 'login'" class="form-group checkbox-group checkbox-group--compact">
                   <label class="checkbox-label" for="rememberMe">
                     <input id="rememberMe" v-model="formData.rememberMe" type="checkbox" :disabled="isLoading" />
-                    <span>7 天内记住我</span>
+                    <span>7 天内免登录</span>
                   </label>
                 </div>
 
@@ -286,15 +286,68 @@ watch(() => props.activeTab, () => {
 
 <style scoped>
 .auth-entry {
-  --entry-bg: #eff3f8;
-  --entry-panel: rgba(255, 255, 255, 0.88);
-  --entry-panel-strong: rgba(255, 255, 255, 0.96);
-  --entry-border: rgba(15, 23, 42, 0.09);
-  --entry-ink: #0f172a;
+  --entry-bg-top: #f7f9fc;
+  --entry-bg: #eef2f7;
+  --entry-shell-surface: linear-gradient(180deg, rgba(248, 250, 252, 0.82), rgba(240, 245, 251, 0.62));
+  --entry-shell-border: rgba(15, 23, 42, 0.09);
+  --entry-shell-shadow:
+    0 28px 80px rgba(15, 23, 42, 0.1),
+    inset 0 1px 0 rgba(248, 250, 252, 0.78);
+  --entry-brand-surface:
+    linear-gradient(180deg, rgba(248, 250, 252, 0.52), rgba(248, 250, 252, 0)),
+    linear-gradient(160deg, rgba(241, 245, 249, 0.94), rgba(219, 234, 254, 0.62) 58%, rgba(226, 232, 240, 0.68));
+  --entry-brand-outline: rgba(148, 163, 184, 0.14);
+  --entry-form-column-surface: linear-gradient(180deg, rgba(248, 250, 252, 0.48), rgba(240, 244, 249, 0.78));
+  --entry-panel: rgba(248, 250, 252, 0.82);
+  --entry-panel-strong: rgba(248, 250, 252, 0.94);
+  --entry-panel-border: rgba(148, 163, 184, 0.16);
+  --entry-panel-shadow:
+    0 18px 42px rgba(15, 23, 42, 0.06),
+    inset 0 1px 0 rgba(248, 250, 252, 0.82);
+  --entry-ink: #172033;
   --entry-muted: #5f6b7d;
+  --entry-topline: #64748b;
   --entry-accent: #2457c5;
+  --entry-accent-strong: #1d48a8;
+  --entry-accent-contrast: #f8f9fb;
   --entry-accent-soft: rgba(36, 87, 197, 0.12);
   --entry-danger: #b42318;
+  --entry-tab-rail: rgba(226, 232, 240, 0.78);
+  --entry-tab-text: #475569;
+  --entry-tab-active-bg: rgba(36, 87, 197, 0.14);
+  --entry-tab-active-color: #183c8a;
+  --entry-focus-border: rgba(36, 87, 197, 0.45);
+  --entry-input-bg: rgba(248, 250, 252, 0.88);
+  --entry-input-border: rgba(148, 163, 184, 0.24);
+  --entry-input-focus-bg: rgba(255, 255, 255, 0.96);
+  --entry-input-placeholder: rgba(100, 116, 139, 0.9);
+  --entry-toggle-ink: #48617e;
+  --entry-toggle-hover-bg: rgba(36, 87, 197, 0.08);
+  --entry-button-bg: #2457c5;
+  --entry-button-hover-bg: #1d48a8;
+  --entry-button-text: #f8f9fb;
+  --entry-button-shadow: 0 18px 38px rgba(36, 87, 197, 0.22);
+  --entry-status-success-bg: rgba(33, 129, 92, 0.1);
+  --entry-status-success-ink: #166534;
+  --entry-status-success-border: rgba(33, 129, 92, 0.16);
+  --entry-status-error-bg: rgba(180, 35, 24, 0.08);
+  --entry-status-error-ink: #912018;
+  --entry-status-error-border: rgba(180, 35, 24, 0.14);
+  --entry-icon-surface: linear-gradient(180deg, rgba(15, 23, 42, 0.04), rgba(15, 23, 42, 0.09));
+  --entry-icon-border: rgba(15, 23, 42, 0.08);
+  --entry-icon-shadow:
+    inset 0 1px 0 rgba(248, 250, 252, 0.72),
+    0 18px 38px rgba(30, 41, 59, 0.1);
+  --entry-statement-surface:
+    linear-gradient(180deg, rgba(248, 250, 252, 0.34), rgba(248, 250, 252, 0.16)),
+    linear-gradient(135deg, rgba(248, 250, 252, 0.12), rgba(191, 219, 254, 0.1));
+  --entry-statement-border: rgba(148, 163, 184, 0.12);
+  --entry-statement-shadow: inset 0 1px 0 rgba(248, 250, 252, 0.55);
+  --entry-grid-line: rgba(148, 163, 184, 0.08);
+  --entry-mesh-one: rgba(248, 250, 252, 0.8);
+  --entry-mesh-two: rgba(191, 219, 254, 0.38);
+  --entry-orb-one: radial-gradient(circle, rgba(96, 106, 180, 0.2) 0%, rgba(96, 106, 180, 0.1) 36%, rgba(96, 106, 180, 0) 72%);
+  --entry-orb-two: radial-gradient(circle, rgba(60, 70, 100, 0.14) 0%, rgba(60, 70, 100, 0.08) 42%, rgba(60, 70, 100, 0) 76%);
   min-height: 100vh;
   position: relative;
   overflow: hidden;
@@ -305,7 +358,72 @@ watch(() => props.activeTab, () => {
   background:
     radial-gradient(circle at top left, rgba(148, 163, 184, 0.2), transparent 28%),
     radial-gradient(circle at 85% 18%, rgba(59, 130, 246, 0.12), transparent 24%),
-    linear-gradient(180deg, #f7f9fc 0%, var(--entry-bg) 100%);
+    linear-gradient(180deg, var(--entry-bg-top) 0%, var(--entry-bg) 100%);
+}
+
+:global(:root[data-theme='dark']) .auth-entry {
+  --entry-bg-top: #131c2d;
+  --entry-bg: #101827;
+  --entry-shell-surface: linear-gradient(180deg, rgba(24, 34, 53, 0.96), rgba(14, 21, 34, 0.92));
+  --entry-shell-border: rgba(157, 173, 196, 0.18);
+  --entry-shell-shadow:
+    0 32px 84px rgba(4, 10, 20, 0.44),
+    inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  --entry-brand-surface:
+    linear-gradient(180deg, rgba(28, 39, 60, 0.68), rgba(20, 29, 45, 0)),
+    linear-gradient(160deg, rgba(24, 34, 53, 0.96), rgba(30, 49, 85, 0.78) 58%, rgba(16, 24, 39, 0.96));
+  --entry-brand-outline: rgba(125, 160, 255, 0.16);
+  --entry-form-column-surface: linear-gradient(180deg, rgba(8, 13, 22, 0.2), rgba(8, 13, 22, 0.48));
+  --entry-panel: rgba(24, 34, 53, 0.9);
+  --entry-panel-strong: rgba(24, 34, 53, 0.96);
+  --entry-panel-border: rgba(157, 173, 196, 0.16);
+  --entry-panel-shadow:
+    0 22px 44px rgba(4, 10, 20, 0.26),
+    inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  --entry-ink: #eef3fb;
+  --entry-muted: #b0bccd;
+  --entry-topline: #94a3b8;
+  --entry-accent: #7da0ff;
+  --entry-accent-strong: #93b3ff;
+  --entry-accent-contrast: #101827;
+  --entry-accent-soft: rgba(125, 160, 255, 0.18);
+  --entry-danger: #f4b6af;
+  --entry-tab-rail: rgba(255, 255, 255, 0.04);
+  --entry-tab-text: #aeb9c9;
+  --entry-tab-active-bg: rgba(125, 160, 255, 0.16);
+  --entry-tab-active-color: #eef3fb;
+  --entry-focus-border: rgba(125, 160, 255, 0.52);
+  --entry-input-bg: rgba(15, 24, 39, 0.84);
+  --entry-input-border: rgba(157, 173, 196, 0.22);
+  --entry-input-focus-bg: rgba(18, 27, 43, 0.96);
+  --entry-input-placeholder: #7f8ca1;
+  --entry-toggle-ink: #b0bccd;
+  --entry-toggle-hover-bg: rgba(125, 160, 255, 0.14);
+  --entry-button-bg: #7da0ff;
+  --entry-button-hover-bg: #93b3ff;
+  --entry-button-text: #101827;
+  --entry-button-shadow: 0 18px 40px rgba(4, 10, 20, 0.36);
+  --entry-status-success-bg: rgba(33, 129, 92, 0.18);
+  --entry-status-success-ink: #c4eadc;
+  --entry-status-success-border: rgba(77, 178, 136, 0.22);
+  --entry-status-error-bg: rgba(196, 73, 61, 0.16);
+  --entry-status-error-ink: #f7cbc6;
+  --entry-status-error-border: rgba(196, 73, 61, 0.24);
+  --entry-icon-surface: linear-gradient(180deg, rgba(125, 160, 255, 0.14), rgba(255, 255, 255, 0.04));
+  --entry-icon-border: rgba(125, 160, 255, 0.18);
+  --entry-icon-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.08),
+    0 18px 38px rgba(4, 10, 20, 0.24);
+  --entry-statement-surface:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0.02)),
+    linear-gradient(135deg, rgba(125, 160, 255, 0.12), rgba(16, 24, 39, 0.04));
+  --entry-statement-border: rgba(125, 160, 255, 0.16);
+  --entry-statement-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  --entry-grid-line: rgba(148, 163, 184, 0.1);
+  --entry-mesh-one: rgba(59, 76, 108, 0.2);
+  --entry-mesh-two: rgba(125, 160, 255, 0.14);
+  --entry-orb-one: radial-gradient(circle, rgba(125, 160, 255, 0.22) 0%, rgba(88, 118, 188, 0.12) 34%, rgba(88, 118, 188, 0) 72%);
+  --entry-orb-two: radial-gradient(circle, rgba(13, 148, 136, 0.18) 0%, rgba(13, 148, 136, 0.08) 40%, rgba(13, 148, 136, 0) 76%);
 }
 
 .auth-entry__mesh,
@@ -318,16 +436,16 @@ watch(() => props.activeTab, () => {
 
 .auth-entry__mesh {
   background:
-    radial-gradient(circle at 24% 24%, rgba(255, 255, 255, 0.78), transparent 28%),
-    radial-gradient(circle at 78% 14%, rgba(191, 219, 254, 0.38), transparent 22%);
+    radial-gradient(circle at 24% 24%, var(--entry-mesh-one), transparent 28%),
+    radial-gradient(circle at 78% 14%, var(--entry-mesh-two), transparent 22%);
   animation: meshDrift 18s ease-in-out infinite;
 }
 
 .auth-entry__grid {
   opacity: 0.5;
   background-image:
-    linear-gradient(rgba(148, 163, 184, 0.08) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(148, 163, 184, 0.08) 1px, transparent 1px);
+    linear-gradient(var(--entry-grid-line) 1px, transparent 1px),
+    linear-gradient(90deg, var(--entry-grid-line) 1px, transparent 1px);
   background-size: 40px 40px;
   mask-image: radial-gradient(circle at center, black 44%, transparent 88%);
 }
@@ -345,8 +463,7 @@ watch(() => props.activeTab, () => {
   left: 7%;
   width: 300px;
   height: 300px;
-  background:
-    radial-gradient(circle, rgba(96, 106, 180, 0.2) 0%, rgba(96, 106, 180, 0.1) 36%, rgba(96, 106, 180, 0) 72%);
+  background: var(--entry-orb-one);
   animation: orbFloatOne 14s ease-in-out infinite;
 }
 
@@ -355,8 +472,7 @@ watch(() => props.activeTab, () => {
   bottom: 10%;
   width: 360px;
   height: 360px;
-  background:
-    radial-gradient(circle, rgba(60, 70, 100, 0.14) 0%, rgba(60, 70, 100, 0.08) 42%, rgba(60, 70, 100, 0) 76%);
+  background: var(--entry-orb-two);
   animation: orbFloatTwo 16s ease-in-out infinite;
 }
 
@@ -367,48 +483,44 @@ watch(() => props.activeTab, () => {
   min-height: 700px;
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(360px, 430px);
-  border: 1px solid var(--entry-border);
+  border: 1px solid var(--entry-shell-border);
   border-radius: 30px;
   overflow: hidden;
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.78), rgba(255, 255, 255, 0.58));
-  box-shadow:
-    0 28px 80px rgba(15, 23, 42, 0.1),
-    inset 0 1px 0 rgba(255, 255, 255, 0.76);
+  background: var(--entry-shell-surface);
+  box-shadow: var(--entry-shell-shadow);
   backdrop-filter: blur(18px);
   animation: shellReveal 560ms cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
-.brand-column,
-.form-card {
+.auth-entry .brand-column,
+.auth-entry .form-card {
   opacity: 0;
   animation: contentReveal 480ms cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
-.brand-column {
+.auth-entry .brand-column {
   position: relative;
   display: flex;
   flex-direction: column;
   justify-content: space-between;
   gap: 28px;
   padding: 56px;
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.46), rgba(255, 255, 255, 0)),
-    linear-gradient(160deg, rgba(241, 245, 249, 0.92), rgba(219, 234, 254, 0.62) 58%, rgba(226, 232, 240, 0.66));
+  background: var(--entry-brand-surface);
 }
 
-.brand-column::after {
+.auth-entry .brand-column::after {
   content: '';
   position: absolute;
   inset: 20px;
   border-radius: 22px;
-  border: 1px solid rgba(148, 163, 184, 0.14);
+  border: 1px solid var(--entry-brand-outline);
   pointer-events: none;
 }
 
 .brand-column__topline,
 .panel-intro__eyebrow {
   margin: 0;
-  color: #64748b;
+  color: var(--entry-topline);
   text-transform: uppercase;
   letter-spacing: 0.22em;
   font-size: 0.73rem;
@@ -422,17 +534,15 @@ watch(() => props.activeTab, () => {
   gap: 16px;
 }
 
-.brand-lockup__icon-wrap {
+.auth-entry .brand-lockup__icon-wrap {
   width: 90px;
   height: 90px;
   border-radius: 26px;
   display: grid;
   place-items: center;
-  background: linear-gradient(180deg, rgba(15, 23, 42, 0.04), rgba(15, 23, 42, 0.09));
-  border: 1px solid rgba(15, 23, 42, 0.08);
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.72),
-    0 18px 38px rgba(30, 41, 59, 0.1);
+  background: var(--entry-icon-surface);
+  border: 1px solid var(--entry-icon-border);
+  box-shadow: var(--entry-icon-shadow);
 }
 
 .brand-lockup__icon {
@@ -477,11 +587,9 @@ watch(() => props.activeTab, () => {
   min-height: 0;
   padding: 18px 20px 20px;
   border-radius: 22px;
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.34), rgba(255, 255, 255, 0.16)),
-    linear-gradient(135deg, rgba(255, 255, 255, 0.12), rgba(191, 219, 254, 0.1));
-  border: 1px solid rgba(148, 163, 184, 0.12);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.55);
+  background: var(--entry-statement-surface);
+  border: 1px solid var(--entry-statement-border);
+  box-shadow: var(--entry-statement-shadow);
 }
 
 .brand-column__statement h2 {
@@ -503,18 +611,18 @@ watch(() => props.activeTab, () => {
   margin-left: 0.08em;
   vertical-align: -0.08em;
   border-radius: 999px;
-  background: rgba(36, 87, 197, 0.72);
+  background: var(--entry-accent);
   animation: caretBlink 1s steps(1) infinite;
 }
 
-.form-column {
+.auth-entry .form-column {
   padding: 24px;
   display: flex;
   align-items: stretch;
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.4), rgba(248, 250, 252, 0.76));
+  background: var(--entry-form-column-surface);
 }
 
-.form-card {
+.auth-entry .form-card {
   width: 100%;
   display: flex;
   flex-direction: column;
@@ -522,30 +630,28 @@ watch(() => props.activeTab, () => {
   gap: 24px;
   padding: 36px;
   border-radius: 26px;
-  border: 1px solid rgba(148, 163, 184, 0.16);
+  border: 1px solid var(--entry-panel-border);
   background: var(--entry-panel-strong);
-  box-shadow:
-    0 18px 42px rgba(15, 23, 42, 0.06),
-    inset 0 1px 0 rgba(255, 255, 255, 0.8);
+  box-shadow: var(--entry-panel-shadow);
   animation-delay: 140ms;
 }
 
-.tabs {
+.auth-entry .tabs {
   display: inline-grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px;
   padding: 6px;
   border-radius: 999px;
-  background: rgba(226, 232, 240, 0.78);
+  background: var(--entry-tab-rail);
   align-self: flex-start;
 }
 
-.tab-btn {
+.auth-entry .tab-btn {
   border: 0;
   border-radius: 999px;
   padding: 10px 18px;
   background: transparent;
-  color: #475569;
+  color: var(--entry-tab-text);
   font-size: 0.94rem;
   font-weight: 600;
   cursor: pointer;
@@ -556,13 +662,13 @@ watch(() => props.activeTab, () => {
     box-shadow 180ms ease;
 }
 
-.tab-btn.active {
-  background: #111111;
-  color: #f8fafc;
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.08);
+.auth-entry .tab-btn.active {
+  background: var(--entry-tab-active-bg);
+  color: var(--entry-tab-active-color);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.04);
 }
 
-.tab-btn:hover:not(:disabled) {
+.auth-entry .tab-btn:hover:not(:disabled) {
   transform: translateY(-1px);
   color: var(--entry-ink);
 }
@@ -613,16 +719,16 @@ watch(() => props.activeTab, () => {
   animation: statusFade 220ms ease;
 }
 
-.status-box.success {
-  background: rgba(22, 163, 74, 0.1);
-  color: #166534;
-  border: 1px solid rgba(22, 163, 74, 0.16);
+.auth-entry .status-box.success {
+  background: var(--entry-status-success-bg);
+  color: var(--entry-status-success-ink);
+  border: 1px solid var(--entry-status-success-border);
 }
 
-.status-box.error {
-  background: rgba(180, 35, 24, 0.08);
-  color: #912018;
-  border: 1px solid rgba(180, 35, 24, 0.14);
+.auth-entry .status-box.error {
+  background: var(--entry-status-error-bg);
+  color: var(--entry-status-error-ink);
+  border: 1px solid var(--entry-status-error-border);
 }
 
 .auth-form {
@@ -659,12 +765,12 @@ watch(() => props.activeTab, () => {
   justify-content: space-between;
 }
 
-.form-group input {
+.auth-entry .form-group input {
   width: 100%;
-  border: 1px solid rgba(148, 163, 184, 0.24);
+  border: 1px solid var(--entry-input-border);
   border-radius: 16px;
   padding: 14px 16px;
-  background: var(--entry-panel);
+  background: var(--entry-input-bg);
   color: var(--entry-ink);
   outline: none;
   transition:
@@ -674,21 +780,21 @@ watch(() => props.activeTab, () => {
     transform 180ms ease;
 }
 
-.form-group input::placeholder {
-  color: rgba(100, 116, 139, 0.9);
+.auth-entry .form-group input::placeholder {
+  color: var(--entry-input-placeholder);
 }
 
-.form-group input:focus {
-  border-color: rgba(36, 87, 197, 0.45);
-  background: #ffffff;
+.auth-entry .form-group input:focus {
+  border-color: var(--entry-focus-border);
+  background: var(--entry-input-focus-bg);
   box-shadow: 0 0 0 4px var(--entry-accent-soft);
   transform: translateY(-1px);
 }
 
-.form-group input:-webkit-autofill,
-.form-group input:-webkit-autofill:hover,
-.form-group input:-webkit-autofill:focus {
-  -webkit-box-shadow: 0 0 0 1000px var(--entry-panel) inset;
+.auth-entry .form-group input:-webkit-autofill,
+.auth-entry .form-group input:-webkit-autofill:hover,
+.auth-entry .form-group input:-webkit-autofill:focus {
+  -webkit-box-shadow: 0 0 0 1000px var(--entry-input-bg) inset;
   -webkit-text-fill-color: var(--entry-ink);
   transition: background-color 5000s ease-in-out 0s;
 }
@@ -706,14 +812,14 @@ watch(() => props.activeTab, () => {
   padding-right: 56px;
 }
 
-.toggle-pwd {
+.auth-entry .toggle-pwd {
   position: absolute;
   top: 50%;
   right: 12px;
   transform: translateY(-50%);
   border: 0;
   background: transparent;
-  color: #48617e;
+  color: var(--entry-toggle-ink);
   cursor: pointer;
   width: 36px;
   height: 36px;
@@ -725,12 +831,12 @@ watch(() => props.activeTab, () => {
   transition: background-color 180ms ease, color 180ms ease;
 }
 
-.toggle-pwd:hover:not(:disabled) {
-  background: rgba(36, 87, 197, 0.08);
+.auth-entry .toggle-pwd:hover:not(:disabled) {
+  background: var(--entry-toggle-hover-bg);
   color: var(--entry-accent);
 }
 
-.toggle-pwd :deep(.app-icon) {
+.auth-entry .toggle-pwd :deep(.app-icon) {
   width: 17px;
   height: 17px;
 }
@@ -780,12 +886,12 @@ watch(() => props.activeTab, () => {
   font-size: 0.84rem;
 }
 
-.primary-button {
+.auth-entry .primary-button {
   border: 0;
   border-radius: 8px;
   padding: 15px 20px;
-  background: #111111;
-  color: #f8fafc;
+  background: var(--entry-button-bg);
+  color: var(--entry-button-text);
   cursor: pointer;
   font-size: 0.98rem;
   font-weight: 700;
@@ -795,10 +901,10 @@ watch(() => props.activeTab, () => {
   transition: transform 180ms ease, box-shadow 180ms ease, background-color 180ms ease;
 }
 
-.primary-button:hover:not(:disabled) {
-  background: #1a1a1a;
+.auth-entry .primary-button:hover:not(:disabled) {
+  background: var(--entry-button-hover-bg);
   transform: translateY(-1px);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  box-shadow: var(--entry-button-shadow);
 }
 
 .primary-button:disabled,

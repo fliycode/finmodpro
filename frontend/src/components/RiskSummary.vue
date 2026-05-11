@@ -228,7 +228,7 @@ const handleFileChange = async (event) => {
       await kbApi.ingestDocument(docId);
       await pollDocumentIndexed(docId);
       flash.success("文档就绪，正在提取风险事件...");
-      await riskApi.extractDocument(docId);
+      await riskApi.extractDocumentWithPolling(docId);
       flash.success("风险提取完成");
     }
     await refreshWorkspace();

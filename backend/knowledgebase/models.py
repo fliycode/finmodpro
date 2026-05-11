@@ -47,6 +47,7 @@ class Document(models.Model):
     title = models.CharField(max_length=255)
     file = models.FileField(upload_to="knowledgebase/documents/")
     file_size = models.PositiveBigIntegerField(default=0, help_text="File size in bytes")
+    file_hash = models.CharField(max_length=64, blank=True, default="", db_index=True, help_text="SHA256 hash of the file content")
     filename = models.CharField(max_length=255)
     doc_type = models.CharField(max_length=32)
     uploaded_by = models.ForeignKey(

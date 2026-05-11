@@ -9,6 +9,7 @@ from risk.controllers import (
     RiskDocumentExtractView,
     RiskEventListView,
     RiskEventReviewView,
+    RiskExtractStatusView,
     RiskReportExportView,
     SentimentAnalyzeView,
     TimeRangeRiskReportCreateView,
@@ -32,6 +33,11 @@ urlpatterns = [
         "documents/extract-batch/retry",
         RiskDocumentBatchExtractRetryView.as_view(),
         name="risk-document-batch-extract-retry",
+    ),
+    path(
+        "documents/extract/status/<str:task_id>",
+        RiskExtractStatusView.as_view(),
+        name="risk-extract-status",
     ),
     path(
         "documents/<int:document_id>/extract",
