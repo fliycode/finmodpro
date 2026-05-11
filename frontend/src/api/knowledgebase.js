@@ -319,6 +319,14 @@ export const kbApi = {
       auth: true,
     });
 
+    if (response.status === 409) {
+      const data = await response.json().catch(() => ({}));
+      const err = new Error(data.message || '文件已存在');
+      err.code = 'DUPLICATE';
+      err.existingDocument = data.existing_document || null;
+      throw err;
+    }
+
     const data = await parseResponse(response);
     return {
       success: true,

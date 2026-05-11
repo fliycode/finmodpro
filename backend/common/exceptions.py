@@ -47,6 +47,13 @@ class ProviderConfigurationError(ServiceConfigurationError):
         )
 
 
+class DuplicateDocumentError(Exception):
+    def __init__(self, message, *, existing_document):
+        super().__init__(message)
+        self.message = message
+        self.existing_document = existing_document
+
+
 class UpstreamRateLimitError(UpstreamServiceError):
     def __init__(
         self,

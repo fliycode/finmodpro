@@ -12,7 +12,7 @@ from django.db.models import Q, Count, Sum
 from django.utils import timezone
 
 from common.observability import trace_span
-from common.exceptions import ServiceConfigurationError, UpstreamServiceError
+from common.exceptions import DuplicateDocumentError, ServiceConfigurationError, UpstreamServiceError
 from knowledgebase.models import Dataset, Document, DocumentChunk, DocumentSectionChunk, DocumentVersion, IngestionTask
 from knowledgebase.services.chunk_service import (
     build_document_chunks,
@@ -505,7 +505,14 @@ def create_document_from_upload(
         file_size=uploaded_file.size,
     ).order_by("-id").first()
     if existing_doc is not None:
-        raise ValueError(f"文件已存在（文档 #{existing_doc.id}: {existing_doc.title}），请勿重复上传。")
+        raise DuplicateDocumentError(
+            f"文件已存在（《{existing_doc.title}》），请勿重复上传。",
+            existing_document={
+                "id": existing_doc.id,
+                "title": existing_doc.title,
+                "filename": existing_doc.filename,
+            },
+        )
 
     resolved_owner = owner or uploaded_by
     parsed_owner_id = _parse_owner_id(owner_id)

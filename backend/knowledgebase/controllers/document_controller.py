@@ -5,6 +5,7 @@ from django.views.decorators.http import require_GET, require_http_methods
 
 from django.conf import settings
 
+from common.exceptions import DuplicateDocumentError
 from knowledgebase.models import Document
 from knowledgebase.services.document_service import (
     build_document_list_response,
@@ -75,6 +76,11 @@ def document_list_create_view(request):
             owner_id=request.POST.get("owner_id"),
             visibility=request.POST.get("visibility"),
             dataset_id=request.POST.get("dataset_id"),
+        )
+    except DuplicateDocumentError as exc:
+        return JsonResponse(
+            {"message": str(exc), "existing_document": exc.existing_document},
+            status=409,
         )
     except ValueError as exc:
         return JsonResponse({"message": str(exc)}, status=400)

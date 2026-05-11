@@ -215,6 +215,15 @@ const pollDocumentIndexed = async (docId, { timeout = 60000, interval = 2000 } =
   throw new Error("文档处理超时，请稍后重试");
 };
 
+const runRiskPipeline = async (docId) => {
+  flash.success("上传完成，文档处理中...");
+  await kbApi.ingestDocument(docId);
+  await pollDocumentIndexed(docId);
+  flash.success("文档就绪，正在提取风险事件...");
+  await riskApi.extractDocumentWithPolling(docId);
+  flash.success("风险提取完成");
+};
+
 const handleFileChange = async (event) => {
   const file = event.target.files?.[0];
   if (!file) return;
@@ -224,15 +233,36 @@ const handleFileChange = async (event) => {
     const result = await kbApi.uploadDocument(file);
     const docId = result.document?.id;
     if (docId) {
-      flash.success("上传完成，文档处理中...");
-      await kbApi.ingestDocument(docId);
-      await pollDocumentIndexed(docId);
-      flash.success("文档就绪，正在提取风险事件...");
-      await riskApi.extractDocumentWithPolling(docId);
-      flash.success("风险提取完成");
+      await runRiskPipeline(docId);
     }
     await refreshWorkspace();
   } catch (error) {
+    if (error.code === 'DUPLICATE' && error.existingDocument) {
+      try {
+        await ElMessageBox.confirm(
+          `文件已存在（《${error.existingDocument.title}》），是否作为新版本上传？`,
+          '文件重复',
+          { confirmButtonText: '上传新版本', cancelButtonText: '取消', type: 'info' },
+        );
+      } catch {
+        return;
+      }
+      try {
+        flash.success("正在上传新版本...");
+        const versionResult = await kbApi.uploadNewVersion(error.existingDocument.id, file, {
+          title: file.name,
+          sourceLabel: file.name,
+        });
+        const newDocId = versionResult.document?.id;
+        if (newDocId) {
+          await runRiskPipeline(newDocId);
+        }
+        await refreshWorkspace();
+      } catch (versionError) {
+        flash.error(versionError.message || "上传新版本失败");
+      }
+      return;
+    }
     flash.error(error.message || "上传或提取失败");
   } finally {
     isUploading.value = false;

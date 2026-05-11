@@ -227,6 +227,34 @@ const handleFileChange = async (event) => {
     await fetchDocuments();
     await fetchStats();
   } catch (error) {
+    if (error.code === 'DUPLICATE' && error.existingDocument) {
+      try {
+        await ElMessageBox.confirm(
+          `文件已存在（《${error.existingDocument.title}》），是否作为新版本上传？`,
+          '文件重复',
+          { confirmButtonText: '上传新版本', cancelButtonText: '取消', type: 'info' },
+        );
+      } catch {
+        return;
+      }
+      try {
+        const versionResult = await kbApi.uploadNewVersion(error.existingDocument.id, file, {
+          title: file.name,
+          sourceLabel: file.name,
+        });
+        flash.success('新版本已上传。');
+        if (versionResult.document?.id) {
+          router.push(`${detailRoutePrefix.value}/documents/${versionResult.document.id}`);
+          return;
+        }
+        await fetchDatasets();
+        await fetchDocuments();
+        await fetchStats();
+      } catch (versionError) {
+        flash.error(`上传新版本失败：${versionError.message || '未知错误'}`);
+      }
+      return;
+    }
     console.error('上传文档失败:', error);
     flash.error(`上传失败：${error.message || '未知错误'}`);
   } finally {
