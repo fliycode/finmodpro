@@ -407,7 +407,7 @@ class ChatAskApiTests(TestCase):
         )
         self.embedding_provider_patcher.start()
         self.vector_search_patcher = patch(
-            "knowledgebase.services.vector_service.VectorService.search",
+            "rag.services.llamaindex_store_service.search",
             side_effect=fake_vector_search,
         )
         self.vector_search_patcher.start()

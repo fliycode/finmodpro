@@ -325,7 +325,116 @@ def _bm25_search(query, filters=None, limit=5):
     return _serialize_bm25_results(nodes)
 
 
+# ---------------------------------------------------------------------------
+# Milvus native hybrid search (dense + sparse BM25)
+# ---------------------------------------------------------------------------
+
+_hybrid_client = None
+_hybrid_client_lock = threading.Lock()
+
+
+def _get_hybrid_milvus_client():
+    global _hybrid_client
+    if _hybrid_client is not None:
+        return _hybrid_client
+    with _hybrid_client_lock:
+        if _hybrid_client is not None:
+            return _hybrid_client
+        from knowledgebase.services.vector_service import VectorService
+        _hybrid_client = VectorService()._get_client()
+        return _hybrid_client
+
+
+def _hybrid_search(*, query, filters=None, top_k=5):
+    from pymilvus import AnnSearchRequest, RRFRanker
+
+    client = _get_hybrid_milvus_client()
+    filter_expr = _build_filter_expression(filters)
+    embed_model = _build_embed_model()
+    query_vector = embed_model._get_query_embedding(query)
+
+    dense_req = AnnSearchRequest(
+        data=[query_vector],
+        anns_field="vector",
+        param={"metric_type": "COSINE", "params": {}},
+        limit=max(int(top_k), 1),
+        expr=filter_expr or None,
+    )
+
+    sparse_req = AnnSearchRequest(
+        data=[query],
+        anns_field="sparse_vector",
+        param={"metric_type": "BM25"},
+        limit=max(int(top_k), 1),
+        expr=filter_expr or None,
+    )
+
+    rrf_k = max(int(getattr(settings, "RAG_RRF_K", 60) or 60), 1)
+    ranker = RRFRanker(rrf_k)
+
+    results = client.hybrid_search(
+        collection_name=settings.MILVUS_COLLECTION_NAME,
+        reqs=[dense_req, sparse_req],
+        ranker=ranker,
+        limit=max(int(top_k), 1),
+        output_fields=[
+            "document_id", "chunk_id", "document_title", "doc_type",
+            "source_date", "page_label", "chunk_index", "content",
+        ],
+    )
+
+    if not results or not results[0]:
+        return []
+
+    chunk_ids = []
+    score_map = {}
+    for hit in results[0]:
+        entity = hit.get("entity", {})
+        chunk_id = entity.get("chunk_id")
+        if chunk_id is None:
+            continue
+        chunk_ids.append(int(chunk_id))
+        score_map[int(chunk_id)] = float(hit.get("distance", 0.0))
+
+    if not chunk_ids:
+        return []
+
+    chunks_by_id = {
+        chunk.id: chunk
+        for chunk in DocumentChunk.objects.select_related("document").filter(id__in=chunk_ids)
+    }
+
+    serialized = []
+    for chunk_id in chunk_ids:
+        chunk = chunks_by_id.get(chunk_id)
+        if chunk is None:
+            continue
+        metadata = chunk.metadata or {}
+        serialized.append({
+            "document_id": chunk.document_id,
+            "chunk_id": chunk.id,
+            "section_chunk_id": chunk.section_chunk_id,
+            "document_title": metadata.get("document_title") or chunk.document.title,
+            "doc_type": metadata.get("doc_type") or chunk.document.doc_type,
+            "source_date": metadata.get("source_date")
+            or (chunk.document.source_date.isoformat() if chunk.document.source_date else None),
+            "page_label": metadata.get("page_label", f"chunk-{chunk.chunk_index + 1}"),
+            "snippet": chunk.content,
+            "window": metadata.get("window", ""),
+            "metadata": metadata,
+            "section_context_summary": None,
+            "score": score_map.get(chunk_id, 0.0),
+            "vector_score": 0.0,
+            "keyword_score": 0.0,
+            "matched_queries": [],
+        })
+    return serialized
+
+
 def search(*, query, filters=None, top_k=5):
+    if getattr(settings, "RAG_HYBRID_SEARCH_ENABLED", False):
+        return _hybrid_search(query=query, filters=filters, top_k=top_k)
+
     index = _build_index()
     filter_expr = _build_filter_expression(filters)
 
@@ -650,6 +759,36 @@ def _fallback_keyword_search(query, filters=None, limit=5):
     return results[: int(limit)]
 
 
+def _hybrid_query(query, filters=None, top_k=5, query_variants=None):
+    candidate_limit = _candidate_limit(top_k)
+    queries = _normalize_queries(query, query_variants)
+
+    # Single query: return hybrid results directly (Milvus RRFRanker already fused)
+    if len(queries) == 1:
+        return _hybrid_search(query=queries[0], filters=filters, top_k=top_k)
+
+    # Multiple queries: fuse results, preserving best score per chunk
+    merged = {}
+    for query_text in queries:
+        results = _hybrid_search(
+            query=query_text,
+            filters=filters,
+            top_k=candidate_limit,
+        )
+        for result in results:
+            key = (result.get("document_id"), result.get("chunk_id"))
+            existing = merged.get(key)
+            if existing is None:
+                merged[key] = {**result, "matched_queries": [query_text]}
+            else:
+                existing["score"] = max(existing["score"], result.get("score", 0.0))
+                if query_text not in existing["matched_queries"]:
+                    existing["matched_queries"].append(query_text)
+
+    fused = sorted(merged.values(), key=lambda x: x["score"], reverse=True)
+    return fused[: int(top_k)]
+
+
 def query_llamaindex_store(
     query,
     filters=None,
@@ -657,6 +796,9 @@ def query_llamaindex_store(
     query_variants=None,
     allow_keyword_fallback=True,
 ):
+    if getattr(settings, "RAG_HYBRID_SEARCH_ENABLED", False):
+        return _hybrid_query(query, filters=filters, top_k=top_k, query_variants=query_variants)
+
     candidate_limit = _candidate_limit(top_k)
     queries = _normalize_queries(query, query_variants)
     ranked_lists = []

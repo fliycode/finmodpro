@@ -1,3 +1,4 @@
+import asyncio
 import hashlib
 
 from django.conf import settings
@@ -49,7 +50,12 @@ class FinModProEmbeddingAdapter(BaseEmbedding):
         return vector
 
     async def _aget_query_embedding(self, query: str) -> list[float]:
-        return self._get_query_embedding(query)
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(None, self._get_query_embedding, query)
+
+    async def _aget_text_embeddings(self, texts: list[str]) -> list[list[float]]:
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(None, self._get_text_embeddings, texts)
 
     def _get_text_embedding(self, text: str) -> list[float]:
         return self._get_query_embedding(text)

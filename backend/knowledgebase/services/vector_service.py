@@ -61,27 +61,73 @@ class VectorService:
             return int(dimension)
         return None
 
+    def _has_sparse_field(self, collection_schema):
+        if not isinstance(collection_schema, dict):
+            return False
+        fields = collection_schema.get("fields") or []
+        return any(
+            isinstance(f, dict) and f.get("name") == "sparse_vector"
+            for f in fields
+        )
+
     def ensure_collection(self, *, dimension=None):
         client = self._get_client()
+        use_hybrid = getattr(settings, "RAG_HYBRID_SEARCH_ENABLED", False)
 
         target_dimension = int(dimension or settings.KB_EMBEDDING_DIMENSION)
         if client.has_collection(settings.MILVUS_COLLECTION_NAME):
             existing_schema = client.describe_collection(settings.MILVUS_COLLECTION_NAME)
             existing_dimension = self._extract_collection_dimension(existing_schema)
-            if existing_dimension == target_dimension:
+            has_sparse = self._has_sparse_field(existing_schema)
+            if existing_dimension == target_dimension and (has_sparse or not use_hybrid):
                 return client
             client.drop_collection(settings.MILVUS_COLLECTION_NAME)
 
-        client.create_collection(
-            collection_name=settings.MILVUS_COLLECTION_NAME,
-            dimension=target_dimension,
-            primary_field_name="id",
-            id_type="int",
-            vector_field_name="vector",
-            metric_type="COSINE",
-            auto_id=False,
-            enable_dynamic_field=True,
-        )
+        if use_hybrid:
+            from pymilvus import CollectionSchema, DataType, Function, FunctionType
+
+            schema = CollectionSchema(enable_dynamic_field=True)
+            schema.add_field("id", DataType.INT64, is_primary=True, auto_id=False)
+            schema.add_field("vector", DataType.FLOAT_VECTOR, dim=target_dimension)
+            schema.add_field("sparse_vector", DataType.SPARSE_FLOAT_VECTOR)
+            schema.add_field("content_text", DataType.VARCHAR, max_length=65535, analyzer_params={"type": "chinese"})
+            schema.add_field("document_id", DataType.INT64)
+            schema.add_field("chunk_id", DataType.INT64)
+            schema.add_field("document_title", DataType.VARCHAR, max_length=512)
+            schema.add_field("doc_type", DataType.VARCHAR, max_length=64)
+            schema.add_field("source_date", DataType.VARCHAR, max_length=32)
+            schema.add_field("page_label", DataType.VARCHAR, max_length=256)
+            schema.add_field("chunk_index", DataType.INT64)
+            schema.add_field("content", DataType.VARCHAR, max_length=65535)
+
+            bm25_function = Function(
+                name="bm25",
+                function_type=FunctionType.BM25,
+                input_field_names=["content_text"],
+                output_field_names=["sparse_vector"],
+            )
+            schema.add_function(bm25_function)
+
+            index_params = client.prepare_index_params()
+            index_params.add_index(field_name="vector", index_type="AUTOINDEX", metric_type="COSINE")
+            index_params.add_index(field_name="sparse_vector", index_type="AUTOINDEX", metric_type="BM25")
+
+            client.create_collection(
+                collection_name=settings.MILVUS_COLLECTION_NAME,
+                schema=schema,
+                index_params=index_params,
+            )
+        else:
+            client.create_collection(
+                collection_name=settings.MILVUS_COLLECTION_NAME,
+                dimension=target_dimension,
+                primary_field_name="id",
+                id_type="int",
+                vector_field_name="vector",
+                metric_type="COSINE",
+                auto_id=False,
+                enable_dynamic_field=True,
+            )
         return client
 
     def _build_filter_expression(self, filters=None):
@@ -127,22 +173,23 @@ class VectorService:
             )
             for chunk, vector in zip(chunk_batch, vectors):
                 vector_id = int(chunk.id)
-                rows.append(
-                    {
-                        "id": vector_id,
-                        "vector": vector,
-                        "document_id": document.id,
-                        "chunk_id": chunk.id,
-                        "document_title": document.title,
-                        "doc_type": document.doc_type,
-                        "source_date": document.source_date.isoformat()
-                        if document.source_date
-                        else "",
-                        "chunk_index": chunk.chunk_index,
-                        "page_label": chunk.metadata.get("page_label", ""),
-                        "content": chunk.content,
-                    }
-                )
+                row = {
+                    "id": vector_id,
+                    "vector": vector,
+                    "document_id": document.id,
+                    "chunk_id": chunk.id,
+                    "document_title": document.title,
+                    "doc_type": document.doc_type,
+                    "source_date": document.source_date.isoformat()
+                    if document.source_date
+                    else "",
+                    "chunk_index": chunk.chunk_index,
+                    "page_label": chunk.metadata.get("page_label", ""),
+                    "content": chunk.content,
+                }
+                if getattr(settings, "RAG_HYBRID_SEARCH_ENABLED", False):
+                    row["content_text"] = chunk.search_text or chunk.content
+                rows.append(row)
                 chunk.vector_id = str(vector_id)
                 chunks_to_update.append(chunk)
         return rows, chunks_to_update
@@ -163,22 +210,23 @@ class VectorService:
             )
             for section, vector in zip(section_batch, vectors):
                 vector_id = -int(section.id)
-                rows.append(
-                    {
-                        "id": vector_id,
-                        "vector": vector,
-                        "document_id": document.id,
-                        "section_chunk_id": section.id,
-                        "document_title": document.title,
-                        "doc_type": document.doc_type,
-                        "source_date": document.source_date.isoformat()
-                        if document.source_date
-                        else "",
-                        "chunk_index": section.section_index,
-                        "page_label": section.metadata.get("page_label", ""),
-                        "content": section.content,
-                    }
-                )
+                row = {
+                    "id": vector_id,
+                    "vector": vector,
+                    "document_id": document.id,
+                    "section_chunk_id": section.id,
+                    "document_title": document.title,
+                    "doc_type": document.doc_type,
+                    "source_date": document.source_date.isoformat()
+                    if document.source_date
+                    else "",
+                    "chunk_index": section.section_index,
+                    "page_label": section.metadata.get("page_label", ""),
+                    "content": section.content,
+                }
+                if getattr(settings, "RAG_HYBRID_SEARCH_ENABLED", False):
+                    row["content_text"] = section.search_text or section.content
+                rows.append(row)
                 section.vector_id = str(vector_id)
                 section.is_indexed = True
                 sections_to_update.append(section)

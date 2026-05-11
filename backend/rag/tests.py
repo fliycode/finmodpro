@@ -731,3 +731,98 @@ class SentenceWindowRetrievalTests(TestCase):
 
         self.assertEqual(citation["snippet"], "短句。")
         self.assertEqual(citation["window"], "前文。短句。后文。")
+
+
+@override_settings(RAG_HYBRID_SEARCH_ENABLED=True)
+class HybridSearchTests(TestCase):
+    def setUp(self):
+        self.media_root = tempfile.mkdtemp()
+        self.override = override_settings(MEDIA_ROOT=self.media_root)
+        self.override.enable()
+        self.user = User.objects.create_user(
+            username="hybridtest", password="testpass123", is_active=True,
+        )
+        self.group = Group.objects.create(name="member")
+        self.user.groups.add(self.group)
+        seed_roles_and_permissions()
+
+    def tearDown(self):
+        self.override.disable()
+        shutil.rmtree(self.media_root, ignore_errors=True)
+
+    @patch("rag.services.llamaindex_store_service._get_hybrid_milvus_client")
+    @patch("rag.services.llamaindex_store_service._build_embed_model")
+    def test_hybrid_search_returns_results(self, mock_embed, mock_client):
+        document = Document.objects.create(
+            title="Hybrid Test",
+            file=SimpleUploadedFile("test.txt", b"test", content_type="text/plain"),
+            filename="test.txt",
+            doc_type="txt",
+            status=Document.STATUS_CHUNKED,
+            visibility=Document.VISIBILITY_INTERNAL,
+            owner=self.user,
+        )
+        chunk = DocumentChunk.objects.create(
+            document=document,
+            chunk_index=0,
+            content="Revenue grew 10 percent.",
+            search_text="title: Hybrid Test\nRevenue grew 10 percent.",
+            metadata={"document_title": "Hybrid Test"},
+        )
+
+        embed_obj = SimpleNamespace()
+        embed_obj._get_query_embedding = lambda q: [0.1] * 1024
+        mock_embed.return_value = embed_obj
+
+        mock_milvus_client = SimpleNamespace()
+        mock_milvus_client.hybrid_search = lambda **kwargs: [[
+            {
+                "entity": {
+                    "chunk_id": chunk.id,
+                    "document_id": document.id,
+                    "document_title": "Hybrid Test",
+                    "doc_type": "txt",
+                    "source_date": "",
+                    "page_label": "chunk-1",
+                    "chunk_index": 0,
+                    "content": "Revenue grew 10 percent.",
+                },
+                "distance": 0.85,
+            },
+        ]]
+        mock_client.return_value = mock_milvus_client
+
+        results = query_llamaindex_store("revenue growth", top_k=1)
+
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0]["chunk_id"], chunk.id)
+        self.assertAlmostEqual(results[0]["score"], 0.85)
+
+    @patch("rag.services.llamaindex_store_service._hybrid_search")
+    def test_hybrid_query_fuses_multiple_variants(self, mock_hybrid):
+        mock_hybrid.return_value = [
+            {"document_id": 1, "chunk_id": 10, "score": 0.9, "matched_queries": []},
+            {"document_id": 1, "chunk_id": 11, "score": 0.7, "matched_queries": []},
+        ]
+
+        results = query_llamaindex_store(
+            "cash flow",
+            top_k=2,
+            query_variants=["cash flow", "liquidity"],
+        )
+
+        # Should have called hybrid_search for each unique query variant
+        self.assertEqual(mock_hybrid.call_count, 2)
+
+    @override_settings(RAG_HYBRID_SEARCH_ENABLED=False)
+    @patch("rag.services.llamaindex_store_service._hybrid_search")
+    @patch("rag.services.llamaindex_store_service.search")
+    def test_legacy_path_used_when_flag_disabled(self, mock_legacy_search, mock_hybrid):
+        mock_legacy_search.return_value = [
+            {"document_id": 1, "chunk_id": 10, "score": 0.8, "matched_queries": []}
+        ]
+
+        results = query_llamaindex_store("test", top_k=1)
+
+        mock_hybrid.assert_not_called()
+        mock_legacy_search.assert_called_once()
