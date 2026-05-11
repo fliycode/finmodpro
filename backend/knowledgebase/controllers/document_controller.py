@@ -6,6 +6,10 @@ from django.views.decorators.http import require_GET, require_http_methods
 from django.conf import settings
 
 from common.exceptions import DuplicateDocumentError
+from knowledgebase.controllers.audit_utils import (
+    build_document_audit_payload,
+    safe_record_audit_event,
+)
 from knowledgebase.models import Document
 from knowledgebase.services.document_service import (
     build_document_list_response,
@@ -16,6 +20,7 @@ from knowledgebase.services.document_service import (
     get_document_for_user,
 )
 from rbac.services.authz_service import permission_required
+from systemcheck.models import AuditRecord
 
 _MAX_UPLOAD_BYTES = getattr(settings, "DATA_UPLOAD_MAX_MEMORY_SIZE", 50 * 1024 * 1024)
 
@@ -58,10 +63,41 @@ def document_list_create_view(request):
     title = (request.POST.get("title") or "").strip()
     source_date = (request.POST.get("source_date") or "").strip()
     if uploaded_file is None:
+        safe_record_audit_event(
+            actor=request.user,
+            action="knowledgebase.document.upload",
+            target_type="document",
+            status=AuditRecord.STATUS_FAILED,
+            detail_payload={
+                **build_document_audit_payload(
+                    title=title,
+                    source_date=source_date,
+                ),
+                "error": "file 为必填项。",
+            },
+        )
         return JsonResponse({"message": "file 为必填项。"}, status=400)
 
     max_mb = _MAX_UPLOAD_BYTES // (1024 * 1024)
     if uploaded_file.size > _MAX_UPLOAD_BYTES:
+        safe_record_audit_event(
+            actor=request.user,
+            action="knowledgebase.document.upload",
+            target_type="document",
+            target_id=uploaded_file.name,
+            status=AuditRecord.STATUS_FAILED,
+            detail_payload={
+                **build_document_audit_payload(
+                    title=title,
+                    filename=uploaded_file.name,
+                    doc_type=uploaded_file.content_type,
+                    visibility=request.POST.get("visibility"),
+                    source_date=source_date,
+                    file_size=uploaded_file.size,
+                ),
+                "error": f"文件大小超出限制（最大 {max_mb} MB）。",
+            },
+        )
         return JsonResponse(
             {"message": f"文件大小超出限制（最大 {max_mb} MB）。"},
             status=413,
@@ -78,13 +114,58 @@ def document_list_create_view(request):
             dataset_id=request.POST.get("dataset_id"),
         )
     except DuplicateDocumentError as exc:
+        safe_record_audit_event(
+            actor=request.user,
+            action="knowledgebase.document.upload",
+            target_type="document",
+            target_id=uploaded_file.name,
+            status=AuditRecord.STATUS_FAILED,
+            detail_payload={
+                **build_document_audit_payload(
+                    title=title,
+                    filename=uploaded_file.name,
+                    doc_type=uploaded_file.content_type,
+                    visibility=request.POST.get("visibility"),
+                    source_date=source_date,
+                    file_size=uploaded_file.size,
+                ),
+                "error": str(exc),
+                "existing_document_id": exc.existing_document.get("id"),
+            },
+        )
         return JsonResponse(
             {"message": str(exc), "existing_document": exc.existing_document},
             status=409,
         )
     except ValueError as exc:
+        safe_record_audit_event(
+            actor=request.user,
+            action="knowledgebase.document.upload",
+            target_type="document",
+            target_id=uploaded_file.name,
+            status=AuditRecord.STATUS_FAILED,
+            detail_payload={
+                **build_document_audit_payload(
+                    title=title,
+                    filename=uploaded_file.name,
+                    doc_type=uploaded_file.content_type,
+                    visibility=request.POST.get("visibility"),
+                    source_date=source_date,
+                    file_size=uploaded_file.size,
+                ),
+                "error": str(exc),
+            },
+        )
         return JsonResponse({"message": str(exc)}, status=400)
 
+    safe_record_audit_event(
+        actor=request.user,
+        action="knowledgebase.document.upload",
+        target_type="document",
+        target_id=document.id,
+        status=AuditRecord.STATUS_SUCCEEDED,
+        detail_payload=build_document_audit_payload(document=document),
+    )
     return JsonResponse(build_document_response(document), status=201)
 
 
@@ -95,6 +176,15 @@ def document_detail_view(request, document_id):
     try:
         document = get_document_for_user(request.user, document_id)
     except Document.DoesNotExist:
+        if request.method == "DELETE":
+            safe_record_audit_event(
+                actor=request.user,
+                action="knowledgebase.document.delete",
+                target_type="document",
+                target_id=document_id,
+                status=AuditRecord.STATUS_FAILED,
+                detail_payload={"error": "文档不存在。"},
+            )
         return JsonResponse({"message": "文档不存在。"}, status=404)
     except (OperationalError, ProgrammingError, DatabaseError) as exc:
         return _build_schema_not_ready_response(exc)
@@ -103,7 +193,16 @@ def document_detail_view(request, document_id):
         if not request.user.has_perm("auth.delete_document"):
             return JsonResponse({"message": "无权限。"}, status=403)
         try:
+            document_payload = build_document_audit_payload(document=document)
             delete_document_with_vectors(document)
+            safe_record_audit_event(
+                actor=request.user,
+                action="knowledgebase.document.delete",
+                target_type="document",
+                target_id=document_id,
+                status=AuditRecord.STATUS_SUCCEEDED,
+                detail_payload=document_payload,
+            )
             return JsonResponse({"message": "文档已删除。"})
         except (OperationalError, ProgrammingError, DatabaseError) as exc:
             return _build_schema_not_ready_response(exc)

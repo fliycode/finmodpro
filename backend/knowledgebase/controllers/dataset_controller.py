@@ -5,6 +5,10 @@ from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_GET, require_http_methods
 
+from knowledgebase.controllers.audit_utils import (
+    build_dataset_audit_payload,
+    safe_record_audit_event,
+)
 from knowledgebase.models import Dataset
 from knowledgebase.services.dataset_service import (
     create_dataset,
@@ -13,6 +17,7 @@ from knowledgebase.services.dataset_service import (
     serialize_dataset,
 )
 from rbac.services.authz_service import permission_required
+from systemcheck.models import AuditRecord
 
 
 def _build_schema_not_ready_response(exc):
@@ -47,7 +52,29 @@ def dataset_list_create_view(request):
             owner=request.user,
         )
     except ValueError as exc:
+        safe_record_audit_event(
+            actor=request.user,
+            action="knowledgebase.dataset.create",
+            target_type="dataset",
+            status=AuditRecord.STATUS_FAILED,
+            detail_payload={
+                **build_dataset_audit_payload(
+                    name=payload.get("name", ""),
+                    description=payload.get("description", ""),
+                    owner=request.user,
+                ),
+                "error": str(exc),
+            },
+        )
         return JsonResponse({"message": str(exc)}, status=400)
+    safe_record_audit_event(
+        actor=request.user,
+        action="knowledgebase.dataset.create",
+        target_type="dataset",
+        target_id=dataset.id,
+        status=AuditRecord.STATUS_SUCCEEDED,
+        detail_payload=build_dataset_audit_payload(dataset=dataset),
+    )
     return JsonResponse({"dataset": serialize_dataset(dataset)}, status=201)
 
 

@@ -17,7 +17,13 @@ from django.utils import timezone
 from authentication.models import User
 from authentication.services.jwt_service import generate_access_token
 from common.exceptions import UpstreamServiceError
-from knowledgebase.models import Document, DocumentChunk, DocumentSectionChunk, IngestionTask
+from knowledgebase.models import (
+    Document,
+    DocumentChunk,
+    DocumentCleaningResult,
+    DocumentSectionChunk,
+    IngestionTask,
+)
 from knowledgebase.services.chunk_service import build_document_chunks
 from knowledgebase.services.document_service import (
     batch_enqueue_document_ingestion,
@@ -36,6 +42,20 @@ from rag.services.llamaindex_store_service import clear_store, sync_document, qu
 from knowledgebase.services.parser_service import ParserService, parse_document_file
 from knowledgebase.tasks import ingest_document_task
 from rbac.services.rbac_service import ROLE_ADMIN, seed_roles_and_permissions
+from systemcheck.models import AuditRecord
+
+
+class AuditRecordAssertionMixin:
+    def assert_latest_audit(self, *, action, status, target_type=None, target_id=None):
+        audit = AuditRecord.objects.order_by("-id").first()
+        self.assertIsNotNone(audit)
+        self.assertEqual(audit.action, action)
+        self.assertEqual(audit.status, status)
+        if target_type is not None:
+            self.assertEqual(audit.target_type, target_type)
+        if target_id is not None:
+            self.assertEqual(audit.target_id, str(target_id))
+        return audit
 
 
 class FakeEmbeddingProvider:
@@ -65,7 +85,7 @@ def fake_index_document_chunks(document):
     CELERY_TASK_ALWAYS_EAGER=True,
     CELERY_TASK_EAGER_PROPAGATES=True,
 )
-class KnowledgebaseApiTests(TestCase):
+class KnowledgebaseApiTests(AuditRecordAssertionMixin, TestCase):
     def setUp(self):
         self.client = Client()
         seed_roles_and_permissions()
@@ -129,6 +149,14 @@ class KnowledgebaseApiTests(TestCase):
         self.assertTrue(
             upload_payload["document"]["file_path"].startswith("knowledgebase/documents/")
         )
+        audit = self.assert_latest_audit(
+            action="knowledgebase.document.upload",
+            status=AuditRecord.STATUS_SUCCEEDED,
+            target_type="document",
+            target_id=upload_payload["document"]["id"],
+        )
+        self.assertEqual(audit.detail_payload["title"], "2025 Q4 report")
+        self.assertEqual(audit.detail_payload["filename"], "report.txt")
 
         list_response = self.client.get(
             "/api/knowledgebase/documents",
@@ -236,6 +264,13 @@ class KnowledgebaseApiTests(TestCase):
         dataset_id = dataset_payload["id"]
         self.assertEqual(dataset_payload["name"], "2025 年报数据集")
         self.assertEqual(dataset_payload["document_count"], 0)
+        audit = self.assert_latest_audit(
+            action="knowledgebase.dataset.create",
+            status=AuditRecord.STATUS_SUCCEEDED,
+            target_type="dataset",
+            target_id=dataset_id,
+        )
+        self.assertEqual(audit.detail_payload["name"], "2025 年报数据集")
 
         list_response = self.client.get(
             "/api/knowledgebase/datasets",
@@ -364,6 +399,18 @@ class KnowledgebaseApiTests(TestCase):
         self.assertEqual(
             updated_document["provenance"]["processing_notes"],
             "补充了董事会风险说明。",
+        )
+        audit = self.assert_latest_audit(
+            action="knowledgebase.document_version.upload",
+            status=AuditRecord.STATUS_SUCCEEDED,
+            target_type="document",
+            target_id=initial_document["id"],
+        )
+        self.assertEqual(audit.detail_payload["version_number"], 2)
+        self.assertEqual(audit.detail_payload["source_type"], "upload")
+        self.assertEqual(
+            audit.detail_payload["source_metadata_keys"],
+            ["channel", "checksum"],
         )
 
         versions_response = self.client.get(
@@ -554,6 +601,13 @@ class KnowledgebaseApiTests(TestCase):
         self.assertEqual(payload["results"][1]["status"], "skipped")
         self.assertEqual(payload["results"][1]["reason"], "已有进行中的摄取任务。")
         self.assertEqual(payload["results"][1]["task_id"], running_task.id)
+        audit = self.assert_latest_audit(
+            action="knowledgebase.document.batch_ingest",
+            status=AuditRecord.STATUS_SUBMITTED,
+            target_type="document",
+        )
+        self.assertEqual(audit.detail_payload["accepted_count"], 1)
+        self.assertEqual(audit.detail_payload["skipped_count"], 1)
 
     def test_batch_ingest_reports_partial_failure_without_aborting_batch(self):
         first = create_document_from_upload(
@@ -649,6 +703,131 @@ class KnowledgebaseApiTests(TestCase):
         self.assertFalse(document.chunks.model.objects.filter(id__in=chunk_ids).exists())
         self.assertFalse(os.path.exists(original_path))
         delete_vector_mock.assert_called_once_with(document.id)
+        audit = self.assert_latest_audit(
+            action="knowledgebase.document.batch_delete",
+            status=AuditRecord.STATUS_SUCCEEDED,
+            target_type="document",
+        )
+        self.assertEqual(audit.detail_payload["deleted_count"], 1)
+        self.assertEqual(audit.detail_payload["document_ids"], [document.id])
+
+    def test_document_delete_writes_audit_record(self):
+        document = create_document_from_upload(
+            uploaded_file=SimpleUploadedFile(
+                "single-delete.txt",
+                b"single delete",
+                content_type="text/plain",
+            ),
+            title="Single delete",
+            source_date="2026-04-10",
+            uploaded_by=self.user,
+        )
+
+        with patch.object(VectorService, "delete_document", return_value=None):
+            with self.captureOnCommitCallbacks(execute=True):
+                response = self.client.delete(
+                    f"/api/knowledgebase/documents/{document.id}",
+                    HTTP_AUTHORIZATION=f"Bearer {self.access_token}",
+                )
+
+        self.assertEqual(response.status_code, 200)
+        audit = self.assert_latest_audit(
+            action="knowledgebase.document.delete",
+            status=AuditRecord.STATUS_SUCCEEDED,
+            target_type="document",
+            target_id=document.id,
+        )
+        self.assertEqual(audit.detail_payload["title"], "Single delete")
+        self.assertEqual(audit.detail_payload["filename"], "single-delete.txt")
+
+    def test_cleaning_rule_crud_and_document_cleaning_write_audit_records(self):
+        create_rule_response = self.client.post(
+            "/api/knowledgebase/cleaning/rules",
+            data=json.dumps(
+                {
+                    "name": "Normalize quotes",
+                    "rule_type": "normalize_quotes",
+                    "config": {"locale": "zh-CN"},
+                    "enabled": True,
+                    "priority": 30,
+                }
+            ),
+            content_type="application/json",
+            HTTP_AUTHORIZATION=f"Bearer {self.access_token}",
+        )
+
+        self.assertEqual(create_rule_response.status_code, 201)
+        rule_payload = create_rule_response.json()["rule"]
+        audit = self.assert_latest_audit(
+            action="knowledgebase.cleaning_rule.create",
+            status=AuditRecord.STATUS_SUCCEEDED,
+            target_type="cleaning_rule",
+            target_id=rule_payload["id"],
+        )
+        self.assertEqual(audit.detail_payload["config_keys"], ["locale"])
+
+        update_rule_response = self.client.patch(
+            f"/api/knowledgebase/cleaning/rules/{rule_payload['id']}",
+            data=json.dumps({"enabled": False, "priority": 10}),
+            content_type="application/json",
+            HTTP_AUTHORIZATION=f"Bearer {self.access_token}",
+        )
+
+        self.assertEqual(update_rule_response.status_code, 200)
+        audit = self.assert_latest_audit(
+            action="knowledgebase.cleaning_rule.update",
+            status=AuditRecord.STATUS_SUCCEEDED,
+            target_type="cleaning_rule",
+            target_id=rule_payload["id"],
+        )
+        self.assertEqual(audit.detail_payload["enabled"], False)
+        self.assertEqual(audit.detail_payload["priority"], 10)
+
+        document = create_document_from_upload(
+            uploaded_file=SimpleUploadedFile(
+                "cleaning.txt",
+                b"Line one\nLine two",
+                content_type="text/plain",
+            ),
+            title="Cleaning doc",
+            source_date="2026-04-10",
+            uploaded_by=self.user,
+        )
+        document.parsed_text = "Line one\nLine two"
+        document.save(update_fields=["parsed_text", "updated_at"])
+
+        cleaning_response = self.client.post(
+            f"/api/knowledgebase/documents/{document.id}/cleaning",
+            HTTP_AUTHORIZATION=f"Bearer {self.access_token}",
+        )
+
+        self.assertEqual(cleaning_response.status_code, 201)
+        self.assertEqual(
+            DocumentCleaningResult.objects.filter(document=document).count(),
+            1,
+        )
+        audit = self.assert_latest_audit(
+            action="knowledgebase.document.clean",
+            status=AuditRecord.STATUS_SUCCEEDED,
+            target_type="document",
+            target_id=document.id,
+        )
+        self.assertEqual(audit.detail_payload["title"], "Cleaning doc")
+        self.assertIn("quality_score", audit.detail_payload)
+
+        delete_rule_response = self.client.delete(
+            f"/api/knowledgebase/cleaning/rules/{rule_payload['id']}",
+            HTTP_AUTHORIZATION=f"Bearer {self.access_token}",
+        )
+
+        self.assertEqual(delete_rule_response.status_code, 200)
+        audit = self.assert_latest_audit(
+            action="knowledgebase.cleaning_rule.delete",
+            status=AuditRecord.STATUS_SUCCEEDED,
+            target_type="cleaning_rule",
+            target_id=rule_payload["id"],
+        )
+        self.assertEqual(audit.detail_payload["name"], "Normalize quotes")
 
     def test_batch_ingest_rejects_non_integer_document_ids(self):
         response = self.client.post(
