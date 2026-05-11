@@ -194,7 +194,13 @@ const navigateToDetail = (item) => {
 };
 
 const triggerUpload = () => {
-  uploadSelectedDatasetId.value = selectedDatasetId.value !== 'all' ? selectedDatasetId.value : '';
+  if (selectedDatasetId.value !== 'all') {
+    uploadSelectedDatasetId.value = selectedDatasetId.value;
+  } else if (datasets.value.length > 0) {
+    uploadSelectedDatasetId.value = String(datasets.value[0].id);
+  } else {
+    uploadSelectedDatasetId.value = '';
+  }
   isUploadDialogOpen.value = true;
 };
 
@@ -438,14 +444,6 @@ onUnmounted(() => {
           <p class="kb-dialog__desc">上传的文档将归入所选数据集，也可稍后在文档详情中修改。</p>
           <div class="kb-dialog__datasets">
             <button
-              type="button"
-              :class="['kb-dataset-option', { active: !uploadSelectedDatasetId }]"
-              @click="uploadSelectedDatasetId = ''"
-            >
-              <span class="kb-dataset-option__name">不指定数据集</span>
-              <span class="kb-dataset-option__hint">文档将归入"未分组"</span>
-            </button>
-            <button
               v-for="ds in datasets"
               :key="ds.id"
               type="button"
@@ -454,6 +452,14 @@ onUnmounted(() => {
             >
               <span class="kb-dataset-option__name">{{ ds.name }}</span>
               <span class="kb-dataset-option__hint">{{ ds.document_count ?? 0 }} 个文档</span>
+            </button>
+            <button
+              type="button"
+              :class="['kb-dataset-option', { active: !uploadSelectedDatasetId }]"
+              @click="uploadSelectedDatasetId = ''"
+            >
+              <span class="kb-dataset-option__name">不指定数据集</span>
+              <span class="kb-dataset-option__hint">文档将归入"未分组"</span>
             </button>
           </div>
           <div class="kb-dialog__actions">
