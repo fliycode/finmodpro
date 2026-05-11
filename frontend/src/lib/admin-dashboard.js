@@ -18,6 +18,7 @@ const chartColors = () => ({
   textSecondary: readCSS('--text-secondary', '#8190aa'),
   gridLine: readCSS('--line-soft', 'rgba(91, 132, 205, 0.12)'),
   surfaceBg: readCSS('--surface-1', 'rgba(7, 16, 32, 0.94)'),
+  surface2: readCSS('--surface-2', '#182235'),
   lineStrong: readCSS('--line-strong', 'rgba(91, 132, 205, 0.34)'),
 });
 
@@ -383,7 +384,7 @@ export function buildDashboardDonutOption(rows, center = ['38%', '50%']) {
       itemWidth: 9,
       itemHeight: 9,
       itemGap: 14,
-      textStyle: { color: '#a7b5cb', fontWeight: 800 },
+      textStyle: { color: chartColors().textSecondary, fontWeight: 800 },
       formatter(name) {
         const match = rows.find((item) => item.label === name);
         return `${name}  ${match?.percent || ''}`;
@@ -397,7 +398,7 @@ export function buildDashboardDonutOption(rows, center = ['38%', '50%']) {
         label: { show: false },
         labelLine: { show: false },
         itemStyle: {
-          borderColor: '#08152a',
+          borderColor: chartColors().surface2,
           borderWidth: 2,
         },
         data: rows.map((row) => ({
@@ -559,14 +560,14 @@ export function buildTrendChartOption(stats) {
     xAxis: {
       type: 'category',
       data: requests.map((item) => formatShortDate(item.date)),
-      axisLine: { lineStyle: { color: '#d9e1eb' } },
+      axisLine: { lineStyle: { color: chartColors().lineStrong } },
       axisLabel: { color: chartColors().muted },
     },
     yAxis: {
       type: 'value',
       minInterval: 1,
       axisLabel: { color: chartColors().muted },
-      splitLine: { lineStyle: { color: '#e9edf3' } },
+      splitLine: { lineStyle: { color: chartColors().gridLine } },
     },
     series: [
       {
@@ -633,13 +634,13 @@ export function buildDocumentStatusOption(stats) {
       type: 'value',
       minInterval: 1,
       axisLabel: { color: chartColors().muted },
-      splitLine: { lineStyle: { color: '#e9edf3' } },
+      splitLine: { lineStyle: { color: chartColors().gridLine } },
     },
     yAxis: {
       type: 'category',
       data: rows.map((row) => row.label),
       axisLabel: { color: chartColors().muted },
-      axisLine: { lineStyle: { color: '#d9e1eb' } },
+      axisLine: { lineStyle: { color: chartColors().lineStrong } },
     },
     series: [
       {

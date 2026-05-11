@@ -71,14 +71,17 @@ const documentHighlights = computed(() => ([
   {
     label: '处理中',
     value: formatNumber(dashboardStats.value.processing_document_count),
+    tone: 'processing',
   },
   {
     label: '失败',
     value: formatNumber(dashboardStats.value.failed_document_count),
+    tone: 'risk',
   },
   {
     label: '可重试入库',
     value: formatNumber(dashboardStats.value.retryable_ingestion_count),
+    tone: 'retry',
   },
 ]));
 </script>
@@ -153,7 +156,7 @@ const documentHighlights = computed(() => ([
         <AdminChart :option="documentOption" height="180px" />
 
         <div class="board-panel__metrics">
-          <div v-for="item in documentHighlights" :key="item.label" class="board-panel__metric">
+          <div v-for="item in documentHighlights" :key="item.label" class="board-panel__metric" :class="`is-${item.tone}`">
             <span>{{ item.label }}</span>
             <strong>{{ item.value }}</strong>
           </div>
@@ -207,7 +210,12 @@ const documentHighlights = computed(() => ([
   border: 1px solid var(--line-soft);
   border-radius: var(--radius-card);
   background: var(--surface-1);
-  box-shadow: var(--shadow-md);
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.summary-tile:hover {
+  border-color: var(--line-strong);
+  box-shadow: var(--shadow-sm);
 }
 
 .summary-tile__head,
@@ -293,8 +301,8 @@ const documentHighlights = computed(() => ([
 }
 
 .summary-tile.is-cyan .summary-tile__icon {
-  color: #5d9fe6;
-  background: rgba(93, 159, 230, 0.12);
+  color: var(--brand);
+  background: rgba(36, 87, 197, 0.12);
 }
 
 .summary-tile.is-green .summary-tile__icon {
@@ -308,7 +316,12 @@ const documentHighlights = computed(() => ([
   border: 1px solid var(--line-soft);
   border-radius: var(--radius-card);
   background: var(--surface-1);
-  box-shadow: var(--shadow-md);
+  transition: border-color 0.2s ease;
+}
+
+.ops-board__hero:hover,
+.board-panel:hover {
+  border-color: var(--line-strong);
 }
 
 .ops-board__hero {
@@ -358,6 +371,11 @@ const documentHighlights = computed(() => ([
   padding: 10px 14px;
   border-radius: var(--radius-lg);
   background: rgba(36, 87, 197, 0.08);
+  transition: background 0.2s ease;
+}
+
+.ops-board__hero-stat:hover {
+  background: rgba(36, 87, 197, 0.14);
 }
 
 .ops-board__hero-stat span {
@@ -406,6 +424,23 @@ const documentHighlights = computed(() => ([
   padding: 10px 14px;
   border-radius: var(--radius-lg);
   background: var(--surface-2);
+  transition: background 0.15s ease;
+}
+
+.board-panel__metric:hover {
+  background: var(--surface-hover);
+}
+
+.board-panel__metric.is-risk strong {
+  color: var(--risk);
+}
+
+.board-panel__metric.is-processing strong {
+  color: var(--brand);
+}
+
+.board-panel__metric.is-retry strong {
+  color: var(--warning);
 }
 
 .board-panel__metric span {
@@ -438,6 +473,11 @@ const documentHighlights = computed(() => ([
   padding: 12px 14px;
   border-radius: var(--radius-lg);
   background: var(--surface-2);
+  transition: background 0.15s ease;
+}
+
+.audit-feed__item:hover {
+  background: var(--surface-hover);
 }
 
 .audit-feed__copy {
