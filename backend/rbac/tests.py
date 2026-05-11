@@ -12,9 +12,11 @@ from rbac.services.authz_service import permission_required
 from rbac.services.rbac_service import (
     ROLE_ADMIN,
     ROLE_MEMBER,
+    ROLE_PERMISSION_MAP,
     ROLE_SUPER_ADMIN,
     seed_roles_and_permissions,
 )
+from systemcheck.models import AuditRecord
 
 
 @permission_required("auth.view_dashboard")
@@ -25,6 +27,26 @@ def protected_dashboard_view(request):
 urlpatterns = [
     path("api/rbac/test-protected", protected_dashboard_view),
 ]
+
+
+def expected_permissions_for_roles(*role_names):
+    permission_names = set()
+    for role_name in role_names:
+        permission_names.update(ROLE_PERMISSION_MAP[role_name])
+    return sorted(name.split(".", 1)[1] for name in permission_names)
+
+
+class AuditRecordAssertionMixin:
+    def assert_latest_audit(self, *, action, status, target_type=None, target_id=None):
+        audit = AuditRecord.objects.order_by("-id").first()
+        self.assertIsNotNone(audit)
+        self.assertEqual(audit.action, action)
+        self.assertEqual(audit.status, status)
+        if target_type is not None:
+            self.assertEqual(audit.target_type, target_type)
+        if target_id is not None:
+            self.assertEqual(audit.target_id, str(target_id))
+        return audit
 
 
 @override_settings(
@@ -131,7 +153,7 @@ class RbacApiTests(TestCase):
     JWT_SECRET_KEY="test-jwt-secret",
     JWT_ACCESS_TOKEN_LIFETIME_SECONDS=3600,
 )
-class AdminManagementApiTests(TestCase):
+class AdminManagementApiTests(AuditRecordAssertionMixin, TestCase):
     def setUp(self):
         self.client = Client()
         seed_roles_and_permissions()
@@ -184,23 +206,7 @@ class AdminManagementApiTests(TestCase):
                 "username": "admin-user",
                 "email": "admin@example.com",
                 "groups": [ROLE_ADMIN],
-                "permissions": [
-                    "add_user",
-                    "ask_financial_qa",
-                    "change_user",
-                    "delete_document",
-                    "manage_model_config",
-                    "review_risk_event",
-                    "trigger_ingest",
-                    "upload_document",
-                    "view_audit_log",
-                    "view_chat_session",
-                    "view_dashboard",
-                    "view_document",
-                    "view_evaluation",
-                    "view_role",
-                    "view_user",
-                ],
+                "permissions": expected_permissions_for_roles(ROLE_ADMIN),
                 "is_superuser": False,
                 "is_staff": True,
                 "date_joined": self.admin_user.date_joined.isoformat(),
@@ -247,28 +253,20 @@ class AdminManagementApiTests(TestCase):
                 "username": "target-user",
                 "email": "target@example.com",
                 "groups": [ROLE_ADMIN, ROLE_MEMBER],
-                "permissions": [
-                    "add_user",
-                    "ask_financial_qa",
-                    "change_user",
-                    "delete_document",
-                    "manage_model_config",
-                    "review_risk_event",
-                    "trigger_ingest",
-                    "upload_document",
-                    "view_audit_log",
-                    "view_chat_session",
-                    "view_dashboard",
-                    "view_document",
-                    "view_evaluation",
-                    "view_role",
-                    "view_user",
-                ],
+                "permissions": expected_permissions_for_roles(ROLE_ADMIN, ROLE_MEMBER),
                 "is_superuser": False,
                 "is_staff": False,
                 "date_joined": self.target_user.date_joined.isoformat(),
             },
         )
+        audit = self.assert_latest_audit(
+            action="rbac.user.groups.replace",
+            status=AuditRecord.STATUS_SUCCEEDED,
+            target_type="user",
+            target_id=self.target_user.id,
+        )
+        self.assertEqual(audit.detail_payload["previous_groups"], [ROLE_MEMBER])
+        self.assertEqual(audit.detail_payload["groups"], [ROLE_ADMIN, ROLE_MEMBER])
 
     def test_post_admin_users_creates_user_and_assigns_groups(self):
         response = self.client.post(
@@ -293,6 +291,14 @@ class AdminManagementApiTests(TestCase):
             [ROLE_MEMBER],
         )
         self.assertEqual(response.json()["username"], "new-analyst")
+        audit = self.assert_latest_audit(
+            action="rbac.user.create",
+            status=AuditRecord.STATUS_SUCCEEDED,
+            target_type="user",
+            target_id=created_user.id,
+        )
+        self.assertEqual(audit.detail_payload["username"], "new-analyst")
+        self.assertEqual(audit.detail_payload["groups"], [ROLE_MEMBER])
 
     def test_patch_admin_user_detail_updates_profile_fields_and_groups(self):
         response = self.client.patch(
@@ -317,6 +323,14 @@ class AdminManagementApiTests(TestCase):
             list(self.target_user.groups.values_list("name", flat=True)),
             [ROLE_ADMIN],
         )
+        audit = self.assert_latest_audit(
+            action="rbac.user.update",
+            status=AuditRecord.STATUS_SUCCEEDED,
+            target_type="user",
+            target_id=self.target_user.id,
+        )
+        self.assertEqual(audit.detail_payload["username"], "target-user-updated")
+        self.assertEqual(audit.detail_payload["groups"], [ROLE_ADMIN])
 
     def test_delete_admin_user_detail_removes_target_user(self):
         response = self.client.delete(
@@ -327,6 +341,13 @@ class AdminManagementApiTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertFalse(User.objects.filter(id=self.target_user.id).exists())
         self.assertEqual(response.json(), {"message": "用户已删除。"})
+        audit = self.assert_latest_audit(
+            action="rbac.user.delete",
+            status=AuditRecord.STATUS_SUCCEEDED,
+            target_type="user",
+            target_id=self.target_user.id,
+        )
+        self.assertEqual(audit.detail_payload["username"], "target-user")
 
     def test_delete_admin_user_detail_rejects_current_user(self):
         response = self.client.delete(
@@ -336,6 +357,13 @@ class AdminManagementApiTests(TestCase):
 
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.json(), {"message": "不能删除当前登录用户。"})
+        audit = self.assert_latest_audit(
+            action="rbac.user.delete",
+            status=AuditRecord.STATUS_FAILED,
+            target_type="user",
+            target_id=self.super_admin_user.id,
+        )
+        self.assertEqual(audit.detail_payload["error"], "不能删除当前登录用户。")
 
     def test_member_receives_403_on_admin_apis(self):
         users_response = self.client.get(

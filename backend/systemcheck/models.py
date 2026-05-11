@@ -3,11 +3,13 @@ from django.db import models
 
 
 class AuditRecord(models.Model):
+    STATUS_SUBMITTED = "submitted"
     STATUS_SUCCEEDED = "succeeded"
     STATUS_FAILED = "failed"
     STATUS_RETRIED = "retried"
     STATUS_SKIPPED = "skipped"
     STATUS_CHOICES = (
+        (STATUS_SUBMITTED, "Submitted"),
         (STATUS_SUCCEEDED, "Succeeded"),
         (STATUS_FAILED, "Failed"),
         (STATUS_RETRIED, "Retried"),

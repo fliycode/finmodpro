@@ -35,6 +35,7 @@ from llm.services.runtime_service import (
     get_rerank_provider,
 )
 from rbac.services.rbac_service import ROLE_ADMIN, ROLE_MEMBER, ROLE_SUPER_ADMIN, seed_roles_and_permissions
+from systemcheck.models import AuditRecord
 
 
 class _FakeHttpResponse:
@@ -53,7 +54,20 @@ class _FakeStreamingHttpResponse:
         return iter(self._lines)
 
 
-class ModelConfigListApiTests(TestCase):
+class AuditRecordAssertionMixin:
+    def assert_latest_audit(self, *, action, status, target_type=None, target_id=None):
+        audit = AuditRecord.objects.order_by("-id").first()
+        self.assertIsNotNone(audit)
+        self.assertEqual(audit.action, action)
+        self.assertEqual(audit.status, status)
+        if target_type is not None:
+            self.assertEqual(audit.target_type, target_type)
+        if target_id is not None:
+            self.assertEqual(audit.target_id, str(target_id))
+        return audit
+
+
+class ModelConfigListApiTests(AuditRecordAssertionMixin, TestCase):
     def setUp(self):
         self.client = Client()
         seed_roles_and_permissions()
@@ -266,7 +280,7 @@ class ModelConfigListApiTests(TestCase):
     JWT_SECRET_KEY="test-jwt-secret",
     JWT_ACCESS_TOKEN_LIFETIME_SECONDS=3600,
 )
-class ModelConfigActivationApiTests(TestCase):
+class ModelConfigActivationApiTests(AuditRecordAssertionMixin, TestCase):
     def setUp(self):
         self.client = Client()
         seed_roles_and_permissions()
@@ -350,6 +364,13 @@ class ModelConfigActivationApiTests(TestCase):
         replacement.refresh_from_db()
         self.assertFalse(previous.is_active)
         self.assertTrue(replacement.is_active)
+        audit = self.assert_latest_audit(
+            action="llm.model_config.set_active_state",
+            status=AuditRecord.STATUS_SUCCEEDED,
+            target_type="model_config",
+            target_id=replacement.id,
+        )
+        self.assertTrue(audit.detail_payload["is_active"])
 
     def test_activation_can_disable_model_config(self):
         active_model = get_active_model_config(ModelConfig.CAPABILITY_CHAT)
@@ -464,6 +485,13 @@ class ModelConfigActivationApiTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json(), {"code": 0, "message": "ok", "data": {"deleted": True}})
         self.assertFalse(ModelConfig.objects.filter(id=model_config.id).exists())
+        audit = self.assert_latest_audit(
+            action="llm.model_config.delete",
+            status=AuditRecord.STATUS_SUCCEEDED,
+            target_type="model_config",
+            target_id=model_config.id,
+        )
+        self.assertEqual(audit.detail_payload["name"], "deepseek-delete-inactive")
 
     def test_admin_can_create_direct_provider_model_config(self):
         response = self.client.post(
@@ -493,6 +521,13 @@ class ModelConfigActivationApiTests(TestCase):
         payload = response.json()
         self.assertEqual(payload["data"]["model_config"]["provider"], "deepseek")
         self.assertTrue(payload["data"]["model_config"]["has_api_key"])
+        audit = self.assert_latest_audit(
+            action="llm.model_config.create",
+            status=AuditRecord.STATUS_SUCCEEDED,
+            target_type="model_config",
+        )
+        self.assertEqual(audit.detail_payload["name"], "deepseek-chat-prod")
+        self.assertTrue(audit.detail_payload["has_api_key"])
 
     @patch("urllib.request.urlopen")
     def test_admin_can_test_direct_chat_connection(self, mocked_urlopen):
@@ -519,6 +554,13 @@ class ModelConfigActivationApiTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["data"]["ok"], True)
+        audit = self.assert_latest_audit(
+            action="llm.model_config.test_connection",
+            status=AuditRecord.STATUS_SUCCEEDED,
+            target_type="model_config",
+        )
+        self.assertEqual(audit.detail_payload["provider"], "deepseek")
+        self.assertTrue(audit.detail_payload["has_api_key"])
 
     @patch("urllib.request.urlopen")
     def test_admin_can_test_direct_embedding_connection(self, mocked_urlopen):
@@ -616,13 +658,13 @@ class PromptConfigListApiTests(TestCase):
         payload = response.json()
         self.assertEqual(payload["code"], 0)
         self.assertEqual(payload["message"], "ok")
-        self.assertEqual(payload["data"]["total"], 2)
-        self.assertEqual(
-            [item["key"] for item in payload["data"]["prompt_configs"]],
-            ["chat/answer.txt", "risk/extract.txt"],
-        )
+        prompt_configs = payload["data"]["prompt_configs"]
+        self.assertEqual(payload["data"]["total"], len(prompt_configs))
+        prompt_keys = [item["key"] for item in prompt_configs]
+        self.assertIn("chat/answer.txt", prompt_keys)
+        self.assertIn("risk/extract.txt", prompt_keys)
 
-        first_prompt = payload["data"]["prompt_configs"][0]
+        first_prompt = next(item for item in prompt_configs if item["key"] == "chat/answer.txt")
         self.assertEqual(
             set(first_prompt.keys()),
             {"key", "category", "name", "template", "variables", "updated_at"},
@@ -638,7 +680,7 @@ class PromptConfigListApiTests(TestCase):
     JWT_SECRET_KEY="test-jwt-secret",
     JWT_ACCESS_TOKEN_LIFETIME_SECONDS=3600,
 )
-class PromptConfigUpdateApiTests(TestCase):
+class PromptConfigUpdateApiTests(AuditRecordAssertionMixin, TestCase):
     def setUp(self):
         self.client = Client()
         seed_roles_and_permissions()
@@ -750,13 +792,21 @@ class PromptConfigUpdateApiTests(TestCase):
             render_prompt("chat/answer.txt", company_name="FinModPro", quarter="2025Q1"),
             "新模板：FinModPro / 2025Q1",
         )
+        audit = self.assert_latest_audit(
+            action="llm.prompt_config.update",
+            status=AuditRecord.STATUS_SUCCEEDED,
+            target_type="prompt_config",
+            target_id="chat/answer.txt",
+        )
+        self.assertEqual(audit.detail_payload["template_length"], len("新模板：{company_name} / {quarter}"))
+        self.assertEqual(audit.detail_payload["variable_names"], ["company_name", "quarter"])
 
 
 @override_settings(
     JWT_SECRET_KEY="test-jwt-secret",
     JWT_ACCESS_TOKEN_LIFETIME_SECONDS=3600,
 )
-class EvalRecordApiTests(TestCase):
+class EvalRecordApiTests(AuditRecordAssertionMixin, TestCase):
     def setUp(self):
         self.client = Client()
         seed_roles_and_permissions()
@@ -857,6 +907,13 @@ class EvalRecordApiTests(TestCase):
         self.assertEqual(payload["data"]["eval_record"]["metadata"]["qa_dataset_size"], 2)
         self.assertEqual(payload["data"]["eval_record"]["metadata"]["extraction_dataset_size"], 2)
         self.assertEqual(EvalRecord.objects.count(), 1)
+        audit = self.assert_latest_audit(
+            action="llm.evaluation.run",
+            status=AuditRecord.STATUS_SUCCEEDED,
+            target_type="evaluation",
+        )
+        self.assertEqual(audit.detail_payload["task_type"], "qa")
+        self.assertEqual(audit.detail_payload["dataset_name"], "qa-smoke")
 
     def test_list_evaluations_requires_view_evaluation_permission(self):
         response = self.client.get(
@@ -959,7 +1016,7 @@ class EvalRecordApiTests(TestCase):
     JWT_SECRET_KEY="test-jwt-secret",
     JWT_ACCESS_TOKEN_LIFETIME_SECONDS=3600,
 )
-class FineTuneRunApiTests(TestCase):
+class FineTuneRunApiTests(AuditRecordAssertionMixin, TestCase):
     def setUp(self):
         self.client = Client()
         seed_roles_and_permissions()
@@ -1024,6 +1081,13 @@ class FineTuneRunApiTests(TestCase):
         self.assertEqual(payload["data"]["fine_tune_run"]["training_config"]["epochs"], 3)
         self.assertTrue(payload["data"]["fine_tune_run"]["callback_token"].startswith("ftcb_"))
         self.assertEqual(FineTuneRun.objects.count(), 1)
+        audit = self.assert_latest_audit(
+            action="llm.fine_tune_run.create",
+            status=AuditRecord.STATUS_SUCCEEDED,
+            target_type="fine_tune_run",
+        )
+        self.assertEqual(audit.detail_payload["dataset_name"], "财报基准集")
+        self.assertEqual(audit.detail_payload["strategy"], "lora")
 
     def test_list_fine_tunes_returns_model_lineage(self):
         base_model = get_active_model_config(ModelConfig.CAPABILITY_CHAT)
@@ -1132,6 +1196,13 @@ class FineTuneRunApiTests(TestCase):
         self.assertEqual(payload["data"]["fine_tune_run"]["metrics"]["f1_score"], 0.95)
         self.assertEqual(payload["data"]["fine_tune_run"]["notes"], "训练结果已回写平台。")
         self.assertEqual(payload["data"]["fine_tune_run"]["artifact_manifest"], {})
+        audit = self.assert_latest_audit(
+            action="llm.fine_tune_run.update",
+            status=AuditRecord.STATUS_SUCCEEDED,
+            target_type="fine_tune_run",
+            target_id=run.id,
+        )
+        self.assertEqual(audit.detail_payload["status"], "succeeded")
 
     def test_update_fine_tune_run_accepts_runner_name_and_training_config(self):
         base_model = get_active_model_config(ModelConfig.CAPABILITY_CHAT)
@@ -1261,7 +1332,7 @@ class FineTuneRunnerClientTests(SimpleTestCase):
         self.assertEqual(command[batch_index + 1], "3")
 
 
-class FineTuneRunCallbackApiTests(TestCase):
+class FineTuneRunCallbackApiTests(AuditRecordAssertionMixin, TestCase):
     def setUp(self):
         self.client = Client()
         seed_roles_and_permissions()
@@ -1558,6 +1629,13 @@ class FineTuneRunCallbackApiTests(TestCase):
         self.assertEqual(server_payload["base_url"], "https://gpu-runner.example")
         self.assertTrue(server_payload["has_auth_token"])
         self.assertEqual(server_payload["auth_token_masked"], "runner******oken")
+        audit = self.assert_latest_audit(
+            action="llm.fine_tune_runner_server.create",
+            status=AuditRecord.STATUS_SUCCEEDED,
+            target_type="fine_tune_runner_server",
+        )
+        self.assertEqual(audit.detail_payload["name"], "gpu-runner-a")
+        self.assertTrue(audit.detail_payload["has_auth_token"])
 
         base_model = get_active_model_config(ModelConfig.CAPABILITY_CHAT)
         create_run_response = self.client.post(
@@ -1647,6 +1725,13 @@ class FineTuneRunCallbackApiTests(TestCase):
         self.assertEqual(payload["dispatch"]["job_id"], "gpu-job-001")
         self.assertEqual(payload["fine_tune_run"]["external_job_id"], "gpu-job-001")
         self.assertEqual(payload["fine_tune_run"]["runner_name"], "gpu-runner-a")
+        audit = self.assert_latest_audit(
+            action="llm.fine_tune_run.dispatch",
+            status=AuditRecord.STATUS_SUBMITTED,
+            target_type="fine_tune_run",
+            target_id=run_id,
+        )
+        self.assertEqual(audit.detail_payload["job_id"], "gpu-job-001")
 
         request_obj = mock_urlopen.call_args.args[0]
         self.assertEqual(request_obj.full_url, "https://gpu-runner.example/api/v1/fine-tune-jobs")

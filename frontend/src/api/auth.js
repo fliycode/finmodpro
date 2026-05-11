@@ -124,6 +124,29 @@ export const createAuthApi = (overrides = {}) => {
         }),
       });
     },
+    async forgotPassword(payload) {
+      await ensureCsrfCookie(config);
+      return config.fetchJson('/api/auth/forgot-password', {
+        method: 'POST',
+        credentials: 'include',
+        headers: withCsrfHeaders(),
+        body: JSON.stringify({
+          username: payload.username,
+        }),
+      });
+    },
+    async resetPassword(payload) {
+      await ensureCsrfCookie(config);
+      return config.fetchJson('/api/auth/reset-password', {
+        method: 'POST',
+        credentials: 'include',
+        headers: withCsrfHeaders(),
+        body: JSON.stringify({
+          token: payload.token,
+          new_password: payload.newPassword,
+        }),
+      });
+    },
   };
 };
 

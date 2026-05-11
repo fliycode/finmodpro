@@ -106,13 +106,19 @@ def ensure_role_groups():
 
     cache_key = "rbac:role_groups"
     cached = cache.get(cache_key)
-    if cached is not None:
-        return cached
+    if isinstance(cached, (list, tuple, set)):
+        cached_names = [str(name) for name in cached]
+        cached_groups = {
+            group.name: group
+            for group in Group.objects.filter(name__in=cached_names)
+        }
+        if all(role_name in cached_groups for role_name in ROLE_PERMISSION_MAP):
+            return cached_groups
 
     groups = {}
     for role_name in ROLE_PERMISSION_MAP:
         groups[role_name], _ = Group.objects.get_or_create(name=role_name)
-    cache.set(cache_key, groups, 3600)
+    cache.set(cache_key, list(groups.keys()), 3600)
     return groups
 
 

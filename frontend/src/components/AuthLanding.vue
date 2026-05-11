@@ -45,9 +45,21 @@ const streamedStatement = ref('');
 const usernameInput = ref(null);
 let typingTimer = null;
 
-const panelTitle = computed(() => (props.activeTab === 'login' ? '欢迎回来' : '创建账号'));
-const panelEyebrow = computed(() => (props.activeTab === 'login' ? 'Welcome back' : 'Create account'));
-const submitLabel = computed(() => (props.activeTab === 'login' ? '登录' : '创建账号'));
+const panelTitle = computed(() => {
+  if (props.activeTab === 'forgot') return '忘记密码';
+  if (props.activeTab === 'reset') return '重置密码';
+  return props.activeTab === 'login' ? '欢迎回来' : '创建账号';
+});
+const panelEyebrow = computed(() => {
+  if (props.activeTab === 'forgot') return 'Forgot password';
+  if (props.activeTab === 'reset') return 'Reset password';
+  return props.activeTab === 'login' ? 'Welcome back' : 'Create account';
+});
+const submitLabel = computed(() => {
+  if (props.activeTab === 'forgot') return '发送重置链接';
+  if (props.activeTab === 'reset') return '重置密码';
+  return props.activeTab === 'login' ? '登录' : '创建账号';
+});
 const statementSegments = computed(() => buildBrandStatementSegments(streamedStatement.value));
 const passwordToggleLabel = computed(() => getPasswordToggleLabel(props.showPassword));
 const STATEMENT_STREAM_INTERVAL_MS = 56;
@@ -172,109 +184,200 @@ watch(() => props.activeTab, () => {
               </div>
 
               <form class="auth-form" novalidate @submit="emit('submit', $event)">
-                <div class="form-group">
-                  <label for="username">用户名</label>
-                  <input
-                    id="username"
-                    ref="usernameInput"
-                    v-model="formData.username"
-                    type="text"
-                    autocomplete="username"
-                    maxlength="64"
-                    :placeholder="activeTab === 'register' ? '例如：finance.ops' : '请输入用户名'"
-                    :class="{ 'input-error': errors.username }"
-                    :aria-invalid="!!errors.username"
-                    :aria-describedby="errors.username ? 'username-error' : undefined"
-                    :disabled="isLoading"
-                  />
-                  <span v-if="errors.username" id="username-error" class="error-msg" role="alert">{{ errors.username }}</span>
-                </div>
-
-                <div v-if="activeTab === 'register'" class="form-group">
-                  <label for="email">电子邮箱</label>
-                  <input
-                    id="email"
-                    v-model="formData.email"
-                    type="email"
-                    autocomplete="email"
-                    maxlength="254"
-                    placeholder="name@company.com"
-                    :class="{ 'input-error': errors.email }"
-                    :aria-invalid="!!errors.email"
-                    :aria-describedby="errors.email ? 'email-error' : undefined"
-                    :disabled="isLoading"
-                  />
-                  <span v-if="errors.email" id="email-error" class="error-msg" role="alert">{{ errors.email }}</span>
-                </div>
-
-                <div class="form-group">
-                  <div class="label-row">
-                    <label for="password">密码</label>
-                    <span v-if="activeTab === 'login'" class="inline-link inline-link--muted">忘记密码？</span>
-                  </div>
-                  <div class="password-input-wrapper">
+                <!-- Login / Register fields -->
+                <template v-if="activeTab === 'login' || activeTab === 'register'">
+                  <div class="form-group">
+                    <label for="username">用户名</label>
                     <input
-                      id="password"
-                      v-model="formData.password"
-                      :type="showPassword ? 'text' : 'password'"
-                      :autocomplete="activeTab === 'login' ? 'current-password' : 'new-password'"
-                      maxlength="128"
-                      placeholder="••••••••"
-                      :class="{ 'input-error': errors.password }"
-                      :aria-invalid="!!errors.password"
-                      :aria-describedby="errors.password ? 'password-error' : undefined"
+                      id="username"
+                      ref="usernameInput"
+                      v-model="formData.username"
+                      type="text"
+                      autocomplete="username"
+                      maxlength="64"
+                      :placeholder="activeTab === 'register' ? '例如：finance.ops' : '请输入用户名'"
+                      :class="{ 'input-error': errors.username }"
+                      :aria-invalid="!!errors.username"
+                      :aria-describedby="errors.username ? 'username-error' : undefined"
                       :disabled="isLoading"
                     />
-                    <button
-                      type="button"
-                      class="toggle-pwd"
-                      :aria-label="passwordToggleLabel"
-                      :title="passwordToggleLabel"
-                      :disabled="isLoading"
-                      @click="emit('toggle-password')"
-                    >
-                      <AppIcon :name="showPassword ? 'eye-off' : 'eye'" />
-                    </button>
+                    <span v-if="errors.username" id="username-error" class="error-msg" role="alert">{{ errors.username }}</span>
                   </div>
-                  <span v-if="errors.password" id="password-error" class="error-msg" role="alert">{{ errors.password }}</span>
-                </div>
 
-                <div v-if="activeTab === 'register'" class="form-group">
-                  <label for="confirmPassword">确认密码</label>
-                  <input
-                    id="confirmPassword"
-                    v-model="formData.confirmPassword"
-                    :type="showPassword ? 'text' : 'password'"
-                    autocomplete="new-password"
-                    maxlength="128"
-                    placeholder="再次输入密码"
-                    :class="{ 'input-error': errors.confirmPassword }"
-                    :aria-invalid="!!errors.confirmPassword"
-                    :aria-describedby="errors.confirmPassword ? 'confirm-password-error' : undefined"
-                    :disabled="isLoading"
-                  />
-                  <span v-if="errors.confirmPassword" id="confirm-password-error" class="error-msg" role="alert">{{ errors.confirmPassword }}</span>
-                </div>
+                  <div v-if="activeTab === 'register'" class="form-group">
+                    <label for="email">电子邮箱</label>
+                    <input
+                      id="email"
+                      v-model="formData.email"
+                      type="email"
+                      autocomplete="email"
+                      maxlength="254"
+                      placeholder="name@company.com"
+                      :class="{ 'input-error': errors.email }"
+                      :aria-invalid="!!errors.email"
+                      :aria-describedby="errors.email ? 'email-error' : undefined"
+                      :disabled="isLoading"
+                    />
+                    <span v-if="errors.email" id="email-error" class="error-msg" role="alert">{{ errors.email }}</span>
+                  </div>
 
-                <div v-if="activeTab === 'register'" class="form-group checkbox-group">
-                  <label class="checkbox-label" for="agreeTerms">
-                    <input id="agreeTerms" v-model="formData.agreeTerms" type="checkbox" :disabled="isLoading" />
-                    <span>我同意 <span class="inline-link inline-link--muted">服务条款</span> 与 <span class="inline-link inline-link--muted">隐私政策</span></span>
-                  </label>
-                  <span v-if="errors.agreeTerms" class="error-msg" role="alert">{{ errors.agreeTerms }}</span>
-                </div>
+                  <div class="form-group">
+                    <div class="label-row">
+                      <label for="password">密码</label>
+                      <button
+                        v-if="activeTab === 'login'"
+                        type="button"
+                        class="inline-link inline-link--muted"
+                        :disabled="isLoading"
+                        @click="emit('toggle-tab', 'forgot')"
+                      >忘记密码？</button>
+                    </div>
+                    <div class="password-input-wrapper">
+                      <input
+                        id="password"
+                        v-model="formData.password"
+                        :type="showPassword ? 'text' : 'password'"
+                        :autocomplete="activeTab === 'login' ? 'current-password' : 'new-password'"
+                        maxlength="128"
+                        placeholder="••••••••"
+                        :class="{ 'input-error': errors.password }"
+                        :aria-invalid="!!errors.password"
+                        :aria-describedby="errors.password ? 'password-error' : undefined"
+                        :disabled="isLoading"
+                      />
+                      <button
+                        type="button"
+                        class="toggle-pwd"
+                        :aria-label="passwordToggleLabel"
+                        :title="passwordToggleLabel"
+                        :disabled="isLoading"
+                        @click="emit('toggle-password')"
+                      >
+                        <AppIcon :name="showPassword ? 'eye-off' : 'eye'" />
+                      </button>
+                    </div>
+                    <span v-if="errors.password" id="password-error" class="error-msg" role="alert">{{ errors.password }}</span>
+                  </div>
 
-                <div v-if="activeTab === 'login'" class="form-group checkbox-group checkbox-group--compact">
-                  <label class="checkbox-label" for="rememberMe">
-                    <input id="rememberMe" v-model="formData.rememberMe" type="checkbox" :disabled="isLoading" />
-                    <span>7 天内免登录</span>
-                  </label>
-                </div>
+                  <div v-if="activeTab === 'register'" class="form-group">
+                    <label for="confirmPassword">确认密码</label>
+                    <input
+                      id="confirmPassword"
+                      v-model="formData.confirmPassword"
+                      :type="showPassword ? 'text' : 'password'"
+                      autocomplete="new-password"
+                      maxlength="128"
+                      placeholder="再次输入密码"
+                      :class="{ 'input-error': errors.confirmPassword }"
+                      :aria-invalid="!!errors.confirmPassword"
+                      :aria-describedby="errors.confirmPassword ? 'confirm-password-error' : undefined"
+                      :disabled="isLoading"
+                    />
+                    <span v-if="errors.confirmPassword" id="confirm-password-error" class="error-msg" role="alert">{{ errors.confirmPassword }}</span>
+                  </div>
+
+                  <div v-if="activeTab === 'register'" class="form-group checkbox-group">
+                    <label class="checkbox-label" for="agreeTerms">
+                      <input id="agreeTerms" v-model="formData.agreeTerms" type="checkbox" :disabled="isLoading" />
+                      <span>我同意 <span class="inline-link inline-link--muted">服务条款</span> 与 <span class="inline-link inline-link--muted">隐私政策</span></span>
+                    </label>
+                    <span v-if="errors.agreeTerms" class="error-msg" role="alert">{{ errors.agreeTerms }}</span>
+                  </div>
+
+                  <div v-if="activeTab === 'login'" class="form-group checkbox-group checkbox-group--compact">
+                    <label class="checkbox-label" for="rememberMe">
+                      <input id="rememberMe" v-model="formData.rememberMe" type="checkbox" :disabled="isLoading" />
+                      <span>7 天内免登录</span>
+                    </label>
+                  </div>
+                </template>
+
+                <!-- Forgot password fields -->
+                <template v-if="activeTab === 'forgot'">
+                  <div class="form-group">
+                    <label for="username">用户名</label>
+                    <input
+                      id="username"
+                      ref="usernameInput"
+                      v-model="formData.username"
+                      type="text"
+                      autocomplete="username"
+                      maxlength="64"
+                      placeholder="请输入注册时的用户名"
+                      :class="{ 'input-error': errors.username }"
+                      :aria-invalid="!!errors.username"
+                      :aria-describedby="errors.username ? 'username-error' : undefined"
+                      :disabled="isLoading"
+                    />
+                    <span v-if="errors.username" id="username-error" class="error-msg" role="alert">{{ errors.username }}</span>
+                  </div>
+                  <p class="forgot-hint">输入用户名后，系统将生成密码重置链接。</p>
+                </template>
+
+                <!-- Reset password fields -->
+                <template v-if="activeTab === 'reset'">
+                  <div class="form-group">
+                    <div class="label-row">
+                      <label for="password">新密码</label>
+                    </div>
+                    <div class="password-input-wrapper">
+                      <input
+                        id="password"
+                        v-model="formData.password"
+                        :type="showPassword ? 'text' : 'password'"
+                        autocomplete="new-password"
+                        maxlength="128"
+                        placeholder="••••••••"
+                        :class="{ 'input-error': errors.password }"
+                        :aria-invalid="!!errors.password"
+                        :aria-describedby="errors.password ? 'password-error' : undefined"
+                        :disabled="isLoading"
+                      />
+                      <button
+                        type="button"
+                        class="toggle-pwd"
+                        :aria-label="passwordToggleLabel"
+                        :title="passwordToggleLabel"
+                        :disabled="isLoading"
+                        @click="emit('toggle-password')"
+                      >
+                        <AppIcon :name="showPassword ? 'eye-off' : 'eye'" />
+                      </button>
+                    </div>
+                    <span v-if="errors.password" id="password-error" class="error-msg" role="alert">{{ errors.password }}</span>
+                  </div>
+
+                  <div class="form-group">
+                    <label for="confirmPassword">确认新密码</label>
+                    <input
+                      id="confirmPassword"
+                      v-model="formData.confirmPassword"
+                      :type="showPassword ? 'text' : 'password'"
+                      autocomplete="new-password"
+                      maxlength="128"
+                      placeholder="再次输入密码"
+                      :class="{ 'input-error': errors.confirmPassword }"
+                      :aria-invalid="!!errors.confirmPassword"
+                      :aria-describedby="errors.confirmPassword ? 'confirm-password-error' : undefined"
+                      :disabled="isLoading"
+                    />
+                    <span v-if="errors.confirmPassword" id="confirm-password-error" class="error-msg" role="alert">{{ errors.confirmPassword }}</span>
+                  </div>
+                </template>
 
                 <button type="submit" class="primary-button" :disabled="isLoading">
                   <span v-if="isLoading" class="loader"></span>
                   <span v-else>{{ submitLabel }}</span>
                 </button>
+
+                <div v-if="activeTab === 'forgot' || activeTab === 'reset'" class="back-to-login">
+                  <button
+                    type="button"
+                    class="inline-link inline-link--muted"
+                    :disabled="isLoading"
+                    @click="emit('toggle-tab', 'login')"
+                  >返回登录</button>
+                </div>
               </form>
             </div>
           </Transition>
@@ -878,7 +981,31 @@ watch(() => props.activeTab, () => {
 .inline-link--muted {
   color: var(--entry-accent);
   opacity: 0.7;
-  cursor: default;
+  cursor: pointer;
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+}
+
+.inline-link--muted:hover {
+  opacity: 1;
+  text-decoration: underline;
+}
+
+.forgot-hint {
+  margin: -4px 0 8px;
+  font-size: 0.84rem;
+  color: var(--entry-muted);
+  line-height: 1.5;
+}
+
+.back-to-login {
+  text-align: center;
+  margin-top: 12px;
+  opacity: 0;
+  animation: formGroupReveal 480ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  animation-delay: 200ms;
 }
 
 .error-msg {

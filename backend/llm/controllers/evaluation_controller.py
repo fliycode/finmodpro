@@ -8,6 +8,8 @@ from llm.services.evaluation_service import (
     run_basic_evaluation,
 )
 from rbac.services.authz_service import get_authenticated_user, user_has_permission
+from systemcheck.models import AuditRecord
+from systemcheck.services.audit_service import record_audit_event
 
 
 class EvalRecordListCreateView(APIView):
@@ -44,8 +46,39 @@ class EvalRecordListCreateView(APIView):
         try:
             eval_record = run_basic_evaluation(**serializer.validated_data)
         except ValueError:
+            record_audit_event(
+                actor=user,
+                action="llm.evaluation.run",
+                target_type="evaluation",
+                target_id=serializer.validated_data.get("model_config_id") or "",
+                status=AuditRecord.STATUS_FAILED,
+                detail_payload={
+                    "task_type": serializer.validated_data["task_type"],
+                    "evaluation_mode": serializer.validated_data.get("evaluation_mode", ""),
+                    "dataset_name": serializer.validated_data.get("dataset_name", ""),
+                    "dataset_version": serializer.validated_data.get("dataset_version", ""),
+                    "version": serializer.validated_data.get("version", ""),
+                    "error": "模型配置不存在。",
+                },
+            )
             return error_response(code=404, message="模型配置不存在。", status_code=404)
 
+        record_audit_event(
+            actor=user,
+            action="llm.evaluation.run",
+            target_type="evaluation",
+            target_id=eval_record.id,
+            status=AuditRecord.STATUS_SUCCEEDED,
+            detail_payload={
+                "task_type": eval_record.task_type,
+                "evaluation_mode": eval_record.evaluation_mode,
+                "target_name": eval_record.target_name,
+                "model_config_id": eval_record.model_config_id or "",
+                "dataset_name": eval_record.dataset_name,
+                "dataset_version": eval_record.dataset_version,
+                "version": eval_record.version,
+            },
+        )
         return success_response(
             data={"eval_record": EvalRecordSummarySerializer(eval_record).data},
             status_code=201,

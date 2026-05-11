@@ -9,10 +9,12 @@ from unittest.mock import patch
 
 from authentication.models import User
 from authentication.controllers.auth_controller import (
+    forgot_password_view,
     login_view,
     logout_view,
     refresh_view,
     register_view,
+    reset_password_view,
 )
 from authentication.services.refresh_session_service import (
     RefreshSessionError,
@@ -20,6 +22,12 @@ from authentication.services.refresh_session_service import (
     rotate_refresh_session,
 )
 from authentication.services.jwt_service import decode_access_token, generate_access_token
+from authentication.services.password_reset_service import (
+    PasswordResetError,
+    create_reset_token,
+    reset_password,
+    validate_reset_token,
+)
 from rbac.services.rbac_service import seed_roles_and_permissions
 
 
@@ -472,3 +480,183 @@ class AuthenticationCookieResponseTests(SimpleTestCase):
         revoke_refresh_session_mock.assert_called_once_with("cookie-to-revoke")
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.cookies["finmodpro_refresh"]["max-age"], 0)
+
+
+@override_settings(
+    JWT_SECRET_KEY="test-jwt-secret",
+    AUTH_PASSWORD_RESET_TOKEN_LIFETIME_SECONDS=1800,
+)
+class PasswordResetServiceTests(TestCase):
+    def test_create_reset_token_raises_for_unknown_username(self):
+        with self.assertRaises(PasswordResetError):
+            create_reset_token(username="nonexistent")
+
+    def test_create_reset_token_returns_raw_token_and_lifetime(self):
+        User.objects.create_user(username="alice", password="secret123")
+        raw_token, lifetime = create_reset_token(username="alice")
+        self.assertIsInstance(raw_token, str)
+        self.assertTrue(len(raw_token) > 20)
+        self.assertEqual(lifetime, 1800)
+
+    def test_validate_reset_token_returns_record_for_valid_token(self):
+        User.objects.create_user(username="alice", password="secret123")
+        raw_token, _ = create_reset_token(username="alice")
+        record = validate_reset_token(token=raw_token)
+        self.assertEqual(record.user.username, "alice")
+        self.assertFalse(record.used)
+
+    def test_validate_reset_token_rejects_invalid_token(self):
+        with self.assertRaises(PasswordResetError):
+            validate_reset_token(token="invalid-token")
+
+    def test_validate_reset_token_rejects_used_token(self):
+        User.objects.create_user(username="alice", password="secret123")
+        raw_token, _ = create_reset_token(username="alice")
+        reset_password(token=raw_token, new_password="newpass123")
+        with self.assertRaises(PasswordResetError):
+            validate_reset_token(token=raw_token)
+
+    def test_create_reset_token_invalidates_previous_tokens(self):
+        User.objects.create_user(username="alice", password="secret123")
+        first_token, _ = create_reset_token(username="alice")
+        create_reset_token(username="alice")
+        with self.assertRaises(PasswordResetError):
+            validate_reset_token(token=first_token)
+
+    def test_reset_password_changes_user_password(self):
+        user = User.objects.create_user(username="alice", password="secret123")
+        raw_token, _ = create_reset_token(username="alice")
+        result_user = reset_password(token=raw_token, new_password="newpass123")
+        self.assertEqual(result_user.id, user.id)
+        user.refresh_from_db()
+        self.assertTrue(user.check_password("newpass123"))
+
+    def test_reset_password_marks_token_as_used(self):
+        User.objects.create_user(username="alice", password="secret123")
+        raw_token, _ = create_reset_token(username="alice")
+        reset_password(token=raw_token, new_password="newpass123")
+        from authentication.models import PasswordResetToken
+        token_hash = PasswordResetToken.objects.get(user__username="alice")
+        self.assertTrue(token_hash.used)
+
+
+@override_settings(
+    JWT_SECRET_KEY="test-jwt-secret",
+    AUTH_PASSWORD_RESET_TOKEN_LIFETIME_SECONDS=1800,
+)
+class PasswordResetApiTests(TestCase):
+    def test_forgot_password_returns_reset_token(self):
+        User.objects.create_user(username="alice", password="secret123")
+        response = self.client.post(
+            "/api/auth/forgot-password",
+            data=json.dumps({"username": "alice"}),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertIn("reset_token", payload)
+        self.assertEqual(payload["expires_in"], 1800)
+
+    def test_forgot_password_rejects_unknown_username(self):
+        response = self.client.post(
+            "/api/auth/forgot-password",
+            data=json.dumps({"username": "nonexistent"}),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 404)
+        self.assertIn("不存在", response.json()["message"])
+
+    def test_forgot_password_rejects_missing_username(self):
+        response = self.client.post(
+            "/api/auth/forgot-password",
+            data=json.dumps({}),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 400)
+
+    def test_reset_password_with_valid_token(self):
+        User.objects.create_user(username="alice", password="secret123")
+        token_resp = self.client.post(
+            "/api/auth/forgot-password",
+            data=json.dumps({"username": "alice"}),
+            content_type="application/json",
+        )
+        reset_token = token_resp.json()["reset_token"]
+
+        response = self.client.post(
+            "/api/auth/reset-password",
+            data=json.dumps({"token": reset_token, "new_password": "newpass123"}),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("已重置", response.json()["message"])
+
+        login_resp = self.client.post(
+            "/api/auth/login",
+            data=json.dumps({"username": "alice", "password": "newpass123"}),
+            content_type="application/json",
+        )
+        self.assertEqual(login_resp.status_code, 200)
+
+    def test_reset_password_rejects_invalid_token(self):
+        response = self.client.post(
+            "/api/auth/reset-password",
+            data=json.dumps({"token": "bad-token", "new_password": "newpass123"}),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 400)
+
+    def test_reset_password_rejects_short_password(self):
+        User.objects.create_user(username="alice", password="secret123")
+        token_resp = self.client.post(
+            "/api/auth/forgot-password",
+            data=json.dumps({"username": "alice"}),
+            content_type="application/json",
+        )
+        reset_token = token_resp.json()["reset_token"]
+
+        response = self.client.post(
+            "/api/auth/reset-password",
+            data=json.dumps({"token": reset_token, "new_password": "short"}),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("8位", response.json()["message"])
+
+    def test_reset_password_rejects_used_token(self):
+        User.objects.create_user(username="alice", password="secret123")
+        token_resp = self.client.post(
+            "/api/auth/forgot-password",
+            data=json.dumps({"username": "alice"}),
+            content_type="application/json",
+        )
+        reset_token = token_resp.json()["reset_token"]
+
+        self.client.post(
+            "/api/auth/reset-password",
+            data=json.dumps({"token": reset_token, "new_password": "newpass123"}),
+            content_type="application/json",
+        )
+
+        response = self.client.post(
+            "/api/auth/reset-password",
+            data=json.dumps({"token": reset_token, "new_password": "another123"}),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 400)
+
+    def test_forgot_password_rejects_invalid_json(self):
+        response = self.client.post(
+            "/api/auth/forgot-password",
+            data="not-json",
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 400)
+
+    def test_reset_password_rejects_invalid_json(self):
+        response = self.client.post(
+            "/api/auth/reset-password",
+            data="not-json",
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 400)

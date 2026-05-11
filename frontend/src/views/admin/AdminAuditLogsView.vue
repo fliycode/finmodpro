@@ -3,6 +3,12 @@ import { computed, onMounted, ref } from 'vue';
 import { dashboardApi } from '../../api/dashboard.js';
 import OpsSectionFrame from '../../components/admin/ops/OpsSectionFrame.vue';
 import AppIcon from '../../components/ui/AppIcon.vue';
+import {
+  formatAuditAction,
+  formatAuditDetail,
+  formatAuditStatus,
+  getAuditActionTone,
+} from '../../lib/admin-audit.js';
 
 const audits = ref([]);
 const isLoading = ref(false);
@@ -12,27 +18,6 @@ const pageSize = ref(10);
 const total = ref(0);
 const searchQuery = ref('');
 const searchInput = ref('');
-
-const actionLabels = {
-  'knowledgebase.ingest': '知识入库',
-  'risk.extract': '风险提取',
-  'risk.extract.retry': '重试风险提取',
-  'risk.batch_extract': '批量风险提取',
-  'risk.batch_extract.retry': '重试批量提取',
-  'risk.sentiment': '舆情分析',
-};
-const formatAction = (action) => actionLabels[action] || action || '--';
-
-const actionTones = {
-  'knowledgebase.ingest': 'brand',
-  'risk.extract': 'risk',
-  'risk.extract.retry': 'risk',
-  'risk.batch_extract': 'risk',
-  'risk.batch_extract.retry': 'risk',
-  'risk.sentiment': 'accent',
-};
-
-const statusLabels = { succeeded: '成功', failed: '失败', pending: '待处理', retried: '已重试' };
 
 const stats = computed(() => {
   const failed = audits.value.filter((i) => i.status === 'failed').length;
@@ -135,6 +120,7 @@ onMounted(fetchData);
             <th class="audit-th audit-th--id">ID</th>
             <th class="audit-th">操作人</th>
             <th class="audit-th">操作</th>
+            <th class="audit-th audit-th--detail">详情</th>
             <th class="audit-th">目标类型</th>
             <th class="audit-th">状态</th>
             <th class="audit-th audit-th--time">时间</th>
@@ -143,16 +129,17 @@ onMounted(fetchData);
         <tbody>
           <tr v-for="row in audits" :key="row.id" class="audit-row">
             <td class="audit-td audit-td--id">{{ row.id }}</td>
-            <td class="audit-td audit-td--actor">{{ row.actor_name || '--' }}</td>
-            <td class="audit-td">
-              <span class="audit-action-badge" :class="`is-${actionTones[row.action] || 'neutral'}`">{{ formatAction(row.action) }}</span>
-            </td>
-            <td class="audit-td audit-td--muted">{{ row.target_type || '--' }}</td>
-            <td class="audit-td">
-              <span class="audit-status-badge" :class="`is-${row.status}`">{{ statusLabels[row.status] || row.status }}</span>
-            </td>
-            <td class="audit-td audit-td--time">{{ formatTime(row.created_at) }}</td>
-          </tr>
+              <td class="audit-td audit-td--actor">{{ row.actor_name || '--' }}</td>
+              <td class="audit-td">
+                <span class="audit-action-badge" :class="`is-${getAuditActionTone(row.action)}`">{{ formatAuditAction(row.action) }}</span>
+              </td>
+              <td class="audit-td audit-td--detail" :title="formatAuditDetail(row.detail_payload)">{{ formatAuditDetail(row.detail_payload) }}</td>
+              <td class="audit-td audit-td--muted">{{ row.target_type || '--' }}</td>
+              <td class="audit-td">
+                <span class="audit-status-badge" :class="`is-${row.status}`">{{ formatAuditStatus(row.status) }}</span>
+              </td>
+              <td class="audit-td audit-td--time">{{ formatTime(row.created_at) }}</td>
+            </tr>
         </tbody>
       </table>
     </section>
@@ -316,6 +303,7 @@ onMounted(fetchData);
 }
 
 .audit-th--id { width: 64px; }
+.audit-th--detail { min-width: 280px; }
 .audit-th--time { width: 170px; }
 
 .audit-row {
@@ -345,6 +333,13 @@ onMounted(fetchData);
 
 .audit-td--muted {
   color: var(--text-secondary);
+}
+
+.audit-td--detail {
+  max-width: 320px;
+  color: var(--text-secondary);
+  font-size: 11px;
+  line-height: 1.45;
 }
 
 .audit-td--time {
@@ -406,6 +401,16 @@ onMounted(fetchData);
 .audit-status-badge.is-retried {
   background: rgba(91, 108, 255, 0.1);
   color: #7d8cff;
+}
+
+.audit-status-badge.is-submitted {
+  background: rgba(36, 87, 197, 0.12);
+  color: #5b8af5;
+}
+
+.audit-status-badge.is-skipped {
+  background: rgba(120, 128, 145, 0.12);
+  color: #9ea9bc;
 }
 
 /* ---- States ---- */

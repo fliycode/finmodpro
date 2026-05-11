@@ -3,6 +3,26 @@ const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 export function validateAuthForm(mode, formData) {
   const errors = {};
 
+  if (mode === 'forgot') {
+    if (!formData.username?.trim()) {
+      errors.username = '用户名必填';
+    }
+    return errors;
+  }
+
+  if (mode === 'reset') {
+    if (!formData.password) {
+      errors.password = '密码必填';
+    } else if (formData.password.length < 8) {
+      errors.password = '密码长度至少为8位';
+    }
+
+    if (formData.password !== formData.confirmPassword) {
+      errors.confirmPassword = '两次输入的密码不一致';
+    }
+    return errors;
+  }
+
   if (!formData.username?.trim()) {
     errors.username = '用户名必填';
   }

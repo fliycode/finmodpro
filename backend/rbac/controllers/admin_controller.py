@@ -18,6 +18,8 @@ from rbac.services.rbac_service import (
     replace_user_groups,
     update_admin_user,
 )
+from systemcheck.models import AuditRecord
+from systemcheck.services.audit_service import record_audit_event
 
 
 def _parse_json_body(request):
@@ -29,6 +31,29 @@ def _parse_json_body(request):
 
 def _forbidden_response():
     return JsonResponse({"message": "无权限。"}, status=403)
+
+
+def _build_admin_user_audit_payload(*, user=None, user_row=None, groups=None):
+    if user_row is None and user is not None:
+        user_row = {
+            "id": user.id,
+            "username": user.username,
+            "email": user.email,
+            "groups": sorted(user.groups.values_list("name", flat=True)),
+            "is_staff": user.is_staff,
+            "is_superuser": user.is_superuser,
+        }
+
+    if user_row is None:
+        return {"groups": sorted(groups or [])}
+
+    return {
+        "username": user_row.get("username", ""),
+        "email": user_row.get("email", ""),
+        "groups": sorted(groups if groups is not None else user_row.get("groups", [])),
+        "is_staff": bool(user_row.get("is_staff", False)),
+        "is_superuser": bool(user_row.get("is_superuser", False)),
+    }
 
 
 def _normalize_group_names(payload):
@@ -96,9 +121,30 @@ def admin_user_collection_view(request):
             group_names=group_names,
         )
     except ValueError as exc:
+        record_audit_event(
+            actor=request.user,
+            action="rbac.user.create",
+            target_type="user",
+            target_id=user_fields["username"],
+            status=AuditRecord.STATUS_FAILED,
+            detail_payload={
+                **_build_admin_user_audit_payload(groups=group_names or []),
+                "username": user_fields["username"],
+                "email": user_fields["email"],
+                "error": str(exc),
+            },
+        )
         status_code = 409 if "已存在" in str(exc) else 400
         return JsonResponse({"message": str(exc)}, status=status_code)
 
+    record_audit_event(
+        actor=request.user,
+        action="rbac.user.create",
+        target_type="user",
+        target_id=created_user["id"],
+        status=AuditRecord.STATUS_SUCCEEDED,
+        detail_payload=_build_admin_user_audit_payload(user_row=created_user),
+    )
     return JsonResponse(created_user, status=201)
 
 
@@ -129,14 +175,46 @@ def admin_user_groups_update_view(request, user_id):
     try:
         user = User.objects.get(id=user_id)
     except User.DoesNotExist:
+        record_audit_event(
+            actor=request.user,
+            action="rbac.user.groups.replace",
+            target_type="user",
+            target_id=user_id,
+            status=AuditRecord.STATUS_FAILED,
+            detail_payload={"groups": sorted({group_name.strip() for group_name in group_names}), "error": "用户不存在。"},
+        )
         return JsonResponse({"message": "用户不存在。"}, status=404)
 
     normalized_group_names = sorted({group_name.strip() for group_name in group_names})
+    previous_groups = sorted(user.groups.values_list("name", flat=True))
     try:
         updated_user = replace_user_groups(user, normalized_group_names)
     except ValueError as exc:
+        record_audit_event(
+            actor=request.user,
+            action="rbac.user.groups.replace",
+            target_type="user",
+            target_id=user.id,
+            status=AuditRecord.STATUS_FAILED,
+            detail_payload={
+                **_build_admin_user_audit_payload(user=user, groups=normalized_group_names),
+                "previous_groups": previous_groups,
+                "error": str(exc),
+            },
+        )
         return JsonResponse({"message": str(exc)}, status=400)
 
+    record_audit_event(
+        actor=request.user,
+        action="rbac.user.groups.replace",
+        target_type="user",
+        target_id=user.id,
+        status=AuditRecord.STATUS_SUCCEEDED,
+        detail_payload={
+            **_build_admin_user_audit_payload(user_row=updated_user),
+            "previous_groups": previous_groups,
+        },
+    )
     return JsonResponse(updated_user)
 
 
@@ -153,13 +231,38 @@ def admin_user_detail_view(request, user_id):
     try:
         user = User.objects.get(id=user_id)
     except User.DoesNotExist:
+        record_audit_event(
+            actor=request.user,
+            action="rbac.user.update" if request.method == "PATCH" else "rbac.user.delete",
+            target_type="user",
+            target_id=user_id,
+            status=AuditRecord.STATUS_FAILED,
+            detail_payload={"error": "用户不存在。"},
+        )
         return JsonResponse({"message": "用户不存在。"}, status=404)
 
     if request.method == "DELETE":
+        user_snapshot = _build_admin_user_audit_payload(user=user)
         if request.user.id == user.id:
+            record_audit_event(
+                actor=request.user,
+                action="rbac.user.delete",
+                target_type="user",
+                target_id=user.id,
+                status=AuditRecord.STATUS_FAILED,
+                detail_payload={**user_snapshot, "error": "不能删除当前登录用户。"},
+            )
             return JsonResponse({"message": "不能删除当前登录用户。"}, status=400)
 
         delete_admin_user(user)
+        record_audit_event(
+            actor=request.user,
+            action="rbac.user.delete",
+            target_type="user",
+            target_id=user_id,
+            status=AuditRecord.STATUS_SUCCEEDED,
+            detail_payload=user_snapshot,
+        )
         return JsonResponse({"message": "用户已删除。"})
 
     payload = _parse_json_body(request)
@@ -184,7 +287,28 @@ def admin_user_detail_view(request, user_id):
             group_names=group_names,
         )
     except ValueError as exc:
+        record_audit_event(
+            actor=request.user,
+            action="rbac.user.update",
+            target_type="user",
+            target_id=user.id,
+            status=AuditRecord.STATUS_FAILED,
+            detail_payload={
+                **_build_admin_user_audit_payload(user=user, groups=group_names),
+                "username": user_fields["username"],
+                "email": user_fields["email"],
+                "error": str(exc),
+            },
+        )
         status_code = 409 if "已存在" in str(exc) else 400
         return JsonResponse({"message": str(exc)}, status=status_code)
 
+    record_audit_event(
+        actor=request.user,
+        action="rbac.user.update",
+        target_type="user",
+        target_id=user.id,
+        status=AuditRecord.STATUS_SUCCEEDED,
+        detail_payload=_build_admin_user_audit_payload(user_row=updated_user),
+    )
     return JsonResponse(updated_user)

@@ -21,6 +21,11 @@ from authentication.services.refresh_session_service import (
     revoke_refresh_session,
     rotate_refresh_session,
 )
+from authentication.services.password_reset_service import (
+    PasswordResetError,
+    create_reset_token,
+    reset_password,
+)
 
 
 def _parse_json_body(request):
@@ -208,3 +213,54 @@ def logout_view(request):
 
     response = JsonResponse({"message": "已退出登录。"}, status=200)
     return _clear_refresh_cookie(response)
+
+
+@require_POST
+def forgot_password_view(request):
+    payload = _parse_json_body(request)
+    if payload is None:
+        return JsonResponse({"message": "请求体必须是合法 JSON。"}, status=400)
+
+    username = (payload.get("username") or "").strip()
+    if not username:
+        return JsonResponse({"message": "username 为必填项。"}, status=400)
+
+    try:
+        raw_token, expires_in = create_reset_token(username=username)
+    except PasswordResetError as exc:
+        return JsonResponse({"message": str(exc)}, status=404)
+
+    return JsonResponse(
+        {
+            "message": "重置令牌已生成。",
+            "reset_token": raw_token,
+            "expires_in": expires_in,
+        },
+        status=200,
+    )
+
+
+@require_POST
+def reset_password_view(request):
+    payload = _parse_json_body(request)
+    if payload is None:
+        return JsonResponse({"message": "请求体必须是合法 JSON。"}, status=400)
+
+    token = (payload.get("token") or "").strip()
+    new_password = payload.get("new_password") or ""
+
+    if not token or not new_password:
+        return JsonResponse({"message": "token 和 new_password 为必填项。"}, status=400)
+
+    if len(new_password) < 8:
+        return JsonResponse({"message": "密码长度至少为8位。"}, status=400)
+
+    try:
+        user = reset_password(token=token, new_password=new_password)
+    except PasswordResetError as exc:
+        return JsonResponse({"message": str(exc)}, status=400)
+
+    return JsonResponse(
+        {"message": "密码已重置，请使用新密码登录。"},
+        status=200,
+    )

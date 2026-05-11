@@ -413,3 +413,24 @@ class AuditLogsApiTests(TestCase):
 
         self.assertEqual(response.status_code, 403)
         self.assertEqual(response.json(), {"code": 403, "message": "无权限。", "data": {}})
+
+    def test_record_audit_event_redacts_sensitive_payload_and_keeps_submitted_status(self):
+        record = record_audit_event(
+            actor=self.user,
+            action="llm.model_config.test_connection",
+            target_type="model_config",
+            target_id="7",
+            status=AuditRecord.STATUS_SUBMITTED,
+            detail_payload={
+                "provider": "deepseek",
+                "api_key": "sk-secret",
+                "template": "full prompt template",
+                "has_api_key": True,
+            },
+        )
+
+        self.assertEqual(record.status, AuditRecord.STATUS_SUBMITTED)
+        self.assertEqual(record.detail_payload["provider"], "deepseek")
+        self.assertEqual(record.detail_payload["api_key"], "[REDACTED]")
+        self.assertEqual(record.detail_payload["template"], "[REDACTED]")
+        self.assertTrue(record.detail_payload["has_api_key"])

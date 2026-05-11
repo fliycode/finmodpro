@@ -9,6 +9,7 @@ import {
   buildDashboardTrendOption,
   normalizeDashboardPayload,
 } from '../lib/admin-dashboard.js';
+import { formatAuditAction, formatAuditStatus } from '../lib/admin-audit.js';
 import AdminChart from './admin/AdminChart.vue';
 import AppIcon from './ui/AppIcon.vue';
 
@@ -32,32 +33,6 @@ const formatShortTime = (value) => {
     minute: '2-digit',
     hour12: false,
   }).format(new Date(value));
-};
-
-const formatStatus = (status) => {
-  const labels = {
-    queued: '排队中',
-    running: '进行中',
-    succeeded: '成功',
-    failed: '失败',
-    pending: '待处理',
-    approved: '已通过',
-    rejected: '已驳回',
-    retried: '已重试',
-    skipped: '已跳过',
-  };
-
-  return labels[status] || status || '状态';
-};
-
-const formatAuditAction = (action) => {
-  const labels = {
-    'knowledgebase.ingest': '知识入库',
-    'risk.extract': '风险提取',
-    'risk.batch_extract': '批量提取',
-  };
-
-  return labels[action] || action || '审计事件';
 };
 
 const fetchData = async () => {
@@ -86,10 +61,10 @@ const auditRows = computed(() => dashboardStats.value.audit_snippets.slice(0, 4)
   id: item.id || `audit-${index}`,
   title: formatAuditAction(item.action),
   actor: item.actor_name || '系统',
-  status: formatStatus(item.status),
+  status: formatAuditStatus(item.status),
   statusTone: item.status === 'failed' ? 'is-risk' : 'is-neutral',
   time: formatShortTime(item.created_at),
-  summary: item.summary || `${formatAuditAction(item.action)} · ${formatStatus(item.status)}`,
+  summary: item.summary || `${formatAuditAction(item.action)} · ${formatAuditStatus(item.status)}`,
 })));
 
 const documentHighlights = computed(() => ([

@@ -4,6 +4,7 @@ import { useRouter } from 'vue-router';
 
 import AuthLanding from '../../components/AuthLanding.vue';
 import { validateAuthForm } from '../../lib/auth-form.js';
+import { authApi } from '../../api/auth.js';
 import { authSession } from '../../lib/auth-session.js';
 import { authStorage } from '../../lib/auth-storage.js';
 import { resolveHomeRoute } from '../../lib/session-state.js';
@@ -13,6 +14,7 @@ const router = useRouter();
 const activeTab = ref('login');
 const showPassword = ref(false);
 const isLoading = ref(false);
+const resetToken = ref('');
 const status = reactive({
   message: '',
   type: '',
@@ -46,14 +48,36 @@ const resetStatus = () => {
   status.type = '';
 };
 
+const clearForm = () => {
+  formData.username = '';
+  formData.email = '';
+  formData.password = '';
+  formData.confirmPassword = '';
+  formData.agreeTerms = false;
+  formData.rememberMe = false;
+};
+
 const switchTab = (tab) => {
   activeTab.value = tab;
   showPassword.value = false;
   clearErrors();
   resetStatus();
+  if (tab === 'login' || tab === 'register') {
+    clearForm();
+    resetToken.value = '';
+  }
 };
 
 onMounted(() => {
+  const params = new URLSearchParams(window.location.search);
+  const token = params.get('token');
+  if (token) {
+    resetToken.value = token;
+    activeTab.value = 'reset';
+    window.history.replaceState({}, '', window.location.pathname);
+    return;
+  }
+
   const flashMessage = authStorage.consumeFlashMessage();
   if (flashMessage) {
     status.message = flashMessage;
@@ -93,17 +117,46 @@ const submit = async (event) => {
       return;
     }
 
-    await authSession.register({
-      username: formData.username,
-      email: formData.email,
-      password: formData.password,
-    });
+    if (activeTab.value === 'register') {
+      await authSession.register({
+        username: formData.username,
+        email: formData.email,
+        password: formData.password,
+      });
 
-    status.message = '注册成功，请使用新账号登录。';
-    status.type = 'success';
-    activeTab.value = 'login';
-    formData.password = '';
-    formData.confirmPassword = '';
+      status.message = '注册成功，请使用新账号登录。';
+      status.type = 'success';
+      activeTab.value = 'login';
+      formData.password = '';
+      formData.confirmPassword = '';
+      return;
+    }
+
+    if (activeTab.value === 'forgot') {
+      const result = await authApi.forgotPassword({
+        username: formData.username,
+      });
+      resetToken.value = result.reset_token;
+      status.message = '重置链接已生成，请在下方设置新密码。';
+      status.type = 'success';
+      formData.password = '';
+      formData.confirmPassword = '';
+      activeTab.value = 'reset';
+      return;
+    }
+
+    if (activeTab.value === 'reset') {
+      await authApi.resetPassword({
+        token: resetToken.value,
+        newPassword: formData.password,
+      });
+      status.message = '密码已重置，请使用新密码登录。';
+      status.type = 'success';
+      clearForm();
+      resetToken.value = '';
+      activeTab.value = 'login';
+      return;
+    }
   } catch (error) {
     status.type = 'error';
 
