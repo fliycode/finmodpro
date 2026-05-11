@@ -7,6 +7,7 @@ from typing import TypedDict
 from django.conf import settings
 from langgraph.config import get_stream_writer
 from langgraph.graph import END, START, StateGraph
+from langgraph.types import RetryPolicy
 
 from chat.services.context_service import build_chat_messages
 from chat.services.session_service import normalize_context_filters
@@ -18,6 +19,25 @@ from rag.services.retrieval_service import build_retrieval_response
 logger = logging.getLogger(__name__)
 
 MAX_CHAT_CITATIONS = 3
+
+
+def _should_retry_retrieval(exc: Exception) -> bool:
+    """Retry on transient retrieval failures; do NOT retry on programming errors."""
+    from pymilvus.exceptions import MilvusException
+    if isinstance(exc, (ConnectionError, MilvusException)):
+        return True
+    if isinstance(exc, (ValueError, TypeError, RuntimeError, OSError)):
+        return False
+    return True
+
+
+_RETRIEVAL_RETRY = RetryPolicy(
+    max_attempts=2,
+    backoff_factor=1.0,
+    initial_interval=0.5,
+    jitter=True,
+    retry_on=_should_retry_retrieval,
+)
 
 
 def retrieve_chat_context_results(*, query, filters=None, top_k=None, query_variants=None):
@@ -475,13 +495,36 @@ def _route_after_router(state: ChatRagState):
     return "rewrite_query" if state.get("route") == "retrieve" else "direct_answer_context"
 
 
+def _route_after_score_filter(state: ChatRagState):
+    results = state.get("retrieval_results") or []
+    if results:
+        return "build_retrieval_context"
+    return "empty_retrieval_context"
+
+
+def _empty_retrieval_context(state: ChatRagState):
+    _emit_step({"step": "build_context", "citation_count": 0, "answer_mode": "fallback"})
+    return {
+        "retrieval_results": [],
+        "citations": [],
+        "answer_mode": "fallback",
+        "messages": build_chat_messages(
+            session=state.get("session"),
+            question=state["question"],
+            citations=[],
+            filters=state.get("resolved_filters", {}),
+        ),
+    }
+
+
 def _build_rag_graph():
     graph = StateGraph(ChatRagState)
     graph.add_node("route", _route_by_rules)
     graph.add_node("rewrite_query", _rewrite_query)
-    graph.add_node("retrieve_and_merge", _retrieve_and_merge)
+    graph.add_node("retrieve_and_merge", _retrieve_and_merge, retry_policy=_RETRIEVAL_RETRY)
     graph.add_node("score_filter", _score_filter)
     graph.add_node("build_retrieval_context", _build_retrieval_context)
+    graph.add_node("empty_retrieval_context", _empty_retrieval_context)
     graph.add_node("direct_answer_context", _direct_answer_context)
     graph.add_edge(START, "route")
     graph.add_conditional_edges(
@@ -494,8 +537,16 @@ def _build_rag_graph():
     )
     graph.add_edge("rewrite_query", "retrieve_and_merge")
     graph.add_edge("retrieve_and_merge", "score_filter")
-    graph.add_edge("score_filter", "build_retrieval_context")
+    graph.add_conditional_edges(
+        "score_filter",
+        _route_after_score_filter,
+        {
+            "build_retrieval_context": "build_retrieval_context",
+            "empty_retrieval_context": "empty_retrieval_context",
+        },
+    )
     graph.add_edge("build_retrieval_context", END)
+    graph.add_edge("empty_retrieval_context", END)
     graph.add_edge("direct_answer_context", END)
     return graph.compile(store=django_memory_store)
 

@@ -75,7 +75,7 @@ class DjangoMemoryStore(BaseStore):
         return results
 
     async def abatch(self, ops: Iterable[Op]) -> list:
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         return await loop.run_in_executor(None, self.batch, list(ops))
 
     def _handle_put(self, op: PutOp):

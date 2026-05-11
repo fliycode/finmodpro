@@ -1404,6 +1404,69 @@ class ChatAskApiTests(TestCase):
         user_message_content = captured_calls[-1][-1]["content"]
         self.assertIn("张三", user_message_content, "Session history must appear in the prompt sent to the LLM")
 
+    def test_should_retry_retrieval_retries_on_connection_and_milvus_errors(self):
+        from chat.services.rag_graph_service import _should_retry_retrieval
+
+        self.assertTrue(_should_retry_retrieval(ConnectionError("refused")))
+        self.assertTrue(_should_retry_retrieval(RuntimeError("transient")))
+        self.assertFalse(_should_retry_retrieval(ValueError("bad input")))
+        self.assertFalse(_should_retry_retrieval(TypeError("wrong type")))
+        self.assertFalse(_should_retry_retrieval(OSError("disk full")))
+
+    def test_prepare_chat_payload_retries_on_transient_retrieval_failure(self):
+        call_count = 0
+
+        def flaky_retrieve(*, query, filters=None, top_k=5, query_variants=None):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                raise ConnectionError("Milvus connection refused")
+            return [
+                {
+                    "chunk_id": 1,
+                    "document_id": 1,
+                    "document_title": "Test Doc",
+                    "doc_type": "txt",
+                    "source_date": "2025-01-01",
+                    "page_label": "chunk-1",
+                    "snippet": "test content",
+                    "score": 0.9,
+                    "rerank_score": 0.9,
+                    "vector_score": 0.9,
+                    "keyword_score": 0.0,
+                },
+            ]
+
+        provider = ScriptedChatProvider([
+            '{"rewritten_query":"test query","query_variants":["test query"]}',
+        ])
+        with (
+            patch("chat.services.rag_graph_service.retrieve_chat_context", side_effect=flaky_retrieve),
+            patch("chat.services.rag_graph_service.rerank_with_variants", side_effect=lambda results, **kw: results),
+        ):
+            payload = prepare_chat_payload(
+                question="查一下测试文档",
+                provider=provider,
+            )
+
+        self.assertEqual(call_count, 2, "Should have retried once after ConnectionError")
+        self.assertEqual(payload["answer_mode"], "cited")
+
+    @patch("chat.services.rag_graph_service.retrieve_chat_context", return_value=[])
+    @patch("chat.services.rag_graph_service.rerank_with_variants", side_effect=lambda results, **kw: results)
+    def test_score_filter_empty_routes_to_empty_retrieval_context(self, _rerank, _retrieve):
+        provider = ScriptedChatProvider([
+            '{"rewritten_query":"no match query","query_variants":["no match query"]}',
+        ])
+        payload = prepare_chat_payload(
+            question="查一下不存在的文档内容",
+            provider=provider,
+        )
+
+        self.assertEqual(payload["answer_mode"], "fallback")
+        self.assertEqual(payload["citations"], [])
+        self.assertIsNotNone(payload.get("answer_notice"))
+
 
 class ChatSessionCreateApiTests(TestCase):
     def setUp(self):
