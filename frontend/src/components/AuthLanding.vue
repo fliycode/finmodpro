@@ -436,6 +436,8 @@ watch(() => props.activeTab, () => {
   --entry-status-error-bg: rgba(180, 35, 24, 0.08);
   --entry-status-error-ink: #912018;
   --entry-status-error-border: rgba(180, 35, 24, 0.14);
+  --entry-input-error-border: rgba(180, 35, 24, 0.35);
+  --entry-input-error-shadow: 0 0 0 4px rgba(180, 35, 24, 0.08);
   --entry-icon-surface: linear-gradient(180deg, rgba(15, 23, 42, 0.04), rgba(15, 23, 42, 0.09));
   --entry-icon-border: rgba(15, 23, 42, 0.08);
   --entry-icon-shadow:
@@ -512,6 +514,8 @@ watch(() => props.activeTab, () => {
   --entry-status-error-bg: rgba(196, 73, 61, 0.16);
   --entry-status-error-ink: #f7cbc6;
   --entry-status-error-border: rgba(196, 73, 61, 0.24);
+  --entry-input-error-border: rgba(244, 114, 94, 0.52);
+  --entry-input-error-shadow: 0 0 0 4px rgba(244, 114, 94, 0.14);
   --entry-icon-surface: linear-gradient(180deg, rgba(125, 160, 255, 0.14), rgba(255, 255, 255, 0.04));
   --entry-icon-border: rgba(125, 160, 255, 0.18);
   --entry-icon-shadow:
@@ -903,8 +907,8 @@ watch(() => props.activeTab, () => {
 }
 
 .input-error {
-  border-color: rgba(180, 35, 24, 0.35) !important;
-  box-shadow: 0 0 0 4px rgba(180, 35, 24, 0.08) !important;
+  border-color: var(--entry-input-error-border) !important;
+  box-shadow: var(--entry-input-error-shadow) !important;
 }
 
 .password-input-wrapper {
@@ -988,6 +992,10 @@ watch(() => props.activeTab, () => {
   font: inherit;
 }
 
+:global(:root[data-theme='dark']) .inline-link--muted {
+  opacity: 0.9;
+}
+
 .inline-link--muted:hover {
   opacity: 1;
   text-decoration: underline;
@@ -1046,8 +1054,8 @@ watch(() => props.activeTab, () => {
   width: 18px;
   height: 18px;
   border-radius: 50%;
-  border: 2px solid rgba(248, 250, 252, 0.4);
-  border-top-color: #f8fafc;
+  border: 2px solid var(--entry-button-text);
+  border-top-color: transparent;
   animation: spin 0.8s linear infinite;
 }
 
