@@ -1,6 +1,19 @@
 <script setup>
 import { onBeforeUnmount, onMounted, ref, watch } from 'vue';
-import * as echarts from 'echarts';
+import { init, use } from 'echarts/core';
+import { BarChart, LineChart, PieChart } from 'echarts/charts';
+import { GridComponent, LegendComponent, TooltipComponent } from 'echarts/components';
+import { CanvasRenderer } from 'echarts/renderers';
+
+use([
+  BarChart,
+  LineChart,
+  PieChart,
+  GridComponent,
+  LegendComponent,
+  TooltipComponent,
+  CanvasRenderer,
+]);
 
 const props = defineProps({
   option: {
@@ -22,7 +35,7 @@ const renderChart = () => {
   }
 
   if (!chartInstance) {
-    chartInstance = echarts.init(containerRef.value);
+    chartInstance = init(containerRef.value);
   }
 
   chartInstance.setOption(props.option, true);

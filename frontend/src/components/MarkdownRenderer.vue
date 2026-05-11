@@ -5,7 +5,17 @@
 <script setup>
 import { computed } from 'vue';
 import { marked } from 'marked';
-import hljs from 'highlight.js';
+import hljs from 'highlight.js/lib/core';
+import bash from 'highlight.js/lib/languages/bash';
+import javascript from 'highlight.js/lib/languages/javascript';
+import json from 'highlight.js/lib/languages/json';
+import markdown from 'highlight.js/lib/languages/markdown';
+import plaintext from 'highlight.js/lib/languages/plaintext';
+import python from 'highlight.js/lib/languages/python';
+import sql from 'highlight.js/lib/languages/sql';
+import typescript from 'highlight.js/lib/languages/typescript';
+import xml from 'highlight.js/lib/languages/xml';
+import yaml from 'highlight.js/lib/languages/yaml';
 import DOMPurify from 'dompurify';
 
 // 导入 GitHub Dark 主题
@@ -22,21 +32,79 @@ const props = defineProps({
   },
 });
 
+hljs.registerLanguage('bash', bash);
+hljs.registerLanguage('javascript', javascript);
+hljs.registerLanguage('json', json);
+hljs.registerLanguage('markdown', markdown);
+hljs.registerLanguage('plaintext', plaintext);
+hljs.registerLanguage('python', python);
+hljs.registerLanguage('sql', sql);
+hljs.registerLanguage('typescript', typescript);
+hljs.registerLanguage('xml', xml);
+hljs.registerLanguage('yaml', yaml);
+
+const LANGUAGE_ALIASES = {
+  sh: 'bash',
+  shell: 'bash',
+  js: 'javascript',
+  ts: 'typescript',
+  py: 'python',
+  yml: 'yaml',
+  html: 'xml',
+  svg: 'xml',
+  vue: 'xml',
+  text: 'plaintext',
+  plain: 'plaintext',
+};
+
+const escapeHtml = (value) => String(value)
+  .replaceAll('&', '&amp;')
+  .replaceAll('<', '&lt;')
+  .replaceAll('>', '&gt;')
+  .replaceAll('"', '&quot;')
+  .replaceAll("'", '&#39;');
+
+const resolveLanguage = (lang) => {
+  const normalized = String(lang || '').trim().toLowerCase();
+  if (!normalized) {
+    return '';
+  }
+
+  return LANGUAGE_ALIASES[normalized] || normalized;
+};
+
+const highlightCodeBlock = (text, lang) => {
+  const language = resolveLanguage(lang);
+
+  if (language && hljs.getLanguage(language)) {
+    return {
+      language,
+      value: hljs.highlight(text, { language }).value,
+    };
+  }
+
+  try {
+    const detected = hljs.highlightAuto(text);
+    return {
+      language: detected.language || 'plaintext',
+      value: detected.value,
+    };
+  } catch {
+    return {
+      language: language || 'plaintext',
+      value: escapeHtml(text),
+    };
+  }
+};
+
 // 配置 marked
 const renderer = new marked.Renderer();
 
 // 自定义代码块渲染（带高亮）
 renderer.code = function ({ text, lang }) {
-  const language = lang && hljs.getLanguage(lang) ? lang : 'plaintext';
-  let highlighted;
+  const highlightedBlock = highlightCodeBlock(text, lang);
 
-  try {
-    highlighted = hljs.highlight(text, { language }).value;
-  } catch {
-    highlighted = hljs.highlightAuto(text).value;
-  }
-
-  return `<pre class="hljs-code-block"><div class="hljs-code-header"><span class="hljs-code-lang">${language}</span><button class="hljs-copy-btn" onclick="navigator.clipboard.writeText(this.closest('.hljs-code-block').querySelector('code').textContent).then(()=>{this.textContent='已复制';setTimeout(()=>{this.textContent='复制'},1500)})">复制</button></div><code class="hljs language-${language}">${highlighted}</code></pre>`;
+  return `<pre class="hljs-code-block"><div class="hljs-code-header"><span class="hljs-code-lang">${highlightedBlock.language}</span><button class="hljs-copy-btn" onclick="navigator.clipboard.writeText(this.closest('.hljs-code-block').querySelector('code').textContent).then(()=>{this.textContent='已复制';setTimeout(()=>{this.textContent='复制'},1500)})">复制</button></div><code class="hljs language-${highlightedBlock.language}">${highlightedBlock.value}</code></pre>`;
 };
 
 // 自定义链接渲染（新标签页打开）

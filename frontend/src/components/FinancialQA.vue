@@ -1,5 +1,5 @@
 <script setup>
-import { computed, nextTick, onMounted, ref, watch } from 'vue';
+import { computed, defineAsyncComponent, nextTick, onMounted, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 
 import { chatApi } from '../api/chat.js';
@@ -15,10 +15,11 @@ import {
   updateMessageAt,
   shouldShowFinancialQaEmptyState,
 } from '../lib/workspace-qa.js';
-import ChatHistory from './ChatHistory.vue';
-import ChatMemoryDrawer from './ChatMemoryDrawer.vue';
 import AppIcon from './ui/AppIcon.vue';
-import MarkdownRenderer from './MarkdownRenderer.vue';
+
+const ChatHistory = defineAsyncComponent(() => import('./ChatHistory.vue'));
+const ChatMemoryDrawer = defineAsyncComponent(() => import('./ChatMemoryDrawer.vue'));
+const MarkdownRenderer = defineAsyncComponent(() => import('./MarkdownRenderer.vue'));
 
 const props = defineProps({
   sessionId: {
@@ -44,6 +45,30 @@ const historyDrawerOpen = ref(false);
 const memoryDrawerOpen = ref(false);
 const activeSessionFilters = ref({});
 const ragSteps = ref([]);
+let sessionOptionsPromise = null;
+
+const scheduleNonCriticalWork = (work) => {
+  const runner = () => Promise.resolve().then(work);
+
+  if (typeof window === 'undefined') {
+    return runner();
+  }
+
+  return new Promise((resolve, reject) => {
+    const run = () => runner().then(resolve).catch(reject);
+
+    if (typeof window.requestIdleCallback === 'function') {
+      window.requestIdleCallback(() => {
+        void run();
+      }, { timeout: 500 });
+      return;
+    }
+
+    window.setTimeout(() => {
+      void run();
+    }, 0);
+  });
+};
 
 const hasStreamingAssistant = computed(() =>
   messages.value.some((message) => message.isStreaming),
@@ -177,16 +202,27 @@ const resetConversation = () => {
 };
 
 const refreshSessionOptions = async () => {
-  isLoadingSessions.value = true;
-  try {
-    sessionOptions.value = await chatApi.listHistory({
-      datasetId: activeDatasetId.value,
-    });
-  } catch (error) {
-    console.error('加载会话列表失败:', error);
-  } finally {
-    isLoadingSessions.value = false;
+  if (sessionOptionsPromise) {
+    return sessionOptionsPromise;
   }
+
+  isLoadingSessions.value = true;
+  sessionOptionsPromise = (async () => {
+    try {
+      sessionOptions.value = await chatApi.listHistory({
+        datasetId: activeDatasetId.value,
+      });
+      return sessionOptions.value;
+    } catch (error) {
+      console.error('加载会话列表失败:', error);
+      return [];
+    } finally {
+      isLoadingSessions.value = false;
+      sessionOptionsPromise = null;
+    }
+  })();
+
+  return sessionOptionsPromise;
 };
 
 const syncSessionRoute = async (sessionId) => {
@@ -309,10 +345,25 @@ watch(
   },
 );
 
-onMounted(async () => {
-  preloadAvatarImage();
-  activeSessionFilters.value = getDefaultSessionFilters(route.query.dataset);
+watch(historyDrawerOpen, async (isOpen) => {
+  if (!isOpen) {
+    return;
+  }
+
   await refreshSessionOptions();
+});
+
+onMounted(async () => {
+  activeSessionFilters.value = getDefaultSessionFilters(route.query.dataset);
+  void scheduleNonCriticalWork(async () => {
+    preloadAvatarImage();
+    await Promise.allSettled([
+      refreshSessionOptions(),
+      import('./MarkdownRenderer.vue'),
+      import('./ChatHistory.vue'),
+    ]);
+  });
+
   if (currentSessionId.value) {
     await loadSession(currentSessionId.value);
   }
