@@ -4,21 +4,27 @@ import { useRoute, useRouter } from 'vue-router';
 
 import KnowledgeBaseDetailPanel from '../../components/knowledgebase/KnowledgeBaseDetailPanel.vue';
 import KnowledgeBasePreviewModal from '../../components/knowledgebase/KnowledgeBasePreviewModal.vue';
+import { cleaningApi } from '../../api/cleaning.js';
 import { kbApi } from '../../api/knowledgebase.js';
 import { useFlash } from '../../lib/flash.js';
-import { getIngestionAction } from '../../lib/knowledgebase-actions.js';
+import { getIngestionAction, isIngestionInFlight } from '../../lib/knowledgebase-actions.js';
+import { permissionHelper } from '../../lib/permission.js';
 import { buildChunkExpansionState, buildPreviewState } from '../../lib/knowledgebase-workspace.js';
 
 const route = useRoute();
 const router = useRouter();
 const flash = useFlash();
+const DETAIL_TABS = new Set(['processing', 'cleaning', 'versions', 'chunks', 'errors']);
 
 const document = ref(null);
 const isSubmittingTask = ref(false);
 const isUploadingVersion = ref(false);
 const isLoadingVersions = ref(false);
 const isLoadingChunks = ref(false);
-const activeTab = ref('processing');
+const isLoadingCleaningResults = ref(false);
+const isSubmittingCleaning = ref(false);
+const cleaningResults = ref([]);
+const activeTab = ref(DETAIL_TABS.has(route.query.tab) ? route.query.tab : 'processing');
 const versionHistory = ref([]);
 const chunks = ref([]);
 const expandedChunkIds = ref([]);
@@ -29,6 +35,7 @@ const statusTone = {
   uploaded: 'neutral',
   queued: 'neutral',
   parsing: 'accent',
+  cleaning: 'accent',
   chunking: 'accent',
   indexing: 'accent',
   indexed: 'success',
@@ -45,22 +52,49 @@ const decoratedDocument = computed(() => {
 
 const ingestionAction = computed(() => getIngestionAction(decoratedDocument.value));
 const previewState = computed(() => buildPreviewState(decoratedDocument.value));
+const canTriggerCleaning = computed(() => (
+  permissionHelper.hasPermission('trigger_cleaning') && !isIngestionInFlight(decoratedDocument.value)
+));
 
 const taskHintText = computed(() => {
   const doc = document.value;
   if (!doc) return '';
   const code = doc.processStep?.code || '';
-  if (['queued', 'parsing', 'chunking', 'indexing'].includes(code)) {
-    return '任务已启动，后台正在执行解析、切块和向量写入，完成后列表与详情会自动刷新。';
+  if (['queued', 'parsing', 'cleaning', 'chunking', 'indexing'].includes(code)) {
+    return '任务已启动，后台正在执行解析、清洗、切块和向量写入，完成后列表与详情会自动刷新。';
   }
   return `上传只保存原始文件；点击"${ingestionAction.value?.label || '启动入库'}"后，后台才会异步完成解析、切块和写入向量库。`;
 });
+
+const syncActiveTab = async (nextTab) => {
+  activeTab.value = DETAIL_TABS.has(nextTab) ? nextTab : 'processing';
+  const nextQuery = { ...route.query };
+  if (activeTab.value === 'processing') {
+    delete nextQuery.tab;
+  } else {
+    nextQuery.tab = activeTab.value;
+  }
+  await router.replace({ query: nextQuery });
+};
 
 const fetchDocument = async () => {
   try {
     document.value = await kbApi.getDocumentDetail(route.params.id);
   } catch (error) {
     flash.error(`加载文档详情失败：${error.message || '未知错误'}`);
+  }
+};
+
+const fetchCleaningResults = async () => {
+  isLoadingCleaningResults.value = true;
+  try {
+    const payload = await cleaningApi.getDocumentResults(route.params.id);
+    cleaningResults.value = payload.results || [];
+  } catch (error) {
+    cleaningResults.value = [];
+    flash.error(`加载清洗结果失败：${error.message || '未知错误'}`);
+  } finally {
+    isLoadingCleaningResults.value = false;
   }
 };
 
@@ -95,12 +129,30 @@ const startIngestion = async () => {
     const result = await kbApi.ingestDocument(route.params.id);
     if (result.document) document.value = result.document;
     flash.success(result.message || '入库任务已提交。');
-    await fetchDocument();
-    await fetchChunks();
+    await Promise.all([fetchDocument(), fetchChunks(), fetchCleaningResults()]);
   } catch (error) {
     flash.error(`启动入库失败：${error.message || '未知错误'}`);
   } finally {
     isSubmittingTask.value = false;
+  }
+};
+
+const runCleaning = async () => {
+  if (isSubmittingCleaning.value || !canTriggerCleaning.value) return;
+  isSubmittingCleaning.value = true;
+  try {
+    const result = await cleaningApi.triggerCleaning(route.params.id);
+    if (result.result) {
+      flash.success(`清洗完成，最新质量分 ${result.result.qualityScore.toFixed(1)}。`);
+    } else {
+      flash.success('清洗完成。');
+    }
+    await syncActiveTab('cleaning');
+    await Promise.all([fetchDocument(), fetchCleaningResults()]);
+  } catch (error) {
+    flash.error(`执行清洗失败：${error.message || '未知错误'}`);
+  } finally {
+    isSubmittingCleaning.value = false;
   }
 };
 
@@ -116,7 +168,7 @@ const handleVersionUpload = async (event) => {
     });
     if (result.document) {
       document.value = result.document;
-      activeTab.value = 'versions';
+      await syncActiveTab('versions');
     }
     flash.success(result.message || '新版本已上传。');
     await fetchDocument();
@@ -143,14 +195,13 @@ let pollInterval = null;
 
 onMounted(async () => {
   await fetchDocument();
-  await fetchChunks();
+  await Promise.all([fetchChunks(), fetchCleaningResults()]);
   pollInterval = setInterval(async () => {
     const doc = document.value;
     if (!doc) return;
     const code = doc.processStep?.code || '';
-    if (!['queued', 'parsing', 'chunking', 'indexing'].includes(code)) return;
-    await fetchDocument();
-    await fetchChunks();
+    if (!['queued', 'parsing', 'cleaning', 'chunking', 'indexing'].includes(code)) return;
+    await Promise.all([fetchDocument(), fetchChunks(), fetchCleaningResults()]);
   }, 3000);
 });
 
@@ -178,12 +229,17 @@ onUnmounted(() => {
       :chunks="chunks"
       :expanded-chunk-ids="expandedChunkIds"
       :is-loading-chunks="isLoadingChunks"
+      :cleaning-results="cleaningResults"
+      :is-loading-cleaning-results="isLoadingCleaningResults"
+      :is-submitting-cleaning="isSubmittingCleaning"
+      :can-trigger-cleaning="canTriggerCleaning"
       :empty-state="{ title: '加载中...', detail: '' }"
       @ingest="startIngestion"
+      @clean="runCleaning"
       @upload-version="fileInput?.click()"
       @preview="isPreviewOpen = true"
       @open-original="openLink(document?.originalUrl)"
-      @change-tab="activeTab = $event"
+      @change-tab="syncActiveTab"
       @toggle-chunk="expandedChunkIds = buildChunkExpansionState(expandedChunkIds, $event)"
     />
     <KnowledgeBasePreviewModal

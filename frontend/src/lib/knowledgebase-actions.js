@@ -1,4 +1,4 @@
-const ACTIVE_CODES = new Set(['queued', 'parsing', 'chunking', 'indexing']);
+const ACTIVE_CODES = new Set(['queued', 'parsing', 'cleaning', 'chunking', 'indexing']);
 const ACTIVE_TASK_STATUSES = new Set(['queued', 'running']);
 
 export const isIngestionInFlight = (document) => {

@@ -10,6 +10,46 @@ const unwrap = (payload) => {
   return payload ?? {};
 };
 
+const normalizeQualityGate = (qualityGate = {}, fallbackScore = 0) => ({
+  score: Number(qualityGate.score ?? fallbackScore ?? 0),
+  status: qualityGate.status || 'warning',
+  reason: qualityGate.reason || '',
+  shouldBlock: Boolean(qualityGate.should_block),
+  minQualityScore: Number(qualityGate.min_quality_score ?? 0),
+  warnQualityScore: Number(qualityGate.warn_quality_score ?? 0),
+});
+
+export const normalizeCleaningResult = (result = {}) => ({
+  id: result.id ?? null,
+  documentId: result.document_id ?? null,
+  rulesApplied: Array.isArray(result.rules_applied)
+    ? result.rules_applied.map((rule) => ({
+      id: rule.id ?? null,
+      name: rule.name || '未命名规则',
+      type: rule.type || '',
+    }))
+    : [],
+  issuesFound: Array.isArray(result.issues_found)
+    ? result.issues_found.map((issue, index) => ({
+      id: `${result.id ?? 'result'}-${index}`,
+      rule: issue.rule || '',
+      type: issue.type || '',
+      detail: issue.detail || '',
+    }))
+    : [],
+  qualityScore: Number(result.quality_score ?? 0),
+  qualitySignals: result.quality_signals && typeof result.quality_signals === 'object'
+    ? Object.fromEntries(
+      Object.entries(result.quality_signals).map(([key, value]) => [key, Number(value ?? 0)]),
+    )
+    : {},
+  originalLength: Number(result.original_length ?? 0),
+  cleanedLength: Number(result.cleaned_length ?? 0),
+  dedupCount: Number(result.dedup_count ?? 0),
+  qualityGate: normalizeQualityGate(result.quality_gate || {}, result.quality_score),
+  cleanedAt: result.cleaned_at || '',
+});
+
 export const normalizeCleaningSummary = (summary = {}) => {
   const qualityGate = summary.quality_gate || {};
   const recentResults = Array.isArray(summary.recent_results) ? summary.recent_results : [];
@@ -39,12 +79,7 @@ export const normalizeCleaningSummary = (summary = {}) => {
       documentTitle: result.document_title || '未命名文档',
       qualityScore: Number(result.quality_score ?? 0),
       cleanedAt: result.cleaned_at || '',
-      qualityGate: {
-        score: Number(result.quality_gate?.score ?? result.quality_score ?? 0),
-        status: result.quality_gate?.status || 'warning',
-        reason: result.quality_gate?.reason || '',
-        shouldBlock: Boolean(result.quality_gate?.should_block),
-      },
+      qualityGate: normalizeQualityGate(result.quality_gate || {}, result.quality_score),
     })),
   };
 };
@@ -104,17 +139,26 @@ export const createCleaningApi = (overrides = {}) => {
     },
 
     async getDocumentResults(documentId) {
-      return unwrap(await fetchJson(`/api/knowledgebase/documents/${documentId}/cleaning`, {
+      const payload = unwrap(await fetchJson(`/api/knowledgebase/documents/${documentId}/cleaning`, {
         method: 'GET',
         auth: true,
       }));
+      const results = Array.isArray(payload) ? payload : payload.results || [];
+      return {
+        results: results.map((result) => normalizeCleaningResult(result)),
+        total: Number(payload.total ?? results.length),
+      };
     },
 
     async triggerCleaning(documentId) {
-      return unwrap(await fetchJson(`/api/knowledgebase/documents/${documentId}/cleaning`, {
+      const payload = unwrap(await fetchJson(`/api/knowledgebase/documents/${documentId}/cleaning`, {
         method: 'POST',
         auth: true,
       }));
+      return {
+        ...payload,
+        result: payload.result ? normalizeCleaningResult(payload.result) : null,
+      };
     },
   };
 };

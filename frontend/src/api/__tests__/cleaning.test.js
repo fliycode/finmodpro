@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { createCleaningApi, normalizeCleaningSummary } from '../cleaning.js';
+import { createCleaningApi, normalizeCleaningResult, normalizeCleaningSummary } from '../cleaning.js';
 
 test('normalizeCleaningSummary maps quality gate and recent results', () => {
   const summary = normalizeCleaningSummary({
@@ -83,4 +83,101 @@ test('createCleaningApi bootstraps default rules and normalizes summary payload'
   assert.equal(result.created_count, 2);
   assert.equal(result.summary.defaultRulesInitialized, true);
   assert.equal(result.summary.qualityGate.blockBelowThreshold, true);
+});
+
+test('normalizeCleaningResult maps rules, issues and quality signals', () => {
+  const result = normalizeCleaningResult({
+    id: 5,
+    document_id: 21,
+    rules_applied: [{ id: 2, name: '默认：空白清理', type: 'clean_whitespace' }],
+    issues_found: [{ rule: '默认：页码去除', type: 'page_number', detail: 'Removed page number: 12' }],
+    quality_score: 81.6,
+    quality_signals: {
+      length: 70,
+      symbol_density: 90,
+    },
+    original_length: 2300,
+    cleaned_length: 2160,
+    dedup_count: 1,
+    quality_gate: {
+      score: 81.6,
+      status: 'passed',
+      reason: '质量分通过当前门槛',
+      should_block: false,
+      min_quality_score: 60,
+      warn_quality_score: 80,
+    },
+    cleaned_at: '2026-05-12T19:00:00+08:00',
+  });
+
+  assert.equal(result.documentId, 21);
+  assert.equal(result.rulesApplied[0].name, '默认：空白清理');
+  assert.equal(result.issuesFound[0].detail, 'Removed page number: 12');
+  assert.equal(result.qualitySignals.length, 70);
+  assert.equal(result.qualityGate.warnQualityScore, 80);
+});
+
+test('createCleaningApi normalizes document results and trigger response', async () => {
+  const calls = [];
+  const api = createCleaningApi({
+    fetchJson: async (path, options) => {
+      calls.push({ path, options });
+      if (options.method === 'GET') {
+        return {
+          total: 1,
+          results: [
+            {
+              id: 1,
+              document_id: 9,
+              rules_applied: [],
+              issues_found: [],
+              quality_score: 76.2,
+              quality_signals: { sentence_integrity: 80 },
+              original_length: 100,
+              cleaned_length: 96,
+              dedup_count: 0,
+              quality_gate: {
+                score: 76.2,
+                status: 'warning',
+                reason: '质量分低于建议阈值 80.0',
+                should_block: false,
+              },
+              cleaned_at: '2026-05-12T19:00:00+08:00',
+            },
+          ],
+        };
+      }
+
+      return {
+        result: {
+          id: 2,
+          document_id: 9,
+          rules_applied: [],
+          issues_found: [],
+          quality_score: 82.1,
+          quality_signals: { length: 88 },
+          original_length: 100,
+          cleaned_length: 95,
+          dedup_count: 0,
+          quality_gate: {
+            score: 82.1,
+            status: 'passed',
+            reason: '质量分通过当前门槛',
+            should_block: false,
+          },
+          cleaned_at: '2026-05-12T19:05:00+08:00',
+        },
+      };
+    },
+  });
+
+  const listing = await api.getDocumentResults(9);
+  const trigger = await api.triggerCleaning(9);
+
+  assert.equal(calls[0].path, '/api/knowledgebase/documents/9/cleaning');
+  assert.equal(calls[1].options.method, 'POST');
+  assert.equal(listing.total, 1);
+  assert.equal(listing.results[0].qualitySignals.sentence_integrity, 80);
+  assert.equal(trigger.result.qualityScore, 82.1);
+  assert.equal(trigger.result.cleanedLength, 95);
 });

@@ -45,7 +45,7 @@ const isAllChecked = () => {
 
 const showReingest = (item) => {
   const code = item.processStep?.code || '';
-  return code !== 'indexing' && code !== 'parsing' && code !== 'chunking' && code !== 'queued';
+  return code !== 'indexing' && code !== 'parsing' && code !== 'cleaning' && code !== 'chunking' && code !== 'queued';
 };
 </script>
 
