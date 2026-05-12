@@ -8,6 +8,7 @@ import {
   buildDashboardSummaryMetrics,
   buildDashboardTokenOption,
   buildDashboardTrendOption,
+  buildDocumentFlowFunnelOption,
   normalizeDashboardPayload,
 } from '../lib/admin-dashboard.js';
 import AdminChart from './admin/AdminChart.vue';
@@ -43,6 +44,7 @@ onMounted(fetchData);
 const summaryMetrics = computed(() => buildDashboardSummaryMetrics(dashboardStats.value));
 const trendOption = computed(() => buildDashboardTrendOption(dashboardStats.value));
 const documentFlow = computed(() => buildDashboardDocumentFlow(dashboardStats.value));
+const documentFunnelOption = computed(() => buildDocumentFlowFunnelOption(dashboardStats.value));
 const tokenOption = computed(() => buildDashboardTokenOption(dashboardStats.value));
 
 const tokenHighlights = computed(() => {
@@ -165,50 +167,17 @@ const tokenHighlights = computed(() => {
           </div>
         </header>
 
-        <div class="board-panel__document-grid">
-          <div class="document-flow">
-            <ol class="document-flow__track">
-              <li
-                v-for="(stage, index) in documentFlow.stages"
-                :key="stage.key"
-                class="document-stage"
-                :class="`is-${stage.tone}`"
-              >
-                <span class="document-stage__index">{{ index + 1 }}</span>
-                <div class="document-stage__body">
-                  <div class="document-stage__topline">
-                    <span>{{ stage.label }}</span>
-                    <strong>{{ formatNumber(stage.value) }}</strong>
-                  </div>
-                  <p>{{ stage.detail }}</p>
-                  <div class="document-stage__meter">
-                    <span :style="{ width: `${stage.value > 0 ? Math.max(stage.percent, 10) : 0}%` }" />
-                  </div>
-                  <small>{{ stage.percent }}%</small>
-                </div>
-              </li>
-            </ol>
+        <AdminChart :option="documentFunnelOption" height="220px" />
 
-            <div class="document-branch">
-              <div class="document-branch__line" aria-hidden="true"></div>
-              <div class="document-branch__body">
-                <span class="document-branch__label">失败分叉</span>
-                <strong>{{ formatNumber(documentFlow.failure.value) }}</strong>
-                <p>当前失败占比 {{ documentFlow.failure.percent }}%，可重试 {{ formatNumber(documentFlow.failure.retryable) }}</p>
-              </div>
-            </div>
-          </div>
-
-          <div class="board-panel__metrics board-panel__metrics--document">
-            <div
-              v-for="item in documentFlow.summary"
-              :key="item.key"
-              class="board-panel__metric"
-              :class="`is-${item.tone}`"
-            >
-              <span>{{ item.label }}</span>
-              <strong>{{ item.value }}</strong>
-            </div>
+        <div class="document-summary-row">
+          <div
+            v-for="item in documentFlow.summary"
+            :key="item.key"
+            class="document-summary-card"
+            :class="`is-${item.tone}`"
+          >
+            <span class="document-summary-card__label">{{ item.label }}</span>
+            <strong class="document-summary-card__value">{{ item.value }}</strong>
           </div>
         </div>
       </article>
@@ -451,7 +420,7 @@ const tokenHighlights = computed(() => {
 }
 
 .board-panel--document {
-  gap: 18px;
+  gap: 14px;
 }
 
 .board-panel__header strong {
@@ -491,13 +460,6 @@ const tokenHighlights = computed(() => {
   color: var(--brand);
 }
 
-.board-panel__document-grid {
-  display: grid;
-  grid-template-columns: minmax(0, 1.35fr) minmax(220px, 0.75fr);
-  gap: 18px;
-  align-items: start;
-}
-
 .board-panel__metrics {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -508,186 +470,51 @@ const tokenHighlights = computed(() => {
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
-.board-panel__metrics--document {
-  grid-template-columns: 1fr;
-  align-content: start;
-}
-
-.document-flow {
+.document-summary-row {
   display: grid;
-  gap: 18px;
-  min-width: 0;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
 }
 
-.document-flow__track {
+.document-summary-card {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 14px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
+  gap: 6px;
+  padding: 14px 16px;
+  border-radius: var(--radius-lg);
+  background: var(--surface-2);
+  border: 1px solid transparent;
+  transition: border-color 0.2s ease;
 }
 
-.document-stage {
-  position: relative;
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  gap: 10px;
-  align-items: start;
-  min-width: 0;
+.document-summary-card:hover {
+  border-color: var(--line-soft);
 }
 
-.document-stage:not(:last-child)::after {
-  content: '';
-  position: absolute;
-  top: 15px;
-  left: calc(100% - 7px);
-  width: 14px;
-  height: 1px;
-  background: var(--line-strong);
-}
-
-.document-stage__index {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 30px;
-  height: 30px;
-  border-radius: 50%;
-  border: 1px solid var(--line-strong);
-  color: var(--text-primary);
+.document-summary-card__label {
+  color: var(--text-muted);
   font-size: 0.75rem;
   font-weight: 700;
-  background: var(--surface-2);
-  flex-shrink: 0;
+  letter-spacing: 0.04em;
 }
 
-.document-stage.is-processing .document-stage__index {
-  border-color: color-mix(in srgb, var(--brand) 40%, var(--line-strong));
-  color: var(--brand);
+.document-summary-card__value {
+  color: var(--text-primary);
+  font-family: var(--heading);
+  font-size: 1.25rem;
+  line-height: 1.1;
+  font-weight: 600;
 }
 
-.document-stage.is-success .document-stage__index {
-  border-color: rgba(33, 129, 92, 0.28);
+.document-summary-card.is-success .document-summary-card__value {
   color: var(--success);
 }
 
-.document-stage__body {
-  display: grid;
-  gap: 6px;
-  min-width: 0;
+.document-summary-card.is-processing .document-summary-card__value {
+  color: var(--brand);
 }
 
-.document-stage__topline {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 10px;
-}
-
-.document-stage__topline span {
-  color: var(--text-primary);
-  font-size: 0.8125rem;
-  font-weight: 700;
-}
-
-.document-stage__topline strong {
-  color: var(--text-primary);
-  font-family: var(--heading);
-  font-size: 1rem;
-  line-height: 1;
-  font-weight: 600;
-}
-
-.document-stage__body p,
-.document-branch__body p {
-  margin: 0;
-  color: var(--text-muted);
-  font-size: 0.75rem;
-  line-height: 1.5;
-}
-
-.document-stage__meter {
-  width: 100%;
-  height: 6px;
-  overflow: hidden;
-  border-radius: 999px;
-  background: var(--surface-2);
-}
-
-.document-stage__meter span {
-  display: block;
-  height: 100%;
-  border-radius: inherit;
-  background: color-mix(in srgb, var(--brand) 70%, var(--surface-2));
-}
-
-.document-stage.is-success .document-stage__meter span {
-  background: color-mix(in srgb, var(--success) 72%, var(--surface-2));
-}
-
-.document-stage__body small {
-  color: var(--text-muted);
-  font-size: 0.6875rem;
-  font-weight: 700;
-  letter-spacing: 0.04em;
-}
-
-.document-branch {
-  display: grid;
-  grid-template-columns: 58px minmax(0, 1fr);
-  gap: 12px;
-  align-items: start;
-}
-
-.document-branch__line {
-  position: relative;
-  min-height: 58px;
-}
-
-.document-branch__line::before,
-.document-branch__line::after {
-  content: '';
-  position: absolute;
-  background: rgba(196, 73, 61, 0.28);
-}
-
-.document-branch__line::before {
-  top: 0;
-  left: 28px;
-  width: 1px;
-  height: 22px;
-}
-
-.document-branch__line::after {
-  top: 22px;
-  left: 28px;
-  width: 18px;
-  height: 1px;
-}
-
-.document-branch__body {
-  display: grid;
-  gap: 6px;
-  padding: 12px 14px;
-  border: 1px solid rgba(196, 73, 61, 0.18);
-  border-radius: var(--radius-lg);
-  background: color-mix(in srgb, var(--risk) 7%, var(--surface-2));
-}
-
-.document-branch__label {
-  color: var(--risk);
-  font-size: 0.75rem;
-  font-weight: 700;
-  letter-spacing: 0.04em;
-}
-
-.document-branch__body strong {
-  color: var(--text-primary);
-  font-family: var(--heading);
-  font-size: 1.125rem;
-  line-height: 1;
-  font-weight: 600;
+.document-summary-card.is-retry .document-summary-card__value {
+  color: var(--warning);
 }
 
 .board-panel__metric {
@@ -739,17 +566,12 @@ const tokenHighlights = computed(() => {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .ops-board__main,
-  .board-panel__document-grid {
+  .ops-board__main {
     grid-template-columns: 1fr;
   }
 
-  .document-flow__track {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
-  .document-stage:nth-child(2)::after {
-    display: none;
+  .document-summary-row {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 }
 
@@ -777,27 +599,8 @@ const tokenHighlights = computed(() => {
     grid-template-columns: 1fr;
   }
 
-  .document-flow__track {
+  .document-summary-row {
     grid-template-columns: 1fr;
-  }
-
-  .document-stage:not(:last-child)::after {
-    top: calc(100% + 7px);
-    left: 14px;
-    width: 1px;
-    height: 14px;
-  }
-
-  .document-branch {
-    grid-template-columns: 30px minmax(0, 1fr);
-  }
-
-  .document-branch__line::before {
-    left: 14px;
-  }
-
-  .document-branch__line::after {
-    left: 14px;
   }
 }
 </style>

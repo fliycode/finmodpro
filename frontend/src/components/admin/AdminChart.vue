@@ -1,15 +1,17 @@
 <script setup>
 import { onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { init, use } from 'echarts/core';
-import { BarChart, LineChart, PieChart } from 'echarts/charts';
-import { GridComponent, LegendComponent, TooltipComponent } from 'echarts/components';
+import { BarChart, FunnelChart, LineChart, PieChart } from 'echarts/charts';
+import { GridComponent, GraphicComponent, LegendComponent, TooltipComponent } from 'echarts/components';
 import { CanvasRenderer } from 'echarts/renderers';
 
 use([
   BarChart,
+  FunnelChart,
   LineChart,
   PieChart,
   GridComponent,
+  GraphicComponent,
   LegendComponent,
   TooltipComponent,
   CanvasRenderer,

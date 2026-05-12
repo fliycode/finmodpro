@@ -5,6 +5,7 @@ import {
   buildDashboardDocumentFlow,
   buildDashboardSummaryMetrics,
   buildDashboardTrendOption,
+  buildDocumentFlowFunnelOption,
   normalizeDashboardPayload,
 } from '../admin-dashboard.js';
 
@@ -94,4 +95,27 @@ test('dashboard document flow converts status counts into pipeline stages and br
   assert.equal(flow.summary[0].value, '60%');
   assert.equal(flow.summary[1].value, '5');
   assert.equal(flow.summary[2].value, '2');
+});
+
+test('document flow funnel option builds a descending funnel with 4 stages', () => {
+  const stats = normalizeDashboardPayload({
+    document_status_distribution: {
+      uploaded: 10,
+      parsed: 8,
+      chunked: 6,
+      indexed: 4,
+      failed: 2,
+    },
+  });
+
+  const option = buildDocumentFlowFunnelOption(stats);
+
+  assert.equal(option.series[0].type, 'funnel');
+  assert.equal(option.series[0].data.length, 4);
+  assert.deepEqual(
+    option.series[0].data.map((d) => d.name),
+    ['上传', '解析', '切块', '已索引'],
+  );
+  assert.equal(option.series[0].sort, 'descending');
+  assert.equal(option.graphic[0].children[0].style.text, '失败 2');
 });

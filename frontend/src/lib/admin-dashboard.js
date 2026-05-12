@@ -568,6 +568,130 @@ export function buildDashboardDocumentFlow(stats) {
   };
 }
 
+export function buildDocumentFlowFunnelOption(stats) {
+  const distribution = stats?.document_status_distribution || {};
+  const total = Math.max(1, sumObjectValues(distribution));
+  const c = chartColors();
+
+  const stageColors = [
+    c.muted,
+    c.brandSoft,
+    c.brand,
+    c.success,
+  ];
+
+  const stageLabels = ['上传', '解析', '切块', '已索引'];
+  const stageKeys = ['uploaded', 'parsed', 'chunked', 'indexed'];
+
+  const data = stageKeys.map((key, i) => {
+    const value = toNumber(distribution[key]);
+    return {
+      name: stageLabels[i],
+      value: Math.max(value, total * 0.03),
+      _raw: value,
+      _percent: total > 0 ? Math.round((value / total) * 100) : 0,
+      itemStyle: {
+        color: stageColors[i],
+        borderColor: c.surfaceBg,
+        borderWidth: 2,
+        borderRadius: [4, 4, 4, 4],
+      },
+    };
+  });
+
+  const failedCount = toNumber(distribution.failed);
+  const failPercent = total > 0 ? Math.round((failedCount / total) * 100) : 0;
+
+  return {
+    backgroundColor: 'transparent',
+    tooltip: {
+      trigger: 'item',
+      backgroundColor: c.surface2,
+      borderColor: c.lineStrong,
+      borderWidth: 1,
+      textStyle: { color: c.textPrimary, fontSize: 12 },
+      formatter: (params) => {
+        const d = params.data;
+        return `<div style="font-weight:600;margin-bottom:4px">${params.name}</div>
+          <div style="font-size:12px;color:${c.textSecondary}">
+            数量：${formatInteger(d._raw)}<br/>
+            占比：${d._percent}%
+          </div>`;
+      },
+    },
+    graphic: failedCount > 0 ? [
+      {
+        type: 'group',
+        right: 20,
+        bottom: 20,
+        children: [
+          {
+            type: 'text',
+            style: {
+              text: `失败 ${formatInteger(failedCount)}`,
+              fill: c.risk,
+              fontSize: 13,
+              fontWeight: 700,
+              fontFamily: 'var(--heading)',
+            },
+          },
+          {
+            type: 'text',
+            top: 20,
+            style: {
+              text: `占比 ${failPercent}%`,
+              fill: c.textSecondary,
+              fontSize: 11,
+            },
+          },
+        ],
+      },
+    ] : [],
+    series: [
+      {
+        type: 'funnel',
+        left: 16,
+        right: failedCount > 0 ? 120 : 40,
+        top: 12,
+        bottom: 12,
+        width: 'auto',
+        minSize: '18%',
+        maxSize: '100%',
+        sort: 'descending',
+        gap: 4,
+        label: {
+          show: true,
+          position: 'inside',
+          formatter: (params) => `{name|${params.name}}  {val|${formatInteger(params.data._raw)}}`,
+          rich: {
+            name: {
+              color: '#fff',
+              fontSize: 12,
+              fontWeight: 700,
+              padding: [0, 0, 0, 4],
+            },
+            val: {
+              color: 'rgba(255,255,255,0.78)',
+              fontSize: 11,
+              fontWeight: 600,
+            },
+          },
+        },
+        labelLine: { show: false },
+        emphasis: {
+          label: { fontSize: 13 },
+          itemStyle: { shadowBlur: 12, shadowColor: 'rgba(0,0,0,0.18)' },
+        },
+        itemStyle: {
+          borderColor: c.surfaceBg,
+          borderWidth: 2,
+        },
+        data,
+      },
+    ],
+  };
+}
+
 export function summarizeOperationalPosture(stats) {
   const pendingRisk = toNumber(stats?.pending_risk_event_count);
   const failedDocuments = toNumber(stats?.failed_document_count);
