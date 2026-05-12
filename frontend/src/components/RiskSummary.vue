@@ -1,155 +1,150 @@
 <script setup>
-import { computed, defineAsyncComponent, onMounted, onBeforeUnmount, ref, watch } from "vue";
-import { riskApi } from "../api/risk.js";
-import { kbApi } from "../api/knowledgebase.js";
-import { useFlash } from "../lib/flash.js";
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 import { ElMessageBox } from 'element-plus';
-import {
-  buildRiskLevelChartOption,
-  normalizeRiskAnalytics,
-} from "../lib/risk-workspace.js";
-import AppIcon from "./ui/AppIcon.vue";
 
-const AdminChart = defineAsyncComponent(() => import("./admin/AdminChart.vue"));
+import { kbApi } from '../api/knowledgebase.js';
+import { riskApi } from '../api/risk.js';
+import { useFlash } from '../lib/flash.js';
+import { normalizeRiskAnalytics } from '../lib/risk-workspace.js';
+import AppIcon from './ui/AppIcon.vue';
 
 const flash = useFlash();
-
-const fmt = new Intl.NumberFormat("zh-CN");
+const fmt = new Intl.NumberFormat('zh-CN');
 
 const buildDefaultFilters = () => ({
-  company_name: "",
-  risk_type: "",
-  risk_level: "",
-  review_status: "",
-  period_start: "",
-  period_end: "",
+  company_name: '',
+  risk_type: '',
+  risk_level: '',
+  review_status: '',
+  period_start: '',
+  period_end: '',
 });
 
 const filters = ref(buildDefaultFilters());
-
 const events = ref([]);
-const isEventsLoading = ref(false);
-const eventsErrorMsg = ref("");
-
 const analyticsPayload = ref(null);
-const isAnalyticsLoading = ref(false);
-const analyticsErrorMsg = ref("");
 
-let workspaceAbort = null;
+const isEventsLoading = ref(false);
+const isAnalyticsLoading = ref(false);
+const isUploading = ref(false);
+const isReportLoading = ref(false);
+const isReportExporting = ref(false);
 const reviewingId = ref(null);
 
+const eventsErrorMsg = ref('');
+const analyticsErrorMsg = ref('');
+const reportErrorMsg = ref('');
+
 const fileInput = ref(null);
-const isUploading = ref(false);
+const eventsDrawerOpen = ref(false);
+const reportType = ref('company');
+const reportForm = ref({ company_name: '', period_start: '', period_end: '' });
+const generatedReport = ref(null);
+
+let workspaceAbort = null;
 
 const analytics = computed(() => normalizeRiskAnalytics(analyticsPayload.value));
-
-const riskLevelOption = computed(() => buildRiskLevelChartOption(analytics.value));
-
-const riskLevelDist = computed(() => analytics.value.risk_level_distribution || []);
 const riskTypeDist = computed(() => analytics.value.risk_type_distribution || []);
-const topCompanies = computed(() => analytics.value.top_companies || []);
-
-const riskLevelCounts = computed(() => {
-  const map = { high: 0, medium: 0, low: 0, critical: 0 };
-  riskLevelDist.value.forEach((item) => {
-    map[item.key] = (map[item.key] || 0) + item.value;
-  });
-  return map;
-});
-
-const totalEvents = computed(() => analytics.value.summary.total_events);
-const highCount = computed(() => riskLevelCounts.value.high + riskLevelCounts.value.critical);
-const medCount = computed(() => riskLevelCounts.value.medium);
-const lowCount = computed(() => riskLevelCounts.value.low);
-
-const highPct = computed(() => totalEvents.value > 0 ? Math.round(highCount.value / totalEvents.value * 100) : 0);
-const medPct = computed(() => totalEvents.value > 0 ? Math.round(medCount.value / totalEvents.value * 100) : 0);
-const lowPct = computed(() => totalEvents.value > 0 ? Math.round(lowCount.value / totalEvents.value * 100) : 0);
-
-const donutStyle = computed(() => {
-  if (totalEvents.value === 0) return {};
-  const h = highPct.value;
-  const m = medPct.value;
-  return {
-    background: `conic-gradient(#e94c59 0 ${h}%, #f0a51a ${h}% ${h + m}%, #2f7bff ${h + m}% 100%)`,
-  };
-});
-
-const highRiskEvents = computed(() =>
-  events.value
-    .filter((e) => e.risk_level === "high" || e.risk_level === "critical")
-    .slice(0, 5)
-);
-
-const allTrendNodes = computed(() => {
-  const trend = analytics.value.trend || [];
-  return trend.map((item, i, arr) => ({
-    date: item.key || item.date || '',
-    label: '',
-    count: item.value || item.count || 0,
-    active: i === arr.length - 1,
-  }));
-});
-
-const trendPageSize = 4;
-const trendOffset = ref(0);
-const trendNodes = computed(() => {
-  const nodes = allTrendNodes.value;
-  const start = Math.max(0, nodes.length - trendPageSize - trendOffset.value);
-  return nodes.slice(start, start + trendPageSize);
-});
-const canScrollTrendLeft = computed(() => trendOffset.value > 0);
-const canScrollTrendRight = computed(() => allTrendNodes.value.length > trendPageSize + trendOffset.value);
-const scrollTrendLeft = () => { if (canScrollTrendLeft.value) trendOffset.value--; };
-const scrollTrendRight = () => { if (canScrollTrendRight.value) trendOffset.value++; };
-
-const activeExtractTab = ref('results');
-const highlightEnabled = ref(true);
+const totalEvents = computed(() => analytics.value.summary.total_events || 0);
+const pendingReviews = computed(() => analytics.value.summary.pending_reviews || 0);
 
 const eventsByType = computed(() => {
-  const map = {};
-  events.value.forEach(e => {
-    if (!map[e.risk_type]) map[e.risk_type] = [];
-    map[e.risk_type].push(e);
+  const groups = {};
+  events.value.forEach((event) => {
+    if (!groups[event.risk_type]) {
+      groups[event.risk_type] = [];
+    }
+    groups[event.risk_type].push(event);
   });
-  return map;
+  return groups;
 });
 
 const dominantLevelMap = computed(() => {
   const priority = { critical: 4, high: 3, medium: 2, low: 1 };
-  const map = {};
-  for (const [type, typeEvents] of Object.entries(eventsByType.value)) {
-    map[type] = typeEvents.reduce((best, e) =>
-      (priority[e.risk_level] || 0) > (priority[best] || 0) ? e.risk_level : best, 'low');
+  const groups = {};
+
+  Object.entries(eventsByType.value).forEach(([type, typeEvents]) => {
+    groups[type] = typeEvents.reduce((best, event) => (
+      (priority[event.risk_level] || 0) > (priority[best] || 0) ? event.risk_level : best
+    ), 'low');
+  });
+
+  return groups;
+});
+
+const groupedRiskResults = computed(() => riskTypeDist.value.map((item) => {
+  const relatedEvents = eventsByType.value[item.key] || [];
+  return {
+    key: item.key,
+    count: item.value,
+    dominantLevel: dominantLevelMap.value[item.key] || 'low',
+    summary: relatedEvents[0]?.summary || '暂无摘要',
+    evidence: relatedEvents[0]?.evidence_text || '暂无证据文本。',
+  };
+}));
+
+const recentEvents = computed(() => events.value.slice(0, 8));
+
+const sourceDoc = computed(() => {
+  const firstEvent = events.value[0];
+  const fileSize = firstEvent?.document_file_size || 0;
+
+  return {
+    title: firstEvent?.document_title || firstEvent?.document_filename || '暂无文档',
+    company: firstEvent?.company_name || '未识别公司',
+    size: fileSize > 0 ? `${(fileSize / 1024 / 1024).toFixed(1)} MB` : '--',
+    date: firstEvent?.document_source_date || '--',
+  };
+});
+
+const extractionQuality = computed(() => {
+  const firstEvent = events.value.find((event) => event.extraction_metadata);
+  if (!firstEvent) {
+    return null;
   }
-  return map;
+
+  return {
+    rounds: firstEvent.extraction_metadata.rounds_completed,
+    verified: firstEvent.extraction_metadata.verification_passed,
+    filteredChunks: firstEvent.extraction_metadata.filtered_chunks,
+    totalChunks: firstEvent.extraction_metadata.total_chunks,
+  };
 });
 
-const docPage = ref(1);
-const docPageSize = 5;
-const docTotalPages = computed(() => Math.max(1, Math.ceil(riskTypeDist.value.length / docPageSize)));
-const pagedRiskTypes = computed(() => {
-  const start = (docPage.value - 1) * docPageSize;
-  return riskTypeDist.value.slice(start, start + docPageSize);
-});
-const prevDocPage = () => { if (docPage.value > 1) docPage.value--; };
-const nextDocPage = () => { if (docPage.value < docTotalPages.value) docPage.value++; };
-watch(riskTypeDist, () => { docPage.value = 1; trendOffset.value = 0; });
+const summaryCards = computed(() => ([
+  {
+    key: 'events',
+    label: '风险事件',
+    value: fmt.format(totalEvents.value),
+    note: '已提取结果',
+  },
+  {
+    key: 'types',
+    label: '风险类型',
+    value: fmt.format(riskTypeDist.value.length),
+    note: '按类型归并',
+  },
+  {
+    key: 'pending',
+    label: '待审核',
+    value: fmt.format(pendingReviews.value),
+    note: '需要人工确认',
+  },
+]));
 
-/* ---- API calls ---- */
-
-const isAbortError = (err) => err?.name === "AbortError";
+const isAbortError = (error) => error?.name === 'AbortError';
 
 const fetchEvents = async (signal) => {
   isEventsLoading.value = true;
-  eventsErrorMsg.value = "";
+  eventsErrorMsg.value = '';
   try {
     const data = await riskApi.getEvents(filters.value, { signal });
     events.value = data.data?.risk_events || data.risk_events || [];
   } catch (error) {
-    if (isAbortError(error)) return;
-    console.error("Failed to fetch risk events:", error);
-    eventsErrorMsg.value = error.message || "加载风险事件失败";
+    if (isAbortError(error)) {
+      return;
+    }
+    eventsErrorMsg.value = error.message || '加载风险事件失败';
   } finally {
     isEventsLoading.value = false;
   }
@@ -157,84 +152,109 @@ const fetchEvents = async (signal) => {
 
 const fetchAnalytics = async (signal) => {
   isAnalyticsLoading.value = true;
-  analyticsErrorMsg.value = "";
+  analyticsErrorMsg.value = '';
   try {
     analyticsPayload.value = await riskApi.getAnalytics(filters.value, { signal });
   } catch (error) {
-    if (isAbortError(error)) return;
-    console.error("Failed to fetch analytics:", error);
-    analyticsErrorMsg.value = error.message || "加载风险分析失败";
+    if (isAbortError(error)) {
+      return;
+    }
+    analyticsErrorMsg.value = error.message || '加载风险分析失败';
   } finally {
     isAnalyticsLoading.value = false;
   }
 };
 
 const refreshWorkspace = async () => {
-  if (workspaceAbort) workspaceAbort.abort();
+  if (workspaceAbort) {
+    workspaceAbort.abort();
+  }
+
   const controller = new AbortController();
   workspaceAbort = controller;
+
   try {
-    await Promise.all([fetchEvents(controller.signal), fetchAnalytics(controller.signal)]);
+    await Promise.all([
+      fetchEvents(controller.signal),
+      fetchAnalytics(controller.signal),
+    ]);
   } finally {
-    if (workspaceAbort === controller) workspaceAbort = null;
+    if (workspaceAbort === controller) {
+      workspaceAbort = null;
+    }
   }
 };
 
-onMounted(() => refreshWorkspace());
-onBeforeUnmount(() => { if (workspaceAbort) workspaceAbort.abort(); });
-
 const handleReview = async (event, status) => {
   const eventId = event.id || event.event_id;
-  if (reviewingId.value === eventId) return;
+  if (reviewingId.value === eventId) {
+    return;
+  }
+
   reviewingId.value = eventId;
   try {
     await riskApi.reviewEvent(eventId, status);
-    flash.success(`风险事件已${status === "approved" ? "确认" : "忽略"}`);
+    flash.success(`风险事件已${status === 'approved' ? '确认' : '忽略'}`);
     await refreshWorkspace();
   } catch (error) {
-    flash.error(error.message || "审核失败");
+    flash.error(error.message || '审核失败');
   } finally {
     reviewingId.value = null;
   }
 };
 
 const applyFilters = () => refreshWorkspace();
-const resetFilters = () => { filters.value = buildDefaultFilters(); refreshWorkspace(); };
+const resetFilters = () => {
+  filters.value = buildDefaultFilters();
+  refreshWorkspace();
+};
 
 const triggerUpload = () => fileInput.value?.click();
 
-const pollDocumentIndexed = async (docId, { timeout = 60000, interval = 2000 } = {}) => {
+const pollDocumentIndexed = async (documentId, { timeout = 60000, interval = 2000 } = {}) => {
   const deadline = Date.now() + timeout;
   while (Date.now() < deadline) {
-    const doc = await kbApi.getDocumentDetail(docId);
-    const status = (doc.status || "").toLowerCase();
-    if (status === "indexed") return doc;
-    if (status === "failed") throw new Error("文档处理失败");
-    await new Promise((r) => setTimeout(r, interval));
+    const document = await kbApi.getDocumentDetail(documentId);
+    const status = (document.status || '').toLowerCase();
+
+    if (status === 'indexed') {
+      return document;
+    }
+    if (status === 'failed') {
+      throw new Error('文档处理失败');
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, interval));
   }
-  throw new Error("文档处理超时，请稍后重试");
+
+  throw new Error('文档处理超时，请稍后重试');
 };
 
-const runRiskPipeline = async (docId) => {
-  flash.success("上传完成，文档处理中...");
-  await kbApi.ingestDocument(docId);
-  await pollDocumentIndexed(docId);
-  flash.success("文档就绪，正在提取风险事件...");
-  await riskApi.extractDocumentWithPolling(docId);
-  flash.success("风险提取完成");
+const runRiskPipeline = async (documentId) => {
+  flash.success('上传完成，文档处理中...');
+  await kbApi.ingestDocument(documentId);
+  await pollDocumentIndexed(documentId);
+  flash.success('文档就绪，正在提取风险事件...');
+  await riskApi.extractDocumentWithPolling(documentId);
+  flash.success('风险提取完成');
 };
 
 const handleFileChange = async (event) => {
   const file = event.target.files?.[0];
-  if (!file) return;
+  if (!file) {
+    return;
+  }
+
   isUploading.value = true;
   try {
-    flash.success("文档上传中...");
+    flash.success('文档上传中...');
     const result = await kbApi.uploadDocument(file);
-    const docId = result.document?.id;
-    if (docId) {
-      await runRiskPipeline(docId);
+    const documentId = result.document?.id;
+
+    if (documentId) {
+      await runRiskPipeline(documentId);
     }
+
     await refreshWorkspace();
   } catch (error) {
     if (error.code === 'DUPLICATE' && error.existingDocument) {
@@ -247,475 +267,541 @@ const handleFileChange = async (event) => {
       } catch {
         return;
       }
+
       try {
-        flash.success("正在上传新版本...");
+        flash.success('正在上传新版本...');
         const versionResult = await kbApi.uploadNewVersion(error.existingDocument.id, file, {
           title: file.name,
           sourceLabel: file.name,
         });
-        const newDocId = versionResult.document?.id;
-        if (newDocId) {
-          await runRiskPipeline(newDocId);
+        const newDocumentId = versionResult.document?.id;
+        if (newDocumentId) {
+          await runRiskPipeline(newDocumentId);
         }
         await refreshWorkspace();
       } catch (versionError) {
-        flash.error(versionError.message || "上传新版本失败");
+        flash.error(versionError.message || '上传新版本失败');
       }
       return;
     }
-    flash.error(error.message || "上传或提取失败");
+
+    flash.error(error.message || '上传或提取失败');
   } finally {
     isUploading.value = false;
-    if (event.target) event.target.value = "";
+    if (event.target) {
+      event.target.value = '';
+    }
   }
 };
 
-const getReviewStatusText = (s) => ({ pending: "待审核", approved: "已确认", rejected: "已忽略" }[s?.toLowerCase()] || s || "待审核");
-const getRiskTagType = (l) => ({ high: "danger", critical: "danger", medium: "warning", low: "success" }[l] || "info");
-const getReviewTagType = (s) => ({ approved: "success", rejected: "danger", pending: "warning" }[s] || "info");
+const generateReport = async () => {
+  reportErrorMsg.value = '';
 
-const formatDate = (d) => { try { return d ? new Date(d).toLocaleString() : "N/A" } catch { return d } };
+  if (reportType.value === 'company' && !reportForm.value.company_name) {
+    reportErrorMsg.value = '请输入公司名称';
+    return;
+  }
 
-const getRiskLevelText = (l) => ({ critical: "严重", high: "高", medium: "中", low: "低" }[l] || l);
-const getRiskLevelClass = (l) => ({ high: "lv-high", critical: "lv-high", medium: "lv-mid", low: "lv-low" }[l] || "lv-low");
+  if (reportType.value === 'time_range' && (!reportForm.value.period_start || !reportForm.value.period_end)) {
+    reportErrorMsg.value = '请输入开始和结束日期';
+    return;
+  }
 
-const formatConfidence = (score) => {
-  const pct = Math.round((parseFloat(score) || 0) * 100);
-  return `${pct}%`;
+  isReportLoading.value = true;
+  generatedReport.value = null;
+
+  try {
+    let data;
+    if (reportType.value === 'company') {
+      data = await riskApi.generateCompanyReport({
+        company_name: reportForm.value.company_name,
+        period_start: reportForm.value.period_start || undefined,
+        period_end: reportForm.value.period_end || undefined,
+      });
+    } else {
+      data = await riskApi.generateTimeRangeReport({
+        period_start: reportForm.value.period_start,
+        period_end: reportForm.value.period_end,
+      });
+    }
+
+    generatedReport.value = data.data?.report || data.report || data;
+    flash.success('风险报告生成成功');
+    await fetchAnalytics();
+  } catch (error) {
+    reportErrorMsg.value = error.message || '生成报告失败';
+  } finally {
+    isReportLoading.value = false;
+  }
 };
 
+const downloadGeneratedReport = async (format = 'markdown') => {
+  if (!generatedReport.value?.id) {
+    flash.error('请先生成报告后再导出');
+    return;
+  }
+
+  isReportExporting.value = true;
+  try {
+    const payload = await riskApi.exportReport(generatedReport.value.id, { format });
+    const blob = new Blob([payload.content], { type: payload.contentType });
+    const url = window.URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = payload.filename;
+    anchor.click();
+    window.URL.revokeObjectURL(url);
+    flash.success('报告已导出');
+  } catch (error) {
+    flash.error(error.message || '导出失败');
+  } finally {
+    isReportExporting.value = false;
+  }
+};
+
+const exportEventsAsJson = () => {
+  if (!events.value.length) {
+    flash.warning('暂无风险事件可导出');
+    return;
+  }
+
+  const blob = new Blob([JSON.stringify(events.value, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = 'risk-events.json';
+  anchor.click();
+  URL.revokeObjectURL(url);
+  flash.success('已导出风险事件 JSON');
+};
+
+const formatDate = (value) => {
+  try {
+    return value ? new Date(value).toLocaleString() : '--';
+  } catch {
+    return value;
+  }
+};
+
+const getRiskTagType = (level) => ({ high: 'danger', critical: 'danger', medium: 'warning', low: 'success' }[level] || 'info');
+const getReviewTagType = (status) => ({ approved: 'success', rejected: 'danger', pending: 'warning' }[status] || 'info');
+const getReviewStatusText = (status) => ({ pending: '待审核', approved: '已确认', rejected: '已忽略' }[status?.toLowerCase()] || status || '待审核');
+const getRiskLevelText = (level) => ({ critical: '严重', high: '高', medium: '中', low: '低' }[level] || level);
+
+const formatConfidence = (score) => `${Math.round((parseFloat(score) || 0) * 100)}%`;
 const getConfidenceClass = (score) => {
-  const val = parseFloat(score) || 0;
-  if (val >= 0.8) return 'confidence-high';
-  if (val >= 0.5) return 'confidence-mid';
+  const value = parseFloat(score) || 0;
+  if (value >= 0.8) return 'confidence-high';
+  if (value >= 0.5) return 'confidence-mid';
   return 'confidence-low';
 };
 
-const getSourceTooltip = (row) => {
-  const meta = row.extraction_metadata;
-  if (!meta) return `Chunk #${row.chunk_id}`;
+const getSourceTooltip = (event) => {
+  const meta = event.extraction_metadata;
+  if (!meta) {
+    return `Chunk #${event.chunk_id}`;
+  }
+
   return [
-    `Chunk #${row.chunk_id}`,
+    `Chunk #${event.chunk_id}`,
     `提取轮次: ${meta.rounds_completed}`,
     `验证: ${meta.verification_passed ? '通过' : '未通过'}`,
     `筛选切块: ${meta.filtered_chunks || '?'}/${meta.total_chunks || '?'}`,
   ].join('\n');
 };
 
-const extractionQuality = computed(() => {
-  const first = events.value.find(e => e.extraction_metadata);
-  if (!first) return null;
-  const meta = first.extraction_metadata;
-  return {
-    rounds: meta.rounds_completed,
-    verified: meta.verification_passed,
-    filteredChunks: meta.filtered_chunks,
-    totalChunks: meta.total_chunks,
-  };
+onMounted(() => {
+  refreshWorkspace();
 });
 
-const iconClasses = ["ri-red", "ri-orange", "ri-blue", "ri-green", "ri-purple", "ri-blue", "ri-brown", "ri-blue"];
-const tagClasses = ["tag-red", "tag-orange", "tag-blue", "tag-cyan"];
-const hlClasses = ["hl-red", "hl-orange", "hl-blue", "hl-green", "hl-purple"];
-
-const getRiskIconCls = (i) => iconClasses[i % iconClasses.length];
-const getRiskTagCls = (i) => tagClasses[i % tagClasses.length];
-const getHlCls = (i) => hlClasses[i % hlClasses.length];
-
-const sourceDoc = computed(() => {
-  const e = events.value[0];
-  const rawSize = e?.document_file_size || 0;
-  return {
-    title: e?.document_title || e?.document_filename || `${e?.company_name || '未知公司'}_风险文档`,
-    company: e?.company_name || '未知公司',
-    size: rawSize > 0 ? `${(rawSize / 1024 / 1024).toFixed(1)} MB` : '--',
-    date: e?.document_source_date || '--',
-  };
+onBeforeUnmount(() => {
+  if (workspaceAbort) {
+    workspaceAbort.abort();
+  }
 });
-
-const eventsDrawerOpen = ref(false);
-
-/* ---- Report ---- */
-
-const reportType = ref("company");
-const isReportLoading = ref(false);
-const isReportExporting = ref(false);
-const reportErrorMsg = ref("");
-const generatedReport = ref(null);
-const reportForm = ref({ company_name: "", period_start: "", period_end: "" });
-
-const generateReport = async () => {
-  reportErrorMsg.value = "";
-  if (reportType.value === "company" && !reportForm.value.company_name) {
-    reportErrorMsg.value = "请输入公司名称";
-    return;
-  }
-  if (reportType.value === "time_range" && (!reportForm.value.period_start || !reportForm.value.period_end)) {
-    reportErrorMsg.value = "请输入开始和结束日期";
-    return;
-  }
-  try {
-    const reportLabel = reportType.value === "company"
-      ? `公司"${reportForm.value.company_name}"的风险报告`
-      : `${reportForm.value.period_start} 至 ${reportForm.value.period_end} 的风险报告`;
-    await ElMessageBox.confirm(`确认生成${reportLabel}吗？`, '生成风险报告', {
-      confirmButtonText: '生成',
-      cancelButtonText: '取消',
-      type: 'info',
-    });
-  } catch {
-    return;
-  }
-  isReportLoading.value = true;
-  generatedReport.value = null;
-  try {
-    let data;
-    if (reportType.value === "company") {
-      data = await riskApi.generateCompanyReport({ company_name: reportForm.value.company_name, period_start: reportForm.value.period_start || undefined, period_end: reportForm.value.period_end || undefined });
-    } else {
-      data = await riskApi.generateTimeRangeReport({ period_start: reportForm.value.period_start, period_end: reportForm.value.period_end });
-    }
-    generatedReport.value = data.data?.report || data.report || data;
-    flash.success("风险报告生成成功");
-    await fetchAnalytics();
-  } catch (error) {
-    reportErrorMsg.value = error.message || "生成报告失败";
-  } finally {
-    isReportLoading.value = false;
-  }
-};
-
-const exportEventsAsJson = () => {
-  if (!events.value.length) { flash.warning("暂无风险事件可导出"); return; }
-  const blob = new Blob([JSON.stringify(events.value, null, 2)], { type: "application/json" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a"); a.href = url; a.download = "risk-events.json"; a.click();
-  URL.revokeObjectURL(url);
-  flash.success("已导出风险事件 JSON");
-};
-
-const downloadGeneratedReport = async (format = "markdown") => {
-  if (!generatedReport.value?.id) { flash.error("请先生成报告后再导出"); return; }
-  isReportExporting.value = true;
-  try {
-    const p = await riskApi.exportReport(generatedReport.value.id, { format });
-    const blob = new Blob([p.content], { type: p.contentType });
-    const url = window.URL.createObjectURL(blob);
-    const a = document.createElement("a"); a.href = url; a.download = p.filename; a.click();
-    window.URL.revokeObjectURL(url);
-    flash.success(`已导出为 ${format === "json" ? "JSON" : "Markdown"}`);
-  } catch (error) {
-    flash.error(error.message || "导出失败");
-  } finally {
-    isReportExporting.value = false;
-  }
-};
 </script>
 
 <template>
-  <div class="risk-stage">
-    <!-- Top Bar -->
-    <div class="risk-topbar">
-      <div class="risk-topbar__center">
-        <span class="risk-topbar__badge">
-          <AppIcon name="shield" :size="14" />
-          已识别 {{ riskTypeDist.length }} 类风险 · {{ fmt.format(totalEvents) }} 条信息
-        </span>
+  <div class="page-stack risk-page">
+    <el-alert
+      v-if="eventsErrorMsg || analyticsErrorMsg"
+      :title="eventsErrorMsg || analyticsErrorMsg"
+      type="error"
+      show-icon
+      :closable="false"
+    />
+
+    <section class="risk-page__hero">
+      <div class="risk-page__hero-copy">
+        <span class="risk-page__eyebrow">Risk Extraction</span>
+        <h2>上传文档，提取风险，确认结果</h2>
+        <p>这个页面只保留三件事：跑提取、看结果、做审核。报告导出放到次级区，不再和主流程抢注意力。</p>
       </div>
-      <div class="risk-topbar__actions">
-        <input ref="fileInput" type="file" accept=".pdf,.docx,.txt" class="risk-topbar__file-input" @change="handleFileChange" aria-hidden="true" tabindex="-1" />
-        <button type="button" class="risk-action-btn" @click="triggerUpload" :disabled="isUploading" :aria-busy="isUploading" aria-label="上传风险文档">
-          <AppIcon name="upload" :size="14" aria-hidden="true" />
+
+      <div class="risk-page__hero-actions">
+        <input
+          ref="fileInput"
+          type="file"
+          accept=".pdf,.docx,.txt"
+          class="risk-page__file-input"
+          @change="handleFileChange"
+          aria-hidden="true"
+          tabindex="-1"
+        />
+        <el-button type="primary" :loading="isUploading" @click="triggerUpload">
+          <AppIcon name="upload" />
           {{ isUploading ? '上传中...' : '上传文档' }}
-        </button>
-        <button type="button" class="risk-action-btn" @click="eventsDrawerOpen = true" aria-label="查看全部风险事件">
-          <AppIcon name="search" :size="14" aria-hidden="true" />
-          查看全部事件
-        </button>
-        <button type="button" class="risk-action-btn risk-action-btn--primary" @click="refreshWorkspace" :disabled="isAnalyticsLoading || isEventsLoading" :aria-busy="isAnalyticsLoading || isEventsLoading" aria-label="刷新风险数据">
-          <AppIcon name="refresh" :size="14" aria-hidden="true" />
+        </el-button>
+        <el-button :loading="isEventsLoading || isAnalyticsLoading" @click="refreshWorkspace">
+          <AppIcon name="refresh" />
           刷新
-        </button>
+        </el-button>
+        <el-button @click="eventsDrawerOpen = true">
+          查看全部事件
+        </el-button>
       </div>
-    </div>
+    </section>
 
-    <!-- Main Grid -->
-    <div class="risk-grid">
-      <!-- LEFT COLUMN -->
-      <div class="risk-left">
-        <!-- Row 1: Source -->
-        <div class="risk-row-top">
-          <section class="risk-panel risk-source">
-            <div class="risk-panel__head">
-              <h3><AppIcon name="file" :size="14" /> 文档来源</h3>
-            </div>
-            <div class="risk-source__file">
-              <div class="risk-source__info">
-                <span class="risk-source__pdf" aria-hidden="true">PDF</span>
-                <div>
-                  <strong :title="sourceDoc.title">{{ sourceDoc.title }}</strong>
-                  <p>{{ sourceDoc.size }} · {{ sourceDoc.date }}</p>
-                </div>
-              </div>
-            </div>
-          </section>
+    <section class="risk-page__summary">
+      <article v-for="item in summaryCards" :key="item.key" class="risk-page__summary-card">
+        <small>{{ item.label }}</small>
+        <strong>{{ item.value }}</strong>
+        <span>{{ item.note }}</span>
+      </article>
+    </section>
+
+    <div class="risk-page__main">
+      <section class="risk-page__panel">
+        <header class="risk-page__panel-head">
+          <div>
+            <h3>提取结果</h3>
+            <p>按风险类型归并结果，先看类型和证据，不再拆成多个复杂面板。</p>
+          </div>
+        </header>
+
+        <div v-if="isEventsLoading" class="risk-page__empty">正在加载提取结果...</div>
+        <div v-else-if="!groupedRiskResults.length" class="risk-page__empty">
+          上传文档后，提取结果会出现在这里。
         </div>
-
-        <!-- Row 2: Doc Viewer + Extract List (fills remaining space) -->
-        <div class="risk-work">
-          <!-- Document Panel -->
-          <div class="risk-doc" v-loading="isEventsLoading">
-            <div class="risk-doc__bar">
-              <span>已识别 {{ riskTypeDist.length }} 类风险，共 {{ fmt.format(totalEvents) }} 条风险信息</span>
-              <span class="risk-doc__pager" role="navigation" aria-label="风险类别分页">
-                <button @click="prevDocPage" :disabled="docPage <= 1" aria-label="上一页">&lt;</button>
-                <span class="risk-doc__page-num" aria-live="polite">{{ riskTypeDist.length ? `${docPage} / ${docTotalPages}` : '- / -' }}</span>
-                <button @click="nextDocPage" :disabled="docPage >= docTotalPages" aria-label="下一页">&gt;</button>
-              </span>
-            </div>
-            <div class="risk-doc__page">
-              <h3>风险因素分析</h3>
-              <p>基于已提取的风险事件，以下列出主要风险类别及证据：</p>
-              <template v-for="(group, gi) in pagedRiskTypes" :key="group.key">
-                <h4>{{ (docPage - 1) * docPageSize + gi + 1 }}. {{ group.key }}</h4>
-                <p class="risk-doc__hl" :class="[getHlCls(gi), { 'no-highlight': !highlightEnabled }]">
-                  {{ (eventsByType[group.key] || []).slice(0, 1).map(e => e.evidence_text || e.summary).join('') || '暂无证据文本。' }}
-                </p>
-              </template>
-              <p v-if="riskTypeDist.length === 0" class="risk-doc__empty">
-                暂无风险数据。上传文档并执行提取后，风险信息将在此展示。
-              </p>
-            </div>
-          </div>
-
-          <!-- Extract Panel -->
-          <div class="risk-extract" v-loading="isEventsLoading">
-            <div class="risk-extract__head">
-              <div class="risk-extract__tabs">
-                <button
-                  :class="['risk-extract__tab', { 'is-active': activeExtractTab === 'results' }]"
-                  @click="activeExtractTab = 'results'"
-                >提取结果</button>
-                <button
-                  :class="['risk-extract__tab', { 'is-active': activeExtractTab === 'source' }]"
-                  @click="activeExtractTab = 'source'"
-                >原文片段</button>
+        <div v-else class="risk-page__result-list">
+          <article
+            v-for="item in groupedRiskResults"
+            :key="item.key"
+            class="risk-page__result-item"
+          >
+            <div class="risk-page__result-head">
+              <div>
+                <strong>{{ item.key }}</strong>
+                <p>{{ item.summary }}</p>
               </div>
-              <div class="risk-extract__tools">
-                <span class="risk-extract__toggle-label" id="hl-toggle-label">高亮</span>
-                <button
-                  class="risk-extract__toggle"
-                  :class="{ 'is-off': !highlightEnabled }"
-                  @click="highlightEnabled = !highlightEnabled"
-                  role="switch"
-                  :aria-checked="highlightEnabled"
-                  aria-labelledby="hl-toggle-label"
-                />
-                <button class="risk-extract__download" @click="exportEventsAsJson">
-                  <AppIcon name="download" :size="12" aria-hidden="true" /> 导出
-                </button>
+              <div class="risk-page__result-meta">
+                <el-tag :type="getRiskTagType(item.dominantLevel)" size="small">
+                  {{ getRiskLevelText(item.dominantLevel) }}
+                </el-tag>
+                <span>{{ item.count }} 条</span>
               </div>
             </div>
-            <div class="risk-extract__list">
-              <!-- Extract results tab -->
-              <template v-if="activeExtractTab === 'results'">
-                <div
-                  v-for="(item, i) in riskTypeDist"
-                  :key="item.key"
-                  class="risk-extract__item"
-                  :class="{ 'is-active': i === 0 }"
-                >
-                  <div class="risk-extract__icon" :class="getRiskIconCls(i)">
-                    <AppIcon name="alert-triangle" :size="13" />
-                  </div>
-                  <div class="risk-extract__body">
-                    <div class="risk-extract__name">{{ item.key }}</div>
-                    <div class="risk-extract__desc">
-                      {{ (eventsByType[item.key] || []).slice(0, 1).map(e => e.summary).join('') || '暂无描述' }}
-                    </div>
-                  </div>
-                  <div class="risk-extract__meta">
-                    <span>{{ item.value }} 条</span>
-                    <span class="risk-extract__level" :class="getRiskLevelClass(dominantLevelMap[item.key] || 'low')">{{ getRiskLevelText(dominantLevelMap[item.key] || 'low') }}</span>
-                  </div>
-                  <span class="risk-extract__chev">&rsaquo;</span>
-                </div>
-              </template>
-              <!-- Source fragments tab -->
-              <template v-else-if="activeExtractTab === 'source'">
-                <div
-                  v-for="(ev, i) in events.slice(0, 20)"
-                  :key="ev.id || i"
-                  class="risk-source-frag"
-                >
-                  <div class="risk-source-frag__header">
-                    <span class="risk-source-frag__type">{{ ev.risk_type }}</span>
-                    <span class="risk-source-frag__company">{{ ev.company_name }}</span>
-                  </div>
-                  <p class="risk-source-frag__text" :class="{ 'no-highlight': !highlightEnabled }">
-                    {{ ev.evidence_text || '无原文片段' }}
-                  </p>
-                </div>
-              </template>
-              <div v-if="riskTypeDist.length === 0 && activeExtractTab === 'results'" class="risk-extract__empty">
-                等待风险提取完成...
-              </div>
-              <div v-if="events.length === 0 && activeExtractTab === 'source'" class="risk-extract__empty">
-                暂无原文片段数据。
-              </div>
-            </div>
-          </div>
+            <p class="risk-page__evidence">{{ item.evidence }}</p>
+          </article>
         </div>
+      </section>
 
-        <!-- Row 3: Timeline -->
-        <section class="risk-panel risk-timeline">
-          <div class="risk-panel__head">
-            <h3><AppIcon name="history" :size="14" /> 风险信息时间轴</h3>
+      <section class="risk-page__panel">
+        <header class="risk-page__panel-head">
+          <div>
+            <h3>审核队列</h3>
+            <p>只展示最近待处理事件，完整筛选和全量记录放到右侧抽屉。</p>
           </div>
-          <div class="risk-timeline__track" role="navigation" aria-label="风险时间轴">
-            <button class="risk-timeline__arr" :class="{ 'is-disabled': !canScrollTrendLeft }" :disabled="!canScrollTrendLeft" @click="scrollTrendLeft" aria-label="向前滚动">&lsaquo;</button>
-            <template v-for="(node, i) in trendNodes" :key="i">
-              <div class="risk-timeline__node" :class="{ 'is-active': node.active }">
-                <strong>{{ node.date }}</strong>
-                <span>{{ node.label || '报告期' }}</span>
-                <span>识别 {{ node.count }} 条风险</span>
-              </div>
+          <el-button text @click="eventsDrawerOpen = true">查看全部</el-button>
+        </header>
+
+        <el-table
+          :data="recentEvents"
+          size="small"
+          v-loading="isEventsLoading"
+          empty-text="暂无风险事件"
+        >
+          <el-table-column prop="company_name" label="公司" min-width="120" show-overflow-tooltip />
+          <el-table-column prop="risk_type" label="类型" min-width="110" show-overflow-tooltip />
+          <el-table-column label="等级" width="82">
+            <template #default="{ row }">
+              <el-tag :type="getRiskTagType(row.risk_level)" size="small">
+                {{ getRiskLevelText(row.risk_level) }}
+              </el-tag>
             </template>
-            <div v-if="trendNodes.length === 0" class="risk-timeline__empty">暂无时间轴数据</div>
-            <button class="risk-timeline__arr" :class="{ 'is-disabled': !canScrollTrendRight }" :disabled="!canScrollTrendRight" @click="scrollTrendRight" aria-label="向后滚动">&rsaquo;</button>
-          </div>
-        </section>
-      </div>
-
-      <!-- RIGHT COLUMN -->
-      <div class="risk-right">
-        <!-- Overview Card -->
-        <section class="risk-panel risk-overview">
-          <div class="risk-panel__head">
-            <h3><AppIcon name="pie-chart" :size="14" /> 风险概览</h3>
-            <span class="risk-panel__update">更新于 {{ formatDate(new Date().toISOString()) }}</span>
-          </div>
-
-          <div v-if="analyticsErrorMsg" class="risk-err" role="alert">{{ analyticsErrorMsg }}</div>
-          <div v-else-if="eventsErrorMsg" class="risk-err" role="alert">{{ eventsErrorMsg }}</div>
-
-          <div v-else class="risk-overview__inner" v-loading="isAnalyticsLoading">
-            <div class="risk-overview__total">
-              <span class="risk-overview__num">{{ fmt.format(totalEvents) }}</span>
-              <span class="risk-overview__label">风险总数</span>
-            </div>
-            <div class="risk-overview__chart">
-              <div v-if="totalEvents > 0" class="risk-overview__donut" :style="donutStyle" role="img" :aria-label="`高风险 ${highPct}%，中风险 ${medPct}%，低风险 ${lowPct}%`" />
-              <div class="risk-overview__legend">
-                <div><i class="risk-dot" style="background:#e94c59" aria-hidden="true" />高风险 {{ fmt.format(highCount) }} ({{ highPct }}%)</div>
-                <div><i class="risk-dot" style="background:#f0a51a" aria-hidden="true" />中风险 {{ fmt.format(medCount) }} ({{ medPct }}%)</div>
-                <div><i class="risk-dot" style="background:#2f7bff" aria-hidden="true" />低风险 {{ fmt.format(lowCount) }} ({{ lowPct }}%)</div>
+          </el-table-column>
+          <el-table-column label="摘要" min-width="220" show-overflow-tooltip>
+            <template #default="{ row }">
+              {{ row.summary || row.evidence_text || '--' }}
+            </template>
+          </el-table-column>
+          <el-table-column label="审核" width="88">
+            <template #default="{ row }">
+              <el-tag :type="getReviewTagType((row.review_status || 'pending').toLowerCase())" size="small">
+                {{ getReviewStatusText(row.review_status) }}
+              </el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column label="操作" width="148" align="right">
+            <template #default="{ row }">
+              <div v-if="(row.review_status || 'pending').toLowerCase() === 'pending'" class="risk-page__actions">
+                <el-button
+                  type="success"
+                  plain
+                  size="small"
+                  :loading="reviewingId === (row.id || row.event_id)"
+                  :disabled="reviewingId !== null"
+                  @click="handleReview(row, 'approved')"
+                >
+                  确认
+                </el-button>
+                <el-button
+                  type="danger"
+                  plain
+                  size="small"
+                  :loading="reviewingId === (row.id || row.event_id)"
+                  :disabled="reviewingId !== null"
+                  @click="handleReview(row, 'rejected')"
+                >
+                  忽略
+                </el-button>
               </div>
-            </div>
-          </div>
-
-          <div class="risk-overview__kpis">
-            <div class="risk-kpi"><strong>{{ fmt.format(riskTypeDist.length) }}</strong><span>风险类别</span></div>
-            <div class="risk-kpi"><strong>{{ fmt.format(totalEvents) }}</strong><span>风险信息</span></div>
-            <div class="risk-kpi"><strong>{{ fmt.format(analytics.summary.pending_reviews) }}</strong><span>待审核</span></div>
-          </div>
-        </section>
-
-        <!-- Bar Chart -->
-        <section class="risk-panel risk-bar">
-          <div class="risk-panel__head">
-            <h3><AppIcon name="bar-chart" :size="14" /> 风险等级分布</h3>
-          </div>
-          <div class="risk-bar__inner">
-            <AdminChart v-if="riskLevelDist.length" :option="riskLevelOption" height="100%" />
-            <div v-else class="risk-bar__empty">暂无数据</div>
-          </div>
-        </section>
-
-        <!-- TOP5 -->
-        <section class="risk-panel risk-top5">
-          <div class="risk-panel__head">
-            <h3><AppIcon name="alert-triangle" :size="14" /> 高风险信息 TOP5</h3>
-            <button class="risk-panel__all" @click="eventsDrawerOpen = true">查看全部</button>
-          </div>
-          <div class="risk-top5__list" role="list" aria-label="高风险事件列表">
-            <div v-for="(ev, i) in highRiskEvents" :key="ev.id || i" class="risk-top5__row" role="listitem">
-              <span class="risk-top5__rank" aria-hidden="true">{{ i + 1 }}</span>
-              <span class="risk-top5__text" :title="ev.summary || ev.evidence_text || '无描述'">{{ ev.summary || ev.evidence_text || '无描述' }}</span>
-              <span class="risk-top5__tag" :class="getRiskTagCls(i)">{{ ev.risk_type }}</span>
-            </div>
-            <div v-if="highRiskEvents.length === 0" class="risk-top5__empty">暂无高风险事件</div>
-          </div>
-        </section>
-
-        <!-- Export -->
-        <section class="risk-panel risk-export">
-          <div class="risk-panel__head">
-            <h3><AppIcon name="download" :size="14" /> 导出与分享</h3>
-          </div>
-          <div v-if="reportErrorMsg" class="risk-err" role="alert" style="margin:0 12px 8px">{{ reportErrorMsg }}</div>
-          <div class="risk-export__form">
-            <div class="risk-export__type-row">
-              <button :class="['risk-export__type-btn', { 'is-active': reportType === 'company' }]" @click="reportType = 'company'">公司报告</button>
-              <button :class="['risk-export__type-btn', { 'is-active': reportType === 'time_range' }]" @click="reportType = 'time_range'">时间范围</button>
-            </div>
-            <div v-if="reportType === 'company'" class="risk-export__fields">
-              <el-input v-model="reportForm.company_name" placeholder="公司名称" size="small" clearable />
-            </div>
-            <div v-else class="risk-export__fields risk-export__fields--dates">
-              <el-date-picker v-model="reportForm.period_start" type="date" placeholder="开始日期" size="small" value-format="YYYY-MM-DD" style="width:100%" />
-              <el-date-picker v-model="reportForm.period_end" type="date" placeholder="结束日期" size="small" value-format="YYYY-MM-DD" style="width:100%" />
-            </div>
-          </div>
-          <div class="risk-export__grid">
-            <button class="risk-export__btn" @click="generateReport" :disabled="isReportLoading" :aria-busy="isReportLoading">
-              <AppIcon name="file-text" :size="15" aria-hidden="true" />
-              <div>{{ isReportLoading ? '生成中...' : '生成' }}<span>风险报告</span></div>
-            </button>
-            <button class="risk-export__btn" @click="downloadGeneratedReport('markdown')" :disabled="!generatedReport || isReportExporting" :aria-busy="isReportExporting">
-              <AppIcon name="download" :size="15" aria-hidden="true" />
-              <div>{{ isReportExporting ? '导出中...' : '导出' }}<span>Markdown 格式</span></div>
-            </button>
-          </div>
-        </section>
-      </div>
+              <span v-else class="risk-page__muted-text">-</span>
+            </template>
+          </el-table-column>
+        </el-table>
+      </section>
     </div>
 
-    <!-- Events Drawer -->
-    <el-drawer v-model="eventsDrawerOpen" direction="rtl" size="700px" :with-header="false" destroy-on-close aria-label="风险事件列表">
+    <div class="risk-page__secondary">
+      <section class="risk-page__panel">
+        <header class="risk-page__panel-head">
+          <div>
+            <h3>来源与证据</h3>
+            <p>把文档元信息和原文证据收在一起，减少来回切换。</p>
+          </div>
+        </header>
+
+        <div class="risk-page__source-grid">
+          <div class="risk-page__source-field">
+            <span>文档</span>
+            <strong>{{ sourceDoc.title }}</strong>
+          </div>
+          <div class="risk-page__source-field">
+            <span>公司</span>
+            <strong>{{ sourceDoc.company }}</strong>
+          </div>
+          <div class="risk-page__source-field">
+            <span>大小</span>
+            <strong>{{ sourceDoc.size }}</strong>
+          </div>
+          <div class="risk-page__source-field">
+            <span>日期</span>
+            <strong>{{ sourceDoc.date }}</strong>
+          </div>
+        </div>
+
+        <div v-if="extractionQuality" class="risk-page__quality">
+          <span>{{ extractionQuality.rounds }} 轮提取</span>
+          <span>{{ extractionQuality.verified ? '验证通过' : '待人工确认' }}</span>
+          <span v-if="extractionQuality.totalChunks">筛选 {{ extractionQuality.filteredChunks }}/{{ extractionQuality.totalChunks }} 切块</span>
+        </div>
+
+        <div v-if="events.length" class="risk-page__evidence-list">
+          <article
+            v-for="event in events.slice(0, 5)"
+            :key="event.id || event.event_id"
+            class="risk-page__evidence-item"
+          >
+            <div class="risk-page__evidence-head">
+              <strong>{{ event.risk_type }}</strong>
+              <span>{{ event.company_name }}</span>
+            </div>
+            <p>{{ event.evidence_text || event.summary || '暂无证据文本。' }}</p>
+          </article>
+        </div>
+        <div v-else class="risk-page__empty">暂无证据片段。</div>
+      </section>
+
+      <section class="risk-page__panel">
+        <header class="risk-page__panel-head">
+          <div>
+            <h3>报告与导出</h3>
+            <p>保留导出能力，但降到次要层级，不干扰提取和审核主任务。</p>
+          </div>
+        </header>
+
+        <div v-if="reportErrorMsg" class="risk-page__report-error">{{ reportErrorMsg }}</div>
+
+        <div class="risk-page__report-type">
+          <el-radio-group v-model="reportType" size="small">
+            <el-radio-button label="company">公司报告</el-radio-button>
+            <el-radio-button label="time_range">时间范围</el-radio-button>
+          </el-radio-group>
+        </div>
+
+        <div v-if="reportType === 'company'" class="risk-page__report-fields">
+          <el-input v-model="reportForm.company_name" placeholder="公司名称" clearable />
+        </div>
+        <div v-else class="risk-page__report-fields risk-page__report-fields--dates">
+          <el-date-picker
+            v-model="reportForm.period_start"
+            type="date"
+            placeholder="开始日期"
+            value-format="YYYY-MM-DD"
+            style="width: 100%"
+          />
+          <el-date-picker
+            v-model="reportForm.period_end"
+            type="date"
+            placeholder="结束日期"
+            value-format="YYYY-MM-DD"
+            style="width: 100%"
+          />
+        </div>
+
+        <div class="risk-page__report-actions">
+          <el-button type="primary" :loading="isReportLoading" @click="generateReport">
+            生成报告
+          </el-button>
+          <el-button :disabled="!generatedReport || isReportExporting" :loading="isReportExporting" @click="downloadGeneratedReport('markdown')">
+            导出 Markdown
+          </el-button>
+          <el-button @click="exportEventsAsJson">
+            导出事件 JSON
+          </el-button>
+        </div>
+      </section>
+    </div>
+
+    <el-drawer
+      v-model="eventsDrawerOpen"
+      direction="rtl"
+      size="720px"
+      :with-header="false"
+      destroy-on-close
+      aria-label="风险事件列表"
+    >
       <div class="risk-events-drawer">
         <div class="risk-events-drawer__head">
           <div>
             <h3>风险事件列表</h3>
-            <div v-if="extractionQuality" class="risk-extraction-quality">
-              <span class="risk-eq__badge">
-                {{ extractionQuality.rounds }}轮提取
-                <template v-if="extractionQuality.verified"> · 验证通过</template>
-              </span>
-              <span v-if="extractionQuality.totalChunks" class="risk-eq__detail">
-                筛选 {{ extractionQuality.filteredChunks }}/{{ extractionQuality.totalChunks }} 切块
-              </span>
+            <div v-if="extractionQuality" class="risk-events-drawer__quality">
+              <span>{{ extractionQuality.rounds }} 轮提取</span>
+              <span v-if="extractionQuality.verified">验证通过</span>
             </div>
           </div>
-          <button class="risk-events-drawer__close" @click="eventsDrawerOpen = false" aria-label="关闭事件列表">&times;</button>
+          <el-button text @click="eventsDrawerOpen = false">关闭</el-button>
         </div>
+
         <el-form :inline="true" class="risk-filter-row">
-          <el-form-item><el-input v-model="filters.company_name" placeholder="公司名称" size="small" clearable /></el-form-item>
-          <el-form-item><el-input v-model="filters.risk_type" placeholder="风险类型" size="small" clearable /></el-form-item>
-          <el-form-item><el-select v-model="filters.risk_level" placeholder="等级" size="small" clearable><el-option label="高" value="high" /><el-option label="中" value="medium" /><el-option label="低" value="low" /><el-option label="严重" value="critical" /></el-select></el-form-item>
-          <el-form-item><el-select v-model="filters.review_status" placeholder="状态" size="small" clearable><el-option label="待审核" value="pending" /><el-option label="已确认" value="approved" /><el-option label="已忽略" value="rejected" /></el-select></el-form-item>
-          <el-form-item><el-button type="primary" size="small" @click="applyFilters" :loading="isEventsLoading">查询</el-button><el-button size="small" @click="resetFilters">重置</el-button></el-form-item>
+          <el-form-item>
+            <el-input v-model="filters.company_name" placeholder="公司名称" size="small" clearable />
+          </el-form-item>
+          <el-form-item>
+            <el-input v-model="filters.risk_type" placeholder="风险类型" size="small" clearable />
+          </el-form-item>
+          <el-form-item>
+            <el-select v-model="filters.risk_level" placeholder="等级" size="small" clearable>
+              <el-option label="严重" value="critical" />
+              <el-option label="高" value="high" />
+              <el-option label="中" value="medium" />
+              <el-option label="低" value="low" />
+            </el-select>
+          </el-form-item>
+          <el-form-item>
+            <el-select v-model="filters.review_status" placeholder="状态" size="small" clearable>
+              <el-option label="待审核" value="pending" />
+              <el-option label="已确认" value="approved" />
+              <el-option label="已忽略" value="rejected" />
+            </el-select>
+          </el-form-item>
+          <el-form-item>
+            <el-button type="primary" size="small" :loading="isEventsLoading" @click="applyFilters">查询</el-button>
+            <el-button size="small" @click="resetFilters">重置</el-button>
+          </el-form-item>
         </el-form>
-        <el-table :data="events" stripe size="small" v-loading="isEventsLoading" max-height="calc(100vh - 200px)" empty-text="暂无风险事件">
+
+        <el-table
+          :data="events"
+          stripe
+          size="small"
+          v-loading="isEventsLoading"
+          max-height="calc(100vh - 220px)"
+          empty-text="暂无风险事件"
+        >
           <el-table-column prop="company_name" label="公司" min-width="140" show-overflow-tooltip />
-          <el-table-column prop="risk_type" label="类型" width="100"><template #default="s"><el-tag size="small" effect="plain">{{ s.row.risk_type }}</el-tag></template></el-table-column>
-          <el-table-column label="等级" width="80"><template #default="s"><el-tag :type="getRiskTagType(s.row.risk_level)" size="small">{{ getRiskLevelText(s.row.risk_level) }}</el-tag></template></el-table-column>
-          <el-table-column label="时间" min-width="150"><template #default="s">{{ formatDate(s.row.event_time || s.row.created_at) }}</template></el-table-column>
-          <el-table-column label="摘要" min-width="240"><template #default="s"><div class="risk-events__summary" :title="s.row.summary">{{ s.row.summary }}</div></template></el-table-column>
-          <el-table-column label="置信度" width="90"><template #default="s"><span :class="getConfidenceClass(s.row.confidence_score)">{{ formatConfidence(s.row.confidence_score) }}</span></template></el-table-column>
-          <el-table-column label="来源" width="100"><template #default="s"><el-tooltip v-if="s.row.chunk_id" :content="getSourceTooltip(s.row)" placement="top"><span class="risk-source-chip">Chunk #{{ s.row.chunk_id }}</span></el-tooltip><span v-else class="risk-source-chip risk-source-chip--muted">--</span></template></el-table-column>
-          <el-table-column label="审核" width="90"><template #default="s"><el-tag :type="getReviewTagType((s.row.review_status || 'pending').toLowerCase())" size="small">{{ getReviewStatusText(s.row.review_status) }}</el-tag></template></el-table-column>
-          <el-table-column label="操作" width="140"><template #default="s"><template v-if="(s.row.review_status || 'pending').toLowerCase() === 'pending'"><el-button type="success" plain size="small" @click="handleReview(s.row, 'approved')" :loading="reviewingId === (s.row.id || s.row.event_id)" :disabled="reviewingId !== null">确认</el-button><el-button type="danger" plain size="small" @click="handleReview(s.row, 'rejected')" :loading="reviewingId === (s.row.id || s.row.event_id)" :disabled="reviewingId !== null">忽略</el-button></template><span v-else class="no-action">-</span></template></el-table-column>
+          <el-table-column label="类型" min-width="120" show-overflow-tooltip>
+            <template #default="{ row }">
+              <el-tag size="small" effect="plain">{{ row.risk_type }}</el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column label="等级" width="82">
+            <template #default="{ row }">
+              <el-tag :type="getRiskTagType(row.risk_level)" size="small">
+                {{ getRiskLevelText(row.risk_level) }}
+              </el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column label="时间" min-width="150">
+            <template #default="{ row }">
+              {{ formatDate(row.event_time || row.created_at) }}
+            </template>
+          </el-table-column>
+          <el-table-column label="摘要" min-width="240" show-overflow-tooltip>
+            <template #default="{ row }">
+              {{ row.summary || '--' }}
+            </template>
+          </el-table-column>
+          <el-table-column label="置信度" width="88">
+            <template #default="{ row }">
+              <span :class="getConfidenceClass(row.confidence_score)">
+                {{ formatConfidence(row.confidence_score) }}
+              </span>
+            </template>
+          </el-table-column>
+          <el-table-column label="来源" width="96">
+            <template #default="{ row }">
+              <el-tooltip v-if="row.chunk_id" :content="getSourceTooltip(row)" placement="top">
+                <span class="risk-source-chip">Chunk #{{ row.chunk_id }}</span>
+              </el-tooltip>
+              <span v-else class="risk-source-chip risk-source-chip--muted">--</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="审核" width="88">
+            <template #default="{ row }">
+              <el-tag :type="getReviewTagType((row.review_status || 'pending').toLowerCase())" size="small">
+                {{ getReviewStatusText(row.review_status) }}
+              </el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column label="操作" width="144">
+            <template #default="{ row }">
+              <template v-if="(row.review_status || 'pending').toLowerCase() === 'pending'">
+                <el-button
+                  type="success"
+                  plain
+                  size="small"
+                  :loading="reviewingId === (row.id || row.event_id)"
+                  :disabled="reviewingId !== null"
+                  @click="handleReview(row, 'approved')"
+                >
+                  确认
+                </el-button>
+                <el-button
+                  type="danger"
+                  plain
+                  size="small"
+                  :loading="reviewingId === (row.id || row.event_id)"
+                  :disabled="reviewingId !== null"
+                  @click="handleReview(row, 'rejected')"
+                >
+                  忽略
+                </el-button>
+              </template>
+              <span v-else class="risk-page__muted-text">-</span>
+            </template>
+          </el-table-column>
         </el-table>
       </div>
     </el-drawer>
@@ -723,58 +809,74 @@ const downloadGeneratedReport = async (format = "markdown") => {
 </template>
 
 <style scoped>
-/* ============================================
-   RISK STAGE — viewport-fitting dense dashboard
-   ============================================ */
-
-.risk-stage {
-  display: flex;
-  flex-direction: column;
-  height: calc(100vh - 88px); /* fills viewport minus topbar */
-  min-height: min(700px, 100vh - 88px);
-  gap: 12px;
-  overflow: hidden;
-}
-
-/* ---- Top Bar ---- */
-
-.risk-topbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 20px;
-  flex-shrink: 0;
-  padding: 14px 18px;
-  border: 1px solid rgba(233, 76, 89, 0.14);
-  border-radius: 12px;
-  background: linear-gradient(180deg, rgba(10, 19, 38, 0.94), rgba(7, 14, 28, 0.94)),
-    radial-gradient(circle at top right, rgba(233, 76, 89, 0.08), transparent 36%);
-}
-
-.risk-topbar__center {
+.risk-page {
   min-width: 0;
 }
 
-.risk-topbar__badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  padding: 7px 14px;
-  border-radius: 999px;
-  border: 1px solid rgba(233, 76, 89, 0.18);
-  background: rgba(233, 76, 89, 0.08);
-  color: #ff949b;
-  font-size: 12px;
-  font-weight: 700;
+.risk-page__hero,
+.risk-page__panel {
+  padding: 20px 22px;
+  border: 1px solid var(--line-strong);
+  border-radius: 24px;
+  background: var(--surface-1);
 }
 
-.risk-topbar__actions {
+.risk-page__hero {
   display: flex;
-  gap: 8px;
-  flex-shrink: 0;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20px;
 }
 
-.risk-topbar__file-input {
+.risk-page__hero-copy {
+  max-width: 760px;
+}
+
+.risk-page__eyebrow {
+  display: inline-flex;
+  margin-bottom: 8px;
+  color: var(--text-muted);
+  font-size: 0.6875rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.risk-page__hero-copy h2,
+.risk-page__panel-head h3 {
+  margin: 0;
+  color: var(--text-primary);
+}
+
+.risk-page__hero-copy p,
+.risk-page__panel-head p,
+.risk-page__result-head p,
+.risk-page__evidence,
+.risk-page__evidence-item p {
+  margin: 0;
+  color: var(--text-secondary);
+  line-height: 1.6;
+}
+
+.risk-page__hero-actions,
+.risk-page__summary,
+.risk-page__main,
+.risk-page__secondary,
+.risk-page__report-actions,
+.risk-page__actions,
+.risk-page__quality {
+  display: flex;
+  gap: 10px;
+}
+
+.risk-page__hero-actions,
+.risk-page__quality,
+.risk-page__actions {
+  flex-wrap: wrap;
+}
+
+.risk-page__file-input {
   position: absolute;
   width: 0;
   height: 0;
@@ -782,822 +884,166 @@ const downloadGeneratedReport = async (format = "markdown") => {
   pointer-events: none;
 }
 
-.risk-action-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  height: 34px;
-  padding: 0 13px;
-  border: 1px solid rgba(102, 132, 255, 0.16);
-  border-radius: 8px;
-  background: rgba(15, 24, 44, 0.78);
-  color: #95aacd;
-  font-size: 12px;
-  font-weight: 700;
-  cursor: pointer;
-  white-space: nowrap;
-  transition: border-color 0.2s, color 0.2s;
-}
-.risk-action-btn:hover { border-color: rgba(102, 138, 255, 0.28); color: #eef4ff; }
-.risk-action-btn--primary {
-  border-color: rgba(233, 76, 89, 0.28);
-  background: linear-gradient(135deg, rgba(233, 76, 89, 0.2), rgba(180, 40, 60, 0.15));
-  color: #ff949b;
-}
-
-/* ---- Main Grid ---- */
-
-.risk-grid {
-  flex: 1;
-  min-height: 0;
+.risk-page__summary {
   display: grid;
-  grid-template-columns: minmax(0, 1.18fr) minmax(340px, 0.72fr);
-  gap: 12px;
-  overflow: hidden;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
-/* ---- Left Column ---- */
+.risk-page__summary-card {
+  display: grid;
+  gap: 6px;
+  padding: 18px 20px;
+  border: 1px solid var(--line-soft);
+  border-radius: 20px;
+  background: var(--surface-1);
+}
 
-.risk-left {
+.risk-page__summary-card small,
+.risk-page__source-field span,
+.risk-page__muted-text,
+.risk-page__quality,
+.risk-events-drawer__quality {
+  color: var(--text-muted);
+  font-size: 0.75rem;
+}
+
+.risk-page__summary-card strong {
+  color: var(--text-primary);
+  font-size: 1.625rem;
+  line-height: 1;
+}
+
+.risk-page__main,
+.risk-page__secondary {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.risk-page__panel {
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  min-height: 0;
-  overflow: hidden;
-}
-
-.risk-row-top {
-  flex-shrink: 0;
-}
-
-/* ---- Panels ---- */
-
-.risk-panel {
-  border: 1px solid rgba(66, 108, 255, 0.12);
-  border-radius: 10px;
-  background: linear-gradient(180deg, rgba(10, 19, 38, 0.88), rgba(7, 14, 28, 0.88)),
-    radial-gradient(circle at top right, rgba(71, 94, 255, 0.05), transparent 34%);
-  box-shadow: 0 16px 40px -32px rgba(4, 10, 22, 0.8);
-  overflow: hidden;
-  display: flex;
-  flex-direction: column;
-}
-
-.risk-panel__head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  padding: 10px 14px;
-  border-bottom: 1px solid rgba(72, 108, 255, 0.08);
-  flex-shrink: 0;
-}
-
-.risk-panel__head h3 {
-  margin: 0;
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  font-size: 13px;
-  font-weight: 800;
-  color: #edf4ff;
-}
-
-.risk-panel__update {
-  font-size: 10px;
-  color: #75839b;
-}
-
-.risk-panel__all {
-  border: 0;
-  background: transparent;
-  font-size: 11px;
-  font-weight: 700;
-  color: #6e7d95;
-  cursor: pointer;
-}
-
-/* ---- Source Card ---- */
-
-.risk-source { flex: 1; }
-
-.risk-source__file {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 10px 14px;
-  flex: 1;
-}
-
-.risk-source__info {
-  display: flex;
-  gap: 10px;
-  align-items: center;
+  gap: 16px;
   min-width: 0;
 }
 
-.risk-source__pdf {
-  width: 28px;
-  height: 32px;
-  border-radius: 4px;
-  background: linear-gradient(180deg, #e35a55, #b9292e);
-  display: grid;
-  place-items: center;
-  color: #fff;
-  font-size: 9px;
-  font-weight: 900;
-  flex-shrink: 0;
+.risk-page__panel-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
 }
 
-.risk-source__info strong {
-  font-size: 13px;
-  color: #edf4ff;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  display: block;
+.risk-page__result-list,
+.risk-page__evidence-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
 }
 
-.risk-source__info p {
-  margin: 2px 0 0;
-  font-size: 11px;
-  color: #8592aa;
-}
-
-/* ---- Work Area (Doc + Extract) ---- */
-
-.risk-work {
-  flex: 1;
-  min-height: 0;
-  display: grid;
-  grid-template-columns: 1.1fr 1fr;
+.risk-page__result-item,
+.risk-page__evidence-item {
+  display: flex;
+  flex-direction: column;
   gap: 10px;
-  overflow: hidden;
+  padding: 16px;
+  border: 1px solid var(--line-soft);
+  border-radius: 18px;
+  background: var(--surface-2);
 }
 
-/* Document Panel */
-
-.risk-doc {
-  border: 1px solid rgba(111, 144, 205, 0.12);
-  border-radius: 10px;
-  background: rgba(9, 18, 35, 0.82);
+.risk-page__result-head,
+.risk-page__evidence-head {
   display: flex;
-  flex-direction: column;
-  overflow: hidden;
-}
-
-.risk-doc__bar {
-  display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
-  padding: 8px 12px;
-  border-bottom: 1px solid rgba(111, 144, 205, 0.1);
-  background: rgba(9, 18, 35, 0.55);
-  color: #8492ac;
-  font-size: 11px;
-  flex-shrink: 0;
+  gap: 12px;
 }
 
-.risk-doc__pager {
-  display: flex;
-  align-items: center;
-  gap: 6px;
+.risk-page__result-head strong,
+.risk-page__evidence-head strong,
+.risk-page__source-field strong {
+  color: var(--text-primary);
 }
 
-.risk-doc__pager button {
-  width: 22px;
-  height: 22px;
-  border-radius: 5px;
-  background: rgba(21, 35, 61, 0.9);
-  border: 1px solid rgba(117, 149, 205, 0.1);
-  color: #8290a9;
-  cursor: pointer;
-  font-size: 13px;
-  display: grid;
-  place-items: center;
-}
-
-.risk-doc__page-num {
-  padding: 2px 8px;
-  border-radius: 5px;
-  background: rgba(31, 43, 72, 0.75);
-  color: #a9b6ce;
-  font-size: 11px;
-  font-weight: 700;
-}
-
-.risk-doc__page {
-  flex: 1;
-  overflow-y: auto;
-  padding: 16px 22px;
-  background: linear-gradient(90deg, rgba(255,255,255,.02) 0 6px, transparent 6px calc(100% - 6px), rgba(255,255,255,.02) calc(100% - 6px)), #081529;
-  font-size: 12px;
-  line-height: 1.65;
-  color: #c8d2e3;
-}
-
-.risk-doc__page h3 { font-size: 15px; margin: 0 0 4px; color: #f6f7fb; }
-.risk-doc__page h4 { font-size: 13px; margin: 10px 0 3px; color: #d0d8f0; }
-.risk-doc__page > p { margin: 0 0 8px; color: #a0adc4; }
-
-.risk-doc__hl {
-  border-radius: 2px;
-  padding: 3px 5px;
-  font-weight: 600;
-  margin: 0 0 8px;
-  color: #e8edf5;
-}
-
-.risk-doc__hl.no-highlight {
-  background: transparent !important;
-  color: #a0adc4;
-  font-weight: 400;
-}
-
-.hl-red { background: rgba(234, 72, 92, 0.26); }
-.hl-orange { background: rgba(240, 165, 26, 0.32); }
-.hl-blue { background: rgba(47, 111, 255, 0.22); }
-.hl-green { background: rgba(33, 173, 122, 0.24); }
-.hl-purple { background: rgba(129, 87, 246, 0.2); }
-
-.risk-doc__empty {
-  color: #8592aa;
-  text-align: center;
-  padding: 40px 20px;
-}
-
-/* Extract Panel */
-
-.risk-extract {
-  border: 1px solid rgba(111, 144, 205, 0.12);
-  border-radius: 10px;
-  background: rgba(9, 18, 35, 0.82);
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-}
-
-.risk-extract__head {
-  display: flex;
-  align-items: flex-end;
-  justify-content: space-between;
-  padding: 0 12px;
-  border-bottom: 1px solid rgba(111, 144, 205, 0.1);
-  background: rgba(9, 18, 35, 0.5);
-  flex-shrink: 0;
-}
-
-.risk-extract__tabs {
-  display: flex;
-  gap: 14px;
-}
-
-.risk-extract__tab {
-  padding: 9px 0;
-  border: 0;
-  background: transparent;
-  font-size: 12px;
-  font-weight: 800;
-  color: #8794ad;
-  cursor: pointer;
-  border-bottom: 2px solid transparent;
-  transition: color 0.2s;
-}
-
-.risk-extract__tab.is-active {
-  color: #eaf2ff;
-  border-bottom-color: #e94c59;
-}
-
-.risk-extract__tools {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding-bottom: 6px;
-  color: #8492aa;
-  font-size: 11px;
-}
-
-.risk-extract__toggle-label { font-size: 11px; }
-
-.risk-extract__toggle {
-  width: 30px;
-  height: 16px;
-  background: #e94c59;
-  border-radius: 8px;
-  position: relative;
-  cursor: pointer;
-  border: 0;
-  padding: 0;
-  flex-shrink: 0;
-}
-
-.risk-extract__toggle::after {
-  content: "";
-  position: absolute;
-  right: 2px;
-  top: 2px;
-  width: 12px;
-  height: 12px;
-  background: #fff;
-  border-radius: 50%;
-  transition: right 0.2s;
-}
-
-.risk-extract__toggle.is-off {
-  background: #3a4560;
-}
-
-.risk-extract__toggle.is-off::after {
-  right: 16px;
-}
-
-.risk-extract__toggle:focus-visible {
-  outline: 2px solid #2457c5;
-  outline-offset: 2px;
-}
-
-.risk-extract__download {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 4px 9px;
-  border: 1px solid rgba(111, 144, 205, 0.14);
-  background: rgba(16, 31, 58, 0.85);
-  border-radius: 5px;
-  color: #a9b6cf;
-  font-size: 11px;
-  cursor: pointer;
-}
-
-.risk-extract__list {
-  flex: 1;
-  overflow-y: auto;
-  padding: 8px 8px 0;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.risk-extract__item {
-  display: grid;
-  grid-template-columns: 28px 1fr auto 14px;
-  align-items: center;
-  gap: 7px;
-  padding: 8px 9px;
-  border-radius: 8px;
-  border: 1px solid rgba(111, 144, 205, 0.07);
-  background: rgba(14, 28, 53, 0.7);
-}
-
-.risk-extract__item.is-active {
-  border-color: rgba(233, 76, 89, 0.35);
-  background: rgba(21, 39, 74, 0.8);
-}
-
-.risk-extract__icon {
-  width: 26px;
-  height: 26px;
-  border-radius: 6px;
-  display: grid;
-  place-items: center;
-}
-
-.ri-red { background: rgba(234,72,92,.1); color: #e94c59; border: 1px solid rgba(234,72,92,.24); }
-.ri-orange { background: rgba(240,165,26,.1); color: #f0a51a; border: 1px solid rgba(240,165,26,.22); }
-.ri-blue { background: rgba(47,111,255,.1); color: #2f7bff; border: 1px solid rgba(47,111,255,.22); }
-.ri-green { background: rgba(33,173,122,.1); color: #21ad7a; border: 1px solid rgba(33,173,122,.22); }
-.ri-purple { background: rgba(129,87,246,.1); color: #8157f6; border: 1px solid rgba(129,87,246,.22); }
-.ri-brown { background: rgba(190,115,76,.1); color: #bd7951; border: 1px solid rgba(190,115,76,.22); }
-
-.risk-extract__body { min-width: 0; }
-.risk-extract__name { font-size: 12px; color: #ebf2ff; font-weight: 800; margin-bottom: 2px; }
-.risk-extract__desc {
-  font-size: 10.5px;
-  color: #8190aa;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.risk-extract__meta {
+.risk-page__result-meta {
   display: flex;
   flex-direction: column;
   align-items: flex-end;
-  gap: 3px;
-  font-size: 10px;
-  color: #95a4be;
-}
-
-.risk-extract__level {
-  display: inline-grid;
-  place-items: center;
-  width: 24px;
-  height: 24px;
-  border-radius: 6px;
-  font-size: 11px;
-  font-weight: 900;
-}
-
-.lv-high { color: #ff6f78; background: rgba(234,72,92,.12); }
-.lv-mid { color: #f3b236; background: rgba(240,165,26,.12); }
-.lv-low { color: #4ea0ff; background: rgba(47,111,255,.12); }
-
-.risk-extract__chev { color: #8fa1bf; font-size: 16px; }
-.risk-extract__empty { padding: 20px; text-align: center; color: #6f7e9c; font-size: 12px; }
-
-/* ---- Timeline ---- */
-
-.risk-timeline { flex-shrink: 0; }
-
-.risk-timeline__track {
-  display: flex;
-  align-items: center;
   gap: 8px;
-  padding: 10px 12px;
-  flex: 1;
-}
-
-.risk-timeline__arr {
-  width: 28px;
-  height: 28px;
-  border-radius: 7px;
-  display: grid;
-  place-items: center;
-  color: #8c9db9;
-  background: rgba(19, 35, 62, 0.85);
-  border: 1px solid rgba(111, 144, 205, 0.1);
-  cursor: pointer;
-  font-size: 20px;
-  flex-shrink: 0;
-}
-
-.risk-timeline__node {
-  flex: 1;
-  min-width: 120px;
-  border-left: 2px solid #356be8;
-  padding: 6px 12px;
-  position: relative;
-}
-
-.risk-timeline__node::before {
-  content: "";
-  position: absolute;
-  left: -8px;
-  top: 2px;
-  width: 12px;
-  height: 12px;
-  border-radius: 50%;
-  background: #102040;
-  border: 2px solid #76a2ff;
-  box-shadow: 0 0 10px rgba(80,130,255,.5);
-}
-
-.risk-timeline__node.is-active::before {
-  border-color: #e94c59;
-  box-shadow: 0 0 10px rgba(233,76,89,.5);
-}
-
-.risk-timeline__node strong {
-  display: block;
-  color: #dbe6ff;
-  font-size: 12px;
-  margin-bottom: 3px;
-}
-
-.risk-timeline__node span {
-  display: block;
-  color: #8290a8;
-  font-size: 10.5px;
-  line-height: 1.5;
-}
-
-.risk-timeline__node.is-active strong { color: #ff8a94; }
-.risk-timeline__empty { padding: 20px; color: #6f7e9c; text-align: center; flex: 1; font-size: 12px; }
-
-/* ---- RIGHT COLUMN ---- */
-
-.risk-right {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  min-height: 0;
-  overflow: hidden;
-}
-
-/* Overview */
-
-.risk-overview { flex-shrink: 0; }
-
-.risk-overview__inner {
-  display: grid;
-  grid-template-columns: 90px 1fr;
-  align-items: center;
-  gap: 10px;
-  padding: 10px 14px;
-}
-
-.risk-overview__total {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-}
-
-.risk-overview__num {
-  font-size: 38px;
-  font-weight: 900;
-  color: #83a7ff;
-  line-height: 1;
-}
-
-.risk-overview__label {
-  font-size: 11px;
-  color: #8190aa;
-  font-weight: 700;
-  margin-top: 3px;
-}
-
-.risk-overview__chart {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-}
-
-.risk-overview__donut {
-  width: 68px;
-  height: 68px;
-  border-radius: 50%;
-  flex-shrink: 0;
-  position: relative;
-}
-
-.risk-overview__donut::after {
-  content: "";
-  position: absolute;
-  inset: 16px;
-  border-radius: 50%;
-  background: #0d1a31;
-  box-shadow: inset 0 0 6px rgba(0,0,0,.35);
-}
-
-.risk-overview__legend {
-  display: flex;
-  flex-direction: column;
-  gap: 5px;
-  font-size: 11px;
-  font-weight: 700;
-  color: #a2afc6;
-}
-
-.risk-dot {
-  display: inline-block;
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  margin-right: 5px;
-}
-
-.risk-overview__kpis {
-  display: grid;
-  grid-template-columns: 1fr 1fr 1fr;
-  gap: 8px;
-  padding: 0 14px 12px;
-}
-
-.risk-kpi {
-  border-radius: 8px;
-  background: rgba(17, 33, 61, 0.78);
-  display: grid;
-  place-items: center;
-  padding: 10px 6px;
-}
-
-.risk-kpi strong {
-  font-size: 22px;
-  color: #7fa5ff;
-  font-weight: 900;
-  line-height: 1;
-}
-
-.risk-kpi span {
-  margin-top: 3px;
-  font-size: 10.5px;
-  color: #8492ac;
-  font-weight: 700;
-}
-
-.risk-err {
-  margin: 10px 14px;
-  padding: 9px 12px;
-  border-radius: 7px;
-  border: 1px solid rgba(224, 92, 120, 0.2);
-  background: rgba(51, 18, 34, 0.72);
-  color: #ffb4c1;
-  font-size: 12px;
-}
-
-/* Bar */
-
-.risk-bar { flex: 1; min-height: 0; }
-.risk-bar__inner {
-  flex: 1;
-  min-height: 0;
-  padding: 6px 8px;
-}
-.risk-bar__empty {
-  display: grid;
-  place-items: center;
-  height: 100%;
-  color: #6f7e9c;
-  font-size: 12px;
-}
-
-/* TOP5 */
-
-.risk-top5 { flex: 1; min-height: 0; }
-
-.risk-top5__list {
-  flex: 1;
-  overflow-y: auto;
-  padding: 0 12px 8px;
-}
-
-.risk-top5__row {
-  display: grid;
-  grid-template-columns: 18px 1fr auto;
-  align-items: start;
-  gap: 8px;
-  padding: 8px 0;
-  border-bottom: 1px solid rgba(111, 144, 205, 0.06);
-  font-size: 11.5px;
-  color: #a6b4cb;
-  line-height: 1.4;
-}
-
-.risk-top5__row:last-child { border-bottom: 0; }
-
-.risk-top5__rank {
-  width: 18px;
-  height: 18px;
-  border-radius: 50%;
-  display: grid;
-  place-items: center;
-  background: rgba(234, 72, 92, 0.12);
-  color: #ff6470;
-  font-size: 10px;
-  font-weight: 900;
-  margin-top: 1px;
-}
-
-.risk-top5__text {
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-}
-
-.risk-top5__tag {
-  padding: 2px 6px;
-  border-radius: 5px;
-  font-size: 10px;
-  font-weight: 800;
+  color: var(--text-muted);
+  font-size: 0.75rem;
   white-space: nowrap;
-  flex-shrink: 0;
 }
 
-.tag-red { color: #ff6974; background: rgba(234,72,92,.12); }
-.tag-orange { color: #f3ae2a; background: rgba(240,165,26,.12); }
-.tag-blue { color: #4fa1ff; background: rgba(47,111,255,.12); }
-.tag-cyan { color: #28b7e8; background: rgba(40,183,232,.12); }
-
-.risk-top5__empty {
-  padding: 20px;
-  text-align: center;
-  color: #6f7e9c;
-  font-size: 12px;
+.risk-page__evidence {
+  padding: 12px 14px;
+  border-radius: 14px;
+  background: var(--surface-3);
 }
 
-/* Export */
-
-.risk-export { flex-shrink: 0; }
-
-.risk-export__form {
-  padding: 8px 12px 0;
+.risk-page__source-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
 }
 
-.risk-export__type-row {
-  display: flex;
-  gap: 4px;
-  margin-bottom: 8px;
-}
-
-.risk-export__type-btn {
-  flex: 1;
-  padding: 5px 0;
-  border: 1px solid rgba(111, 144, 205, 0.12);
-  border-radius: 6px;
-  background: transparent;
-  color: #8492aa;
-  font-size: 11px;
-  font-weight: 700;
-  cursor: pointer;
-  transition: border-color 0.2s, color 0.2s, background 0.2s;
-}
-
-.risk-export__type-btn.is-active {
-  border-color: rgba(233, 76, 89, 0.3);
-  background: rgba(233, 76, 89, 0.08);
-  color: #ff949b;
-}
-
-.risk-export__fields {
-  display: flex;
+.risk-page__source-field {
+  display: grid;
   gap: 6px;
+  padding: 14px;
+  border: 1px solid var(--line-soft);
+  border-radius: 16px;
+  background: var(--surface-2);
 }
 
-.risk-export__fields--dates {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 6px;
+.risk-page__evidence-head span {
+  color: var(--text-muted);
+  font-size: 0.75rem;
 }
 
-.risk-export__grid {
-  display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  gap: 8px;
-  padding: 10px 12px;
+.risk-page__report-error {
+  padding: 12px 14px;
+  border: 1px solid rgba(196, 73, 61, 0.16);
+  border-radius: 14px;
+  background: rgba(196, 73, 61, 0.08);
+  color: var(--risk);
+  font-size: 0.875rem;
 }
 
-.risk-export__btn {
+.risk-page__report-fields {
   display: grid;
-  grid-template-columns: 22px 1fr;
+  gap: 10px;
+}
+
+.risk-page__report-fields--dates {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.risk-page__empty {
+  display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 11px 10px;
-  border-radius: 8px;
-  border: 1px solid rgba(111, 144, 205, 0.1);
-  background: rgba(12, 24, 45, 0.78);
-  color: #dbe7ff;
-  font-size: 11px;
-  font-weight: 800;
-  cursor: pointer;
-  text-align: left;
-  transition: border-color 0.2s;
+  justify-content: center;
+  min-height: 180px;
+  color: var(--text-secondary);
+  text-align: center;
 }
-
-.risk-export__btn:hover:not(:disabled) { border-color: rgba(102, 138, 255, 0.22); }
-.risk-export__btn:disabled { opacity: 0.45; cursor: not-allowed; }
-
-.risk-export__btn span {
-  display: block;
-  margin-top: 2px;
-  color: #75839a;
-  font-size: 10px;
-  font-weight: 600;
-}
-
-/* ---- Events Drawer ---- */
 
 .risk-events-drawer {
-  padding: 18px;
-}
-
-.risk-events-drawer h3 {
-  margin: 0;
-  font-size: 18px;
-  color: #edf4ff;
+  padding: 20px;
 }
 
 .risk-events-drawer__head {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
+  gap: 16px;
   margin-bottom: 16px;
 }
 
-.risk-events-drawer__close {
-  width: 32px;
-  height: 32px;
-  display: grid;
-  place-items: center;
-  border: 1px solid rgba(111, 144, 205, 0.14);
-  border-radius: 8px;
-  background: rgba(16, 31, 58, 0.6);
-  color: #8492aa;
-  font-size: 20px;
-  cursor: pointer;
-  transition: color 0.2s, border-color 0.2s;
-}
-
-.risk-events-drawer__close:hover {
-  color: #dbe7ff;
-  border-color: rgba(111, 144, 205, 0.28);
-}
-
-.risk-events-drawer__close:focus-visible {
-  outline: 2px solid #2457c5;
-  outline-offset: 2px;
+.risk-events-drawer__head h3 {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: 1.125rem;
 }
 
 .risk-filter-row {
@@ -1607,157 +1053,84 @@ const downloadGeneratedReport = async (format = "markdown") => {
   margin-bottom: 14px;
 }
 
-.risk-events__summary {
+.confidence-high {
+  color: var(--success);
   font-weight: 600;
-  color: #d8e5ff;
-  font-size: 12px;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
 }
 
-.confidence-high { color: #21ad7a; font-weight: 600; }
-.confidence-mid  { color: #f0a51a; font-weight: 600; }
-.confidence-low  { color: #e94c59; font-weight: 600; }
+.confidence-mid {
+  color: var(--warning);
+  font-weight: 600;
+}
+
+.confidence-low {
+  color: var(--risk);
+  font-weight: 600;
+}
 
 .risk-source-chip {
   display: inline-block;
-  padding: 1px 6px;
-  border-radius: 4px;
-  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 999px;
   background: rgba(36, 87, 197, 0.1);
-  color: #2457c5;
-  cursor: default;
+  color: var(--brand);
+  font-size: 0.75rem;
 }
+
 .risk-source-chip--muted {
   background: rgba(125, 135, 152, 0.1);
-  color: #7d8798;
+  color: var(--text-muted);
 }
 
-.risk-extraction-quality {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-top: 4px;
+.risk-page :deep(.el-table) {
+  --el-table-border-color: var(--line-soft);
+  --el-table-header-bg-color: transparent;
+  border: 1px solid var(--line-soft);
+  border-radius: 18px;
 }
 
-.risk-eq__badge {
-  font-size: 11px;
-  font-weight: 600;
-  color: #21ad7a;
-  background: rgba(33, 173, 122, 0.1);
-  padding: 2px 8px;
-  border-radius: 4px;
+.risk-page :deep(.el-table__inner-wrapper::before) {
+  display: none;
 }
 
-.risk-eq__detail {
-  font-size: 10px;
-  color: #8492aa;
-}
-
-/* Source Fragments */
-
-.risk-source-frag {
-  padding: 8px 10px;
-  border-radius: 8px;
-  border: 1px solid rgba(111, 144, 205, 0.07);
-  background: rgba(14, 28, 53, 0.7);
-}
-
-.risk-source-frag__header {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 6px;
-}
-
-.risk-source-frag__type {
-  font-size: 10px;
-  font-weight: 800;
-  color: #ff949b;
-  background: rgba(233, 76, 89, 0.1);
-  padding: 2px 6px;
-  border-radius: 4px;
-}
-
-.risk-source-frag__company {
-  font-size: 10px;
-  color: #8492aa;
-}
-
-.risk-source-frag__text {
-  font-size: 11px;
-  line-height: 1.6;
-  color: #c8d2e3;
-  margin: 0;
-  background: rgba(47, 111, 255, 0.08);
-  border-radius: 4px;
-  padding: 6px 8px;
-}
-
-.risk-source-frag__text.no-highlight {
+.risk-page :deep(.el-table th.el-table__cell) {
+  height: 40px;
+  padding-block: 6px;
+  color: var(--text-muted);
+  font-size: 0.6875rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
   background: transparent;
-  color: #a0adc4;
 }
 
-/* Disabled timeline arrow */
-
-.risk-timeline__arr.is-disabled {
-  opacity: 0.3;
-  cursor: not-allowed;
+.risk-page :deep(.el-input__wrapper),
+.risk-page :deep(.el-select__wrapper),
+.risk-page :deep(.el-textarea__inner) {
+  min-height: 36px;
+  background: var(--surface-2);
+  box-shadow: inset 0 0 0 1px var(--line-strong);
+  border-radius: 12px;
 }
 
-/* Focus-visible for keyboard navigation */
-
-.risk-action-btn:focus-visible,
-.risk-doc__pager button:focus-visible,
-.risk-timeline__arr:focus-visible,
-.risk-extract__tab:focus-visible,
-.risk-extract__download:focus-visible,
-.risk-export__btn:focus-visible,
-.risk-panel__all:focus-visible {
-  outline: 2px solid #2457c5;
-  outline-offset: 2px;
+.risk-page :deep(.el-radio-button__inner) {
+  border-radius: 12px;
 }
-
-/* Reduced motion */
-
-@media (prefers-reduced-motion: reduce) {
-  .risk-action-btn,
-  .risk-extract__tab,
-  .risk-extract__toggle,
-  .risk-extract__toggle::after,
-  .risk-export__btn,
-  .risk-timeline__node::before {
-    transition-duration: 0.01ms !important;
-  }
-}
-
-/* ---- Responsive ---- */
 
 @media (max-width: 1200px) {
-  .risk-grid {
+  .risk-page__summary,
+  .risk-page__main,
+  .risk-page__secondary,
+  .risk-page__source-grid,
+  .risk-page__report-fields--dates {
     grid-template-columns: 1fr;
-    overflow-y: auto;
-  }
-  .risk-right {
-    display: flex;
-    flex-direction: row;
-    flex-wrap: wrap;
-    gap: 10px;
-    overflow: visible;
-  }
-  .risk-right > section {
-    flex: 1 1 300px;
-    min-width: 0;
   }
 }
 
-@media (max-width: 800px) {
-  .risk-stage { height: auto; overflow-y: auto; }
-  .risk-topbar { flex-wrap: wrap; }
-  .risk-work { grid-template-columns: 1fr; min-height: 500px; }
-  .risk-row-top { grid-template-columns: 1fr; }
+@media (max-width: 900px) {
+  .risk-page__hero,
+  .risk-page__panel-head {
+    flex-direction: column;
+  }
 }
 </style>

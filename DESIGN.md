@@ -294,6 +294,13 @@ Dark mode shadows shift to higher opacity (`rgba(0, 0, 0, ...)` bases) to read a
 - **Header:** section-heading pattern with title (~17px, 600) and optional description (14px, text-secondary). Max-width 62ch on description.
 - **Spacing:** Consecutive admin section cards get 8px top margin (tighter than workspace's 20px).
 
+### Risk Extraction Workspace
+- **Primary task:** Upload a document, inspect extracted risks, review pending events.
+- **Main layout:** One control band, one summary band, one main two-column work area. Do not front-load analytics before users see extraction results.
+- **Primary surfaces:** `提取结果`, `审核队列`, `来源与证据`.
+- **Secondary surfaces:** Reporting, export, and full event history stay available, but visually subordinate to the extraction and review flow.
+- **Theme fit:** The risk extraction page belongs to the analyst workspace. Keep it light, restrained, and task-oriented, not a dark war-room dashboard.
+
 ### Command Palette
 - **Overlay:** Fixed, full-viewport, `rgba(0, 0, 0, 0.48)` with 4px blur backdrop.
 - **Container:** 520px wide, 8px radius, surface-1 background, shadow XL.
