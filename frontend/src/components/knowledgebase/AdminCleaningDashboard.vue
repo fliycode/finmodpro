@@ -1,17 +1,14 @@
 <script setup>
-import { ref, computed, onMounted } from 'vue';
-import { useRouter } from 'vue-router';
+import { onMounted, ref } from 'vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
-import CleaningRuleDialog from './CleaningRuleDialog.vue';
+
 import { cleaningApi } from '../../api/cleaning.js';
+import CleaningRuleDialog from './CleaningRuleDialog.vue';
 
 const loading = ref(true);
-const summaryLoading = ref(true);
 const rules = ref([]);
-const summary = ref(null);
 const dialogVisible = ref(false);
 const editingRule = ref(null);
-const router = useRouter();
 
 const RULE_TYPE_LABELS = {
   clean_whitespace: '空白清理',
@@ -29,100 +26,6 @@ const RULE_TYPE_LABELS = {
   normalize_financial_numbers: '数字格式标准化',
 };
 
-const GATE_STATUS_LABELS = {
-  passed: '通过',
-  warning: '告警',
-  blocked: '阻断',
-};
-
-const DEFAULT_RULE_PRESETS = [
-  { name: '默认：空白清理', rule_type: 'clean_whitespace', priority: 10 },
-  { name: '默认：编码修复', rule_type: 'fix_encoding', priority: 20 },
-  { name: '默认：页眉页脚去除', rule_type: 'remove_header_footer', priority: 30 },
-  { name: '默认：页码去除', rule_type: 'remove_page_numbers', priority: 40 },
-  { name: '默认：模板文本去除', rule_type: 'remove_boilerplate', priority: 50 },
-  { name: '默认：断裂段落合并', rule_type: 'group_broken_paragraphs', priority: 60 },
-  { name: '默认：精确去重', rule_type: 'dedup_exact', priority: 70 },
-];
-
-const metricCards = computed(() => {
-  if (!summary.value) {
-    return [];
-  }
-
-  return [
-    {
-      key: 'defaults',
-      label: '默认规则覆盖',
-      value: `${summary.value.defaultRuleCount}/${summary.value.defaultRuleTotal}`,
-      hint: summary.value.defaultRulesInitialized ? '默认规则已齐全' : '仍有默认规则缺失',
-    },
-    {
-      key: 'enabled',
-      label: '已启用规则',
-      value: `${summary.value.enabledRuleCount}`,
-      hint: `默认规则中启用 ${summary.value.enabledDefaultRuleCount} 条`,
-    },
-    {
-      key: 'history',
-      label: '最近清洗样本',
-      value: `${summary.value.recentResultCount}`,
-      hint: summary.value.lastCleanedAt ? `最后一次执行 ${summary.value.lastCleanedAt}` : '尚无清洗记录',
-    },
-  ];
-});
-
-const governanceStatus = computed(() => {
-  if (!summary.value || summary.value.averageQualityScore == null) {
-    return {
-      status: 'warning',
-      title: '等待首批样本',
-      detail: '先执行一份样本，再判断规则质量。',
-    };
-  }
-
-  const score = summary.value.averageQualityScore;
-  const { minQualityScore, warnQualityScore, blockBelowThreshold } = summary.value.qualityGate;
-  if (score < minQualityScore) {
-    return {
-      status: blockBelowThreshold ? 'blocked' : 'warning',
-      title: blockBelowThreshold ? '当前规则有阻断风险' : '当前规则需要人工复核',
-      detail: `平均分 ${score.toFixed(1)}，低于最低阈值 ${minQualityScore.toFixed(1)}。`,
-    };
-  }
-
-  if (score < warnQualityScore) {
-    return {
-      status: 'warning',
-      title: '整体质量可用，但仍需调优',
-      detail: `平均分 ${score.toFixed(1)}，低于建议阈值 ${warnQualityScore.toFixed(1)}。`,
-    };
-  }
-
-  return {
-    status: 'passed',
-    title: '清洗链路整体稳定',
-    detail: `平均分 ${score.toFixed(1)}，高于建议阈值 ${warnQualityScore.toFixed(1)}。`,
-  };
-});
-
-const recentResults = computed(() => summary.value?.recentResults || []);
-const defaultRuleItems = computed(() => {
-  const rulesByName = new Map(
-    rules.value.map((rule) => [rule.name, rule]),
-  );
-
-  return DEFAULT_RULE_PRESETS.map((preset) => {
-    const matched = rulesByName.get(preset.name);
-    return {
-      ...preset,
-      label: RULE_TYPE_LABELS[preset.rule_type] || preset.rule_type,
-      status: matched ? (matched.enabled ? 'enabled' : 'disabled') : 'missing',
-      priority: matched?.priority ?? preset.priority,
-    };
-  });
-});
-
 async function loadRules() {
   loading.value = true;
   try {
@@ -132,17 +35,6 @@ async function loadRules() {
     ElMessage.error(err.message || '加载清洗规则失败');
   } finally {
     loading.value = false;
-  }
-}
-
-async function loadSummary() {
-  summaryLoading.value = true;
-  try {
-    summary.value = await cleaningApi.getSummary();
-  } catch (err) {
-    ElMessage.error(err.message || '加载清洗状态失败');
-  } finally {
-    summaryLoading.value = false;
   }
 }
 
@@ -161,7 +53,7 @@ async function handleDelete(rule) {
     await ElMessageBox.confirm(`确定删除规则「${rule.name}」？`, '确认删除', { type: 'warning' });
     await cleaningApi.deleteRule(rule.id);
     ElMessage.success('已删除');
-    await Promise.all([loadRules(), loadSummary()]);
+    await loadRules();
   } catch {
     // cancelled
   }
@@ -171,26 +63,9 @@ async function handleToggle(rule) {
   try {
     await cleaningApi.updateRule(rule.id, { enabled: !rule.enabled });
     ElMessage.success(rule.enabled ? '已禁用' : '已启用');
-    await Promise.all([loadRules(), loadSummary()]);
+    await loadRules();
   } catch (err) {
     ElMessage.error(err.message || '操作失败');
-  }
-}
-
-async function handleBootstrapDefaults() {
-  try {
-    await ElMessageBox.confirm(
-      '这会补齐缺失的默认规则，但不会覆盖你已经修改过的规则配置。是否继续？',
-      '初始化默认规则',
-      { type: 'warning' },
-    );
-    const result = await cleaningApi.bootstrapDefaultRules();
-    ElMessage.success(result.created_count > 0 ? `已初始化 ${result.created_count} 条默认规则` : '默认规则已齐全');
-    await Promise.all([loadRules(), loadSummary()]);
-  } catch (err) {
-    if (err?.message && !String(err.message).toLowerCase().includes('cancel')) {
-      ElMessage.error(err.message || '初始化默认规则失败');
-    }
   }
 }
 
@@ -204,218 +79,67 @@ async function handleSubmit(payload) {
       ElMessage.success('规则已创建');
     }
     dialogVisible.value = false;
-    await Promise.all([loadRules(), loadSummary()]);
+    await loadRules();
   } catch (err) {
     ElMessage.error(err.message || '操作失败');
   }
 }
 
-function handleOpenDocument(result) {
-  if (!result?.documentId) {
-    ElMessage.warning('当前结果没有关联文档');
-    return;
-  }
-  router.push(`/admin/knowledge/documents/${result.documentId}?tab=cleaning`);
-}
-
 onMounted(async () => {
-  await Promise.all([loadRules(), loadSummary()]);
+  await loadRules();
 });
 </script>
 
 <template>
-  <div class="cleaning-dashboard">
-    <section v-if="summary" class="cleaning-dashboard__hero" v-loading="summaryLoading">
-      <div class="cleaning-dashboard__hero-main">
-        <p class="cleaning-dashboard__eyebrow">Knowledge governance / Cleaning</p>
-        <h2>数据清洗</h2>
-
-        <div :class="['cleaning-dashboard__score-panel', `is-${governanceStatus.status}`]">
-          <div class="cleaning-dashboard__score-main">
-            <p class="cleaning-dashboard__status-label">整体状态</p>
-            <div class="cleaning-dashboard__score-row">
-              <strong class="cleaning-dashboard__score-value">
-                {{ summary.averageQualityScore == null ? '--' : summary.averageQualityScore.toFixed(1) }}
-              </strong>
-              <span :class="['cleaning-dashboard__status-pill', `is-${governanceStatus.status}`]">
-                {{ GATE_STATUS_LABELS[governanceStatus.status] || governanceStatus.status }}
-              </span>
-            </div>
-            <p class="cleaning-dashboard__score-title">{{ governanceStatus.title }}</p>
-            <p class="cleaning-dashboard__score-detail">{{ governanceStatus.detail }}</p>
-          </div>
-
-          <div class="cleaning-dashboard__metric-grid">
-            <article
-              v-for="card in metricCards"
-              :key="card.key"
-              class="cleaning-dashboard__metric-card"
-            >
-              <p class="cleaning-dashboard__status-label">{{ card.label }}</p>
-              <strong class="cleaning-dashboard__metric-value">{{ card.value }}</strong>
-              <p class="cleaning-dashboard__status-hint">{{ card.hint }}</p>
-            </article>
-          </div>
-        </div>
+  <section class="cleaning-dashboard">
+    <div class="cleaning-dashboard__surface">
+      <div class="cleaning-dashboard__header">
+        <h3>清洗规则</h3>
+        <el-button type="primary" @click="handleCreate">新增规则</el-button>
       </div>
 
-      <aside :class="['cleaning-dashboard__hero-side', `is-${governanceStatus.status}`]">
-        <div class="cleaning-dashboard__defaults-head">
-          <div>
-            <p class="cleaning-dashboard__status-label">默认规则</p>
-            <h3>基线规则集</h3>
-          </div>
-          <span :class="['cleaning-dashboard__status-pill', summary.defaultRulesInitialized ? 'is-passed' : 'is-warning']">
-            {{ summary.defaultRuleCount }}/{{ summary.defaultRuleTotal }}
-          </span>
-        </div>
-
-        <div class="cleaning-dashboard__thresholds">
-          <div class="cleaning-dashboard__threshold-item">
-            <span>最低阈值</span>
-            <strong>{{ summary.qualityGate.minQualityScore.toFixed(1) }}</strong>
-          </div>
-          <div class="cleaning-dashboard__threshold-item">
-            <span>建议阈值</span>
-            <strong>{{ summary.qualityGate.warnQualityScore.toFixed(1) }}</strong>
-          </div>
-          <div class="cleaning-dashboard__threshold-item">
-            <span>低于最低阈值</span>
-            <strong>{{ summary.qualityGate.blockBelowThreshold ? '阻断' : '告警' }}</strong>
-          </div>
-        </div>
-
-        <div class="cleaning-dashboard__default-list">
-          <article
-            v-for="rule in defaultRuleItems"
-            :key="rule.name"
-            class="cleaning-dashboard__default-item"
-          >
-            <div class="cleaning-dashboard__default-copy">
-              <strong>{{ rule.label }}</strong>
-              <span>{{ rule.name }}</span>
-            </div>
-            <div class="cleaning-dashboard__default-meta">
-              <span class="cleaning-dashboard__default-priority">P{{ rule.priority }}</span>
-              <span :class="['cleaning-dashboard__default-state', `is-${rule.status}`]">
-                {{ rule.status === 'enabled' ? '启用' : rule.status === 'disabled' ? '已禁用' : '缺失' }}
-              </span>
-            </div>
-          </article>
-        </div>
-
-        <p v-if="summary.missingDefaultRuleNames.length" class="cleaning-dashboard__warning">
-          缺失：{{ summary.missingDefaultRuleNames.join('、') }}
-        </p>
-        <el-button type="primary" @click="handleBootstrapDefaults">
-          补齐默认规则
-        </el-button>
-      </aside>
-    </section>
-
-    <section class="cleaning-dashboard__workspace">
-      <div class="cleaning-dashboard__main">
-        <section class="cleaning-dashboard__surface">
-          <div class="cleaning-dashboard__header">
-            <h3>清洗规则</h3>
-            <el-button type="primary" @click="handleCreate">新建规则</el-button>
-          </div>
-
-          <el-table :data="rules" v-loading="loading" stripe style="width: 100%">
-            <el-table-column prop="name" label="规则名称" min-width="160" />
-            <el-table-column label="类型" min-width="140">
-              <template #default="{ row }">
-                <el-tag size="small">{{ RULE_TYPE_LABELS[row.rule_type] || row.rule_type }}</el-tag>
-              </template>
-            </el-table-column>
-            <el-table-column prop="priority" label="优先级" width="90" align="center" />
-            <el-table-column label="状态" width="90" align="center">
-              <template #default="{ row }">
-                <el-tag :type="row.enabled ? 'success' : 'info'" size="small">
-                  {{ row.enabled ? '启用' : '禁用' }}
-                </el-tag>
-              </template>
-            </el-table-column>
-            <el-table-column label="操作" width="220" align="center">
-              <template #default="{ row }">
-                <el-button link type="primary" size="small" @click="handleEdit(row)">编辑</el-button>
-                <el-button link type="primary" size="small" @click="handleToggle(row)">
-                  {{ row.enabled ? '禁用' : '启用' }}
-                </el-button>
-                <el-button link type="danger" size="small" @click="handleDelete(row)">删除</el-button>
-              </template>
-            </el-table-column>
-          </el-table>
-        </section>
-      </div>
-
-      <aside class="cleaning-dashboard__rail">
-        <section class="cleaning-dashboard__surface cleaning-dashboard__recent">
-          <div class="cleaning-dashboard__recent-header">
-            <h3>最近清洗结果</h3>
-            <span class="cleaning-dashboard__recent-time">{{ summary?.lastCleanedAt || '暂无记录' }}</span>
-          </div>
-          <div v-if="recentResults.length" class="cleaning-dashboard__recent-list">
-            <button
-              v-for="row in recentResults"
-              :key="row.id"
-              type="button"
-              class="cleaning-dashboard__recent-card"
-              @click="handleOpenDocument(row)"
-            >
-              <div class="cleaning-dashboard__recent-card-head">
-                <strong>{{ row.documentTitle }}</strong>
-                <span :class="['cleaning-dashboard__status-pill', `is-${row.qualityGate.status}`]">
-                  {{ GATE_STATUS_LABELS[row.qualityGate.status] || row.qualityGate.status }}
-                </span>
-              </div>
-              <div class="cleaning-dashboard__recent-card-meta">
-                <span>质量分 {{ row.qualityScore.toFixed(1) }}</span>
-                <span>{{ row.cleanedAt || '暂无时间' }}</span>
-              </div>
-            </button>
-          </div>
-          <div v-else class="cleaning-dashboard__empty">
-            暂无清洗记录
-          </div>
-        </section>
-      </aside>
-    </section>
+      <el-table :data="rules" v-loading="loading" stripe style="width: 100%">
+        <el-table-column prop="name" label="规则名称" min-width="180" />
+        <el-table-column label="类型" min-width="150">
+          <template #default="{ row }">
+            <el-tag size="small">{{ RULE_TYPE_LABELS[row.rule_type] || row.rule_type }}</el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column prop="priority" label="优先级" width="96" align="center" />
+        <el-table-column label="状态" width="96" align="center">
+          <template #default="{ row }">
+            <el-tag :type="row.enabled ? 'success' : 'info'" size="small">
+              {{ row.enabled ? '启用' : '禁用' }}
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="操作" width="220" align="center">
+          <template #default="{ row }">
+            <el-button link type="primary" size="small" @click="handleEdit(row)">编辑</el-button>
+            <el-button link type="primary" size="small" @click="handleToggle(row)">
+              {{ row.enabled ? '禁用' : '启用' }}
+            </el-button>
+            <el-button link type="danger" size="small" @click="handleDelete(row)">删除</el-button>
+          </template>
+        </el-table-column>
+      </el-table>
+    </div>
 
     <CleaningRuleDialog
       v-model:visible="dialogVisible"
       :rule="editingRule"
       @submit="handleSubmit"
     />
-  </div>
+  </section>
 </template>
 
 <style scoped>
 .cleaning-dashboard {
   display: flex;
   flex-direction: column;
-  gap: 18px;
 }
 
-.cleaning-dashboard__hero,
-.cleaning-dashboard__workspace {
-  display: grid;
-  gap: 16px;
-}
-
-.cleaning-dashboard__hero {
-  grid-template-columns: minmax(0, 1.5fr) minmax(300px, 0.9fr);
-  align-items: stretch;
-}
-
-.cleaning-dashboard__workspace {
-  grid-template-columns: minmax(0, 1.45fr) minmax(320px, 0.85fr);
-  align-items: start;
-}
-
-.cleaning-dashboard__surface,
-.cleaning-dashboard__hero-main,
-.cleaning-dashboard__hero-side {
+.cleaning-dashboard__surface {
   border: 1px solid color-mix(in oklab, var(--brand) 14%, var(--line-soft));
   border-radius: 22px;
   background: var(--surface-2);
@@ -423,304 +147,17 @@ onMounted(async () => {
   padding: 20px 22px;
 }
 
-.cleaning-dashboard__hero-main,
-.cleaning-dashboard__hero-side,
-.cleaning-dashboard__main,
-.cleaning-dashboard__rail,
-.cleaning-dashboard__recent,
-.cleaning-dashboard__score-main,
-.cleaning-dashboard__score-panel,
-.cleaning-dashboard__metric-card,
-.cleaning-dashboard__default-list,
-.cleaning-dashboard__recent-list {
-  display: flex;
-  flex-direction: column;
-}
-
-.cleaning-dashboard__hero-main,
-.cleaning-dashboard__hero-side,
-.cleaning-dashboard__recent,
-.cleaning-dashboard__score-panel,
-.cleaning-dashboard__recent-list {
-  gap: 16px;
-}
-
-.cleaning-dashboard__eyebrow,
-.cleaning-dashboard__status-label,
-.cleaning-dashboard__status-hint,
-.cleaning-dashboard__empty,
-.cleaning-dashboard__recent-card-meta,
-.cleaning-dashboard__default-copy span,
-.cleaning-dashboard__recent-time,
-.cleaning-dashboard__threshold-item span {
-  margin: 0;
-  color: var(--text-secondary);
-}
-
-.cleaning-dashboard__eyebrow,
-.cleaning-dashboard__status-label {
-  font-size: 0.8rem;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-
-.cleaning-dashboard__hero-main h2,
-.cleaning-dashboard__header h3,
-.cleaning-dashboard__hero-side h3,
-.cleaning-dashboard__recent-header h3 {
-  margin: 0;
-  color: var(--text-primary);
-}
-
-.cleaning-dashboard__hero-main h2 {
-  font-size: 2rem;
-  line-height: 1.1;
-  max-width: 14ch;
-}
-
-.cleaning-dashboard__empty,
-.cleaning-dashboard__recent-card-meta,
-.cleaning-dashboard__default-copy span,
-.cleaning-dashboard__recent-time,
-.cleaning-dashboard__threshold-item span {
-  font-size: 0.95rem;
-  line-height: 1.65;
-}
-
-.cleaning-dashboard__score-panel {
-  display: grid;
-  grid-template-columns: minmax(0, 1.05fr) minmax(280px, 0.95fr);
-  gap: 16px;
-  border-radius: 20px;
-  padding: 18px;
-}
-
-.cleaning-dashboard__score-panel.is-passed,
-.cleaning-dashboard__hero-side.is-passed {
-  border-color: color-mix(in oklab, var(--success) 32%, var(--line-soft));
-  background: color-mix(in oklab, var(--success) 4%, var(--surface-2));
-}
-
-.cleaning-dashboard__score-panel.is-warning,
-.cleaning-dashboard__hero-side.is-warning {
-  border-color: color-mix(in oklab, #d97706 28%, var(--line-soft));
-  background: color-mix(in oklab, #d97706 4%, var(--surface-2));
-}
-
-.cleaning-dashboard__score-panel.is-blocked,
-.cleaning-dashboard__hero-side.is-blocked {
-  border-color: color-mix(in oklab, var(--risk) 30%, var(--line-soft));
-  background: color-mix(in oklab, var(--risk) 4%, var(--surface-2));
-}
-
-.cleaning-dashboard__score-row,
-.cleaning-dashboard__header,
-.cleaning-dashboard__recent-header,
-.cleaning-dashboard__recent-card-head {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 16px;
-}
-
-.cleaning-dashboard__score-value {
-  font-size: 4.25rem;
-  line-height: 0.92;
-  font-weight: 700;
-  color: var(--text-primary);
-}
-
-.cleaning-dashboard__score-title,
-.cleaning-dashboard__score-detail {
-  margin: 0;
-}
-
-.cleaning-dashboard__score-title {
-  font-size: 1.15rem;
-  font-weight: 600;
-  color: var(--text-primary);
-}
-
-.cleaning-dashboard__score-detail {
-  color: var(--text-secondary);
-  line-height: 1.65;
-}
-
-.cleaning-dashboard__metric-grid {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 12px;
-}
-
-.cleaning-dashboard__metric-card {
-  gap: 8px;
-  border: 1px solid color-mix(in oklab, var(--brand) 14%, var(--line-soft));
-  border-radius: 16px;
-  background: rgba(255, 255, 255, 0.78);
-  padding: 14px 15px;
-}
-
-.cleaning-dashboard__metric-value {
-  font-size: 1.45rem;
-  line-height: 1.1;
-  font-weight: 700;
-  color: var(--text-primary);
-}
-
-.cleaning-dashboard__status-pill {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: fit-content;
-  border-radius: 999px;
-  padding: 6px 10px;
-  font-size: 0.78rem;
-  font-weight: 600;
-  line-height: 1;
-}
-
-.cleaning-dashboard__status-pill.is-passed {
-  background: color-mix(in oklab, var(--success) 12%, var(--surface-2));
-  color: color-mix(in oklab, var(--success) 72%, var(--text-primary));
-}
-
-.cleaning-dashboard__status-pill.is-warning {
-  background: color-mix(in oklab, #d97706 14%, var(--surface-2));
-  color: color-mix(in oklab, #d97706 76%, var(--text-primary));
-}
-
-.cleaning-dashboard__status-pill.is-blocked {
-  background: color-mix(in oklab, var(--risk) 12%, var(--surface-2));
-  color: color-mix(in oklab, var(--risk) 74%, var(--text-primary));
-}
-
-.cleaning-dashboard__defaults-head {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 12px;
-}
-
-.cleaning-dashboard__thresholds {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 10px;
-}
-
-.cleaning-dashboard__threshold-item,
-.cleaning-dashboard__default-item {
+.cleaning-dashboard__header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
-  border: 1px solid color-mix(in oklab, var(--brand) 10%, var(--line-soft));
-  border-radius: 16px;
-  background: rgba(255, 255, 255, 0.72);
-  padding: 12px 14px;
-}
-
-.cleaning-dashboard__threshold-item {
-  flex-direction: column;
-  align-items: flex-start;
-}
-
-.cleaning-dashboard__threshold-item strong,
-.cleaning-dashboard__default-copy strong,
-.cleaning-dashboard__recent-card-head strong {
-  color: var(--text-primary);
-}
-
-.cleaning-dashboard__default-list {
-  gap: 10px;
-}
-
-.cleaning-dashboard__default-copy {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
-}
-
-.cleaning-dashboard__default-meta {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-shrink: 0;
-}
-
-.cleaning-dashboard__default-priority {
-  font-size: 0.78rem;
-  font-weight: 600;
-  color: var(--text-muted);
-}
-
-.cleaning-dashboard__default-state {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 52px;
-  border-radius: 999px;
-  padding: 5px 9px;
-  font-size: 0.78rem;
-  font-weight: 600;
-  line-height: 1;
-}
-
-.cleaning-dashboard__default-state.is-enabled {
-  background: color-mix(in oklab, var(--success) 12%, var(--surface-2));
-  color: color-mix(in oklab, var(--success) 72%, var(--text-primary));
-}
-
-.cleaning-dashboard__default-state.is-disabled {
-  background: color-mix(in oklab, var(--warning) 10%, var(--surface-2));
-  color: color-mix(in oklab, var(--warning) 76%, var(--text-primary));
-}
-
-.cleaning-dashboard__default-state.is-missing {
-  background: color-mix(in oklab, var(--risk) 12%, var(--surface-2));
-  color: color-mix(in oklab, var(--risk) 74%, var(--text-primary));
-}
-
-.cleaning-dashboard__warning {
-  margin: 0;
-  color: color-mix(in oklab, #9a4f00 80%, var(--text-primary));
-}
-
-.cleaning-dashboard__rail {
-  display: flex;
-  flex-direction: column;
   gap: 16px;
+  margin-bottom: 16px;
 }
 
-.cleaning-dashboard__recent {
-  min-height: 100%;
-}
-
-.cleaning-dashboard__recent-list {
-  gap: 10px;
-}
-
-.cleaning-dashboard__recent-card {
-  border: 1px solid color-mix(in oklab, var(--brand) 14%, var(--line-soft));
-  border-radius: 16px;
-  background: color-mix(in oklab, var(--brand) 4%, var(--surface-2));
-  padding: 14px;
-  text-align: left;
-  cursor: pointer;
-  transition: border-color 0.18s ease, background 0.18s ease, transform 0.18s ease;
-}
-
-.cleaning-dashboard__recent-card:hover {
-  border-color: color-mix(in oklab, var(--brand) 28%, var(--line-soft));
-  background: color-mix(in oklab, var(--brand) 8%, var(--surface-2));
-  transform: translateY(-1px);
-}
-
-.cleaning-dashboard__recent-card-meta {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  margin-top: 8px;
+.cleaning-dashboard__header h3 {
+  margin: 0;
+  color: var(--text-primary);
 }
 
 :deep(.el-table) {
@@ -729,36 +166,14 @@ onMounted(async () => {
   --el-table-row-hover-bg-color: color-mix(in oklab, var(--brand) 5%, var(--surface-2));
 }
 
-@media (max-width: 1100px) {
-  .cleaning-dashboard__hero,
-  .cleaning-dashboard__workspace,
-  .cleaning-dashboard__score-panel,
-  .cleaning-dashboard__thresholds {
-    grid-template-columns: 1fr;
-  }
-
-  .cleaning-dashboard__metric-grid {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-  }
-}
-
 @media (max-width: 720px) {
-  .cleaning-dashboard__metric-grid {
-    grid-template-columns: 1fr;
+  .cleaning-dashboard__surface {
+    padding: 16px;
   }
 
-  .cleaning-dashboard__score-row,
-  .cleaning-dashboard__recent-header,
-  .cleaning-dashboard__header,
-  .cleaning-dashboard__recent-card-head,
-  .cleaning-dashboard__defaults-head,
-  .cleaning-dashboard__default-item {
+  .cleaning-dashboard__header {
     flex-direction: column;
-    align-items: flex-start;
-  }
-
-  .cleaning-dashboard__score-value {
-    font-size: 3.2rem;
+    align-items: stretch;
   }
 }
 </style>
