@@ -129,6 +129,11 @@ export function normalizeDashboardPayload(payload) {
     chat_request_count_24h: toNumber(data.chat_request_count_24h),
     model_invocation_count_7d: toNumber(data.model_invocation_count_7d),
     model_invocation_count_prev_7d: toNumber(data.model_invocation_count_prev_7d),
+    total_token_count: toNumber(data.total_token_count),
+    total_request_token_count: toNumber(data.total_request_token_count),
+    total_response_token_count: toNumber(data.total_response_token_count),
+    token_count_7d: toNumber(data.token_count_7d),
+    token_count_prev_7d: toNumber(data.token_count_prev_7d),
     audit_operation_count_7d: toNumber(data.audit_operation_count_7d),
     audit_operation_count_prev_7d: toNumber(data.audit_operation_count_prev_7d),
     document_added_count_7d: toNumber(data.document_added_count_7d),
@@ -140,6 +145,9 @@ export function normalizeDashboardPayload(payload) {
     chat_requests_7d: Array.isArray(data.chat_requests_7d) ? data.chat_requests_7d : [],
     retrieval_hits_7d: Array.isArray(data.retrieval_hits_7d) ? data.retrieval_hits_7d : [],
     model_invocations_7d: Array.isArray(data.model_invocations_7d) ? data.model_invocations_7d : [],
+    token_usage_7d: Array.isArray(data.token_usage_7d) ? data.token_usage_7d : [],
+    request_tokens_7d: Array.isArray(data.request_tokens_7d) ? data.request_tokens_7d : [],
+    response_tokens_7d: Array.isArray(data.response_tokens_7d) ? data.response_tokens_7d : [],
     audit_operations_7d: Array.isArray(data.audit_operations_7d) ? data.audit_operations_7d : [],
     risk_level_distribution: {
       low: toNumber(data?.risk_level_distribution?.low),
@@ -165,9 +173,9 @@ export function buildDashboardSummaryMetrics(stats) {
     stats?.model_invocation_count_7d,
     stats?.model_invocation_count_prev_7d,
   );
-  const auditDelta = formatWeekOverWeekDelta(
-    stats?.audit_operation_count_7d,
-    stats?.audit_operation_count_prev_7d,
+  const tokenDelta = formatWeekOverWeekDelta(
+    stats?.token_count_7d,
+    stats?.token_count_prev_7d,
   );
   const documentDelta = formatWeekOverWeekDelta(
     stats?.document_added_count_7d,
@@ -190,14 +198,14 @@ export function buildDashboardSummaryMetrics(stats) {
       deltaTone: modelDelta.tone,
     },
     {
-      key: 'audit-operations',
-      label: '审计操作量',
-      value: formatInteger(stats?.audit_operation_count_7d),
-      note: `上周 ${formatInteger(stats?.audit_operation_count_prev_7d)} 次`,
-      icon: 'zap',
+      key: 'token-usage',
+      label: '系统 Token 用量',
+      value: formatInteger(stats?.total_token_count),
+      note: `输入 ${formatInteger(stats?.total_request_token_count)} · 输出 ${formatInteger(stats?.total_response_token_count)}`,
+      icon: 'activity',
       tone: 'orange',
-      delta: auditDelta.label,
-      deltaTone: auditDelta.tone,
+      delta: tokenDelta.label,
+      deltaTone: tokenDelta.tone,
     },
     {
       key: 'documents',
@@ -316,8 +324,8 @@ const getFallbackTrendSeries = (total, days) => {
 
 export function buildDashboardTrendOption(stats) {
   const requestRows = Array.isArray(stats?.model_invocations_7d) ? stats.model_invocations_7d : [];
-  const auditRows = Array.isArray(stats?.audit_operations_7d) ? stats.audit_operations_7d : [];
-  const dates = requestRows.length > 0 ? requestRows.map((item) => item.date) : auditRows.map((item) => item.date);
+  const tokenRows = Array.isArray(stats?.token_usage_7d) ? stats.token_usage_7d : [];
+  const dates = requestRows.length > 0 ? requestRows.map((item) => item.date) : tokenRows.map((item) => item.date);
   const axis = buildBoardAxis();
 
   return {
@@ -329,7 +337,7 @@ export function buildDashboardTrendOption(stats) {
       itemWidth: 18,
       itemHeight: 8,
       textStyle: { color: chartColors().textSecondary, fontWeight: 700 },
-      data: ['模型调用', '审计操作'],
+      data: ['模型调用', 'Token 用量'],
     },
     grid: { left: 42, right: 22, top: 48, bottom: 28 },
     xAxis: {
@@ -360,15 +368,65 @@ export function buildDashboardTrendOption(stats) {
         itemStyle: { color: chartColors().brand, borderRadius: [8, 8, 0, 0] },
       },
       {
-        name: '审计操作',
+        name: 'Token 用量',
         type: 'line',
         smooth: true,
         symbolSize: 7,
         yAxisIndex: 1,
-        data: auditRows.map((item) => toNumber(item.value)),
+        data: tokenRows.map((item) => toNumber(item.value)),
         lineStyle: { width: 3, color: chartColors().warning },
         itemStyle: { color: chartColors().warning },
         areaStyle: { color: 'rgba(183, 121, 31, 0.12)' },
+      },
+    ],
+  };
+}
+
+export function buildDashboardTokenOption(stats) {
+  const inputRows = Array.isArray(stats?.request_tokens_7d) ? stats.request_tokens_7d : [];
+  const outputRows = Array.isArray(stats?.response_tokens_7d) ? stats.response_tokens_7d : [];
+  const dates = inputRows.length > 0 ? inputRows.map((item) => item.date) : outputRows.map((item) => item.date);
+  const axis = buildBoardAxis();
+
+  return {
+    color: [chartColors().brand, chartColors().brandSoft],
+    tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' }, ...buildBoardTooltip() },
+    legend: {
+      top: 0,
+      left: 0,
+      itemWidth: 16,
+      itemHeight: 8,
+      textStyle: { color: chartColors().textSecondary, fontWeight: 700 },
+      data: ['输入 Token', '输出 Token'],
+    },
+    grid: { left: 18, right: 18, top: 42, bottom: 8, containLabel: true },
+    xAxis: {
+      type: 'category',
+      data: dates.map((item) => formatShortDate(item)),
+      ...axis,
+    },
+    yAxis: {
+      type: 'value',
+      minInterval: 1,
+      axisLabel: axis.axisLabel,
+      splitLine: { lineStyle: { color: chartColors().gridLine } },
+    },
+    series: [
+      {
+        name: '输入 Token',
+        type: 'bar',
+        stack: 'token-usage',
+        barWidth: 20,
+        data: inputRows.map((item) => toNumber(item.value)),
+        itemStyle: { color: chartColors().brand, borderRadius: [8, 8, 0, 0] },
+      },
+      {
+        name: '输出 Token',
+        type: 'bar',
+        stack: 'token-usage',
+        barWidth: 20,
+        data: outputRows.map((item) => toNumber(item.value)),
+        itemStyle: { color: chartColors().brandSoft, borderRadius: [8, 8, 0, 0] },
       },
     ],
   };

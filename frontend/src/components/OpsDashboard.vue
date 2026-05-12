@@ -6,10 +6,10 @@ import { dashboardApi } from '../api/dashboard.js';
 import {
   buildDashboardDocumentOption,
   buildDashboardSummaryMetrics,
+  buildDashboardTokenOption,
   buildDashboardTrendOption,
   normalizeDashboardPayload,
 } from '../lib/admin-dashboard.js';
-import { formatAuditAction, formatAuditStatus } from '../lib/admin-audit.js';
 import AdminChart from './admin/AdminChart.vue';
 import AppIcon from './ui/AppIcon.vue';
 
@@ -20,20 +20,7 @@ const errorMsg = ref('');
 const numberFormatter = new Intl.NumberFormat('zh-CN');
 
 const formatNumber = (value) => numberFormatter.format(Math.max(0, Math.round(Number(value) || 0)));
-
-const formatShortTime = (value) => {
-  if (!value) {
-    return '--';
-  }
-
-  return new Intl.DateTimeFormat('zh-CN', {
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: false,
-  }).format(new Date(value));
-};
+const formatPercent = (value) => `${Math.round(Math.max(0, Number(value) || 0))}%`;
 
 const fetchData = async () => {
   isLoading.value = true;
@@ -56,16 +43,7 @@ onMounted(fetchData);
 const summaryMetrics = computed(() => buildDashboardSummaryMetrics(dashboardStats.value));
 const trendOption = computed(() => buildDashboardTrendOption(dashboardStats.value));
 const documentOption = computed(() => buildDashboardDocumentOption(dashboardStats.value));
-
-const auditRows = computed(() => dashboardStats.value.audit_snippets.slice(0, 4).map((item, index) => ({
-  id: item.id || `audit-${index}`,
-  title: formatAuditAction(item.action),
-  actor: item.actor_name || '系统',
-  status: formatAuditStatus(item.status),
-  statusTone: item.status === 'failed' ? 'is-risk' : 'is-neutral',
-  time: formatShortTime(item.created_at),
-  summary: item.summary || `${formatAuditAction(item.action)} · ${formatAuditStatus(item.status)}`,
-})));
+const tokenOption = computed(() => buildDashboardTokenOption(dashboardStats.value));
 
 const documentHighlights = computed(() => ([
   {
@@ -84,6 +62,32 @@ const documentHighlights = computed(() => ([
     tone: 'retry',
   },
 ]));
+
+const tokenHighlights = computed(() => {
+  const total7d = Number(dashboardStats.value.token_count_7d) || 0;
+  const input = Number(dashboardStats.value.total_request_token_count) || 0;
+  const output = Number(dashboardStats.value.total_response_token_count) || 0;
+  const total = input + output;
+  const requests = Number(dashboardStats.value.model_invocation_count_7d) || 0;
+
+  return [
+    {
+      label: '近 7 天',
+      value: formatNumber(total7d),
+      tone: 'processing',
+    },
+    {
+      label: '输出占比',
+      value: formatPercent(total > 0 ? (output / total) * 100 : 0),
+      tone: 'retry',
+    },
+    {
+      label: '单次均值',
+      value: formatNumber(requests > 0 ? total7d / requests : 0),
+      tone: 'neutral',
+    },
+  ];
+});
 </script>
 
 <template>
@@ -122,68 +126,71 @@ const documentHighlights = computed(() => ([
       </article>
     </section>
 
-    <section class="ops-board__hero">
-      <header class="ops-board__hero-header">
-        <div>
-          <h2>模型调用趋势 <span class="ops-board__eyebrow">近 7 天</span></h2>
-          <p>调用量与审计操作节奏概览。</p>
-        </div>
-
-        <div class="ops-board__hero-aside">
-          <div class="ops-board__hero-stat">
-            <span>调用总量</span>
-            <strong>{{ formatNumber(dashboardStats.model_invocation_count_7d) }}</strong>
-          </div>
-          <div class="ops-board__hero-stat">
-            <span>审计操作</span>
-            <strong>{{ formatNumber(dashboardStats.audit_operation_count_7d) }}</strong>
-          </div>
-        </div>
-      </header>
-
-      <AdminChart :option="trendOption" height="240px" />
-    </section>
-
-    <section class="ops-board__secondary">
-      <article class="board-panel">
-        <header class="board-panel__header">
+    <section class="ops-board__main">
+      <article class="ops-board__hero">
+        <header class="ops-board__hero-header">
           <div>
-            <strong>文档处理状态</strong>
-            <span>入库管线当前各阶段数量。</span>
+            <h2>模型调用与 Token 走势 <span class="ops-board__eyebrow">近 7 天</span></h2>
+            <p>调用频次与整体 Token 消耗放在同一视图里，更适合判断负载变化。</p>
+          </div>
+
+          <div class="ops-board__hero-aside">
+            <div class="ops-board__hero-stat">
+              <span>近 7 天调用量</span>
+              <strong>{{ formatNumber(dashboardStats.model_invocation_count_7d) }}</strong>
+            </div>
+            <div class="ops-board__hero-stat">
+              <span>近 7 天 Token</span>
+              <strong>{{ formatNumber(dashboardStats.token_count_7d) }}</strong>
+            </div>
           </div>
         </header>
 
-        <AdminChart :option="documentOption" height="180px" />
+        <AdminChart :option="trendOption" height="280px" />
+      </article>
 
-        <div class="board-panel__metrics">
-          <div v-for="item in documentHighlights" :key="item.label" class="board-panel__metric" :class="`is-${item.tone}`">
+      <article class="board-panel board-panel--token">
+        <header class="board-panel__header board-panel__header--stacked">
+          <div>
+            <strong>Token 近 7 天结构</strong>
+            <span>输入与输出拆开看，更容易定位成本上升来自哪里。</span>
+          </div>
+          <div class="board-panel__badge">
+            <AppIcon name="activity" />
+            <span>全系统累计 {{ formatNumber(dashboardStats.total_token_count) }}</span>
+          </div>
+        </header>
+
+        <AdminChart :option="tokenOption" height="220px" />
+
+        <div class="board-panel__metrics board-panel__metrics--token">
+          <div v-for="item in tokenHighlights" :key="item.label" class="board-panel__metric" :class="`is-${item.tone}`">
             <span>{{ item.label }}</span>
             <strong>{{ item.value }}</strong>
           </div>
         </div>
       </article>
+    </section>
 
-      <article class="board-panel">
+    <section class="ops-board__secondary">
+      <article class="board-panel board-panel--document">
         <header class="board-panel__header">
           <div>
-            <strong>最近审计操作</strong>
-            <span>近期治理动作时间线。</span>
+            <strong>文档处理状态</strong>
+            <span>入库管线当前各阶段数量，用来识别处理积压和失败点。</span>
           </div>
         </header>
 
-        <div v-if="auditRows.length > 0" class="audit-feed">
-          <article v-for="row in auditRows" :key="row.id" class="audit-feed__item">
-            <div class="audit-feed__copy">
-              <strong>{{ row.title }}</strong>
-              <p>{{ row.actor }} · {{ row.summary }}</p>
+        <div class="board-panel__document-grid">
+          <AdminChart :option="documentOption" height="220px" />
+
+          <div class="board-panel__metrics board-panel__metrics--document">
+            <div v-for="item in documentHighlights" :key="item.label" class="board-panel__metric" :class="`is-${item.tone}`">
+              <span>{{ item.label }}</span>
+              <strong>{{ item.value }}</strong>
             </div>
-            <div class="audit-feed__meta">
-              <span class="audit-feed__status" :class="row.statusTone">{{ row.status }}</span>
-              <time>{{ row.time }}</time>
-            </div>
-          </article>
+          </div>
         </div>
-        <div v-else class="admin-empty-state">近 7 天暂无审计操作</div>
       </article>
     </section>
   </section>
@@ -192,14 +199,14 @@ const documentHighlights = computed(() => ([
 <style scoped>
 .ops-board {
   display: grid;
-  gap: 20px;
+  gap: 18px;
   color: var(--text-secondary);
 }
 
 .ops-board__summary {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 16px;
+  gap: 14px;
 }
 
 .summary-tile {
@@ -224,6 +231,11 @@ const documentHighlights = computed(() => ([
   align-items: center;
   justify-content: space-between;
   gap: 12px;
+}
+
+.summary-tile__value-row {
+  align-items: flex-end;
+  flex-wrap: wrap;
 }
 
 .summary-tile__label {
@@ -252,9 +264,10 @@ const documentHighlights = computed(() => ([
 .summary-tile strong {
   color: var(--text-primary);
   font-family: var(--heading);
-  font-size: 1.5rem;
-  line-height: 1;
+  font-size: clamp(1.35rem, 2vw, 1.7rem);
+  line-height: 1.05;
   font-weight: 600;
+  word-break: break-word;
 }
 
 .summary-tile p {
@@ -319,6 +332,13 @@ const documentHighlights = computed(() => ([
   transition: border-color 0.2s ease;
 }
 
+.ops-board__main {
+  display: grid;
+  grid-template-columns: minmax(0, 1.35fr) minmax(320px, 0.9fr);
+  gap: 16px;
+  align-items: start;
+}
+
 .ops-board__hero:hover,
 .board-panel:hover {
   border-color: var(--line-strong);
@@ -327,6 +347,7 @@ const documentHighlights = computed(() => ([
 .ops-board__hero {
   display: grid;
   gap: 14px;
+  min-width: 0;
 }
 
 .ops-board__hero-header,
@@ -364,18 +385,18 @@ const documentHighlights = computed(() => ([
 .ops-board__hero-aside {
   display: grid;
   gap: 12px;
-  min-width: 168px;
+  min-width: 196px;
 }
 
 .ops-board__hero-stat {
-  padding: 10px 14px;
+  padding: 12px 14px;
   border-radius: var(--radius-lg);
-  background: rgba(36, 87, 197, 0.08);
+  background: color-mix(in srgb, var(--brand) 8%, var(--surface-2));
   transition: background 0.2s ease;
 }
 
 .ops-board__hero-stat:hover {
-  background: rgba(36, 87, 197, 0.14);
+  background: color-mix(in srgb, var(--brand) 12%, var(--surface-2));
 }
 
 .ops-board__hero-stat span {
@@ -396,14 +417,21 @@ const documentHighlights = computed(() => ([
 }
 
 .ops-board__secondary {
-  display: grid;
-  grid-template-columns: minmax(0, 1.1fr) minmax(0, 0.9fr);
-  gap: 16px;
+  display: block;
 }
 
 .board-panel {
   display: grid;
   gap: 14px;
+}
+
+.board-panel--token {
+  min-width: 0;
+  gap: 16px;
+}
+
+.board-panel--document {
+  gap: 18px;
 }
 
 .board-panel__header strong {
@@ -414,14 +442,53 @@ const documentHighlights = computed(() => ([
   font-weight: 700;
 }
 
+.board-panel__header--stacked {
+  align-items: flex-start;
+}
+
+.board-panel__badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 32px;
+  padding: 0 12px;
+  border-radius: var(--radius-pill);
+  color: var(--text-primary);
+  background: var(--surface-2);
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+
+.board-panel__badge :deep(.app-icon) {
+  width: 14px;
+  height: 14px;
+  color: var(--brand);
+}
+
+.board-panel__document-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(220px, 0.8fr);
+  gap: 18px;
+  align-items: center;
+}
+
 .board-panel__metrics {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 12px;
 }
 
+.board-panel__metrics--token {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.board-panel__metrics--document {
+  grid-template-columns: 1fr;
+  align-content: start;
+}
+
 .board-panel__metric {
-  padding: 10px 14px;
+  padding: 12px 14px;
   border-radius: var(--radius-lg);
   background: var(--surface-2);
   transition: background 0.15s ease;
@@ -443,6 +510,10 @@ const documentHighlights = computed(() => ([
   color: var(--warning);
 }
 
+.board-panel__metric.is-neutral strong {
+  color: var(--text-primary);
+}
+
 .board-panel__metric span {
   display: block;
   color: var(--text-muted);
@@ -460,81 +531,13 @@ const documentHighlights = computed(() => ([
   font-weight: 600;
 }
 
-.audit-feed {
-  display: grid;
-  gap: 12px;
-}
-
-.audit-feed__item {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 12px;
-  align-items: center;
-  padding: 12px 14px;
-  border-radius: var(--radius-lg);
-  background: var(--surface-2);
-  transition: background 0.15s ease;
-}
-
-.audit-feed__item:hover {
-  background: var(--surface-hover);
-}
-
-.audit-feed__copy {
-  min-width: 0;
-}
-
-.audit-feed__copy strong {
-  display: block;
-  color: var(--text-primary);
-  font-size: 0.9375rem;
-  font-weight: 700;
-}
-
-.audit-feed__copy p {
-  margin: 6px 0 0;
-  color: var(--text-muted);
-  font-size: 0.8125rem;
-  line-height: 1.5;
-}
-
-.audit-feed__meta {
-  display: grid;
-  justify-items: end;
-  gap: 8px;
-}
-
-.audit-feed__meta time {
-  color: var(--text-muted);
-  font-size: 0.75rem;
-}
-
-.audit-feed__status {
-  display: inline-flex;
-  align-items: center;
-  min-height: 28px;
-  padding: 0 10px;
-  border-radius: var(--radius-pill);
-  font-size: 0.75rem;
-  font-weight: 700;
-}
-
-.audit-feed__status.is-risk {
-  color: var(--risk);
-  background: rgba(196, 73, 61, 0.12);
-}
-
-.audit-feed__status.is-neutral {
-  color: var(--text-secondary);
-  background: rgba(125, 135, 152, 0.12);
-}
-
 @media (max-width: 1320px) {
   .ops-board__summary {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .ops-board__secondary {
+  .ops-board__main,
+  .board-panel__document-grid {
     grid-template-columns: 1fr;
   }
 }
@@ -554,12 +557,6 @@ const documentHighlights = computed(() => ([
   }
 
   .ops-board__hero-header,
-  .board-panel__header,
-  .audit-feed__item {
-    grid-template-columns: 1fr;
-  }
-
-  .ops-board__hero-header,
   .board-panel__header {
     display: grid;
   }
@@ -567,10 +564,6 @@ const documentHighlights = computed(() => ([
   .ops-board__hero-aside,
   .board-panel__metrics {
     grid-template-columns: 1fr;
-  }
-
-  .audit-feed__meta {
-    justify-items: start;
   }
 }
 </style>

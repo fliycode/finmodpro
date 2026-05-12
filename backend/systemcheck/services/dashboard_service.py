@@ -1,6 +1,6 @@
 from datetime import timedelta
 
-from django.db.models import Count, Q
+from django.db.models import Case, Count, F, IntegerField, Q, Sum, When
 from django.utils import timezone
 
 from knowledgebase.models import Document, IngestionTask
@@ -61,6 +61,38 @@ def _build_window_summary(*, queryset, date_field, days=7):
     return {
         "current_count": queryset.filter(**current_filter).count(),
         "previous_count": queryset.filter(**previous_filter).count(),
+        "series": _build_daily_series(days=days, values_by_day=values_by_day),
+    }
+
+
+def _build_value_window_summary(*, queryset, date_field, value_expression, days=7):
+    today = timezone.localdate()
+    current_start_day = today - timedelta(days=days - 1)
+    previous_start_day = current_start_day - timedelta(days=days)
+
+    current_filter = {f"{date_field}__date__gte": current_start_day}
+    previous_filter = {
+        f"{date_field}__date__gte": previous_start_day,
+        f"{date_field}__date__lt": current_start_day,
+    }
+    series_key = f"{date_field}__date"
+
+    current_rows = (
+        queryset.filter(**current_filter)
+        .values(series_key)
+        .annotate(value=Sum(value_expression))
+    )
+    values_by_day = {
+        row[series_key]: int(row["value"] or 0)
+        for row in current_rows
+    }
+
+    current_total = queryset.filter(**current_filter).aggregate(total=Sum(value_expression))["total"] or 0
+    previous_total = queryset.filter(**previous_filter).aggregate(total=Sum(value_expression))["total"] or 0
+
+    return {
+        "current_total": int(current_total),
+        "previous_total": int(previous_total),
         "series": _build_daily_series(days=days, values_by_day=values_by_day),
     }
 
@@ -173,9 +205,35 @@ def get_dashboard_stats():
     )
     hit_logs = recent_logs.filter(result_count__gt=0)
 
+    model_invocation_logs = ModelInvocationLog.objects.all()
+    token_total_expression = Case(
+        When(total_tokens__gt=0, then=F("total_tokens")),
+        default=F("request_tokens") + F("response_tokens"),
+        output_field=IntegerField(),
+    )
     model_invocation_summary = _build_window_summary(
-        queryset=ModelInvocationLog.objects.all(),
+        queryset=model_invocation_logs,
         date_field="created_at",
+    )
+    token_usage_summary = _build_value_window_summary(
+        queryset=model_invocation_logs,
+        date_field="created_at",
+        value_expression=token_total_expression,
+    )
+    request_token_summary = _build_value_window_summary(
+        queryset=model_invocation_logs,
+        date_field="created_at",
+        value_expression=F("request_tokens"),
+    )
+    response_token_summary = _build_value_window_summary(
+        queryset=model_invocation_logs,
+        date_field="created_at",
+        value_expression=F("response_tokens"),
+    )
+    token_totals = model_invocation_logs.aggregate(
+        total_token_count=Sum(token_total_expression),
+        total_request_token_count=Sum("request_tokens"),
+        total_response_token_count=Sum("response_tokens"),
     )
     audit_operation_summary = _build_window_summary(
         queryset=AuditRecord.objects.all(),
@@ -234,6 +292,14 @@ def get_dashboard_stats():
         "model_invocation_count_7d": model_invocation_summary["current_count"],
         "model_invocation_count_prev_7d": model_invocation_summary["previous_count"],
         "model_invocations_7d": model_invocation_summary["series"],
+        "total_token_count": int(token_totals["total_token_count"] or 0),
+        "total_request_token_count": int(token_totals["total_request_token_count"] or 0),
+        "total_response_token_count": int(token_totals["total_response_token_count"] or 0),
+        "token_count_7d": token_usage_summary["current_total"],
+        "token_count_prev_7d": token_usage_summary["previous_total"],
+        "token_usage_7d": token_usage_summary["series"],
+        "request_tokens_7d": request_token_summary["series"],
+        "response_tokens_7d": response_token_summary["series"],
         "audit_operation_count_7d": audit_operation_summary["current_count"],
         "audit_operation_count_prev_7d": audit_operation_summary["previous_count"],
         "audit_operations_7d": audit_operation_summary["series"],

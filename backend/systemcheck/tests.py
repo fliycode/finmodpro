@@ -274,6 +274,11 @@ class DashboardStatsApiTests(TestCase):
         self.assertEqual(data["chat_request_count_24h"], 1)
         self.assertEqual(data["model_invocation_count_7d"], 4)
         self.assertEqual(data["model_invocation_count_prev_7d"], 2)
+        self.assertEqual(data["total_token_count"], 1080)
+        self.assertEqual(data["total_request_token_count"], 720)
+        self.assertEqual(data["total_response_token_count"], 360)
+        self.assertEqual(data["token_count_7d"], 720)
+        self.assertEqual(data["token_count_prev_7d"], 360)
         self.assertEqual(data["audit_operation_count_7d"], 2)
         self.assertEqual(data["audit_operation_count_prev_7d"], 1)
         self.assertEqual(data["document_added_count_7d"], 3)
@@ -289,6 +294,9 @@ class DashboardStatsApiTests(TestCase):
         self.assertEqual(len(data["chat_requests_7d"]), 7)
         self.assertEqual(len(data["retrieval_hits_7d"]), 7)
         self.assertEqual(len(data["model_invocations_7d"]), 7)
+        self.assertEqual(len(data["token_usage_7d"]), 7)
+        self.assertEqual(len(data["request_tokens_7d"]), 7)
+        self.assertEqual(len(data["response_tokens_7d"]), 7)
         self.assertEqual(len(data["audit_operations_7d"]), 7)
         self.assertEqual(
             data["risk_level_distribution"],
