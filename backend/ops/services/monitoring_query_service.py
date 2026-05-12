@@ -4,6 +4,49 @@ from django.utils.timezone import now
 
 from ops.models import AlertEvent, AlertRule, SystemMetric
 
+DEFAULT_ALERT_RULE_DEFINITIONS = (
+    {
+        "name": "CPU 使用率过高",
+        "metric_name": "cpu_percent",
+        "condition": AlertRule.CONDITION_GTE,
+        "threshold": 85.0,
+        "severity": AlertRule.SEVERITY_CRITICAL,
+        "enabled": True,
+        "notification_channels": ["in_app"],
+        "description": "当 CPU 使用率持续偏高时，通过站内告警提醒管理员及时排查。",
+    },
+    {
+        "name": "内存使用率过高",
+        "metric_name": "memory_percent",
+        "condition": AlertRule.CONDITION_GTE,
+        "threshold": 85.0,
+        "severity": AlertRule.SEVERITY_WARNING,
+        "enabled": True,
+        "notification_channels": ["in_app"],
+        "description": "用于发现内存占用持续上升或潜在泄漏。",
+    },
+    {
+        "name": "磁盘使用率过高",
+        "metric_name": "disk_percent",
+        "condition": AlertRule.CONDITION_GTE,
+        "threshold": 80.0,
+        "severity": AlertRule.SEVERITY_CRITICAL,
+        "enabled": True,
+        "notification_channels": ["in_app"],
+        "description": "磁盘余量不足时尽早预警，避免影响上传、解析和索引任务。",
+    },
+    {
+        "name": "Celery Worker 不可用",
+        "metric_name": "celery_worker_count",
+        "condition": AlertRule.CONDITION_LT,
+        "threshold": 1.0,
+        "severity": AlertRule.SEVERITY_CRITICAL,
+        "enabled": True,
+        "notification_channels": ["in_app"],
+        "description": "当异步任务执行器不可用时，提醒管理员检查队列和 worker 状态。",
+    },
+)
+
 
 def get_current_system_status():
     metric_names = [
@@ -106,6 +149,36 @@ def create_alert_rule(
     return _serialize_rule(rule)
 
 
+def seed_default_alert_rules(*, created_by=None):
+    created = 0
+    skipped = 0
+    seeded_rules = []
+
+    for definition in DEFAULT_ALERT_RULE_DEFINITIONS:
+        rule, was_created = AlertRule.objects.get_or_create(
+            name=definition["name"],
+            defaults={
+                "metric_name": definition["metric_name"],
+                "condition": definition["condition"],
+                "threshold": definition["threshold"],
+                "severity": definition["severity"],
+                "enabled": definition["enabled"],
+                "notification_channels": definition["notification_channels"],
+                "description": definition["description"],
+                "created_by": created_by,
+            },
+        )
+        created += int(was_created)
+        skipped += int(not was_created)
+        seeded_rules.append(_serialize_rule(rule))
+
+    return {
+        "created": created,
+        "skipped": skipped,
+        "rules": seeded_rules,
+    }
+
+
 def update_alert_rule(*, rule, **kwargs):
     allowed_fields = {
         "name",
@@ -172,6 +245,7 @@ def _serialize_event(event):
         "metric_name": event.rule.metric_name if event.rule else None,
         "condition": event.rule.condition if event.rule else None,
         "threshold": event.rule.threshold if event.rule else None,
+        "notification_channels": event.rule.notification_channels if event.rule else [],
         "status": event.status,
         "triggered_value": event.triggered_value,
         "triggered_at": event.triggered_at.isoformat() if event.triggered_at else None,

@@ -177,6 +177,7 @@ export function normalizeAlertEvent(event) {
     triggeredValue: toNumber(event.triggered_value),
     triggeredAt: safeStr(event.triggered_at),
     resolvedAt: safeStr(event.resolved_at),
+    notificationChannels: Array.isArray(event.notification_channels) ? event.notification_channels : [],
     acknowledgedBy: event.acknowledged_by,
     acknowledgedByName: safeStr(event.acknowledged_by_name),
     createdAt: safeStr(event.created_at),
@@ -224,3 +225,89 @@ export const METRIC_OPTIONS = [
   { value: 'redis_healthy', label: 'Redis 状态' },
   { value: 'milvus_healthy', label: 'Milvus 状态' },
 ];
+
+export const DEFAULT_ALERT_NOTIFICATION_CHANNELS = Object.freeze(['in_app']);
+
+export const ALERT_NOTIFICATION_CHANNEL_OPTIONS = Object.freeze([
+  { value: 'in_app', label: '站内通知（管理员铃铛）' },
+]);
+
+export const ALERT_RULE_TEMPLATES = Object.freeze([
+  {
+    name: 'CPU 使用率过高',
+    metric_name: 'cpu_percent',
+    condition: 'gte',
+    threshold: 85,
+    severity: 'critical',
+    enabled: true,
+    notification_channels: [...DEFAULT_ALERT_NOTIFICATION_CHANNELS],
+    description: '当 CPU 使用率持续偏高时，通过站内告警提醒管理员及时排查。',
+  },
+  {
+    name: '内存使用率过高',
+    metric_name: 'memory_percent',
+    condition: 'gte',
+    threshold: 85,
+    severity: 'warning',
+    enabled: true,
+    notification_channels: [...DEFAULT_ALERT_NOTIFICATION_CHANNELS],
+    description: '用于发现内存占用持续上升或潜在泄漏。',
+  },
+  {
+    name: '磁盘使用率过高',
+    metric_name: 'disk_percent',
+    condition: 'gte',
+    threshold: 80,
+    severity: 'critical',
+    enabled: true,
+    notification_channels: [...DEFAULT_ALERT_NOTIFICATION_CHANNELS],
+    description: '磁盘余量不足时尽早预警，避免影响上传、解析和索引任务。',
+  },
+  {
+    name: 'Celery Worker 不可用',
+    metric_name: 'celery_worker_count',
+    condition: 'lt',
+    threshold: 1,
+    severity: 'critical',
+    enabled: true,
+    notification_channels: [...DEFAULT_ALERT_NOTIFICATION_CHANNELS],
+    description: '当异步任务执行器不可用时，提醒管理员检查队列和 worker 状态。',
+  },
+]);
+
+export function getMetricLabel(metricName) {
+  return METRIC_OPTIONS.find((option) => option.value === metricName)?.label || metricName || '-';
+}
+
+export function getNotificationChannelLabel(channel) {
+  return ALERT_NOTIFICATION_CHANNEL_OPTIONS.find((option) => option.value === channel)?.label || channel || '-';
+}
+
+export function summarizeAlertEvents(events) {
+  return (Array.isArray(events) ? events : []).reduce((summary, event) => {
+    const status = safeStr(event.status);
+    summary.all += 1;
+    if (status && summary[status] !== undefined) {
+      summary[status] += 1;
+    }
+    return summary;
+  }, {
+    all: 0,
+    firing: 0,
+    acknowledged: 0,
+    resolved: 0,
+  });
+}
+
+export function formatAlertTime(isoStr) {
+  if (!isoStr) {
+    return '-';
+  }
+
+  const date = new Date(isoStr);
+  if (Number.isNaN(date.getTime())) {
+    return '-';
+  }
+
+  return `${date.getMonth() + 1}/${date.getDate()} ${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
+}

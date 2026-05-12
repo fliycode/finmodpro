@@ -1,11 +1,18 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
-import { RouterLink, useRouter } from 'vue-router';
+import { RouterLink, useRoute, useRouter } from 'vue-router';
 
+import { monitoringApi } from '../../api/monitoring.js';
 import AppAvatar from './AppAvatar.vue';
 import AppIcon from './AppIcon.vue';
 import { getNavItems, getTopbarActions } from '../../config/navigation.js';
 import { authSession } from '../../lib/auth-session.js';
+import {
+  SEVERITY_LABELS,
+  formatAlertTime,
+  normalizeAlertEvent,
+  summarizeAlertEvents,
+} from '../../lib/admin-monitoring.js';
 import { AUTH_EXPIRED_MESSAGE, authStorage } from '../../lib/auth-storage.js';
 import { useFlash } from '../../lib/flash.js';
 import ThemeToggle from './ThemeToggle.vue';
@@ -23,6 +30,7 @@ const props = defineProps({
 
 const emit = defineEmits(['toggle-sidebar']);
 
+const route = useRoute();
 const router = useRouter();
 const flash = useFlash();
 const profile = computed(() => authStorage.getProfile());
@@ -33,11 +41,21 @@ const profileAvatarUrl = computed(() => profile.value?.user?.avatar_url || '');
 const roleLabel = computed(() => (props.area === 'admin' ? '管理员端' : '用户端'));
 
 const dropdownOpen = ref(false);
+const dropdownRef = ref(null);
+const avatarTriggerRef = ref(null);
+const notificationOpen = ref(false);
+const notificationDropdownRef = ref(null);
+const notificationTriggerRef = ref(null);
+const notificationLoading = ref(false);
+const notificationError = ref('');
+const notificationEvents = ref([]);
 const paletteOpen = ref(false);
 const paletteQuery = ref('');
 const paletteIndex = ref(0);
+let notificationPollHandle = null;
 
 const toggleDropdown = () => {
+  notificationOpen.value = false;
   dropdownOpen.value = !dropdownOpen.value;
 };
 
@@ -45,16 +63,74 @@ const closeDropdown = () => {
   dropdownOpen.value = false;
 };
 
+const normalizedNotificationEvents = computed(() => notificationEvents.value.map(normalizeAlertEvent));
+const notificationSummary = computed(() => summarizeAlertEvents(normalizedNotificationEvents.value));
+const notificationBadge = computed(() => {
+  const count = notificationSummary.value.firing;
+  if (!count) {
+    return '';
+  }
+  return count > 99 ? '99+' : String(count);
+});
+
+const openAlertCenter = () => {
+  notificationOpen.value = false;
+  router.push('/admin/notifications');
+};
+
+const closeNotifications = () => {
+  notificationOpen.value = false;
+};
+
+const loadNotifications = async ({ withSpinner = false } = {}) => {
+  if (props.area !== 'admin') {
+    return;
+  }
+
+  if (withSpinner) {
+    notificationLoading.value = true;
+  }
+
+  try {
+    const payload = await monitoringApi.listAlertEvents({ status: 'firing', limit: 20 });
+    notificationEvents.value = Array.isArray(payload) ? payload : [];
+    notificationError.value = '';
+  } catch (err) {
+    notificationError.value = err.message || '加载告警失败';
+  } finally {
+    if (withSpinner) {
+      notificationLoading.value = false;
+    }
+  }
+};
+
+const toggleNotifications = async () => {
+  closeDropdown();
+  notificationOpen.value = !notificationOpen.value;
+  if (notificationOpen.value) {
+    await loadNotifications({ withSpinner: true });
+  }
+};
+
 const handleClickOutside = (event) => {
-  const dropdown = document.querySelector('.app-topbar__dropdown');
-  const trigger = document.querySelector('.app-topbar__avatar-trigger');
   if (
-    dropdown &&
-    trigger &&
-    !dropdown.contains(event.target) &&
-    !trigger.contains(event.target)
+    dropdownOpen.value &&
+    dropdownRef.value &&
+    avatarTriggerRef.value &&
+    !dropdownRef.value.contains(event.target) &&
+    !avatarTriggerRef.value.contains(event.target)
   ) {
     closeDropdown();
+  }
+
+  if (
+    notificationOpen.value &&
+    notificationDropdownRef.value &&
+    notificationTriggerRef.value &&
+    !notificationDropdownRef.value.contains(event.target) &&
+    !notificationTriggerRef.value.contains(event.target)
+  ) {
+    closeNotifications();
   }
 };
 
@@ -131,6 +207,11 @@ watch(paletteQuery, () => {
   paletteIndex.value = 0;
 });
 
+watch(() => route.fullPath, () => {
+  closeDropdown();
+  closeNotifications();
+});
+
 const handleLogout = async () => {
   closeDropdown();
   await authSession.logout();
@@ -145,12 +226,21 @@ onMounted(() => {
   window.addEventListener('finmodpro:auth-expired', handleAuthExpired);
   document.addEventListener('click', handleClickOutside);
   document.addEventListener('keydown', onKeydown);
+  if (props.area === 'admin') {
+    loadNotifications({ withSpinner: true });
+    notificationPollHandle = window.setInterval(() => {
+      loadNotifications();
+    }, 60000);
+  }
 });
 
 onBeforeUnmount(() => {
   window.removeEventListener('finmodpro:auth-expired', handleAuthExpired);
   document.removeEventListener('click', handleClickOutside);
   document.removeEventListener('keydown', onKeydown);
+  if (notificationPollHandle) {
+    window.clearInterval(notificationPollHandle);
+  }
 });
 </script>
 
@@ -185,8 +275,77 @@ onBeforeUnmount(() => {
       <div class="app-topbar__utility-group">
         <ThemeToggle />
 
+        <div v-if="props.area === 'admin'" class="app-topbar__notification-group">
+          <button
+            ref="notificationTriggerRef"
+            type="button"
+            class="app-topbar__notification-trigger"
+            :aria-label="notificationBadge ? `告警通知：${notificationBadge} 条未处理` : '告警通知'"
+            @click.stop="toggleNotifications"
+          >
+            <AppIcon name="bell" />
+            <span v-if="notificationBadge" class="app-topbar__notification-badge">
+              {{ notificationBadge }}
+            </span>
+          </button>
+
+          <Transition name="dropdown">
+            <div
+              v-if="notificationOpen"
+              ref="notificationDropdownRef"
+              class="app-topbar__dropdown app-topbar__notification-dropdown"
+            >
+              <div class="app-topbar__notification-header">
+                <div>
+                  <strong>告警通知</strong>
+                  <span>
+                    {{ notificationSummary.firing ? `${notificationSummary.firing} 条待处理` : '当前没有触发中的告警' }}
+                  </span>
+                </div>
+              </div>
+
+              <div v-if="notificationError" class="app-topbar__notification-empty">
+                {{ notificationError }}
+              </div>
+              <div v-else-if="notificationLoading" class="app-topbar__notification-empty">
+                加载中...
+              </div>
+              <div v-else-if="normalizedNotificationEvents.length" class="app-topbar__notification-list">
+                <button
+                  v-for="event in normalizedNotificationEvents.slice(0, 5)"
+                  :key="event.id"
+                  type="button"
+                  class="app-topbar__notification-item"
+                  @click="openAlertCenter"
+                >
+                  <div class="app-topbar__notification-item-copy">
+                    <strong>{{ event.ruleName || '未命名规则' }}</strong>
+                    <span>{{ SEVERITY_LABELS[event.severity] || event.severity }} · {{ formatAlertTime(event.triggeredAt) }}</span>
+                  </div>
+                  <span class="app-topbar__notification-item-value">
+                    {{ event.triggeredValue?.toFixed(1) }}
+                  </span>
+                </button>
+              </div>
+              <div v-else class="app-topbar__notification-empty">
+                当前没有触发中的告警
+              </div>
+
+              <div class="app-topbar__dropdown-divider"></div>
+              <button
+                type="button"
+                class="app-topbar__dropdown-item app-topbar__dropdown-item--primary"
+                @click="openAlertCenter"
+              >
+                查看告警中心
+              </button>
+            </div>
+          </Transition>
+        </div>
+
         <div class="app-topbar__avatar-group">
           <button
+            ref="avatarTriggerRef"
             type="button"
             class="app-topbar__avatar-trigger"
             :aria-label="`账号菜单：${profileName}`"
@@ -196,7 +355,7 @@ onBeforeUnmount(() => {
           </button>
 
           <Transition name="dropdown">
-            <div v-if="dropdownOpen" class="app-topbar__dropdown" role="menu">
+            <div v-if="dropdownOpen" ref="dropdownRef" class="app-topbar__dropdown" role="menu">
               <div class="app-topbar__dropdown-summary">
                 <AppAvatar :src="profileAvatarUrl" :name="profileName" size="md" />
                 <div>

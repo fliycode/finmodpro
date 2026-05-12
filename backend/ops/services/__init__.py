@@ -15,6 +15,7 @@ from ops.services.monitoring_query_service import (
     get_metric_time_series,
     list_alert_events,
     list_alert_rules,
+    seed_default_alert_rules,
     update_alert_rule,
 )
 
@@ -28,6 +29,7 @@ __all__ = [
     "list_alert_rules",
     "get_alert_rule",
     "create_alert_rule",
+    "seed_default_alert_rules",
     "update_alert_rule",
     "delete_alert_rule",
     "list_alert_events",

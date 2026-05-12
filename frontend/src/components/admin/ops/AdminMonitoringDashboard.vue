@@ -12,8 +12,12 @@ import {
   buildResourceGauges,
   buildCeleryStatus,
   buildMetricTimeSeriesOption,
+  formatAlertTime,
+  getMetricLabel,
+  getNotificationChannelLabel,
   normalizeAlertRule,
   normalizeAlertEvent,
+  ALERT_RULE_TEMPLATES,
   SEVERITY_LABELS,
   SEVERITY_TONES,
   CONDITION_LABELS,
@@ -38,6 +42,7 @@ const resourceGauges = computed(() => buildResourceGauges(normalizedStatus.value
 const celeryInfo = computed(() => buildCeleryStatus(normalizedStatus.value.metrics));
 const normalizedRules = computed(() => (Array.isArray(rules.value) ? rules.value.map(normalizeAlertRule) : []));
 const normalizedEvents = computed(() => (Array.isArray(events.value) ? events.value.map(normalizeAlertEvent) : []));
+const recommendedTemplates = ALERT_RULE_TEMPLATES;
 const chartOption = computed(() => {
   if (!timeSeries.value || !timeSeries.value.data_points?.length) return null;
   return buildMetricTimeSeriesOption(normalizeMetricTimeSeries(timeSeries.value));
@@ -82,6 +87,11 @@ function handleCreateRule() {
   dialogVisible.value = true;
 }
 
+function handleCreateFromTemplate(template) {
+  editingRule.value = { ...template };
+  dialogVisible.value = true;
+}
+
 function handleEditRule(rule) {
   editingRule.value = rule;
   dialogVisible.value = true;
@@ -103,6 +113,21 @@ async function handleRuleSubmit(payload) {
   }
 }
 
+async function handleSeedDefaultRules() {
+  try {
+    const result = await monitoringApi.seedDefaultAlertRules();
+    const rulesData = await monitoringApi.listAlertRules();
+    rules.value = Array.isArray(rulesData) ? rulesData : [];
+    ElMessage.success(
+      result.created
+        ? `已初始化 ${result.created} 条默认规则`
+        : '默认规则已存在，无需重复初始化',
+    );
+  } catch (err) {
+    ElMessage.error(err.message || '初始化默认规则失败');
+  }
+}
+
 async function handleDeleteRule(ruleId) {
   try {
     await monitoringApi.deleteAlertRule(ruleId);
@@ -116,8 +141,10 @@ async function handleDeleteRule(ruleId) {
 async function handleToggleRule(rule) {
   try {
     await monitoringApi.updateAlertRule(rule.id, { enabled: !rule.enabled });
-    rule.enabled = !rule.enabled;
-    ElMessage.success(rule.enabled ? '规则已启用' : '规则已禁用');
+    const nextEnabled = !rule.enabled;
+    const rulesData = await monitoringApi.listAlertRules();
+    rules.value = Array.isArray(rulesData) ? rulesData : [];
+    ElMessage.success(nextEnabled ? '规则已启用' : '规则已禁用');
   } catch (err) {
     ElMessage.error(err.message || '操作失败');
   }
@@ -132,12 +159,6 @@ async function handleAcknowledgeEvent(eventId) {
   } catch (err) {
     ElMessage.error(err.message || '确认失败');
   }
-}
-
-function formatTime(isoStr) {
-  if (!isoStr) return '-';
-  const d = new Date(isoStr);
-  return `${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
 }
 
 onMounted(loadAll);
@@ -220,18 +241,66 @@ onMounted(loadAll);
     <section class="monitoring__section">
       <div class="monitoring__section-header">
         <h3 class="monitoring__heading">告警规则</h3>
-        <el-button size="small" type="primary" @click="handleCreateRule">新建规则</el-button>
+        <div class="monitoring__header-actions">
+          <el-button size="small" @click="handleSeedDefaultRules">初始化默认规则</el-button>
+          <el-button size="small" type="primary" @click="handleCreateRule">新建规则</el-button>
+        </div>
+      </div>
+      <div v-if="!normalizedRules.length" class="monitoring__setup-panel">
+        <div class="monitoring__setup-guide">
+          <h4>当前还没有配置任何告警规则</h4>
+          <ol>
+            <li>先确保定时任务已启用：指标采集和告警评估会定期写入并比对监控数据。</li>
+            <li>至少先配置 CPU、内存、磁盘和 Celery Worker 四条基础规则。</li>
+            <li>通知方式选择“站内通知”后，管理员可在右上角铃铛和告警中心接收提醒。</li>
+          </ol>
+          <div class="monitoring__setup-actions">
+            <el-button size="small" @click="handleSeedDefaultRules">一键初始化默认规则</el-button>
+            <el-button size="small" type="primary" @click="handleCreateRule">手动新建规则</el-button>
+          </div>
+        </div>
+        <div class="monitoring__template-grid">
+          <button
+            v-for="template in recommendedTemplates"
+            :key="template.name"
+            type="button"
+            class="monitoring__template-card"
+            @click="handleCreateFromTemplate(template)"
+          >
+            <div class="monitoring__template-title">{{ template.name }}</div>
+            <div class="monitoring__template-detail">
+              {{ getMetricLabel(template.metric_name) }} · {{ CONDITION_LABELS[template.condition] || template.condition }} {{ template.threshold }}
+            </div>
+            <p>{{ template.description }}</p>
+            <span>按此模板创建</span>
+          </button>
+        </div>
       </div>
       <el-table :data="normalizedRules" size="small" stripe>
         <el-table-column prop="name" label="名称" min-width="160" />
         <el-table-column label="指标" min-width="140">
           <template #default="{ row }">
-            {{ METRIC_OPTIONS.find((o) => o.value === row.metricName)?.label || row.metricName }}
+            {{ getMetricLabel(row.metricName) }}
           </template>
         </el-table-column>
         <el-table-column label="条件" min-width="140">
           <template #default="{ row }">
             {{ CONDITION_LABELS[row.condition] || row.condition }} {{ row.threshold }}
+          </template>
+        </el-table-column>
+        <el-table-column label="通知方式" min-width="180">
+          <template #default="{ row }">
+            <div v-if="row.notificationChannels.length" class="monitoring__channel-list">
+              <el-tag
+                v-for="channel in row.notificationChannels"
+                :key="`${row.id}-${channel}`"
+                size="small"
+                effect="plain"
+              >
+                {{ getNotificationChannelLabel(channel) }}
+              </el-tag>
+            </div>
+            <span v-else class="text-secondary">未配置</span>
           </template>
         </el-table-column>
         <el-table-column label="严重程度" width="90">
@@ -282,7 +351,7 @@ onMounted(loadAll);
           <template #default="{ row }">{{ row.triggeredValue?.toFixed(2) }}</template>
         </el-table-column>
         <el-table-column label="触发时间" width="140">
-          <template #default="{ row }">{{ formatTime(row.triggeredAt) }}</template>
+          <template #default="{ row }">{{ formatAlertTime(row.triggeredAt) }}</template>
         </el-table-column>
         <el-table-column label="操作" width="100" fixed="right">
           <template #default="{ row }">
@@ -332,6 +401,15 @@ onMounted(loadAll);
   align-items: center;
   justify-content: space-between;
   margin-bottom: 16px;
+  gap: 12px;
+}
+
+.monitoring__header-actions,
+.monitoring__setup-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
 }
 
 .monitoring__heading {
@@ -408,6 +486,84 @@ onMounted(loadAll);
   font-size: 12px;
 }
 
+.monitoring__setup-panel {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr);
+  gap: 16px;
+  padding: 18px;
+  margin-bottom: 16px;
+  border: 1px dashed var(--line-soft, #e5e7eb);
+  border-radius: 14px;
+  background: var(--surface-0, #f9fafb);
+}
+
+.monitoring__setup-guide h4 {
+  margin: 0 0 12px;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text-primary, #111827);
+}
+
+.monitoring__setup-guide ol {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--text-secondary, #6b7280);
+  font-size: 13px;
+  line-height: 1.7;
+  margin-bottom: 12px;
+}
+
+.monitoring__template-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+}
+
+.monitoring__template-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 14px;
+  border: 1px solid var(--line-soft, #e5e7eb);
+  border-radius: 12px;
+  background: var(--surface-1, #fff);
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.2s ease, transform 0.2s ease;
+}
+
+.monitoring__template-card:hover {
+  border-color: var(--brand, #2457c5);
+  transform: translateY(-1px);
+}
+
+.monitoring__template-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-primary, #111827);
+}
+
+.monitoring__template-detail,
+.monitoring__template-card p,
+.monitoring__template-card span {
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-secondary, #6b7280);
+  line-height: 1.6;
+}
+
+.monitoring__template-card span {
+  color: var(--brand, #2457c5);
+  font-weight: 600;
+}
+
+.monitoring__channel-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
 /* Reuse service card styles for Celery */
 .service-card {
   display: flex;
@@ -451,6 +607,10 @@ onMounted(loadAll);
   .monitoring__service-grid,
   .monitoring__gauge-grid {
     grid-template-columns: 1fr 1fr;
+  }
+
+  .monitoring__setup-panel {
+    grid-template-columns: 1fr;
   }
 }
 

@@ -7,6 +7,7 @@ from ops.controllers.alert_event_controller import (
 from ops.controllers.alert_rule_controller import (
     AlertRuleDetailView,
     AlertRuleListView,
+    AlertRuleSeedDefaultsView,
 )
 from ops.controllers.metrics_controller import (
     MetricTimeSeriesView,
@@ -20,6 +21,16 @@ urlpatterns = [
     path("monitoring/metrics/", MetricTimeSeriesView.as_view(), name="metric-timeseries"),
     path("alerts/rules", AlertRuleListView.as_view(), name="alert-rule-list-legacy"),
     path("alerts/rules/", AlertRuleListView.as_view(), name="alert-rule-list"),
+    path(
+        "alerts/rules/seed-defaults",
+        AlertRuleSeedDefaultsView.as_view(),
+        name="alert-rule-seed-defaults-legacy",
+    ),
+    path(
+        "alerts/rules/seed-defaults/",
+        AlertRuleSeedDefaultsView.as_view(),
+        name="alert-rule-seed-defaults",
+    ),
     path(
         "alerts/rules/<int:rule_id>",
         AlertRuleDetailView.as_view(),

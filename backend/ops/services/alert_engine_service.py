@@ -4,6 +4,10 @@ from datetime import timezone as tz
 from django.utils.timezone import now
 
 logger = __import__("logging").getLogger(__name__)
+ACTIVE_ALERT_STATUSES = (
+    "firing",
+    "acknowledged",
+)
 
 
 def evaluate_alert_rules():
@@ -40,13 +44,12 @@ def evaluate_alert_rules():
         )
 
         if is_violated:
-            # Check if there's already a firing event for this rule
-            existing_firing = AlertEvent.objects.filter(
+            existing_open_event = AlertEvent.objects.filter(
                 rule=rule,
-                status=AlertEvent.STATUS_FIRING,
-            ).first()
+                status__in=ACTIVE_ALERT_STATUSES,
+            ).order_by("-triggered_at", "-id").first()
 
-            if existing_firing is None:
+            if existing_open_event is None:
                 AlertEvent.objects.create(
                     rule=rule,
                     status=AlertEvent.STATUS_FIRING,
@@ -55,14 +58,13 @@ def evaluate_alert_rules():
                 )
                 triggered += 1
             else:
-                # Update triggered value
-                existing_firing.triggered_value = metric.value
-                existing_firing.save(update_fields=["triggered_value"])
+                existing_open_event.triggered_value = metric.value
+                existing_open_event.save(update_fields=["triggered_value"])
         else:
-            # Resolve any open firing events for this rule
+            # Resolve any active events for this rule once the metric recovers.
             open_events = AlertEvent.objects.filter(
                 rule=rule,
-                status=AlertEvent.STATUS_FIRING,
+                status__in=ACTIVE_ALERT_STATUSES,
             )
             count = open_events.update(
                 status=AlertEvent.STATUS_RESOLVED,
@@ -114,6 +116,7 @@ def _serialize_alert_event(event):
         "triggered_value": event.triggered_value,
         "triggered_at": event.triggered_at.isoformat() if event.triggered_at else None,
         "resolved_at": event.resolved_at.isoformat() if event.resolved_at else None,
+        "notification_channels": event.rule.notification_channels if event.rule else [],
         "acknowledged_by": event.acknowledged_by_id,
         "created_at": event.created_at.isoformat() if event.created_at else None,
     }

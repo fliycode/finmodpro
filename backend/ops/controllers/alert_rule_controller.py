@@ -6,6 +6,7 @@ from ops.services import (
     delete_alert_rule,
     get_alert_rule,
     list_alert_rules,
+    seed_default_alert_rules,
     update_alert_rule,
 )
 from rbac.services.authz_service import get_authenticated_user, user_has_permission
@@ -122,3 +123,17 @@ class AlertRuleDetailView(APIView):
 
         delete_alert_rule(rule=rule)
         return success_response(data={"deleted": True})
+
+
+class AlertRuleSeedDefaultsView(APIView):
+    authentication_classes = []
+    permission_classes = []
+
+    def post(self, request):
+        user, permission_error = _require_manage_permission(request)
+        if permission_error is not None:
+            return permission_error
+
+        result = seed_default_alert_rules(created_by=user)
+        status_code = 201 if result["created"] else 200
+        return success_response(data=result, status_code=status_code)

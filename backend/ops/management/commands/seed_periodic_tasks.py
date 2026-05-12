@@ -1,9 +1,11 @@
 from django.core.management.base import BaseCommand
 from django_celery_beat.models import CrontabSchedule, PeriodicTask
 
+from ops.services import seed_default_alert_rules
+
 
 class Command(BaseCommand):
-    help = "Seed default periodic tasks for ops monitoring"
+    help = "Seed default monitoring periodic tasks and default alert rules"
 
     def handle(self, *args, **options):
         schedule, _ = CrontabSchedule.objects.get_or_create(
@@ -33,4 +35,10 @@ class Command(BaseCommand):
             },
         )
 
-        self.stdout.write(self.style.SUCCESS("Periodic tasks seeded."))
+        result = seed_default_alert_rules()
+
+        self.stdout.write(
+            self.style.SUCCESS(
+                f"Periodic tasks seeded. Default alert rules created={result['created']} skipped={result['skipped']}."
+            )
+        )

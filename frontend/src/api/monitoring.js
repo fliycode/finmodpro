@@ -54,6 +54,13 @@ export const monitoringApi = {
     }));
   },
 
+  async seedDefaultAlertRules() {
+    return unwrap(await apiConfig.fetchJson('/api/monitoring/alerts/rules/seed-defaults/', {
+      method: 'POST',
+      auth: true,
+    }));
+  },
+
   async updateAlertRule(ruleId, payload) {
     return unwrap(await apiConfig.fetchJson(`/api/monitoring/alerts/rules/${ruleId}/`, {
       method: 'PATCH',

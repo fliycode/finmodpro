@@ -145,6 +145,11 @@ export const appRoutes = [
         meta: { title: '系统监控', subtitle: '系统资源、服务健康与告警管理。', breadcrumb: [{ label: '数据看板' }, { label: '系统监控' }] },
       },
       {
+        path: 'notifications',
+        component: () => import('../views/admin/AdminAlertNotificationsView.vue'),
+        meta: { title: '告警中心', subtitle: '集中查看站内告警通知、确认处理与回看最近告警。', breadcrumb: [{ label: '数据看板' }, { label: '告警中心' }] },
+      },
+      {
         path: 'cleaning',
         component: () => import('../views/admin/AdminCleaningView.vue'),
         meta: { title: '数据清洗', subtitle: '配置清洗规则、查看清洗质量与问题报告。', breadcrumb: [{ label: '知识库管理' }, { label: '数据清洗' }] },
