@@ -5,6 +5,16 @@ import unicodedata
 from knowledgebase.models import CleaningRule, DocumentCleaningResult
 from knowledgebase.services.cleaning_quality_service import compute_quality_score
 
+_INLINE_FLAG_MAP = {
+    "a": re.ASCII,
+    "i": re.IGNORECASE,
+    "m": re.MULTILINE,
+    "s": re.DOTALL,
+    "x": re.VERBOSE,
+}
+
+_LEADING_INLINE_FLAGS_RE = re.compile(r"^\(\?([a-zA-Z]+)\)")
+
 
 def clean_document(*, document):
     rules = list(CleaningRule.objects.filter(enabled=True).order_by("priority", "id"))
@@ -144,12 +154,16 @@ def _remove_page_numbers(text, config, rule_name):
         r"^\s*\d+\s*/\s*\d+\s*$",
         r"^\s*-\s*\d+\s*-\s*$",
     ])
-    combined = re.compile("|".join(f"({p})" for p in patterns), re.IGNORECASE | re.MULTILINE)
+    compiled_patterns = _compile_patterns(
+        patterns,
+        base_flags=re.IGNORECASE | re.MULTILINE,
+    )
     lines = text.split("\n")
     issues = []
     result = []
     for line in lines:
-        if combined.fullmatch(line.strip()):
+        stripped_line = line.strip()
+        if any(pattern.fullmatch(stripped_line) for pattern in compiled_patterns):
             issues.append({"rule": rule_name, "type": "page_number", "detail": f"Removed page number: {line.strip()}"})
         else:
             result.append(line)
@@ -165,13 +179,14 @@ def _remove_boilerplate(text, config, rule_name):
         r"(?i)免责[条款声明].*",
         r"(?i)版权所有.*",
     ])
-    combined = re.compile("|".join(f"({p})" for p in patterns), re.MULTILINE)
+    compiled_patterns = _compile_patterns(patterns, base_flags=re.MULTILINE)
     lines = text.split("\n")
     issues = []
     result = []
     for line in lines:
-        if combined.search(line.strip()) and len(line.strip()) < 200:
-            issues.append({"rule": rule_name, "type": "boilerplate", "detail": f"Removed boilerplate: {line.strip()[:60]}"})
+        stripped_line = line.strip()
+        if any(pattern.search(stripped_line) for pattern in compiled_patterns) and len(stripped_line) < 200:
+            issues.append({"rule": rule_name, "type": "boilerplate", "detail": f"Removed boilerplate: {stripped_line[:60]}"})
         else:
             result.append(line)
     return "\n".join(result), issues
@@ -271,6 +286,27 @@ def _normalize_financial_numbers(text, config, rule_name):
     if not matches:
         return text, []
     return text, []
+
+
+def _compile_patterns(patterns, *, base_flags=0):
+    compiled_patterns = []
+
+    for raw_pattern in patterns:
+        pattern = raw_pattern
+        flags = base_flags
+
+        while True:
+            match = _LEADING_INLINE_FLAGS_RE.match(pattern)
+            if not match:
+                break
+
+            for flag in match.group(1).lower():
+                flags |= _INLINE_FLAG_MAP.get(flag, 0)
+            pattern = pattern[match.end():]
+
+        compiled_patterns.append(re.compile(pattern, flags))
+
+    return compiled_patterns
 
 
 _RULE_HANDLERS = {

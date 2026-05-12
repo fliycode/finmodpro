@@ -11,7 +11,7 @@ from django.apps import apps
 from django.contrib.auth.models import Group
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.db import ProgrammingError, transaction
-from django.test import Client, TestCase, override_settings
+from django.test import Client, SimpleTestCase, TestCase, override_settings
 from django.utils import timezone
 
 from authentication.models import User
@@ -38,6 +38,7 @@ from knowledgebase.services.document_service import (
     parse_document,
     vectorize_document,
 )
+from knowledgebase.services.cleaning_engine_service import clean_document_text
 from knowledgebase.services.vector_service import VectorService
 from rag.services.llamaindex_store_service import clear_store, sync_document, query_llamaindex_store
 from knowledgebase.services.parser_service import ParserService, parse_document_file
@@ -57,6 +58,35 @@ class AuditRecordAssertionMixin:
         if target_id is not None:
             self.assertEqual(audit.target_id, str(target_id))
         return audit
+
+
+class KnowledgebaseCleaningEngineTests(SimpleTestCase):
+    def test_clean_document_text_accepts_inline_case_insensitive_patterns(self):
+        rules = [
+            SimpleNamespace(
+                id=1,
+                name="默认：模板文本去除",
+                rule_type="remove_boilerplate",
+                config={},
+            ),
+            SimpleNamespace(
+                id=2,
+                name="默认：页码去除",
+                rule_type="remove_page_numbers",
+                config={"patterns": [r"(?i)page\s+\d+"]},
+            ),
+        ]
+
+        result = clean_document_text(
+            text="All Rights Reserved\nPage 12\n正文保留",
+            rules=rules,
+        )
+
+        self.assertEqual(result["cleaned_text"], "正文保留")
+        self.assertEqual(
+            [issue["type"] for issue in result["issues"]],
+            ["boilerplate", "page_number"],
+        )
 
 
 class FakeEmbeddingProvider:
