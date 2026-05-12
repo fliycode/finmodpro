@@ -7,6 +7,20 @@ from authentication.models import User, UserProfile
 ROLE_SUPER_ADMIN = "super_admin"
 ROLE_ADMIN = "admin"
 ROLE_MEMBER = "member"
+SYSTEM_ROLE_NAMES = (ROLE_SUPER_ADMIN, ROLE_ADMIN, ROLE_MEMBER)
+ROLE_LABELS = {
+    ROLE_SUPER_ADMIN: "超级管理员",
+    ROLE_ADMIN: "管理员",
+    ROLE_MEMBER: "普通成员",
+}
+ROLE_DESCRIPTIONS = {
+    ROLE_SUPER_ADMIN: "拥有平台级治理能力，可维护权限、用户、模型与治理配置。",
+    ROLE_ADMIN: "负责日常管理、运维与内容治理，不具备平台最高控制权。",
+    ROLE_MEMBER: "面向普通业务成员，保留基础问答与文档访问能力。",
+}
+SYSTEM_ROLE_REQUIRED_PERMISSION_CODENAMES = {
+    ROLE_SUPER_ADMIN: {"view_role", "assign_role"},
+}
 
 CUSTOM_PERMISSION_DEFINITIONS = (
     ("view_dashboard", "Can view dashboard"),
@@ -101,6 +115,10 @@ def ensure_custom_permissions():
     return permissions
 
 
+def is_system_role_name(role_name):
+    return role_name in SYSTEM_ROLE_NAMES
+
+
 def ensure_role_groups():
     from django.core.cache import cache
 
@@ -136,13 +154,213 @@ def _get_permissions_by_name(permission_names):
     return [permissions[permission_name] for permission_name in permission_names]
 
 
-def seed_roles_and_permissions():
+def _strip_permission_name(permission_name):
+    return permission_name.split(".", 1)[1] if "." in permission_name else permission_name
+
+
+def get_role_default_permission_codenames(role_name):
+    return sorted(_strip_permission_name(name) for name in ROLE_PERMISSION_MAP.get(role_name, set()))
+
+
+def list_rbac_permissions():
+    ensure_custom_permissions()
+    content_type = ContentType.objects.get_for_model(User)
+    permissions = Permission.objects.filter(content_type=content_type).order_by("codename")
+
+    serialized = []
+    for permission in permissions:
+        serialized.append(
+            {
+                "id": permission.id,
+                "codename": permission.codename,
+                "name": permission.name,
+                "app_label": permission.content_type.app_label,
+                "assigned_by_default_to": sorted(
+                    role_name
+                    for role_name, permission_names in ROLE_PERMISSION_MAP.items()
+                    if f"auth.{permission.codename}" in permission_names
+                ),
+            }
+        )
+
+    return serialized
+
+
+def _list_group_users(group):
+    return list(group.user_set.order_by("id"))
+
+
+def serialize_admin_role_row(group):
+    users = _list_group_users(group)
+    permission_codenames = sorted(group.permissions.values_list("codename", flat=True))
+    default_permission_codenames = get_role_default_permission_codenames(group.name)
+    is_system = is_system_role_name(group.name)
+
+    return {
+        "id": group.id,
+        "name": group.name,
+        "label": ROLE_LABELS.get(group.name, group.name),
+        "description": ROLE_DESCRIPTIONS.get(group.name),
+        "role_type": "system" if is_system else "custom",
+        "is_system": is_system,
+        "can_rename": not is_system,
+        "can_delete": not is_system and not users,
+        "member_count": len(users),
+        "permissions": permission_codenames,
+        "default_permissions": default_permission_codenames,
+        "has_customized_permissions": is_system and permission_codenames != default_permission_codenames,
+    }
+
+
+def serialize_admin_role_detail(group):
+    role = serialize_admin_role_row(group)
+    role["assigned_users"] = [
+        {
+            "id": user.id,
+            "username": user.username,
+            "email": user.email,
+        }
+        for user in _list_group_users(group)
+    ]
+    return role
+
+
+def list_admin_role_rows():
+    groups = Group.objects.order_by("name").prefetch_related("permissions", "user_set")
+    return [serialize_admin_role_row(group) for group in groups]
+
+
+def get_admin_role_detail(role_id):
+    group = Group.objects.prefetch_related("permissions", "user_set").get(id=role_id)
+    return serialize_admin_role_detail(group)
+
+
+def _normalize_role_name(role_name):
+    normalized_role_name = (role_name or "").strip()
+    max_length = Group._meta.get_field("name").max_length
+
+    if not normalized_role_name:
+        raise ValueError("角色名称不能为空。")
+    if len(normalized_role_name) > max_length:
+        raise ValueError(f"角色名称不能超过 {max_length} 个字符。")
+    return normalized_role_name
+
+
+def _get_group_by_id(role_id):
+    return Group.objects.get(id=role_id)
+
+
+def _resolve_permissions_by_codenames(permission_codenames):
+    if permission_codenames is None:
+        return None
+
+    ensure_custom_permissions()
+    content_type = ContentType.objects.get_for_model(User)
+    normalized_codenames = sorted(
+        {
+            _strip_permission_name(permission_codename).strip()
+            for permission_codename in permission_codenames
+            if isinstance(permission_codename, str) and permission_codename.strip()
+        }
+    )
+    if len(normalized_codenames) != len(permission_codenames):
+        raise ValueError("permissions 必须是非空字符串数组。")
+
+    permissions = list(
+        Permission.objects.filter(
+            content_type=content_type,
+            codename__in=normalized_codenames,
+        ).order_by("codename")
+    )
+    found_codenames = {permission.codename for permission in permissions}
+    missing_codenames = sorted(set(normalized_codenames) - found_codenames)
+    if missing_codenames:
+        raise ValueError(f"Unknown permissions: {', '.join(missing_codenames)}")
+
+    return permissions
+
+
+def _validate_system_role_permissions(group, permission_codenames):
+    if not is_system_role_name(group.name):
+        return
+
+    required_permission_codenames = SYSTEM_ROLE_REQUIRED_PERMISSION_CODENAMES.get(group.name, set())
+    missing_codenames = sorted(required_permission_codenames - set(permission_codenames))
+    if missing_codenames:
+        raise ValueError(
+            f"系统角色 {group.name} 必须保留权限: {', '.join(missing_codenames)}"
+        )
+
+
+def create_admin_role(*, name, permission_codenames=None):
+    normalized_role_name = _normalize_role_name(name)
+    if Group.objects.filter(name=normalized_role_name).exists():
+        raise ValueError("角色名称已存在。")
+
+    group = Group.objects.create(name=normalized_role_name)
+    if permission_codenames is not None:
+        permissions = _resolve_permissions_by_codenames(permission_codenames)
+        permission_names = [permission.codename for permission in permissions]
+        _validate_system_role_permissions(group, permission_names)
+        group.permissions.set(permissions)
+
+    return serialize_admin_role_detail(group)
+
+
+def update_admin_role(role_id, *, name=None, permission_codenames=None):
+    group = _get_group_by_id(role_id)
+
+    if name is None and permission_codenames is None:
+        raise ValueError("至少需要更新角色名称或权限集合。")
+
+    if name is not None:
+        normalized_role_name = _normalize_role_name(name)
+        if is_system_role_name(group.name) and normalized_role_name != group.name:
+            raise ValueError("系统角色不允许重命名。")
+        duplicate_exists = Group.objects.filter(name=normalized_role_name).exclude(id=group.id).exists()
+        if duplicate_exists:
+            raise ValueError("角色名称已存在。")
+        group.name = normalized_role_name
+        group.save(update_fields=["name"])
+
+    if permission_codenames is not None:
+        permissions = _resolve_permissions_by_codenames(permission_codenames)
+        resolved_codenames = [permission.codename for permission in permissions]
+        _validate_system_role_permissions(group, resolved_codenames)
+        group.permissions.set(permissions)
+
+    group.refresh_from_db()
+    return serialize_admin_role_detail(group)
+
+
+def restore_admin_role_permissions(role_id):
+    group = _get_group_by_id(role_id)
+    if not is_system_role_name(group.name):
+        raise ValueError("仅系统角色支持恢复默认权限。")
+
+    default_permissions = _get_permissions_by_name(ROLE_PERMISSION_MAP[group.name])
+    group.permissions.set(default_permissions)
+    group.refresh_from_db()
+    return serialize_admin_role_detail(group)
+
+
+def delete_admin_role(role_id):
+    group = _get_group_by_id(role_id)
+    if is_system_role_name(group.name):
+        raise ValueError("系统角色不允许删除。")
+    if group.user_set.exists():
+        raise ValueError("角色仍有关联用户，无法删除。")
+    group.delete()
+
+
+def seed_roles_and_permissions(*, reset_system_role_permissions=False):
     groups = ensure_role_groups()
     seeded_groups = {}
 
     for role_name, permission_names in ROLE_PERMISSION_MAP.items():
         group = groups[role_name]
-        group.permissions.set(_get_permissions_by_name(permission_names))
+        if reset_system_role_permissions or not group.permissions.exists():
+            group.permissions.set(_get_permissions_by_name(permission_names))
         seeded_groups[role_name] = group
 
     return seeded_groups

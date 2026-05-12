@@ -1,24 +1,40 @@
 import { authStorage } from './auth-storage.js';
 
+export const hasProfilePermission = (profile = {}, permission) => {
+  const permissions = profile?.permissions ?? [];
+  return permissions.includes(permission);
+};
+
+export const hasAnyProfilePermission = (profile = {}, requiredPermissions = []) => {
+  const permissions = profile?.permissions ?? [];
+  return requiredPermissions.some((permission) => permissions.includes(permission));
+};
+
+export const hasProfileGroup = (profile = {}, group) => {
+  const groups = profile?.groups ?? [];
+  return groups.includes(group);
+};
+
+export const hasAnyProfileGroup = (profile = {}, requiredGroups = []) => {
+  const groups = profile?.groups ?? [];
+  return requiredGroups.some((group) => groups.includes(group));
+};
+
 export const permissionHelper = {
   hasPermission(permission) {
-    const { permissions } = authStorage.getProfile();
-    return permissions.includes(permission);
+    return hasProfilePermission(authStorage.getProfile(), permission);
   },
-  
+
   hasAnyPermission(requiredPermissions = []) {
-    const { permissions } = authStorage.getProfile();
-    return requiredPermissions.some(p => permissions.includes(p));
+    return hasAnyProfilePermission(authStorage.getProfile(), requiredPermissions);
   },
 
   hasGroup(group) {
-    const { groups } = authStorage.getProfile();
-    return groups.includes(group);
+    return hasProfileGroup(authStorage.getProfile(), group);
   },
 
   hasAnyGroup(requiredGroups = []) {
-    const { groups } = authStorage.getProfile();
-    return requiredGroups.some(g => groups.includes(g));
+    return hasAnyProfileGroup(authStorage.getProfile(), requiredGroups);
   },
 
   isAdmin() {

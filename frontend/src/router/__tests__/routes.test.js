@@ -28,6 +28,7 @@ test('admin route tree keeps governance pages mounted under admin shell', () => 
   const childPaths = (adminRoute?.children || []).map((route) => route.path);
 
   assert.ok(childPaths.includes('users'));
+  assert.ok(childPaths.includes('roles'));
   assert.ok(childPaths.includes('notifications'));
 });
 

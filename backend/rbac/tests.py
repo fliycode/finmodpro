@@ -14,6 +14,7 @@ from rbac.services.rbac_service import (
     ROLE_MEMBER,
     ROLE_PERMISSION_MAP,
     ROLE_SUPER_ADMIN,
+    get_role_default_permission_codenames,
     seed_roles_and_permissions,
 )
 from systemcheck.models import AuditRecord
@@ -232,6 +233,186 @@ class AdminManagementApiTests(AuditRecordAssertionMixin, TestCase):
             ],
         )
 
+    def test_get_admin_roles_requires_view_role_and_returns_role_rows(self):
+        response = self.client.get(
+            "/api/admin/roles",
+            HTTP_AUTHORIZATION=f"Bearer {self.admin_access_token}",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        roles = response.json()
+        admin_role = next(role for role in roles if role["name"] == ROLE_ADMIN)
+        self.assertEqual(admin_role["role_type"], "system")
+        self.assertEqual(admin_role["member_count"], 1)
+        self.assertFalse(admin_role["can_rename"])
+        self.assertFalse(admin_role["can_delete"])
+        self.assertIn("view_dashboard", admin_role["permissions"])
+        self.assertIn("view_dashboard", admin_role["default_permissions"])
+        self.assertFalse(admin_role["has_customized_permissions"])
+
+    def test_get_admin_permissions_requires_view_role_and_returns_permission_catalog(self):
+        response = self.client.get(
+            "/api/admin/permissions",
+            HTTP_AUTHORIZATION=f"Bearer {self.admin_access_token}",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        permissions = response.json()
+        assign_role_permission = next(
+            permission for permission in permissions if permission["codename"] == "assign_role"
+        )
+        self.assertEqual(assign_role_permission["app_label"], "auth")
+        self.assertIn(ROLE_SUPER_ADMIN, assign_role_permission["assigned_by_default_to"])
+
+    def test_get_admin_role_detail_returns_assigned_users(self):
+        admin_group = Group.objects.get(name=ROLE_ADMIN)
+        response = self.client.get(
+            f"/api/admin/roles/{admin_group.id}",
+            HTTP_AUTHORIZATION=f"Bearer {self.admin_access_token}",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["name"], ROLE_ADMIN)
+        self.assertEqual(payload["member_count"], 1)
+        self.assertEqual(
+            payload["assigned_users"],
+            [
+                {
+                    "id": self.admin_user.id,
+                    "username": "admin-user",
+                    "email": "admin@example.com",
+                }
+            ],
+        )
+
+    def test_post_admin_roles_create_creates_custom_role_with_permissions(self):
+        response = self.client.post(
+            "/api/admin/roles/create",
+            data=json.dumps(
+                {
+                    "name": "analyst_plus",
+                    "permissions": ["view_dashboard", "view_document"],
+                }
+            ),
+            content_type="application/json",
+            HTTP_AUTHORIZATION=f"Bearer {self.super_admin_access_token}",
+        )
+
+        self.assertEqual(response.status_code, 201)
+        created_group = Group.objects.get(name="analyst_plus")
+        self.assertEqual(
+            sorted(created_group.permissions.values_list("codename", flat=True)),
+            ["view_dashboard", "view_document"],
+        )
+        self.assertEqual(response.json()["role_type"], "custom")
+        audit = self.assert_latest_audit(
+            action="rbac.role.create",
+            status=AuditRecord.STATUS_SUCCEEDED,
+            target_type="role",
+            target_id=created_group.id,
+        )
+        self.assertEqual(audit.detail_payload["name"], "analyst_plus")
+
+    def test_patch_admin_role_detail_updates_custom_role(self):
+        custom_group = Group.objects.create(name="operations_ro")
+        custom_group.permissions.set(
+            Permission.objects.filter(
+                content_type=ContentType.objects.get_for_model(User),
+                codename__in=["view_dashboard"],
+            )
+        )
+
+        response = self.client.patch(
+            f"/api/admin/roles/{custom_group.id}",
+            data=json.dumps(
+                {
+                    "name": "operations_rw",
+                    "permissions": ["view_dashboard", "view_document"],
+                }
+            ),
+            content_type="application/json",
+            HTTP_AUTHORIZATION=f"Bearer {self.super_admin_access_token}",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        custom_group.refresh_from_db()
+        self.assertEqual(custom_group.name, "operations_rw")
+        self.assertEqual(
+            sorted(custom_group.permissions.values_list("codename", flat=True)),
+            ["view_dashboard", "view_document"],
+        )
+        audit = self.assert_latest_audit(
+            action="rbac.role.update",
+            status=AuditRecord.STATUS_SUCCEEDED,
+            target_type="role",
+            target_id=custom_group.id,
+        )
+        self.assertEqual(audit.detail_payload["previous_name"], "operations_ro")
+
+    def test_delete_admin_role_detail_rejects_system_role(self):
+        admin_group = Group.objects.get(name=ROLE_ADMIN)
+        response = self.client.delete(
+            f"/api/admin/roles/{admin_group.id}",
+            HTTP_AUTHORIZATION=f"Bearer {self.super_admin_access_token}",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json(), {"message": "系统角色不允许删除。"})
+        audit = self.assert_latest_audit(
+            action="rbac.role.delete",
+            status=AuditRecord.STATUS_FAILED,
+            target_type="role",
+            target_id=admin_group.id,
+        )
+        self.assertEqual(audit.detail_payload["name"], ROLE_ADMIN)
+
+    def test_delete_admin_role_detail_deletes_custom_role_without_members(self):
+        custom_group = Group.objects.create(name="temporary_role")
+
+        response = self.client.delete(
+            f"/api/admin/roles/{custom_group.id}",
+            HTTP_AUTHORIZATION=f"Bearer {self.super_admin_access_token}",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(Group.objects.filter(id=custom_group.id).exists())
+        self.assertEqual(response.json(), {"message": "角色已删除。"})
+        audit = self.assert_latest_audit(
+            action="rbac.role.delete",
+            status=AuditRecord.STATUS_SUCCEEDED,
+            target_type="role",
+            target_id=custom_group.id,
+        )
+        self.assertEqual(audit.detail_payload["name"], "temporary_role")
+
+    def test_post_admin_role_restore_defaults_restores_system_permissions(self):
+        admin_group = Group.objects.get(name=ROLE_ADMIN)
+        only_view_role = Permission.objects.get(
+            content_type=ContentType.objects.get_for_model(User),
+            codename="view_role",
+        )
+        admin_group.permissions.set([only_view_role])
+
+        response = self.client.post(
+            f"/api/admin/roles/{admin_group.id}/restore-defaults",
+            HTTP_AUTHORIZATION=f"Bearer {self.super_admin_access_token}",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        admin_group.refresh_from_db()
+        self.assertEqual(
+            sorted(admin_group.permissions.values_list("codename", flat=True)),
+            get_role_default_permission_codenames(ROLE_ADMIN),
+        )
+        audit = self.assert_latest_audit(
+            action="rbac.role.restore_defaults",
+            status=AuditRecord.STATUS_SUCCEEDED,
+            target_type="role",
+            target_id=admin_group.id,
+        )
+        self.assertEqual(audit.detail_payload["previous_permissions"], ["view_role"])
+
     def test_put_admin_user_groups_requires_assign_role_and_replaces_group_set(self):
         response = self.client.put(
             f"/api/admin/users/{self.target_user.id}/groups",
@@ -396,14 +577,53 @@ class AdminManagementApiTests(AuditRecordAssertionMixin, TestCase):
             f"/api/admin/users/{self.target_user.id}",
             HTTP_AUTHORIZATION=f"Bearer {self.member_access_token}",
         )
+        roles_response = self.client.get(
+            "/api/admin/roles",
+            HTTP_AUTHORIZATION=f"Bearer {self.member_access_token}",
+        )
+        permissions_response = self.client.get(
+            "/api/admin/permissions",
+            HTTP_AUTHORIZATION=f"Bearer {self.member_access_token}",
+        )
+        role_create_response = self.client.post(
+            "/api/admin/roles/create",
+            data=json.dumps({"name": "forbidden-role"}),
+            content_type="application/json",
+            HTTP_AUTHORIZATION=f"Bearer {self.member_access_token}",
+        )
 
         self.assertEqual(users_response.status_code, 403)
         self.assertEqual(groups_response.status_code, 403)
         self.assertEqual(update_response.status_code, 403)
         self.assertEqual(create_response.status_code, 403)
         self.assertEqual(delete_response.status_code, 403)
+        self.assertEqual(roles_response.status_code, 403)
+        self.assertEqual(permissions_response.status_code, 403)
+        self.assertEqual(role_create_response.status_code, 403)
         self.assertEqual(users_response.json(), {"message": "无权限。"})
         self.assertEqual(groups_response.json(), {"message": "无权限。"})
         self.assertEqual(update_response.json(), {"message": "无权限。"})
         self.assertEqual(create_response.json(), {"message": "无权限。"})
         self.assertEqual(delete_response.json(), {"message": "无权限。"})
+        self.assertEqual(roles_response.json(), {"message": "无权限。"})
+        self.assertEqual(permissions_response.json(), {"message": "无权限。"})
+        self.assertEqual(role_create_response.json(), {"message": "无权限。"})
+
+    def test_seed_roles_and_permissions_preserves_customized_system_permissions_by_default(self):
+        admin_group = Group.objects.get(name=ROLE_ADMIN)
+        admin_group.permissions.set(
+            [
+                Permission.objects.get(
+                    content_type=ContentType.objects.get_for_model(User),
+                    codename="view_role",
+                )
+            ]
+        )
+
+        seed_roles_and_permissions()
+
+        admin_group.refresh_from_db()
+        self.assertEqual(
+            list(admin_group.permissions.values_list("codename", flat=True)),
+            ["view_role"],
+        )

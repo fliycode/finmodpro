@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { navigationMap } from '../navigation.js';
+import { getNavItems, navigationMap } from '../navigation.js';
 
 test('admin llm navigation collapses into one model-management parent entry', () => {
   const llmItems = navigationMap.admin.filter((item) => item.group === 'admin-llm');
@@ -35,6 +35,15 @@ test('admin navigation still exposes governance pages after the redesign', () =>
 
   assert.deepEqual(
     governanceItems.map((item) => item.to),
-    ['/admin/users', '/admin/audit-logs'],
+    ['/admin/users', '/admin/roles', '/admin/audit-logs'],
   );
+});
+
+test('getNavItems filters admin navigation by explicit permissions', () => {
+  const items = getNavItems('admin', {
+    groups: ['ops_observer'],
+    permissions: ['view_role'],
+  });
+
+  assert.deepEqual(items.map((item) => item.to), ['/admin/roles']);
 });

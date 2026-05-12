@@ -16,6 +16,50 @@ export const createAdminApi = (overrides = {}) => {
         auth: true,
       });
     },
+    listRoles() {
+      return config.fetchJson('/api/admin/roles', {
+        method: 'GET',
+        auth: true,
+      });
+    },
+    listPermissions() {
+      return config.fetchJson('/api/admin/permissions', {
+        method: 'GET',
+        auth: true,
+      });
+    },
+    getRole(roleId) {
+      return config.fetchJson(`/api/admin/roles/${roleId}`, {
+        method: 'GET',
+        auth: true,
+      });
+    },
+    createRole(payload) {
+      return config.fetchJson('/api/admin/roles/create', {
+        method: 'POST',
+        auth: true,
+        body: JSON.stringify(payload),
+      });
+    },
+    updateRole(roleId, payload) {
+      return config.fetchJson(`/api/admin/roles/${roleId}`, {
+        method: 'PATCH',
+        auth: true,
+        body: JSON.stringify(payload),
+      });
+    },
+    deleteRole(roleId) {
+      return config.fetchJson(`/api/admin/roles/${roleId}`, {
+        method: 'DELETE',
+        auth: true,
+      });
+    },
+    restoreRoleDefaults(roleId) {
+      return config.fetchJson(`/api/admin/roles/${roleId}/restore-defaults`, {
+        method: 'POST',
+        auth: true,
+      });
+    },
     createUser(payload) {
       return config.fetchJson('/api/admin/users', {
         method: 'POST',

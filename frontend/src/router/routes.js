@@ -1,9 +1,7 @@
-export function getDefaultRouteForRole(profile) {
-  const groups = profile?.groups ?? [];
-  const permissions = profile?.permissions ?? [];
-  const isAdmin = groups.includes('admin') || groups.includes('super_admin') || permissions.includes('admin');
+import { resolveHomeRoute } from '../lib/session-state.js';
 
-  return isAdmin ? '/admin/overview' : '/workspace/qa';
+export function getDefaultRouteForRole(profile) {
+  return resolveHomeRoute(profile);
 }
 
 export const appRoutes = [
@@ -81,22 +79,51 @@ export const appRoutes = [
       {
         path: 'overview',
         component: () => import('../views/admin/AdminOverviewView.vue'),
-        meta: { title: '数据看板', subtitle: '聚焦模型调用、审计操作与知识资产入库节奏。', breadcrumb: [{ label: '数据看板' }] },
+        meta: {
+          title: '数据看板',
+          subtitle: '聚焦模型调用、审计操作与知识资产入库节奏。',
+          breadcrumb: [{ label: '数据看板' }],
+          requiredPermissions: ['view_dashboard'],
+        },
       },
       {
         path: 'users',
         component: () => import('../views/admin/AdminUsersView.vue'),
-        meta: { title: '用户管理', subtitle: '管理平台用户账号、角色分配与访问权限。', breadcrumb: [{ label: '治理审阅' }, { label: '用户管理' }] },
+        meta: {
+          title: '用户管理',
+          subtitle: '管理平台用户账号、角色分配与访问权限。',
+          breadcrumb: [{ label: '治理审阅' }, { label: '用户管理' }],
+          requiredPermissions: ['view_user'],
+        },
+      },
+      {
+        path: 'roles',
+        component: () => import('../views/admin/AdminRolesView.vue'),
+        meta: {
+          title: '权限管理',
+          subtitle: '管理角色、权限矩阵与自定义角色的治理边界。',
+          breadcrumb: [{ label: '治理审阅' }, { label: '权限管理' }],
+          requiredPermissions: ['view_role'],
+        },
       },
       {
         path: 'knowledge',
         component: () => import('../views/admin/AdminKnowledgeView.vue'),
-        meta: { title: '知识库管理', subtitle: '管理员视角查看知识资产、入库链路、存储和向量资源指标。', breadcrumb: [] },
+        meta: {
+          title: '知识库管理',
+          subtitle: '管理员视角查看知识资产、入库链路、存储和向量资源指标。',
+          breadcrumb: [],
+          requiredPermissions: ['view_document'],
+        },
       },
       {
         path: 'knowledge/documents/:id',
         component: () => import('../views/admin/AdminKnowledgeDetailView.vue'),
-        meta: { title: '文档详情', breadcrumb: [{ label: '知识库管理', to: '/admin/knowledge' }, { label: '文档详情' }] },
+        meta: {
+          title: '文档详情',
+          breadcrumb: [{ label: '知识库管理', to: '/admin/knowledge' }, { label: '文档详情' }],
+          requiredPermissions: ['view_document'],
+        },
       },
       {
         path: 'llm',
@@ -105,12 +132,22 @@ export const appRoutes = [
       {
         path: 'llm/models',
         component: () => import('../views/admin/AdminLlmModelsView.vue'),
-        meta: { title: '模型总览', subtitle: '管理模型启停、基础信息与调用概况。', breadcrumb: [{ label: 'Gateway Ops' }, { label: '模型管理' }, { label: '模型总览' }] },
+        meta: {
+          title: '模型总览',
+          subtitle: '管理模型启停、基础信息与调用概况。',
+          breadcrumb: [{ label: 'Gateway Ops' }, { label: '模型管理' }, { label: '模型总览' }],
+          requiredPermissions: ['manage_model_config'],
+        },
       },
       {
         path: 'llm/logs',
         component: () => import('../views/admin/AdminLlmObservabilityView.vue'),
-        meta: { title: '模型日志', subtitle: '按模型查看调用记录、错误分布与链路细节。', breadcrumb: [{ label: 'Gateway Ops' }, { label: '模型管理' }, { label: '模型日志' }] },
+        meta: {
+          title: '模型日志',
+          subtitle: '按模型查看调用记录、错误分布与链路细节。',
+          breadcrumb: [{ label: 'Gateway Ops' }, { label: '模型管理' }, { label: '模型日志' }],
+          requiredPermissions: ['manage_model_config'],
+        },
       },
       {
         path: 'llm/observability',
@@ -119,7 +156,12 @@ export const appRoutes = [
       {
         path: 'llm/usage',
         component: () => import('../views/admin/AdminLlmCostsView.vue'),
-        meta: { title: '用量统计', subtitle: '按模型和时间窗口追踪调用量、Token 与成本。', breadcrumb: [{ label: 'Gateway Ops' }, { label: '模型管理' }, { label: '用量统计' }] },
+        meta: {
+          title: '用量统计',
+          subtitle: '按模型和时间窗口追踪调用量、Token 与成本。',
+          breadcrumb: [{ label: 'Gateway Ops' }, { label: '模型管理' }, { label: '用量统计' }],
+          requiredPermissions: ['manage_model_config'],
+        },
       },
       {
         path: 'llm/costs',
@@ -128,12 +170,22 @@ export const appRoutes = [
       {
         path: 'llm/knowledge',
         component: () => import('../views/admin/AdminLlmKnowledgeView.vue'),
-        meta: { title: '知识库解析与入库链路', subtitle: '文档解析链路可用性与入库治理。', breadcrumb: [{ label: 'Gateway Ops' }, { label: '知识库解析' }] },
+        meta: {
+          title: '知识库解析与入库链路',
+          subtitle: '文档解析链路可用性与入库治理。',
+          breadcrumb: [{ label: 'Gateway Ops' }, { label: '知识库解析' }],
+          requiredPermissions: ['manage_model_config'],
+        },
       },
       {
         path: 'llm/rag-evaluation',
         component: () => import('../views/admin/AdminRagEvalView.vue'),
-        meta: { title: 'RAG 评测', subtitle: '运行检索与生成质量评测，查看 Recall、MRR、忠实度等指标。', breadcrumb: [{ label: 'Gateway Ops' }, { label: '模型管理' }, { label: 'RAG 评测' }] },
+        meta: {
+          title: 'RAG 评测',
+          subtitle: '运行检索与生成质量评测，查看 Recall、MRR、忠实度等指标。',
+          breadcrumb: [{ label: 'Gateway Ops' }, { label: '模型管理' }, { label: 'RAG 评测' }],
+          requiredPermissions: ['view_evaluation', 'run_evaluation'],
+        },
       },
       {
         path: 'graph',
@@ -142,22 +194,42 @@ export const appRoutes = [
       {
         path: 'monitoring',
         component: () => import('../views/admin/AdminMonitoringView.vue'),
-        meta: { title: '系统监控', subtitle: '系统资源、服务健康与告警管理。', breadcrumb: [{ label: '数据看板' }, { label: '系统监控' }] },
+        meta: {
+          title: '系统监控',
+          subtitle: '系统资源、服务健康与告警管理。',
+          breadcrumb: [{ label: '数据看板' }, { label: '系统监控' }],
+          requiredPermissions: ['view_monitoring'],
+        },
       },
       {
         path: 'notifications',
         component: () => import('../views/admin/AdminAlertNotificationsView.vue'),
-        meta: { title: '告警中心', subtitle: '集中查看站内告警通知、确认处理与回看最近告警。', breadcrumb: [{ label: '数据看板' }, { label: '告警中心' }] },
+        meta: {
+          title: '告警中心',
+          subtitle: '集中查看站内告警通知、确认处理与回看最近告警。',
+          breadcrumb: [{ label: '数据看板' }, { label: '告警中心' }],
+          requiredPermissions: ['view_monitoring'],
+        },
       },
       {
         path: 'cleaning',
         component: () => import('../views/admin/AdminCleaningView.vue'),
-        meta: { title: '数据清洗', subtitle: '管理清洗规则。', breadcrumb: [{ label: '知识库管理' }, { label: '数据清洗' }] },
+        meta: {
+          title: '数据清洗',
+          subtitle: '管理清洗规则。',
+          breadcrumb: [{ label: '知识库管理' }, { label: '数据清洗' }],
+          requiredPermissions: ['manage_cleaning_rules'],
+        },
       },
       {
         path: 'audit-logs',
         component: () => import('../views/admin/AdminAuditLogsView.vue'),
-        meta: { title: '操作日志', subtitle: '', breadcrumb: [{ label: '治理审阅' }, { label: '操作日志' }] },
+        meta: {
+          title: '操作日志',
+          subtitle: '',
+          breadcrumb: [{ label: '治理审阅' }, { label: '操作日志' }],
+          requiredPermissions: ['view_audit_log'],
+        },
       },
       {
         path: ':pathMatch(.*)*',
