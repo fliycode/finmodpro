@@ -7,7 +7,6 @@ import { qaApi } from '../api/qa.js';
 import {
   getDefaultSessionFilters,
   getCitationDisclosureLabel,
-  getQaChromeState,
   getQaMessageAvatar,
   getSessionLoadFailureNotice,
   normalizeDatasetId,
@@ -37,6 +36,8 @@ const query = ref('');
 const messages = ref([{ role: 'system', content: DEFAULT_SYSTEM_MESSAGE, tone: 'info' }]);
 const isAsking = ref(false);
 const messagesContainer = ref(null);
+const composerInputRef = ref(null);
+const evidencePanelRef = ref(null);
 const sessionOptions = ref([]);
 const isLoadingSessions = ref(false);
 const isHydratingSession = ref(false);
@@ -45,6 +46,8 @@ const historyDrawerOpen = ref(false);
 const memoryDrawerOpen = ref(false);
 const activeSessionFilters = ref({});
 const ragSteps = ref([]);
+const avatarImageLoaded = ref(false);
+const suggestionOffset = ref(0);
 let sessionOptionsPromise = null;
 
 const scheduleNonCriticalWork = (work) => {
@@ -70,6 +73,14 @@ const scheduleNonCriticalWork = (work) => {
   });
 };
 
+const getMotionBehavior = () => {
+  if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
+    return 'smooth';
+  }
+
+  return window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth';
+};
+
 const hasStreamingAssistant = computed(() =>
   messages.value.some((message) => message.isStreaming),
 );
@@ -81,47 +92,8 @@ const showEmptyState = computed(() => shouldShowFinancialQaEmptyState({
   currentSessionId: currentSessionId.value,
   messages: messages.value,
 }));
-const qaChromeState = getQaChromeState();
 const userAvatar = getQaMessageAvatar('user');
 const assistantAvatar = getQaMessageAvatar('assistant');
-const avatarImageLoaded = ref(false);
-
-// 预加载头像图片
-const preloadAvatarImage = () => {
-  if (!assistantAvatar.imageSrc) return;
-
-  const link = document.createElement('link');
-  link.rel = 'preload';
-  link.as = 'image';
-  link.href = assistantAvatar.imageSrcWebp || assistantAvatar.imageSrc;
-  if (assistantAvatar.imageSrcWebp) {
-    link.type = 'image/webp';
-  }
-  document.head.appendChild(link);
-
-  // 预加载图片以检测加载状态
-  const img = new Image();
-  img.onload = () => {
-    avatarImageLoaded.value = true;
-  };
-  img.onerror = () => {
-    avatarImageLoaded.value = true; // 加载失败也标记为已尝试
-  };
-  img.src = assistantAvatar.imageSrcWebp || assistantAvatar.imageSrc;
-};
-
-const RAG_STEP_LABELS = {
-  route: (d) => `路由决策: ${d.route_guard || d.route}`,
-  rewrite_query: () => '查询改写完成',
-  retrieve: (d) => `检索到 ${d.retrieved_count ?? 0} 条结果`,
-  score_filter: (d) => `评分过滤: ${d.filtered_count ?? 0} 条通过`,
-  build_context: (d) => `构建上下文: ${d.citation_count ?? 0} 篇引用`,
-  direct_context: () => '直接回答模式',
-};
-const getStepLabel = (step) => {
-  const fn = RAG_STEP_LABELS[step?.step];
-  return fn ? fn(step) : step?.step || '处理中';
-};
 const sessionLoadFailureNotice = computed(() =>
   getSessionLoadFailureNotice(activeSessionLoadFailed.value),
 );
@@ -141,6 +113,100 @@ const latestAssistantEntry = computed(() => (
 ));
 const latestCitations = computed(() => latestAssistantEntry.value?.citations ?? []);
 const evidenceHistoryItems = computed(() => historyItems.value.slice(0, 5));
+const nonSystemMessageCount = computed(() =>
+  visibleMessages.value.filter((message) => message.role !== 'system').length,
+);
+const activeConversationTitle = computed(() => {
+  if (!currentSessionId.value) {
+    return '新分析线程';
+  }
+
+  const matched = historyItems.value.find((item) => String(item.id) === String(currentSessionId.value));
+  return matched?.title || '当前会话';
+});
+const activeDatasetLabel = computed(() =>
+  activeDatasetId.value ? `数据集 ${activeDatasetId.value}` : '全局知识范围',
+);
+const latestAnswerModeLabel = computed(() => {
+  const mode = latestAssistantEntry.value?.answer_mode;
+  if (!mode) {
+    return '';
+  }
+  return mode === 'direct' ? '直接回答' : '引用回答';
+});
+const conversationStateLabel = computed(() => {
+  if (isHydratingSession.value) {
+    return '加载会话中';
+  }
+  if (isAsking.value) {
+    return '正在生成回答';
+  }
+  if (currentSessionId.value) {
+    return '历史会话已接入';
+  }
+  return '等待首条问题';
+});
+const conversationDescription = computed(() => {
+  if (activeSessionLoadFailed.value) {
+    return '当前会话加载失败，仍可继续在当前页面发起新的分析。';
+  }
+
+  if (currentSessionId.value) {
+    return `围绕「${activeConversationTitle.value}」持续追问，系统会沿用当前线程的证据与上下文。`;
+  }
+
+  return '从新的分析线程开始，系统会持续沉淀结论、证据和可回看的追问路径。';
+});
+const RAG_STEP_LABELS = {
+  route: (d) => `路由决策: ${d.route_guard || d.route}`,
+  rewrite_query: () => '查询改写完成',
+  retrieve: (d) => `检索到 ${d.retrieved_count ?? 0} 条结果`,
+  score_filter: (d) => `评分过滤: ${d.filtered_count ?? 0} 条通过`,
+  build_context: (d) => `构建上下文: ${d.citation_count ?? 0} 篇引用`,
+  direct_context: () => '直接回答模式',
+};
+const getStepLabel = (step) => {
+  const fn = RAG_STEP_LABELS[step?.step];
+  return fn ? fn(step) : step?.step || '处理中';
+};
+const activeStepLabel = computed(() => {
+  const lastStep = ragSteps.value[ragSteps.value.length - 1];
+  if (lastStep) {
+    return getStepLabel(lastStep);
+  }
+  return isAsking.value ? '正在组织回答' : '等待提问';
+});
+const latestDurationLabel = computed(() => {
+  const duration = latestAssistantEntry.value?.duration_ms;
+  return duration ? `${(duration / 1000).toFixed(1)}s` : '—';
+});
+const summaryItems = computed(() => [
+  {
+    id: 'message-count',
+    label: '消息数量',
+    value: `${nonSystemMessageCount.value} 条`,
+  },
+  {
+    id: 'evidence-count',
+    label: '当前证据',
+    value: latestCitations.value.length > 0 ? `${latestCitations.value.length} 条` : '待生成',
+  },
+  {
+    id: 'pipeline-stage',
+    label: '最新阶段',
+    value: activeStepLabel.value,
+  },
+  {
+    id: 'response-latency',
+    label: '最近耗时',
+    value: latestDurationLabel.value,
+  },
+]);
+const overviewText = computed(() => (
+  activeDatasetId.value
+    ? `当前对话会自动限定在数据集 ${activeDatasetId.value} 的上下文中，适合围绕单个项目做连续追问。`
+    : '当前对话默认面向全局金融知识范围，适合先获得结论框架，再逐步收束到具体证据。'
+));
 const recommendedQuestions = computed(() => {
   if (latestCitations.value.length > 0) {
     const firstTitle = latestCitations.value[0]?.document_title || '当前依据';
@@ -148,6 +214,8 @@ const recommendedQuestions = computed(() => {
       `基于《${firstTitle}》提炼三条最关键的风险信号`,
       '把当前回答整理成适合汇报的风险摘要',
       '列出还需要补充验证的证据与下一步问题',
+      '从现有引用里找出最薄弱的一处论证',
+      '把当前分析转成管理层可执行的处置建议',
     ];
   }
 
@@ -156,6 +224,8 @@ const recommendedQuestions = computed(() => {
       '围绕当前知识库先给我一个整体判断框架',
       '先列出值得重点追问的三类风险主题',
       '给我一个适合继续深挖的分析提纲',
+      '把数据集里的核心实体和关系先梳理出来',
+      '先告诉我哪些部分最值得补证据',
     ];
   }
 
@@ -163,13 +233,43 @@ const recommendedQuestions = computed(() => {
     '先给我一个适合当前问题的分析框架',
     '把这个问题拆成结论、证据、待验证三部分',
     '给我三个更专业的追问方向',
+    '列出分析这个问题时最常见的误判点',
+    '先告诉我应该补哪些背景信息',
   ];
 });
+const visibleRecommendedQuestions = computed(() => {
+  if (recommendedQuestions.value.length <= 3) {
+    return recommendedQuestions.value;
+  }
 
-const getAvatarLabel = (role) => {
-  if (role === 'user') return '我';
-  if (role === 'assistant') return 'AI';
-  return '系统';
+  const offset = suggestionOffset.value % recommendedQuestions.value.length;
+  const rotated = [
+    ...recommendedQuestions.value.slice(offset),
+    ...recommendedQuestions.value.slice(0, offset),
+  ];
+  return rotated.slice(0, 3);
+});
+
+const preloadAvatarImage = () => {
+  if (!assistantAvatar.imageSrc) return;
+
+  const link = document.createElement('link');
+  link.rel = 'preload';
+  link.as = 'image';
+  link.href = assistantAvatar.imageSrcWebp || assistantAvatar.imageSrc;
+  if (assistantAvatar.imageSrcWebp) {
+    link.type = 'image/webp';
+  }
+  document.head.appendChild(link);
+
+  const img = new Image();
+  img.onload = () => {
+    avatarImageLoaded.value = true;
+  };
+  img.onerror = () => {
+    avatarImageLoaded.value = true;
+  };
+  img.src = assistantAvatar.imageSrcWebp || assistantAvatar.imageSrc;
 };
 
 const getFriendlyErrorMessage = (error) => {
@@ -183,8 +283,40 @@ const getFriendlyErrorMessage = (error) => {
   return message;
 };
 
-const applySuggestedQuestion = (value) => {
+const focusComposer = () => {
+  composerInputRef.value?.focus();
+};
+
+const syncComposerHeight = async () => {
+  await nextTick();
+  const element = composerInputRef.value;
+  if (!element) {
+    return;
+  }
+
+  element.style.height = 'auto';
+  const nextHeight = Math.min(Math.max(element.scrollHeight, 56), 180);
+  element.style.height = `${nextHeight}px`;
+};
+
+const rotateRecommendedQuestions = () => {
+  if (recommendedQuestions.value.length <= 3) {
+    return;
+  }
+  suggestionOffset.value = (suggestionOffset.value + 1) % recommendedQuestions.value.length;
+};
+
+const applySuggestedQuestion = async (value) => {
   query.value = value;
+  await syncComposerHeight();
+  focusComposer();
+};
+
+const scrollToEvidence = () => {
+  evidencePanelRef.value?.scrollIntoView({
+    behavior: getMotionBehavior(),
+    block: 'start',
+  });
 };
 
 const scrollToBottom = async () => {
@@ -192,13 +324,15 @@ const scrollToBottom = async () => {
   if (messagesContainer.value) {
     messagesContainer.value.scrollTo({
       top: messagesContainer.value.scrollHeight,
-      behavior: 'smooth',
+      behavior: getMotionBehavior(),
     });
   }
 };
 
-const resetConversation = () => {
+const resetConversation = async () => {
   messages.value = [{ role: 'system', content: DEFAULT_SYSTEM_MESSAGE, tone: 'info' }];
+  ragSteps.value = [];
+  await syncComposerHeight();
 };
 
 const refreshSessionOptions = async () => {
@@ -248,6 +382,7 @@ const loadSession = async (id) => {
   if (!id) return;
   isHydratingSession.value = true;
   activeSessionLoadFailed.value = false;
+  ragSteps.value = [];
   try {
     const session = await chatApi.getSession(id);
     activeSessionFilters.value = session.contextFilters || {};
@@ -297,7 +432,7 @@ const deleteSession = async (id) => {
     if (String(currentSessionId.value) === String(id)) {
       currentSessionId.value = null;
       activeSessionLoadFailed.value = false;
-      resetConversation();
+      await resetConversation();
       await clearSessionRoute();
     }
     await refreshSessionOptions();
@@ -315,11 +450,13 @@ const startNewConversation = async () => {
   currentSessionId.value = null;
   activeSessionLoadFailed.value = false;
   query.value = '';
+  suggestionOffset.value = 0;
   activeSessionFilters.value = getDefaultSessionFilters(route.query.dataset);
-  resetConversation();
+  await resetConversation();
   historyDrawerOpen.value = false;
   await clearSessionRoute();
   await refreshSessionOptions();
+  focusComposer();
 };
 
 watch(() => props.sessionId, async (newId) => {
@@ -331,7 +468,7 @@ watch(() => props.sessionId, async (newId) => {
   if (!newId) {
     activeSessionLoadFailed.value = false;
     activeSessionFilters.value = getDefaultSessionFilters(route.query.dataset);
-    resetConversation();
+    await resetConversation();
   }
 });
 
@@ -341,6 +478,7 @@ watch(
     if (!currentSessionId.value) {
       activeSessionFilters.value = getDefaultSessionFilters(route.query.dataset);
     }
+    suggestionOffset.value = 0;
     await refreshSessionOptions();
   },
 );
@@ -353,14 +491,21 @@ watch(historyDrawerOpen, async (isOpen) => {
   await refreshSessionOptions();
 });
 
+watch(query, () => {
+  void syncComposerHeight();
+});
+
 onMounted(async () => {
   activeSessionFilters.value = getDefaultSessionFilters(route.query.dataset);
+  await syncComposerHeight();
+
   void scheduleNonCriticalWork(async () => {
     preloadAvatarImage();
     await Promise.allSettled([
       refreshSessionOptions(),
       import('./MarkdownRenderer.vue'),
       import('./ChatHistory.vue'),
+      import('./ChatMemoryDrawer.vue'),
     ]);
   });
 
@@ -389,6 +534,7 @@ const handleAsk = async () => {
   messages.value.push({ role: 'user', content: currentQuery });
   isAsking.value = true;
   ragSteps.value = [];
+  await syncComposerHeight();
   await scrollToBottom();
 
   try {
@@ -481,91 +627,115 @@ const handleAsk = async () => {
 
 <template>
   <div class="qa-shell">
-    <!-- QA Toolbar -->
-    <div v-if="qaChromeState.actions.length > 0" class="qa-toolbar">
-      <button
-        type="button"
-        class="qa-toolbar__action"
-        title="历史会话"
-        @click="historyDrawerOpen = true"
-      >
-        <AppIcon name="history" :size="18" />
-      </button>
-      <button
-        type="button"
-        class="qa-toolbar__action"
-        title="记忆管理"
-        @click="memoryDrawerOpen = true"
-      >
-        <AppIcon name="brain-circuit" :size="18" />
-      </button>
-      <button
-        type="button"
-        class="qa-toolbar__action qa-toolbar__action--primary"
-        title="新对话"
-        @click="startNewConversation"
-      >
-        <AppIcon name="plus" :size="18" />
-      </button>
-    </div>
+    <section class="qa-overview">
+      <div class="qa-overview__body">
+        <p class="qa-overview__eyebrow">Intelligent conversation</p>
+        <h1 class="qa-overview__title">智能对话工作台</h1>
+        <p class="qa-overview__text">
+          {{ overviewText }}
+        </p>
+      </div>
+      <div class="qa-overview__actions">
+        <button type="button" class="qa-action-btn" aria-label="打开历史会话" @click="historyDrawerOpen = true">
+          <AppIcon name="history" :size="16" />
+          历史会话
+        </button>
+        <button type="button" class="qa-action-btn" aria-label="打开记忆管理" @click="memoryDrawerOpen = true">
+          <AppIcon name="brain-circuit" :size="16" />
+          记忆管理
+        </button>
+        <button type="button" class="qa-action-btn qa-action-btn--primary" @click="startNewConversation">
+          <AppIcon name="plus" :size="16" />
+          新建对话
+        </button>
+      </div>
+    </section>
 
-    <!-- 2-Column Layout -->
     <div class="qa-layout">
-      <!-- Main Chat Column -->
       <main class="qa-main">
-        <div class="qa-main__card">
-          <!-- Messages -->
+        <section class="qa-panel qa-panel--conversation">
+          <header class="qa-panel__header qa-panel__header--conversation">
+            <div class="qa-panel__heading">
+              <p class="qa-panel__eyebrow">Current thread</p>
+              <h2 class="qa-panel__title">{{ activeConversationTitle }}</h2>
+              <p class="qa-panel__desc">{{ conversationDescription }}</p>
+            </div>
+            <div class="qa-session-pills">
+              <span class="qa-pill">{{ conversationStateLabel }}</span>
+              <span class="qa-pill qa-pill--warm">{{ activeDatasetLabel }}</span>
+              <span v-if="latestAnswerModeLabel" class="qa-pill qa-pill--brand">{{ latestAnswerModeLabel }}</span>
+            </div>
+          </header>
+
+          <div class="qa-summary-grid">
+            <article v-for="item in summaryItems" :key="item.id" class="qa-summary-card">
+              <span class="qa-summary-card__label">{{ item.label }}</span>
+              <strong class="qa-summary-card__value">{{ item.value }}</strong>
+            </article>
+          </div>
+
           <div
             ref="messagesContainer"
-            class="qa-messages"
-            :class="{ 'qa-messages--empty': showEmptyState }"
+            class="qa-transcript"
+            :class="{ 'qa-transcript--empty': showEmptyState }"
+            role="log"
+            aria-live="polite"
           >
             <div v-if="sessionLoadFailureNotice" class="qa-notice qa-notice--warn" role="status">
               {{ sessionLoadFailureNotice }}
             </div>
 
-            <!-- Empty State -->
             <div v-if="showEmptyState" class="qa-empty">
-              <div class="qa-empty__orb" />
-              <h2 class="qa-empty__title">开始新的分析</h2>
+              <div class="qa-empty__badge">
+                <AppIcon name="spark" :size="14" />
+                先从一个问题开始
+              </div>
+              <h3 class="qa-empty__title">把问题拆成结论、证据与待验证项</h3>
               <p class="qa-empty__text">
-                输入您关心的金融问题，AI 将基于知识库与实时数据进行深度分析，
-                并标注引用来源与推理证据。
+                适合先问结论框架，再追问证据来源和下一步动作。每次回答都会自动保留在同一条会话线程里。
               </p>
+              <div class="qa-empty__actions">
+                <button
+                  v-for="prompt in visibleRecommendedQuestions"
+                  :key="prompt"
+                  type="button"
+                  class="qa-question-btn"
+                  @click="applySuggestedQuestion(prompt)"
+                >
+                  {{ prompt }}
+                </button>
+              </div>
             </div>
 
             <TransitionGroup name="qa-msg">
               <div
                 v-for="(msg, index) in visibleMessages"
                 :key="`msg-${index}`"
-                :class="msg.role === 'system' ? 'qa-msg-system' : `qa-msg qa-msg--${msg.role === 'user' ? 'user' : 'assistant'}`"
+                :class="msg.role === 'system' ? 'qa-system-msg' : `qa-message qa-message--${msg.role === 'user' ? 'user' : 'assistant'}`"
               >
-                <!-- System Message -->
                 <template v-if="msg.role === 'system'">
                   <span>{{ msg.content }}</span>
                 </template>
 
-                <!-- User Message -->
                 <template v-else-if="msg.role === 'user'">
-                  <div class="qa-msg__body qa-msg__body--user">
-                    <div class="qa-msg__bubble qa-msg__bubble--user">
+                  <div class="qa-message__body qa-message__body--user">
+                    <div class="qa-message__bubble qa-message__bubble--user">
                       {{ msg.content }}
                     </div>
                   </div>
-                  <div class="qa-msg__avatar qa-msg__avatar--user">
+                  <div class="qa-message__avatar qa-message__avatar--user">
                     <img
                       v-if="userAvatar.imageSrc"
                       :src="userAvatar.imageSrc"
                       :alt="userAvatar.imageAlt"
-                      class="qa-msg__avatar-image"
+                      class="qa-message__avatar-image"
                     >
                     <span v-else>{{ userAvatar.label }}</span>
                   </div>
                 </template>
 
-                <!-- Assistant Message -->
                 <template v-else>
-                  <div class="qa-msg__avatar qa-msg__avatar--ai">
+                  <div class="qa-message__avatar qa-message__avatar--assistant">
                     <picture v-if="assistantAvatar.imageSrc">
                       <source
                         v-if="assistantAvatar.imageSrcWebp"
@@ -575,31 +745,29 @@ const handleAsk = async () => {
                       <img
                         :src="assistantAvatar.imageSrc"
                         :alt="assistantAvatar.imageAlt"
-                        class="qa-msg__avatar-image"
-                        :class="{ 'qa-msg__avatar-image--loading': !avatarImageLoaded }"
+                        class="qa-message__avatar-image"
+                        :class="{ 'qa-message__avatar-image--loading': !avatarImageLoaded }"
                       >
                     </picture>
-                    <span v-else>{{ assistantAvatar.label }}</span>
+                    <span v-else>AI</span>
                   </div>
-                  <div class="qa-msg__body">
+                  <div class="qa-message__body">
                     <div
-                      class="qa-msg__bubble qa-msg__bubble--ai"
-                      :class="{ 'qa-msg__bubble--error': msg.isError }"
+                      class="qa-message__bubble qa-message__bubble--assistant"
+                      :class="{ 'qa-message__bubble--error': msg.isError }"
                     >
-                      <!-- Answer header with badges -->
                       <div v-if="!msg.isStreaming && !msg.isError && msg.content" class="qa-answer__meta">
-                        <span v-if="msg.answer_mode" class="qa-badge qa-badge--mode">
+                        <span v-if="msg.answer_mode" class="qa-badge">
                           {{ msg.answer_mode === 'direct' ? '直接回答' : '引用回答' }}
                         </span>
-                        <span v-if="msg.citations && msg.citations.length > 0" class="qa-badge qa-badge--citations">
+                        <span v-if="msg.citations && msg.citations.length > 0" class="qa-badge">
                           引用 {{ msg.citations.length }} 篇资料
                         </span>
-                        <span v-if="msg.duration_ms" class="qa-badge qa-badge--time">
+                        <span v-if="msg.duration_ms" class="qa-badge">
                           {{ (msg.duration_ms / 1000).toFixed(1) }}s
                         </span>
                       </div>
 
-                      <!-- Answer content -->
                       <div class="qa-answer__content" :class="{ 'qa-answer__content--streaming': msg.isStreaming }">
                         <MarkdownRenderer
                           v-if="msg.content"
@@ -609,29 +777,26 @@ const handleAsk = async () => {
                         <span v-if="msg.isStreaming" class="qa-cursor" />
                       </div>
 
-                      <!-- Loading indicator -->
                       <div v-if="msg.isStreaming && !msg.content && ragSteps.length === 0" class="qa-loading">
                         <span /><span /><span />
                       </div>
 
-                      <!-- RAG pipeline steps -->
                       <div v-if="msg.isStreaming && ragSteps.length > 0" class="qa-steps">
                         <div v-for="(step, i) in ragSteps" :key="i" class="qa-step">
-                          <span class="qa-step__icon">&#10003;</span>
+                          <span class="qa-step__dot" />
                           <span class="qa-step__label">{{ getStepLabel(step) }}</span>
                         </div>
                       </div>
 
-                      <!-- Answer notice -->
                       <div v-if="msg.answer_notice" class="qa-answer__notice">
                         {{ msg.answer_notice }}
                       </div>
 
-                      <!-- Jump to citations -->
                       <button
                         v-if="msg.citations && msg.citations.length > 0"
                         type="button"
                         class="qa-cite-jump"
+                        @click="scrollToEvidence"
                       >
                         {{ getCitationDisclosureLabel(msg.citations) }}
                       </button>
@@ -641,132 +806,131 @@ const handleAsk = async () => {
               </div>
             </TransitionGroup>
 
-            <!-- Initial loading -->
-            <div v-if="isAsking && !hasStreamingAssistant" class="qa-msg qa-msg--assistant">
-              <div class="qa-msg__avatar qa-msg__avatar--ai">
+            <div v-if="isAsking && !hasStreamingAssistant" class="qa-message qa-message--assistant">
+              <div class="qa-message__avatar qa-message__avatar--assistant">
                 <img
                   v-if="assistantAvatar.imageSrc"
                   :src="assistantAvatar.imageSrc"
                   :alt="assistantAvatar.imageAlt"
-                  class="qa-msg__avatar-image"
+                  class="qa-message__avatar-image"
                 >
-                <span v-else>{{ assistantAvatar.label }}</span>
+                <span v-else>AI</span>
               </div>
-              <div class="qa-msg__body">
-                <div class="qa-msg__bubble qa-msg__bubble--ai qa-msg__bubble--loading">
+              <div class="qa-message__body">
+                <div class="qa-message__bubble qa-message__bubble--assistant qa-message__bubble--loading">
                   <div class="qa-loading">
                     <span /><span /><span />
                   </div>
-                  <p>正在整理结论与证据…</p>
+                  <p class="qa-loading__text">正在整理结论与证据…</p>
                 </div>
               </div>
             </div>
           </div>
 
-          <!-- Input Area -->
-          <div class="qa-input-area">
-            <div class="qa-input__row">
+          <footer class="qa-composer">
+            <div class="qa-composer__frame">
               <textarea
+                ref="composerInputRef"
                 v-model="query"
                 rows="1"
-                class="qa-input__textarea"
+                class="qa-composer__textarea"
                 placeholder="请输入您的问题，Enter 发送，Shift + Enter 换行"
+                aria-label="智能对话输入框"
+                @input="syncComposerHeight"
                 @keydown.enter.exact.prevent="handleAsk"
               />
               <button
                 :disabled="isAsking || !query.trim()"
-                class="qa-input__send"
+                class="qa-composer__send"
                 type="button"
-                aria-label="发送"
                 @click="handleAsk"
               >
-                <AppIcon name="send" :size="18" />
+                <AppIcon name="send" :size="16" />
+                发送
               </button>
             </div>
-            <div class="qa-input__footer">
-              <div class="qa-input__toggles">
-                <button type="button" class="qa-toggle">深度思考</button>
-                <button type="button" class="qa-toggle">联网搜索</button>
-                <button type="button" class="qa-toggle">引用溯源</button>
+            <div class="qa-composer__meta">
+              <div class="qa-composer__hints">
+                <span class="qa-hint-chip">Enter 发送</span>
+                <span class="qa-hint-chip">Shift + Enter 换行</span>
+                <span class="qa-hint-chip qa-hint-chip--status">{{ activeStepLabel }}</span>
               </div>
-              <button
-                type="button"
-                class="qa-input__clear"
-                @click="resetConversation"
-              >
-                <AppIcon name="trash" :size="14" />
-                清除对话
+              <button type="button" class="qa-link-btn" @click="resetConversation">
+                清空画布
               </button>
             </div>
-          </div>
-        </div>
+          </footer>
+        </section>
       </main>
 
-      <!-- Right Sidebar -->
       <aside class="qa-rail">
-        <!-- Citations -->
-        <section class="qa-rail__card">
-          <header class="qa-rail__header">
-            <h3><AppIcon name="file" :size="16" /> 引用来源</h3>
-            <span class="qa-rail__count">{{ latestCitations.length }}</span>
+        <section ref="evidencePanelRef" class="qa-panel">
+          <header class="qa-panel__header qa-panel__header--compact">
+            <div class="qa-panel__heading">
+              <p class="qa-panel__eyebrow">Evidence</p>
+              <h3 class="qa-panel__title qa-panel__title--sm">证据依据</h3>
+            </div>
+            <span class="qa-count-pill">{{ latestCitations.length }}</span>
           </header>
-          <div v-if="latestCitations.length > 0" class="qa-rail__list">
-            <div
+          <div v-if="latestCitations.length > 0" class="qa-citation-list">
+            <article
               v-for="(cite, index) in latestCitations.slice(0, 5)"
               :key="`cite-${index}`"
-              class="qa-cite-card"
+              class="qa-citation-card"
             >
-              <div class="qa-cite-card__index" :class="{ 'qa-cite-card__index--active': index === 0 }">
-                {{ index + 1 }}
-              </div>
-              <div class="qa-cite-card__body">
-                <div class="qa-cite-card__title">{{ cite.document_title || '未命名文档' }}</div>
-                <div class="qa-cite-card__meta">
+              <div class="qa-citation-card__index">{{ index + 1 }}</div>
+              <div class="qa-citation-card__body">
+                <div class="qa-citation-card__title">{{ cite.document_title || '未命名文档' }}</div>
+                <div class="qa-citation-card__meta">
                   {{ cite.doc_type || '文档' }}
                   <span v-if="cite.page_label && cite.page_label !== 'N/A'">· {{ cite.page_label }}</span>
                 </div>
-                <div class="qa-cite-card__snippet">{{ cite.snippet || '暂无摘录。' }}</div>
-                <div class="qa-cite-card__score" v-if="cite.score > 0">
+                <p class="qa-citation-card__snippet">{{ cite.snippet || '暂无摘录。' }}</p>
+                <div v-if="cite.score > 0" class="qa-citation-card__score">
                   相关度 {{ (cite.score * 100).toFixed(0) }}%
                 </div>
               </div>
-            </div>
+            </article>
           </div>
-          <div v-else class="qa-rail__empty">
-            <p>发送问题后，引用依据将在这里展示。</p>
+          <div v-else class="qa-empty-block">
+            <p>发送问题后，引用依据会在这里聚合展示。</p>
           </div>
         </section>
 
-        <!-- Recommended Questions -->
-        <section class="qa-rail__card">
-          <header class="qa-rail__header">
-            <h3><AppIcon name="zap" :size="16" /> 相关问题推荐</h3>
-            <button type="button" class="qa-rail__refresh" title="换一换">
-              <AppIcon name="refresh" :size="12" />
+        <section class="qa-panel">
+          <header class="qa-panel__header qa-panel__header--compact">
+            <div class="qa-panel__heading">
+              <p class="qa-panel__eyebrow">Next prompts</p>
+              <h3 class="qa-panel__title qa-panel__title--sm">相关问题推荐</h3>
+            </div>
+            <button type="button" class="qa-icon-btn" aria-label="刷新推荐问题" @click="rotateRecommendedQuestions">
+              <AppIcon name="refresh" :size="14" />
             </button>
           </header>
-          <div class="qa-rail__questions">
+          <div class="qa-question-list">
             <button
-              v-for="q in recommendedQuestions"
-              :key="q"
+              v-for="prompt in visibleRecommendedQuestions"
+              :key="prompt"
               type="button"
               class="qa-question-btn"
-              @click="applySuggestedQuestion(q)"
+              @click="applySuggestedQuestion(prompt)"
             >
-              {{ q }}
+              {{ prompt }}
             </button>
           </div>
         </section>
 
-        <!-- Recent Sessions -->
-        <section v-if="evidenceHistoryItems.length > 0" class="qa-rail__card">
-          <header class="qa-rail__header">
-            <h3><AppIcon name="history" :size="16" /> 最近会话</h3>
-            <button type="button" class="qa-rail__action-text" @click="historyDrawerOpen = true">
+        <section v-if="evidenceHistoryItems.length > 0" class="qa-panel">
+          <header class="qa-panel__header qa-panel__header--compact">
+            <div class="qa-panel__heading">
+              <p class="qa-panel__eyebrow">Recent sessions</p>
+              <h3 class="qa-panel__title qa-panel__title--sm">最近会话</h3>
+            </div>
+            <button type="button" class="qa-link-btn" @click="historyDrawerOpen = true">
               查看全部
             </button>
           </header>
-          <div class="qa-rail__sessions">
+          <div class="qa-session-list">
             <button
               v-for="item in evidenceHistoryItems"
               :key="item.id"
@@ -775,14 +939,13 @@ const handleAsk = async () => {
               @click="openSession(item.id)"
             >
               <span class="qa-session-btn__title">{{ item.title }}</span>
-              <span class="qa-session-btn__time">{{ item.timestamp }}</span>
+              <span class="qa-session-btn__meta">{{ item.timestamp }}</span>
             </button>
           </div>
         </section>
       </aside>
     </div>
 
-    <!-- History Drawer -->
     <el-drawer
       v-model="historyDrawerOpen"
       direction="rtl"
@@ -801,7 +964,6 @@ const handleAsk = async () => {
       />
     </el-drawer>
 
-    <!-- Memory Drawer -->
     <ChatMemoryDrawer
       v-model:open="memoryDrawerOpen"
       :dataset-id="activeDatasetId"
@@ -810,10 +972,6 @@ const handleAsk = async () => {
 </template>
 
 <style scoped>
-/* ============================================
-   QA Shell — Premium Dark Navy Dashboard
-   ============================================ */
-
 .qa-shell {
   display: flex;
   flex-direction: column;
@@ -821,829 +979,852 @@ const handleAsk = async () => {
   min-height: 0;
 }
 
-/* ---- Toolbar ---- */
-
-.qa-toolbar {
-  display: flex;
-  gap: 8px;
-  padding: 0 0 4px;
+.qa-overview,
+.qa-panel {
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius-card);
+  background: var(--surface-2);
+  box-shadow: var(--shadow-sm);
 }
 
-.qa-toolbar__action {
-  width: 34px;
-  height: 34px;
-  display: grid;
-  place-items: center;
-  border: 1px solid rgba(102, 132, 255, 0.14);
-  border-radius: 8px;
-  background: rgba(15, 24, 44, 0.78);
-  color: #95aacd;
-  cursor: pointer;
+.qa-overview {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 24px 28px;
+  background: rgba(253, 249, 239, 0.94);
+}
+
+.qa-overview__body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-width: 760px;
+}
+
+.qa-overview__eyebrow,
+.qa-panel__eyebrow {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.qa-overview__title,
+.qa-panel__title {
+  margin: 0;
+  color: var(--text-primary);
+  line-height: 1.1;
+}
+
+.qa-overview__title {
+  font-size: clamp(2rem, 3vw, 2.6rem);
+  font-family: var(--heading);
+}
+
+.qa-overview__text,
+.qa-panel__desc {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.75;
+  color: var(--text-secondary);
+}
+
+.qa-overview__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  justify-content: flex-end;
+}
+
+.qa-action-btn,
+.qa-icon-btn,
+.qa-link-btn,
+.qa-question-btn,
+.qa-session-btn,
+.qa-cite-jump,
+.qa-composer__send {
+  border: 1px solid transparent;
   transition:
     border-color 0.2s ease,
     background-color 0.2s ease,
-    color 0.2s ease;
+    color 0.2s ease,
+    box-shadow 0.2s ease,
+    transform 0.2s ease;
 }
 
-.qa-toolbar__action:hover {
-  border-color: rgba(102, 132, 255, 0.28);
-  background: rgba(20, 32, 56, 0.92);
-  color: #eef4ff;
+.qa-action-btn {
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 16px;
+  border-radius: var(--radius-pill);
+  border-color: var(--line-strong);
+  background: rgba(255, 255, 255, 0.88);
+  color: var(--text-primary);
+  cursor: pointer;
 }
 
-.qa-toolbar__action--primary {
-  border-color: rgba(100, 140, 255, 0.28);
-  background: linear-gradient(135deg, rgba(44, 99, 255, 0.32), rgba(86, 75, 255, 0.26));
-  color: #c5d4ff;
+.qa-action-btn:hover,
+.qa-question-btn:hover,
+.qa-session-btn:hover,
+.qa-cite-jump:hover,
+.qa-icon-btn:hover,
+.qa-link-btn:hover,
+.qa-composer__send:hover:not(:disabled) {
+  border-color: rgba(36, 87, 197, 0.28);
+  box-shadow: var(--shadow-xs);
 }
 
-/* ---- Layout ---- */
+.qa-action-btn--primary,
+.qa-composer__send {
+  border-color: rgba(36, 87, 197, 0.2);
+  background: var(--brand);
+  color: var(--text-inverse);
+}
+
+.qa-action-btn--primary:hover,
+.qa-composer__send:hover:not(:disabled) {
+  background: var(--brand-hover);
+}
 
 .qa-layout {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 320px;
-  gap: 14px;
+  grid-template-columns: minmax(0, 1fr) 340px;
+  gap: 16px;
   min-height: 0;
-  flex: 1;
+  align-items: start;
 }
 
-/* ---- Main Chat Panel ---- */
-
-.qa-main {
+.qa-main,
+.qa-rail,
+.qa-panel--conversation {
   min-width: 0;
   min-height: 0;
 }
 
-.qa-main__card {
+.qa-panel {
   display: flex;
   flex-direction: column;
-  height: 100%;
-  min-height: 0;
-  border: 1px solid rgba(66, 108, 255, 0.14);
-  border-radius: 14px;
-  background:
-    linear-gradient(180deg, rgba(10, 19, 38, 0.88), rgba(7, 14, 28, 0.88)),
-    radial-gradient(circle at top, rgba(71, 94, 255, 0.1), transparent 42%);
-  box-shadow: 0 24px 56px -36px rgba(4, 10, 22, 0.86);
+  gap: 0;
   overflow: hidden;
 }
 
-/* ---- Messages ---- */
+.qa-panel--conversation {
+  height: 100%;
+}
 
-.qa-messages {
+.qa-panel__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 24px 24px 18px;
+}
+
+.qa-panel__header--conversation {
+  padding-bottom: 16px;
+}
+
+.qa-panel__header--compact {
+  padding-bottom: 14px;
+}
+
+.qa-panel__heading {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.qa-panel__title {
+  font-size: 1.5rem;
+}
+
+.qa-panel__title--sm {
+  font-size: 1.125rem;
+}
+
+.qa-session-pills {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.qa-pill,
+.qa-count-pill,
+.qa-badge,
+.qa-hint-chip {
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;
+  padding: 0 10px;
+  border-radius: var(--radius-pill);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.qa-pill,
+.qa-count-pill,
+.qa-badge,
+.qa-hint-chip {
+  border: 1px solid var(--line-soft);
+  background: var(--surface-3);
+  color: var(--text-secondary);
+}
+
+.qa-pill--brand {
+  border-color: rgba(36, 87, 197, 0.18);
+  background: var(--brand-soft);
+  color: var(--brand);
+}
+
+.qa-pill--warm {
+  border-color: rgba(183, 121, 31, 0.16);
+  background: var(--warning-50);
+  color: var(--warning-600);
+}
+
+.qa-count-pill {
+  color: var(--brand);
+}
+
+.qa-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  padding: 0 24px 20px;
+}
+
+.qa-summary-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-height: 92px;
+  padding: 16px 18px;
+  border: 1px solid rgba(183, 121, 31, 0.12);
+  border-radius: 18px;
+  background: rgba(253, 249, 239, 0.74);
+}
+
+.qa-summary-card__label {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.qa-summary-card__value {
+  font-size: 18px;
+  line-height: 1.45;
+  color: var(--text-primary);
+}
+
+.qa-transcript {
   flex: 1;
   min-height: 0;
-  overflow-y: auto;
   display: flex;
   flex-direction: column;
   gap: 18px;
-  padding: 20px 22px 14px;
+  overflow-y: auto;
+  padding: 4px 24px 20px;
+  background: rgba(248, 249, 251, 0.92);
+  border-top: 1px solid var(--line-soft);
+  border-bottom: 1px solid var(--line-soft);
 }
 
-.qa-messages--empty {
+.qa-transcript--empty {
   justify-content: center;
-  align-items: center;
 }
-
-/* Empty State */
 
 .qa-empty {
   display: flex;
   flex-direction: column;
-  align-items: center;
-  text-align: center;
-  max-width: 380px;
-  padding: 20px;
-  animation: emptyFadeIn 300ms cubic-bezier(0.25, 1, 0.5, 1) both;
+  gap: 14px;
+  max-width: 640px;
+  padding: 28px;
+  border: 1px dashed rgba(183, 121, 31, 0.28);
+  border-radius: 24px;
+  background: rgba(253, 249, 239, 0.78);
 }
 
-.qa-empty__orb {
-  width: 64px;
-  height: 64px;
-  border-radius: 50%;
-  background: linear-gradient(135deg, rgba(94, 128, 255, 0.18), rgba(124, 94, 255, 0.14));
-  border: 1.5px solid rgba(102, 140, 255, 0.18);
-  box-shadow: 0 0 40px rgba(71, 109, 255, 0.2);
-  margin-bottom: 20px;
-  animation: orbBreathe 4s cubic-bezier(0.25, 1, 0.5, 1) infinite;
+.qa-empty__badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  align-self: flex-start;
+  min-height: 32px;
+  padding: 0 12px;
+  border-radius: var(--radius-pill);
+  background: rgba(36, 87, 197, 0.08);
+  color: var(--brand);
+  font-size: 12px;
+  font-weight: 700;
 }
 
 .qa-empty__title {
-  margin: 0 0 8px;
-  font-size: 22px;
-  font-weight: 700;
-  color: #eef4ff;
+  margin: 0;
+  font-size: 26px;
+  line-height: 1.25;
+  color: var(--text-primary);
 }
 
 .qa-empty__text {
   margin: 0;
-  font-size: 13px;
-  line-height: 1.7;
-  color: #8597bb;
+  font-size: 14px;
+  line-height: 1.75;
+  color: var(--text-secondary);
 }
 
-/* Notice */
+.qa-empty__actions,
+.qa-question-list,
+.qa-session-list,
+.qa-citation-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
 
 .qa-notice {
-  padding: 11px 14px;
-  border-radius: 10px;
+  padding: 12px 14px;
+  border-radius: 16px;
   font-size: 13px;
-  line-height: 1.55;
+  line-height: 1.65;
 }
 
 .qa-notice--warn {
-  border: 1px solid rgba(224, 92, 120, 0.24);
-  background: rgba(51, 18, 34, 0.82);
-  color: #ffb4c1;
+  border: 1px solid rgba(196, 73, 61, 0.2);
+  background: var(--risk-50);
+  color: var(--risk-600);
 }
 
-/* System Messages */
-
-.qa-msg-system {
+.qa-system-msg {
   align-self: center;
-  padding: 6px 16px;
-  border-radius: 999px;
-  border: 1px solid rgba(102, 132, 255, 0.12);
-  background: rgba(15, 24, 42, 0.72);
-  color: #8fa1c2;
+  padding: 8px 14px;
+  border-radius: var(--radius-pill);
+  background: var(--surface-3);
+  color: var(--text-muted);
   font-size: 12px;
-  max-width: 90%;
-  text-align: center;
 }
 
-/* Message Row */
-
-.qa-msg {
+.qa-message {
   display: flex;
   gap: 12px;
   align-items: flex-start;
 }
 
-.qa-msg--user {
-  flex-direction: row-reverse;
+.qa-message--user {
+  justify-content: flex-end;
 }
 
-/* Avatars */
-
-.qa-msg__avatar {
-  width: 34px;
-  height: 34px;
-  border-radius: 10px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 11px;
-  font-weight: 800;
-  letter-spacing: 0.04em;
-  flex-shrink: 0;
-  border: 1px solid rgba(103, 134, 255, 0.16);
+.qa-message--user .qa-message__body {
+  order: 1;
 }
 
-.qa-msg__avatar-image {
+.qa-message--user .qa-message__avatar {
+  order: 2;
+}
+
+.qa-message__avatar {
+  width: 40px;
+  height: 40px;
+  flex: 0 0 40px;
+  display: grid;
+  place-items: center;
+  border-radius: 14px;
+  background: var(--surface-3);
+  border: 1px solid var(--line-soft);
+  color: var(--text-primary);
+  font-size: 14px;
+  font-weight: 700;
+  overflow: hidden;
+}
+
+.qa-message__avatar--assistant {
+  background: rgba(253, 249, 239, 0.88);
+  border-color: rgba(183, 121, 31, 0.14);
+}
+
+.qa-message__avatar--user {
+  background: var(--brand);
+  border-color: rgba(36, 87, 197, 0.22);
+  color: var(--text-inverse);
+}
+
+.qa-message__avatar-image {
   width: 100%;
   height: 100%;
   object-fit: cover;
-  border-radius: inherit;
-  transition: opacity 0.2s ease;
+  display: block;
 }
 
-.qa-msg__avatar-image--loading {
-  opacity: 0.5;
+.qa-message__avatar-image--loading {
+  opacity: 0.8;
 }
 
-.qa-msg__avatar--user {
-  background: linear-gradient(135deg, rgba(41, 74, 153, 0.92), rgba(70, 42, 133, 0.92));
-  color: #eff5ff;
-  overflow: hidden;
-}
-
-.qa-msg__avatar--ai {
-  overflow: hidden;
-  background: transparent;
-  border: none;
-  color: #b8ccff;
-}
-
-/* Message Body */
-
-.qa-msg__body {
-  min-width: 0;
-  max-width: 85%;
-}
-
-.qa-msg__body--user {
-  max-width: 78%;
-}
-
-/* Bubbles */
-
-.qa-msg__bubble {
-  border-radius: 14px;
-  padding: 16px 18px;
-  line-height: 1.72;
-  font-size: 14px;
-}
-
-.qa-msg__bubble--ai {
-  background: rgba(12, 20, 35, 0.9);
-  color: #d8e5ff;
-  border: 1px solid rgba(72, 108, 255, 0.12);
-  box-shadow: 0 16px 36px -28px rgba(3, 8, 20, 0.9);
-}
-
-.qa-msg__bubble--user {
-  background: linear-gradient(135deg, rgba(39, 70, 152, 0.9), rgba(68, 48, 144, 0.9));
-  color: #eff5ff;
-  border: 1px solid rgba(113, 142, 255, 0.24);
-}
-
-.qa-msg__bubble--error {
-  border-color: rgba(224, 92, 120, 0.24);
-  background: rgba(52, 18, 36, 0.84);
-  color: #ffc1cc;
-}
-
-.qa-msg__bubble--loading {
+.qa-message__body {
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  align-items: flex-start;
-  padding: 18px 22px;
+  gap: 8px;
+  min-width: 0;
+  max-width: min(840px, calc(100% - 52px));
 }
 
-.qa-msg__bubble--loading p {
-  margin: 0;
-  font-size: 13px;
-  color: #92a6cb;
+.qa-message__body--user {
+  align-items: flex-end;
 }
 
-/* Answer Meta Badges */
+.qa-message__bubble {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px 18px;
+  border-radius: 20px;
+  border: 1px solid var(--line-soft);
+  box-shadow: var(--shadow-xs);
+}
+
+.qa-message__bubble--assistant {
+  background: var(--surface-2);
+}
+
+.qa-message__bubble--user {
+  background: rgba(36, 87, 197, 0.08);
+  border-color: rgba(36, 87, 197, 0.14);
+  color: var(--text-primary);
+}
+
+.qa-message__bubble--error {
+  border-color: rgba(196, 73, 61, 0.18);
+  background: rgba(254, 242, 241, 0.92);
+}
+
+.qa-message__bubble--loading {
+  min-height: 96px;
+  justify-content: center;
+}
 
 .qa-answer__meta {
   display: flex;
-  gap: 8px;
   flex-wrap: wrap;
-  margin-bottom: 12px;
-  padding-bottom: 12px;
-  border-bottom: 1px solid rgba(72, 108, 255, 0.1);
+  gap: 8px;
 }
-
-.qa-badge {
-  font-size: 11px;
-  font-weight: 700;
-  padding: 4px 10px;
-  border-radius: 5px;
-  letter-spacing: 0.02em;
-}
-
-.qa-badge--mode {
-  background: rgba(54, 38, 109, 0.7);
-  color: #9d87ff;
-  border: 1px solid rgba(120, 100, 255, 0.16);
-}
-
-.qa-badge--citations {
-  background: rgba(18, 63, 77, 0.7);
-  color: #55d4bd;
-  border: 1px solid rgba(80, 200, 180, 0.16);
-}
-
-.qa-badge--time {
-  background: rgba(40, 50, 80, 0.6);
-  color: #94a8cc;
-  border: 1px solid rgba(100, 120, 160, 0.16);
-}
-
-/* Answer Content */
 
 .qa-answer__content {
-  min-height: 20px;
-  overflow: hidden;
+  min-width: 0;
+  color: var(--text-primary);
 }
 
 .qa-answer__content--streaming {
-  color: #c8d8f8;
+  min-height: 24px;
 }
 
-/* 流式输出时，让光标紧跟最后一个段落 */
-.qa-answer__content--streaming .markdown-body p:last-child,
-.qa-answer__content--streaming .markdown-body li:last-child {
-  display: inline;
+.qa-answer__notice {
+  padding: 10px 12px;
+  border-radius: 14px;
+  background: var(--warning-50);
+  color: var(--warning-600);
+  font-size: 13px;
+  line-height: 1.6;
 }
 
-.qa-cursor {
-  display: inline-block;
-  width: 2px;
-  height: 1.1em;
-  background: #7b9fff;
-  vertical-align: text-bottom;
-  margin-left: 1px;
-  animation: cursorBlink 0.9s step-end infinite;
+.qa-cite-jump {
+  align-self: flex-start;
+  min-height: 40px;
+  padding: 0 14px;
+  border-radius: var(--radius-pill);
+  border-color: rgba(36, 87, 197, 0.18);
+  background: rgba(36, 87, 197, 0.06);
+  color: var(--brand);
+  cursor: pointer;
 }
-
-@keyframes cursorBlink {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0; }
-}
-
-/* Loading Dots */
-
-.qa-loading {
-  display: inline-flex;
-  gap: 5px;
-}
-
-.qa-loading span {
-  width: 14px;
-  height: 4px;
-  border-radius: 999px;
-  background: rgba(116, 144, 255, 0.5);
-  animation: dotPulse 1.1s ease-in-out infinite;
-}
-
-.qa-loading span:nth-child(2) { animation-delay: 0.14s; }
-.qa-loading span:nth-child(3) { animation-delay: 0.28s; }
-
-@keyframes dotPulse {
-  0%, 100% { opacity: 0.4; transform: scaleX(0.8); }
-  50% { opacity: 1; transform: scaleX(1); }
-}
-
-/* RAG Pipeline Steps */
 
 .qa-steps {
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  padding: 8px 0;
+  gap: 8px;
+  padding-top: 2px;
 }
 
 .qa-step {
-  display: inline-flex;
+  display: flex;
   align-items: center;
-  gap: 6px;
-  font-size: 12px;
-  color: rgba(162, 180, 216, 0.8);
-  animation: stepFadeIn 0.25s ease-out;
-}
-
-.qa-step__icon {
-  color: #486cff;
-  font-size: 11px;
-  flex-shrink: 0;
-}
-
-.qa-step__label {
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-@keyframes stepFadeIn {
-  from { opacity: 0; transform: translateY(4px); }
-  to { opacity: 1; transform: translateY(0); }
-}
-
-/* Answer Notice */
-
-.qa-answer__notice {
-  margin-top: 12px;
-  padding-top: 10px;
-  border-top: 1px solid rgba(72, 108, 255, 0.1);
-  font-size: 12px;
-  color: #a2b4d8;
-  line-height: 1.6;
-}
-
-/* Citation Jump */
-
-.qa-cite-jump {
-  margin-top: 10px;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 0;
-  border: 0;
-  background: transparent;
-  color: #7b9fff;
-  font-size: 12px;
-  font-weight: 700;
-  cursor: pointer;
-}
-
-.qa-cite-jump::after {
-  content: '→';
-}
-
-/* ---- Input Area ---- */
-
-.qa-input-area {
-  border-top: 1px solid rgba(72, 108, 255, 0.12);
-  padding: 14px 20px 16px;
-  background: rgba(8, 15, 28, 0.7);
-}
-
-.qa-input__row {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 44px;
   gap: 10px;
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+
+.qa-step__dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--brand);
+  flex: 0 0 8px;
+}
+
+.qa-loading {
+  display: inline-flex;
   align-items: center;
-  padding: 10px 10px 10px 18px;
-  border-radius: 12px;
-  border: 1px solid rgba(72, 108, 255, 0.16);
-  background:
-    linear-gradient(180deg, rgba(12, 20, 34, 0.94), rgba(9, 15, 28, 0.94)),
-    radial-gradient(circle at 88% 100%, rgba(71, 94, 255, 0.14), transparent 24%);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.02);
+  gap: 6px;
 }
 
-.qa-input__textarea {
-  height: 26px;
-  min-height: 26px;
-  max-height: 140px;
+.qa-loading span {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--brand);
+  animation: qa-bounce 1s infinite ease-in-out;
+}
+
+.qa-loading span:nth-child(2) {
+  animation-delay: 0.12s;
+}
+
+.qa-loading span:nth-child(3) {
+  animation-delay: 0.24s;
+}
+
+.qa-loading__text {
+  margin: 12px 0 0;
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+
+.qa-cursor {
+  display: inline-block;
+  width: 8px;
+  height: 18px;
+  margin-left: 4px;
+  vertical-align: middle;
+  border-radius: 999px;
+  background: var(--brand);
+  animation: qa-caret 1s step-end infinite;
+}
+
+.qa-composer {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 18px 24px 22px;
+  background: rgba(255, 255, 255, 0.96);
+}
+
+.qa-composer__frame {
+  display: flex;
+  align-items: flex-end;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid rgba(183, 121, 31, 0.14);
+  border-radius: 22px;
+  background: rgba(253, 249, 239, 0.72);
+}
+
+.qa-composer__textarea {
+  flex: 1;
+  min-height: 56px;
+  max-height: 180px;
   resize: none;
-  overflow: auto;
   border: 0;
-  background: transparent;
-  padding: 0;
-  font: inherit;
-  font-size: 13.5px;
-  color: #ecf4ff;
-  line-height: 26px;
   outline: none;
+  background: transparent;
+  color: var(--text-primary);
+  font-size: 15px;
+  line-height: 1.65;
 }
 
-.qa-input__textarea::placeholder {
-  color: #637394;
+.qa-composer__textarea::placeholder {
+  color: var(--text-muted);
 }
 
-.qa-input__send {
-  width: 42px;
-  height: 42px;
-  border: none;
-  border-radius: 10px;
-  background: linear-gradient(135deg, #2f63ff, #596cff 65%, #785fff);
-  color: #f6fbff;
+.qa-composer__send {
+  min-width: 96px;
+  min-height: 44px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  gap: 8px;
+  padding: 0 16px;
+  border-radius: var(--radius-pill);
   cursor: pointer;
-  flex-shrink: 0;
-  box-shadow: 0 14px 28px -16px rgba(64, 96, 255, 0.7);
-  transition:
-    transform 0.2s ease,
-    opacity 0.2s ease,
-    filter 0.2s ease;
 }
 
-.qa-input__send:hover:not(:disabled) {
-  filter: brightness(1.06);
-  transform: translateY(-1px);
-}
-
-.qa-input__send:disabled {
+.qa-composer__send:disabled {
+  background: var(--surface-3);
+  border-color: var(--line-soft);
+  color: var(--text-muted);
   cursor: not-allowed;
-  opacity: 0.45;
+  box-shadow: none;
 }
 
-.qa-input__footer {
+.qa-composer__meta {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  margin-top: 10px;
 }
 
-.qa-input__toggles {
+.qa-composer__hints {
   display: flex;
-  gap: 6px;
   flex-wrap: wrap;
+  gap: 8px;
 }
 
-.qa-toggle {
-  min-height: 30px;
+.qa-hint-chip--status {
+  color: var(--brand);
+  border-color: rgba(36, 87, 197, 0.16);
+  background: rgba(36, 87, 197, 0.05);
+}
+
+.qa-icon-btn,
+.qa-link-btn {
+  min-height: 40px;
   padding: 0 12px;
-  border: 1px solid rgba(72, 108, 255, 0.16);
-  border-radius: 7px;
-  background: rgba(15, 24, 44, 0.7);
-  color: #99accb;
-  font-size: 12px;
-  font-weight: 600;
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--text-secondary);
   cursor: pointer;
-  transition:
-    border-color 0.2s ease,
-    background-color 0.2s ease,
-    color 0.2s ease;
 }
 
-.qa-toggle:hover {
-  border-color: rgba(102, 138, 255, 0.26);
-  background: rgba(20, 32, 56, 0.9);
-  color: #d0dcff;
-}
-
-.qa-toggle:first-child {
-  border-color: rgba(80, 130, 255, 0.28);
-  background: rgba(30, 70, 200, 0.18);
-  color: #a0bfff;
-}
-
-.qa-input__clear {
+.qa-icon-btn {
+  width: 40px;
+  justify-content: center;
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  padding: 0;
-  border: 0;
-  background: transparent;
-  color: #7485a8;
-  font-size: 12px;
-  cursor: pointer;
-  flex-shrink: 0;
-  transition: color 0.2s ease;
 }
 
-.qa-input__clear:hover {
-  color: #b0c0e4;
+.qa-link-btn {
+  display: inline-flex;
+  align-items: center;
+  border-color: var(--line-soft);
 }
-
-/* ---- Right Sidebar ---- */
 
 .qa-rail {
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  min-height: 0;
-  overflow-y: auto;
+  gap: 16px;
+  position: sticky;
+  top: 0;
 }
 
-.qa-rail__card {
-  border: 1px solid rgba(66, 108, 255, 0.14);
-  border-radius: 14px;
-  background:
-    linear-gradient(180deg, rgba(10, 19, 38, 0.9), rgba(7, 14, 28, 0.9)),
-    radial-gradient(circle at top right, rgba(71, 94, 255, 0.08), transparent 36%);
-  box-shadow: 0 20px 48px -36px rgba(4, 10, 22, 0.84);
-  overflow: hidden;
-}
-
-.qa-rail__header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  padding: 14px 16px;
-  border-bottom: 1px solid rgba(72, 108, 255, 0.1);
-}
-
-.qa-rail__header h3 {
-  margin: 0;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 14px;
-  font-weight: 700;
-  color: #eef4ff;
-}
-
-.qa-rail__count {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 24px;
-  height: 24px;
-  padding: 0 7px;
-  border-radius: 999px;
-  border: 1px solid rgba(93, 130, 255, 0.22);
-  background: rgba(49, 68, 130, 0.24);
-  color: #a9beff;
-  font-size: 11px;
-  font-weight: 700;
-}
-
-.qa-rail__refresh {
-  display: grid;
-  place-items: center;
-  width: 28px;
-  height: 28px;
-  border: 1px solid rgba(102, 132, 255, 0.14);
-  border-radius: 7px;
-  background: rgba(15, 24, 44, 0.6);
-  color: #8597bb;
-  cursor: pointer;
-  transition: color 0.2s ease;
-}
-
-.qa-rail__refresh:hover {
-  color: #c5d4ff;
-}
-
-.qa-rail__action-text {
-  border: 0;
-  background: transparent;
-  color: #7180a0;
-  font-size: 12px;
-  cursor: pointer;
-  transition: color 0.2s ease;
-}
-
-.qa-rail__action-text:hover {
-  color: #b0c0e4;
-}
-
-.qa-rail__list {
-  display: flex;
-  flex-direction: column;
-}
-
-.qa-rail__empty {
-  padding: 28px 16px;
-  text-align: center;
-}
-
-.qa-rail__empty p {
-  margin: 0;
-  font-size: 13px;
-  color: #6f7e9c;
-  line-height: 1.6;
-}
-
-/* Citation Cards */
-
-.qa-cite-card {
-  display: grid;
-  grid-template-columns: 22px 1fr;
-  gap: 10px;
-  padding: 14px 16px;
-  border-bottom: 1px solid rgba(72, 108, 255, 0.06);
-  transition: background-color 0.2s ease;
-}
-
-.qa-cite-card:last-child {
-  border-bottom: 0;
-}
-
-.qa-cite-card__index {
-  width: 22px;
-  height: 22px;
-  display: grid;
-  place-items: center;
-  border-radius: 50%;
-  border: 1px solid rgba(80, 96, 125, 0.5);
-  color: #8796b5;
-  font-size: 12px;
-  font-weight: 700;
-}
-
-.qa-cite-card__index--active {
-  border-color: rgba(66, 120, 255, 0.5);
-  background: rgba(66, 120, 255, 0.2);
-  color: #a0bfff;
-}
-
-.qa-cite-card__title {
-  font-size: 13px;
-  font-weight: 600;
-  color: #dce5ff;
-  line-height: 1.4;
-  margin-bottom: 4px;
-}
-
-.qa-cite-card__meta {
-  font-size: 11px;
-  color: #6f7e9c;
-  margin-bottom: 6px;
-}
-
-.qa-cite-card__snippet {
-  font-size: 12px;
-  color: #97a8cc;
-  line-height: 1.55;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-}
-
-.qa-cite-card__score {
-  margin-top: 6px;
-  font-size: 11px;
-  color: #8896b6;
-  font-weight: 600;
-}
-
-/* Question Buttons */
-
-.qa-rail__questions {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding: 14px 14px 16px;
-}
-
+.qa-citation-card,
+.qa-session-btn,
 .qa-question-btn {
   width: 100%;
   text-align: left;
-  padding: 11px 14px;
-  border: 1px solid rgba(72, 108, 255, 0.14);
-  border-radius: 10px;
-  background: rgba(15, 24, 44, 0.7);
-  color: #c7d3ee;
-  font-size: 13px;
-  line-height: 1.55;
-  cursor: pointer;
-  transition:
-    border-color 0.2s ease,
-    background-color 0.2s ease,
-    transform 0.2s ease;
 }
 
-.qa-question-btn:hover {
-  border-color: rgba(102, 138, 255, 0.24);
-  background: rgba(20, 32, 56, 0.92);
-  transform: translateY(-1px);
+.qa-citation-card {
+  display: flex;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid var(--line-soft);
+  border-radius: 18px;
+  background: var(--surface-2);
 }
 
-/* Session Buttons */
+.qa-citation-card__index {
+  width: 28px;
+  height: 28px;
+  flex: 0 0 28px;
+  display: grid;
+  place-items: center;
+  border-radius: 999px;
+  background: rgba(36, 87, 197, 0.1);
+  color: var(--brand);
+  font-size: 12px;
+  font-weight: 700;
+}
 
-.qa-rail__sessions {
+.qa-citation-card__body {
   display: flex;
   flex-direction: column;
   gap: 4px;
-  padding: 10px 14px 14px;
+  min-width: 0;
+}
+
+.qa-citation-card__title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.qa-citation-card__meta,
+.qa-citation-card__score,
+.qa-session-btn__meta {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.qa-citation-card__snippet {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 13px;
+  line-height: 1.65;
+}
+
+.qa-question-btn,
+.qa-session-btn {
+  min-height: 44px;
+  display: inline-flex;
+  align-items: flex-start;
+  justify-content: flex-start;
+  padding: 14px 16px;
+  border-radius: 18px;
+  border-color: var(--line-soft);
+  background: var(--surface-2);
+  color: var(--text-primary);
+  cursor: pointer;
+}
+
+.qa-question-btn {
+  font-size: 14px;
+  line-height: 1.55;
 }
 
 .qa-session-btn {
-  width: 100%;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  padding: 10px 12px;
-  border: 1px solid transparent;
-  border-radius: 8px;
-  background: transparent;
-  color: #c7d3ee;
-  font-size: 13px;
-  cursor: pointer;
-  text-align: left;
-  transition:
-    border-color 0.2s ease,
-    background-color 0.2s ease;
-}
-
-.qa-session-btn:hover {
-  border-color: rgba(72, 108, 255, 0.14);
-  background: rgba(15, 24, 44, 0.7);
+  flex-direction: column;
+  gap: 4px;
 }
 
 .qa-session-btn__title {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-weight: 500;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
 }
 
-.qa-session-btn__time {
-  font-size: 11px;
-  color: #6f7e9c;
-  flex-shrink: 0;
+.qa-empty-block {
+  padding: 0 24px 24px;
+  color: var(--text-muted);
+  font-size: 13px;
+  line-height: 1.7;
 }
 
-/* History Drawer Override */
-
-:deep(.qa-history-drawer .el-drawer__body) {
-  padding: 18px;
-  background: linear-gradient(180deg, #0a1220, #0e1729);
+.qa-msg-enter-active,
+.qa-msg-leave-active {
+  transition:
+    opacity 0.18s ease,
+    transform 0.18s ease;
 }
 
-/* ---- Responsive ---- */
+.qa-msg-enter-from,
+.qa-msg-leave-to {
+  opacity: 0;
+  transform: translateY(8px);
+}
 
-@media (max-width: 1100px) {
+.qa-action-btn:focus-visible,
+.qa-icon-btn:focus-visible,
+.qa-link-btn:focus-visible,
+.qa-question-btn:focus-visible,
+.qa-session-btn:focus-visible,
+.qa-cite-jump:focus-visible,
+.qa-composer__send:focus-visible,
+.qa-composer__textarea:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 2px;
+}
+
+@keyframes qa-bounce {
+  0%,
+  80%,
+  100% {
+    transform: translateY(0);
+    opacity: 0.5;
+  }
+  40% {
+    transform: translateY(-4px);
+    opacity: 1;
+  }
+}
+
+@keyframes qa-caret {
+  50% {
+    opacity: 0;
+  }
+}
+
+@media (max-width: 1200px) {
   .qa-layout {
     grid-template-columns: minmax(0, 1fr);
   }
 
   .qa-rail {
-    display: none;
+    position: static;
+  }
+}
+
+@media (max-width: 900px) {
+  .qa-summary-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 
 @media (max-width: 720px) {
-  .qa-messages {
-    padding: 14px 14px 10px;
+  .qa-overview,
+  .qa-panel__header,
+  .qa-summary-grid,
+  .qa-transcript,
+  .qa-composer,
+  .qa-empty-block {
+    padding-left: 18px;
+    padding-right: 18px;
   }
 
-  .qa-input-area {
-    padding: 12px 14px 14px;
+  .qa-overview {
+    padding-top: 20px;
+    padding-bottom: 20px;
+    flex-direction: column;
   }
 
-  .qa-input__toggles {
-    gap: 4px;
+  .qa-overview__actions {
+    width: 100%;
+    justify-content: flex-start;
   }
 
-  .qa-toggle {
-    padding: 0 9px;
-    font-size: 11px;
+  .qa-panel__header {
+    flex-direction: column;
+  }
+
+  .qa-session-pills {
+    justify-content: flex-start;
+  }
+
+  .qa-summary-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .qa-message__body {
+    max-width: 100%;
+  }
+
+  .qa-composer__frame,
+  .qa-composer__meta {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .qa-composer__send {
+    width: 100%;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .qa-action-btn,
+  .qa-icon-btn,
+  .qa-link-btn,
+  .qa-question-btn,
+  .qa-session-btn,
+  .qa-cite-jump,
+  .qa-composer__send,
+  .qa-msg-enter-active,
+  .qa-msg-leave-active,
+  .qa-loading span,
+  .qa-cursor {
+    animation: none !important;
+    transition: none !important;
   }
 }
 </style>
