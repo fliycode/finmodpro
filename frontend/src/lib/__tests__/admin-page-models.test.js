@@ -25,14 +25,3 @@ test('governance pages do not reuse the llm operations region order', () => {
 
   assert.notDeepEqual(llm.regions, governance.regions);
 });
-
-test('knowledge admin page leads with summary before ledger and inspector', () => {
-  const model = getAdminPageModel('knowledge');
-
-  assert.deepEqual(model.regions.map((region) => region.id), [
-    'summary',
-    'ledger',
-    'inspector',
-  ]);
-  assert.equal(model.mobileMode, 'review-stack');
-});

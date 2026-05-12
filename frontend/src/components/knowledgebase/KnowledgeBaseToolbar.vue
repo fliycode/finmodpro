@@ -85,19 +85,9 @@ const selectedLabels = computed(() => ({
   dataset: datasetOptions.value.find((o) => String(o.value) === String(props.selectedDatasetId))?.label || '全部数据集',
 }));
 
-const getControlValue = (controlId) => {
-  if (controlId === 'dataset') {
-    return props.selectedDatasetId;
-  }
-  if (controlId === 'status') {
-    return props.statusFilter;
-  }
-  return props.timeRange;
-};
-
 const toggleDropdown = (control) => {
-  controls.forEach((candidate) => {
-    if (candidate.id !== control.id) candidate.open = false;
+  controls.forEach((c) => {
+    if (c.id !== control.id) c.open = false;
   });
   control.open = !control.open;
 };
@@ -109,9 +99,7 @@ const selectOption = (control, value) => {
 
 const handleClickOutside = (event) => {
   if (toolbarRef.value && !toolbarRef.value.contains(event.target)) {
-    controls.forEach((control) => {
-      control.open = false;
-    });
+    controls.forEach((c) => { c.open = false; });
   }
 };
 
@@ -125,94 +113,61 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <section ref="toolbarRef" class="kb-toolbar" aria-label="知识库筛选与操作">
-    <div class="kb-toolbar__filters">
-      <div
-        v-for="control in controls"
-        :key="control.id"
-        class="kb-custom-select"
-        :class="{ 'is-open': control.open }"
+  <section ref="toolbarRef" class="kb-toolbar">
+    <div
+      v-for="control in controls"
+      :key="control.id"
+      class="kb-custom-select"
+      :class="{ 'is-open': control.open }"
+    >
+      <button
+        type="button"
+        class="kb-custom-select__trigger"
+        @click.stop="toggleDropdown(control)"
       >
+        <span>{{ selectedLabels[control.id] }}</span>
+        <AppIcon name="chevron-down" :width="12" :height="12" />
+      </button>
+      <div v-if="control.open" class="kb-custom-select__dropdown">
         <button
+          v-for="option in control.options"
+          :key="option.value"
           type="button"
-          class="kb-custom-select__trigger"
-          :aria-expanded="control.open ? 'true' : 'false'"
-          aria-haspopup="listbox"
-          :aria-label="`选择${selectedLabels[control.id]}`"
-          @click.stop="toggleDropdown(control)"
+          :class="['kb-custom-select__option', { active: String(option.value) === String(control.id === 'dataset' ? selectedDatasetId : control.id === 'status' ? statusFilter : timeRange) }]"
+          @click.stop="selectOption(control, option.value)"
         >
-          <span>{{ selectedLabels[control.id] }}</span>
-          <AppIcon name="chevron-down" :width="12" :height="12" />
+          {{ option.label }}
         </button>
-        <div
-          v-if="control.open"
-          class="kb-custom-select__dropdown"
-          role="listbox"
-          :aria-label="selectedLabels[control.id]"
-        >
-          <button
-            v-for="option in control.options"
-            :key="option.value"
-            type="button"
-            role="option"
-            :aria-selected="String(option.value) === String(getControlValue(control.id))"
-            :class="['kb-custom-select__option', { active: String(option.value) === String(getControlValue(control.id)) }]"
-            @click.stop="selectOption(control, option.value)"
-          >
-            {{ option.label }}
-          </button>
-        </div>
       </div>
     </div>
 
-    <label class="kb-search-field">
-      <span class="sr-only">搜索知识库文档</span>
-      <AppIcon name="search" :width="16" :height="16" />
-      <input
-        :value="searchKeyword"
-        class="kb-search"
-        type="text"
-        placeholder="搜索文档标题、文件名、上传者"
-        aria-label="搜索知识库文档"
-        @input="emit('update:searchKeyword', $event.target.value)"
-      />
-    </label>
+    <input
+      :value="searchKeyword"
+      class="kb-search"
+      type="text"
+      placeholder="搜索知识库、文档、上传者..."
+      @input="emit('update:searchKeyword', $event.target.value)"
+    />
 
-    <div class="kb-toolbar__actions">
-      <button class="kb-secondary-btn" type="button" @click="emit('create-dataset')">
-        <AppIcon name="plus" :width="16" :height="16" />
-        <span>新建数据集</span>
-      </button>
+    <button class="kb-secondary-btn" @click="emit('create-dataset')">
+      新建数据集
+    </button>
 
-      <button class="kb-primary-btn" type="button" :disabled="isUploading" @click="emit('upload')">
-        <AppIcon :name="isUploading ? 'refresh' : 'upload'" :width="16" :height="16" />
-        <span>{{ isUploading ? '上传中...' : '上传文档' }}</span>
-      </button>
-    </div>
+    <button class="kb-primary-btn" :disabled="isUploading" @click="emit('upload')">
+      {{ isUploading ? '上传中...' : '上传文档' }}
+    </button>
   </section>
 </template>
 
 <style scoped>
 .kb-toolbar {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(240px, 1fr) auto;
-  gap: 12px;
-  padding: 18px;
-  border-bottom: 1px solid var(--line-soft);
-  background: color-mix(in oklab, var(--brand) 2%, var(--surface-2));
-  align-items: center;
-}
-
-.kb-toolbar__filters,
-.kb-toolbar__actions {
   display: flex;
   flex-wrap: wrap;
   gap: 10px;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--line-soft);
+  background: color-mix(in oklab, var(--brand) 3%, var(--surface-2));
   align-items: center;
-}
-
-.kb-toolbar__actions {
-  justify-content: flex-end;
 }
 
 .kb-custom-select {
@@ -227,7 +182,7 @@ onUnmounted(() => {
   justify-content: space-between;
   gap: 8px;
   width: 100%;
-  min-height: 44px;
+  height: 40px;
   padding: 0 14px;
   border: 1px solid var(--line-strong);
   border-radius: 12px;
@@ -282,50 +237,29 @@ onUnmounted(() => {
   color: var(--brand);
 }
 
-.kb-search-field {
-  display: flex;
-  align-items: center;
-  gap: 10px;
+.kb-search {
+  flex: 1 1 200px;
   min-width: 0;
-  min-height: 44px;
+  height: 40px;
   border: 1px solid var(--line-strong);
   border-radius: 12px;
   padding: 0 14px;
   background: var(--surface-3);
   color: var(--text-primary);
-  transition: border-color 0.15s ease, box-shadow 0.15s ease;
-}
-
-.kb-search-field :deep(.app-icon) {
-  flex: 0 0 auto;
-  color: var(--text-muted);
-}
-
-.kb-search {
-  flex: 1 1 auto;
-  min-width: 0;
-  height: 42px;
-  border: none;
-  padding: 0;
-  background: transparent;
-  color: var(--text-primary);
   font-family: 'PingFang SC', 'Noto Sans SC', 'Microsoft YaHei', sans-serif;
   font-size: 14px;
   outline: none;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
 
-.kb-search-field:focus-within {
+.kb-search:focus {
   border-color: var(--brand);
   box-shadow: 0 0 0 3px var(--brand-soft);
 }
 
 .kb-primary-btn,
 .kb-secondary-btn {
-  min-height: 44px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
+  height: 40px;
   border-radius: 12px;
   padding: 0 18px;
   font-family: 'PingFang SC', 'Noto Sans SC', 'Microsoft YaHei', sans-serif;
@@ -352,39 +286,15 @@ onUnmounted(() => {
   cursor: not-allowed;
 }
 
-.sr-only {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  padding: 0;
-  margin: -1px;
-  overflow: hidden;
-  clip: rect(0, 0, 0, 0);
-  white-space: nowrap;
-  border: 0;
-}
-
-@media (max-width: 1080px) {
-  .kb-toolbar {
-    grid-template-columns: 1fr;
-  }
-
-  .kb-toolbar__actions {
-    justify-content: flex-start;
-  }
-}
-
 @media (max-width: 600px) {
-  .kb-toolbar__filters,
-  .kb-toolbar__actions {
+  .kb-toolbar {
     flex-direction: column;
-    align-items: stretch;
   }
 
-  .kb-search-field,
-  .kb-custom-select,
-  .kb-toolbar__actions > * {
+  .kb-search,
+  .kb-custom-select {
     width: 100%;
+    flex: none;
   }
 }
 </style>

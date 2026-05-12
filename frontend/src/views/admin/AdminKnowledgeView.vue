@@ -4,7 +4,7 @@ import KnowledgeBase from '../../components/KnowledgeBase.vue';
 
 <template>
   <section class="admin-knowledge-page">
-    <KnowledgeBase show-admin-metrics />
+    <KnowledgeBase />
   </section>
 </template>
 

@@ -53,12 +53,7 @@ const showReingest = (item) => {
   <div class="kb-table">
     <div class="kb-table__header">
       <label class="kb-checkbox" @click.stop>
-        <input
-          type="checkbox"
-          :checked="isAllChecked()"
-          aria-label="全选当前页文档"
-          @change="emit('toggle-all')"
-        />
+        <input type="checkbox" :checked="isAllChecked()" @change="emit('toggle-all')" />
       </label>
       <span>文档名称</span>
       <span>数据集</span>
@@ -72,22 +67,17 @@ const showReingest = (item) => {
     <div v-if="isLoading && items.length === 0" class="kb-empty">正在加载知识库...</div>
     <div v-else-if="items.length === 0" class="kb-empty">当前没有符合条件的文档。</div>
 
-    <div
+    <button
       v-for="item in items"
       :key="item.id"
+      type="button"
       class="kb-table__row"
-      role="button"
-      tabindex="0"
-      :aria-label="`打开文档详情：${item.title}`"
       @click="emit('navigate', item)"
-      @keydown.enter.self.prevent="emit('navigate', item)"
-      @keydown.space.self.prevent="emit('navigate', item)"
     >
       <label class="kb-checkbox" @click.stop>
         <input
           type="checkbox"
           :checked="checkedIds.includes(item.id)"
-          :aria-label="`选择文档：${item.title}`"
           @change="emit('toggle-row', item.id)"
         />
       </label>
@@ -112,10 +102,7 @@ const showReingest = (item) => {
 
       <div class="kb-table__status kb-col-status">
         <span :class="['kb-status-dot', `tone-${item.statusTone || 'neutral'}`]"></span>
-        <div class="kb-table__status-copy">
-          <span>{{ item.processStep.label }}</span>
-          <small>{{ item.processStep.detail || '等待进一步处理。' }}</small>
-        </div>
+        <span>{{ item.processStep.label }}</span>
       </div>
 
       <div class="kb-table__actions">
@@ -123,7 +110,6 @@ const showReingest = (item) => {
           type="button"
           class="kb-icon-btn"
           title="查看详情"
-          :aria-label="`查看${item.title}的详情`"
           @click.stop="emit('row-action', { item, action: 'view-detail' })"
         >
           <AppIcon name="eye" :width="15" :height="15" />
@@ -133,7 +119,6 @@ const showReingest = (item) => {
           type="button"
           class="kb-icon-btn"
           title="重新入库"
-          :aria-label="`重新入库${item.title}`"
           @click.stop="emit('row-action', { item, action: 'reingest' })"
         >
           <AppIcon name="refresh" :width="15" :height="15" />
@@ -142,13 +127,12 @@ const showReingest = (item) => {
           type="button"
           class="kb-icon-btn kb-icon-btn--danger"
           title="删除"
-          :aria-label="`删除${item.title}`"
           @click.stop="emit('row-action', { item, action: 'delete' })"
         >
           <AppIcon name="trash" :width="15" :height="15" />
         </button>
       </div>
-    </div>
+    </button>
 
     <div v-if="totalPages > 1" class="kb-pagination">
       <span>共 {{ total }} 条</span>
@@ -170,10 +154,10 @@ const showReingest = (item) => {
 .kb-table__header,
 .kb-table__row {
   display: grid;
-  grid-template-columns: 44px minmax(200px, 1fr) 112px 88px 96px 116px 152px 132px;
-  gap: 10px;
+  grid-template-columns: 30px minmax(160px, 1fr) 100px 78px 88px 100px 100px 110px;
+  gap: 8px;
   align-items: center;
-  padding: 12px 18px;
+  padding: 10px 18px;
 }
 
 .kb-table__header {
@@ -189,35 +173,30 @@ const showReingest = (item) => {
 
 .kb-table__row {
   width: 100%;
+  border: none;
   border-bottom: 1px solid var(--line-soft);
   background: transparent;
   color: var(--text-secondary);
   font-family: 'PingFang SC', 'Noto Sans SC', 'Microsoft YaHei', sans-serif;
   text-align: left;
   cursor: pointer;
-  transition: background 0.15s ease, box-shadow 0.15s ease;
+  transition: background 0.15s ease;
 }
 
-.kb-table__row:hover,
-.kb-table__row:focus-visible {
+.kb-table__row:hover {
   background: color-mix(in srgb, var(--brand-soft) 40%, transparent);
-  outline: none;
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--brand) 20%, transparent);
 }
 
 .kb-checkbox {
   display: flex;
   justify-content: center;
-  align-items: center;
-  width: 40px;
-  min-height: 40px;
 }
 
 .kb-checkbox input {
   appearance: none;
   -webkit-appearance: none;
-  width: 18px;
-  height: 18px;
+  width: 16px;
+  height: 16px;
   margin: 0;
   display: grid;
   place-items: center;
@@ -317,16 +296,19 @@ const showReingest = (item) => {
 
 .kb-table__status {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   gap: 6px;
   min-width: 0;
+  color: var(--text-primary);
+  font-family: 'PingFang SC', 'Noto Sans SC', 'Microsoft YaHei', sans-serif;
+  font-size: 12px;
+  font-weight: 600;
 }
 
 .kb-status-dot {
   width: 7px;
   height: 7px;
   flex: 0 0 auto;
-  margin-top: 5px;
   border-radius: 50%;
   background: var(--text-muted);
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--text-muted) 14%, transparent);
@@ -347,53 +329,29 @@ const showReingest = (item) => {
   box-shadow: 0 0 0 3px var(--risk-50);
 }
 
-.kb-table__status-copy {
-  display: grid;
-  gap: 2px;
-  min-width: 0;
-}
-
-.kb-table__status-copy span {
-  color: var(--text-primary);
-  font-family: 'PingFang SC', 'Noto Sans SC', 'Microsoft YaHei', sans-serif;
-  font-size: 12px;
-  font-weight: 600;
-}
-
-.kb-table__status-copy small {
-  overflow: hidden;
-  color: var(--text-muted);
-  font-family: 'PingFang SC', 'Noto Sans SC', 'Microsoft YaHei', sans-serif;
-  font-size: 11px;
-  line-height: 1.5;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 .kb-table__actions {
   display: flex;
-  gap: 6px;
+  gap: 4px;
   align-items: center;
 }
 
 .kb-icon-btn {
-  width: 40px;
-  height: 40px;
+  width: 30px;
+  height: 30px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   border: 1px solid var(--line-soft);
-  border-radius: 10px;
+  border-radius: 7px;
   background: var(--surface-2);
   color: var(--text-muted);
   cursor: pointer;
-  transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
+  transition: background 0.12s ease, color 0.12s ease;
 }
 
 .kb-icon-btn:hover {
   background: var(--brand-soft);
   color: var(--brand);
-  border-color: color-mix(in srgb, var(--brand) 18%, var(--line-soft));
 }
 
 .kb-icon-btn--danger:hover {
@@ -433,25 +391,20 @@ const showReingest = (item) => {
 }
 
 .kb-empty {
-  display: grid;
-  place-items: center;
-  min-height: 140px;
   padding: 28px 20px;
   color: var(--text-secondary);
   font-family: 'PingFang SC', 'Noto Sans SC', 'Microsoft YaHei', sans-serif;
   font-size: 13px;
-  text-align: center;
 }
 
 @media (max-width: 1160px) {
   .kb-table__header,
   .kb-table__row {
-    grid-template-columns: 44px minmax(180px, 1fr) 112px 96px 116px 132px;
+    grid-template-columns: 30px minmax(140px, 1fr) 100px 88px 100px;
   }
 
   .kb-col-size,
-  .kb-col-vector,
-  .kb-table__status-copy small {
+  .kb-col-vector {
     display: none;
   }
 }
@@ -459,7 +412,7 @@ const showReingest = (item) => {
 @media (max-width: 900px) {
   .kb-table__header,
   .kb-table__row {
-    grid-template-columns: 44px minmax(160px, 1fr) 112px 132px;
+    grid-template-columns: 30px minmax(120px, 1fr) 100px 110px;
   }
 
   .kb-col-time,
@@ -471,13 +424,7 @@ const showReingest = (item) => {
 @media (max-width: 600px) {
   .kb-table__header,
   .kb-table__row {
-    grid-template-columns: 44px minmax(150px, 1fr) 132px;
-  }
-
-  .kb-col-vector,
-  .kb-col-time,
-  .kb-col-size {
-    display: none;
+    grid-template-columns: 30px minmax(120px, 1fr) 110px;
   }
 }
 </style>
