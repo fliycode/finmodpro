@@ -10,8 +10,11 @@ import { authSession } from '../../lib/auth-session.js';
 import {
   SEVERITY_LABELS,
   formatAlertTime,
+  getMetricLabel,
   normalizeAlertEvent,
+  sortAlertEventsByPriority,
   summarizeAlertEvents,
+  summarizeAlertSeverities,
 } from '../../lib/admin-monitoring.js';
 import { AUTH_EXPIRED_MESSAGE, authStorage } from '../../lib/auth-storage.js';
 import { useFlash } from '../../lib/flash.js';
@@ -64,7 +67,9 @@ const closeDropdown = () => {
 };
 
 const normalizedNotificationEvents = computed(() => notificationEvents.value.map(normalizeAlertEvent));
+const prioritizedNotificationEvents = computed(() => sortAlertEventsByPriority(normalizedNotificationEvents.value));
 const notificationSummary = computed(() => summarizeAlertEvents(normalizedNotificationEvents.value));
+const notificationSeveritySummary = computed(() => summarizeAlertSeverities(normalizedNotificationEvents.value));
 const notificationBadge = computed(() => {
   const count = notificationSummary.value.firing;
   if (!count) {
@@ -303,24 +308,38 @@ onBeforeUnmount(() => {
                   </span>
                 </div>
               </div>
+              <div
+                v-if="notificationSeveritySummary.critical || notificationSeveritySummary.warning || notificationSeveritySummary.info"
+                class="app-topbar__notification-summary"
+              >
+                <span v-if="notificationSeveritySummary.critical" class="app-topbar__notification-chip is-critical">
+                  严重 {{ notificationSeveritySummary.critical }}
+                </span>
+                <span v-if="notificationSeveritySummary.warning" class="app-topbar__notification-chip is-warning">
+                  警告 {{ notificationSeveritySummary.warning }}
+                </span>
+                <span v-if="notificationSeveritySummary.info" class="app-topbar__notification-chip is-info">
+                  提示 {{ notificationSeveritySummary.info }}
+                </span>
+              </div>
 
-              <div v-if="notificationError" class="app-topbar__notification-empty">
+              <div v-if="notificationError" class="app-topbar__notification-empty" role="alert">
                 {{ notificationError }}
               </div>
               <div v-else-if="notificationLoading" class="app-topbar__notification-empty">
                 加载中...
               </div>
-              <div v-else-if="normalizedNotificationEvents.length" class="app-topbar__notification-list">
+              <div v-else-if="prioritizedNotificationEvents.length" class="app-topbar__notification-list">
                 <button
-                  v-for="event in normalizedNotificationEvents.slice(0, 5)"
+                  v-for="event in prioritizedNotificationEvents.slice(0, 5)"
                   :key="event.id"
                   type="button"
-                  class="app-topbar__notification-item"
+                  :class="['app-topbar__notification-item', `is-${event.severity}`]"
                   @click="openAlertCenter"
                 >
                   <div class="app-topbar__notification-item-copy">
                     <strong>{{ event.ruleName || '未命名规则' }}</strong>
-                    <span>{{ SEVERITY_LABELS[event.severity] || event.severity }} · {{ formatAlertTime(event.triggeredAt) }}</span>
+                    <span>{{ SEVERITY_LABELS[event.severity] || event.severity }} · {{ getMetricLabel(event.metricName) }} · {{ formatAlertTime(event.triggeredAt) }}</span>
                   </div>
                   <span class="app-topbar__notification-item-value">
                     {{ event.triggeredValue?.toFixed(1) }}

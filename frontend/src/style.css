@@ -1460,6 +1460,35 @@ html[data-theme='dark'] body {
   color: var(--text-muted);
 }
 
+.app-topbar__notification-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 0 10px 8px;
+}
+
+.app-topbar__notification-chip {
+  padding: 4px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.app-topbar__notification-chip.is-critical {
+  background: rgba(239, 68, 68, 0.14);
+  color: #fca5a5;
+}
+
+.app-topbar__notification-chip.is-warning {
+  background: rgba(245, 158, 11, 0.14);
+  color: #fcd34d;
+}
+
+.app-topbar__notification-chip.is-info {
+  background: rgba(36, 87, 197, 0.14);
+  color: #93c5fd;
+}
+
 .app-topbar__notification-list {
   display: flex;
   flex-direction: column;
@@ -1474,7 +1503,7 @@ html[data-theme='dark'] body {
   gap: 12px;
   width: 100%;
   padding: 10px 12px;
-  border: none;
+  border: 1px solid transparent;
   border-radius: 10px;
   background: transparent;
   color: inherit;
@@ -1484,6 +1513,18 @@ html[data-theme='dark'] body {
 
 .app-topbar__notification-item:hover {
   background: var(--surface-3);
+}
+
+.app-topbar__notification-item.is-critical {
+  border: 1px solid rgba(239, 68, 68, 0.18);
+}
+
+.app-topbar__notification-item.is-warning {
+  border: 1px solid rgba(245, 158, 11, 0.18);
+}
+
+.app-topbar__notification-item.is-info {
+  border: 1px solid rgba(36, 87, 197, 0.18);
 }
 
 .app-topbar__notification-item-copy {
@@ -1520,6 +1561,15 @@ html[data-theme='dark'] body {
   color: var(--text-muted);
 }
 
+.app-topbar__notification-trigger:focus-visible,
+.app-topbar__avatar-trigger:focus-visible,
+.app-topbar__dropdown-item:focus-visible,
+.app-topbar__notification-item:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(36, 87, 197, 0.16);
+  border-color: var(--brand-300);
+}
+
 /* Dropdown transition ────────────────────────────── */
 .dropdown-enter-active {
   transition: opacity 0.15s ease, transform 0.15s ease;
@@ -1537,6 +1587,17 @@ html[data-theme='dark'] body {
 .dropdown-leave-to {
   opacity: 0;
   transform: translateY(-4px) scale(0.97);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dropdown-enter-active,
+  .dropdown-leave-active,
+  .app-topbar__notification-trigger,
+  .app-topbar__avatar-trigger,
+  .app-topbar__dropdown-item,
+  .app-topbar__notification-item {
+    transition: none;
+  }
 }
 
 .flash-stack {

@@ -216,6 +216,18 @@ export const STATUS_TONES = {
   acknowledged: 'info',
 };
 
+export const SEVERITY_ORDER = {
+  critical: 3,
+  warning: 2,
+  info: 1,
+};
+
+export const STATUS_PRIORITY_ORDER = {
+  firing: 3,
+  acknowledged: 2,
+  resolved: 1,
+};
+
 export const METRIC_OPTIONS = [
   { value: 'cpu_percent', label: 'CPU 使用率' },
   { value: 'memory_percent', label: '内存使用率' },
@@ -296,6 +308,38 @@ export function summarizeAlertEvents(events) {
     firing: 0,
     acknowledged: 0,
     resolved: 0,
+  });
+}
+
+export function summarizeAlertSeverities(events) {
+  return (Array.isArray(events) ? events : []).reduce((summary, event) => {
+    const severity = safeStr(event.severity);
+    if (severity && summary[severity] !== undefined) {
+      summary[severity] += 1;
+    }
+    return summary;
+  }, {
+    critical: 0,
+    warning: 0,
+    info: 0,
+  });
+}
+
+export function sortAlertEventsByPriority(events) {
+  return [...(Array.isArray(events) ? events : [])].sort((left, right) => {
+    const statusDelta = (STATUS_PRIORITY_ORDER[right.status] || 0) - (STATUS_PRIORITY_ORDER[left.status] || 0);
+    if (statusDelta !== 0) {
+      return statusDelta;
+    }
+
+    const severityDelta = (SEVERITY_ORDER[right.severity] || 0) - (SEVERITY_ORDER[left.severity] || 0);
+    if (severityDelta !== 0) {
+      return severityDelta;
+    }
+
+    return safeStr(right.triggeredAt || right.triggered_at).localeCompare(
+      safeStr(left.triggeredAt || left.triggered_at),
+    );
   });
 }
 

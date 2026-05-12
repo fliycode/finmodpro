@@ -6,7 +6,9 @@ import {
   formatAlertTime,
   getMetricLabel,
   getNotificationChannelLabel,
+  sortAlertEventsByPriority,
   summarizeAlertEvents,
+  summarizeAlertSeverities,
 } from '../admin-monitoring.js';
 
 test('alert templates default to in-app notifications for admin bell delivery', () => {
@@ -33,6 +35,32 @@ test('alert summaries count each status bucket from recent events', () => {
     acknowledged: 1,
     resolved: 1,
   });
+});
+
+test('alert severity summary counts critical warning and info events', () => {
+  const summary = summarizeAlertSeverities([
+    { severity: 'critical' },
+    { severity: 'warning' },
+    { severity: 'critical' },
+    { severity: 'info' },
+  ]);
+
+  assert.deepEqual(summary, {
+    critical: 2,
+    warning: 1,
+    info: 1,
+  });
+});
+
+test('alert events sort by status priority then severity then recency', () => {
+  const sorted = sortAlertEventsByPriority([
+    { id: 1, status: 'resolved', severity: 'critical', triggeredAt: '2026-05-12T10:30:00+08:00' },
+    { id: 2, status: 'firing', severity: 'warning', triggeredAt: '2026-05-12T10:20:00+08:00' },
+    { id: 3, status: 'acknowledged', severity: 'critical', triggeredAt: '2026-05-12T10:40:00+08:00' },
+    { id: 4, status: 'firing', severity: 'critical', triggeredAt: '2026-05-12T10:10:00+08:00' },
+  ]);
+
+  assert.deepEqual(sorted.map((item) => item.id), [4, 2, 3, 1]);
 });
 
 test('alert time formatter outputs month-day hour-minute strings', () => {

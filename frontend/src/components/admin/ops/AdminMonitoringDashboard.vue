@@ -1,6 +1,7 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue';
 import { ElMessage } from 'element-plus';
+import { RouterLink } from 'vue-router';
 import AdminChart from '../AdminChart.vue';
 import ServiceStatusCard from './ServiceStatusCard.vue';
 import AlertRuleDialog from './AlertRuleDialog.vue';
@@ -24,6 +25,9 @@ import {
   STATUS_LABELS,
   STATUS_TONES,
   METRIC_OPTIONS,
+  sortAlertEventsByPriority,
+  summarizeAlertEvents,
+  summarizeAlertSeverities,
 } from '../../../lib/admin-monitoring.js';
 
 const loading = ref(true);
@@ -42,6 +46,10 @@ const resourceGauges = computed(() => buildResourceGauges(normalizedStatus.value
 const celeryInfo = computed(() => buildCeleryStatus(normalizedStatus.value.metrics));
 const normalizedRules = computed(() => (Array.isArray(rules.value) ? rules.value.map(normalizeAlertRule) : []));
 const normalizedEvents = computed(() => (Array.isArray(events.value) ? events.value.map(normalizeAlertEvent) : []));
+const prioritizedEvents = computed(() => sortAlertEventsByPriority(normalizedEvents.value));
+const eventSummary = computed(() => summarizeAlertEvents(normalizedEvents.value));
+const severitySummary = computed(() => summarizeAlertSeverities(normalizedEvents.value));
+const priorityEvents = computed(() => prioritizedEvents.value.filter((event) => event.status !== 'resolved').slice(0, 3));
 const recommendedTemplates = ALERT_RULE_TEMPLATES;
 const chartOption = computed(() => {
   if (!timeSeries.value || !timeSeries.value.data_points?.length) return null;
@@ -237,6 +245,52 @@ onMounted(loadAll);
       <div v-else class="monitoring__empty">暂无数据</div>
     </section>
 
+    <section class="monitoring__section">
+      <div class="monitoring__section-header">
+        <h3 class="monitoring__heading">告警态势</h3>
+        <RouterLink to="/admin/notifications" class="monitoring__inline-link">
+          进入告警中心
+        </RouterLink>
+      </div>
+      <div class="monitoring__alert-summary-grid">
+        <article class="monitoring__alert-summary-card">
+          <span>待处理</span>
+          <strong>{{ eventSummary.firing }}</strong>
+        </article>
+        <article class="monitoring__alert-summary-card">
+          <span>严重告警</span>
+          <strong>{{ severitySummary.critical }}</strong>
+        </article>
+        <article class="monitoring__alert-summary-card">
+          <span>已确认</span>
+          <strong>{{ eventSummary.acknowledged }}</strong>
+        </article>
+        <article class="monitoring__alert-summary-card">
+          <span>已恢复</span>
+          <strong>{{ eventSummary.resolved }}</strong>
+        </article>
+      </div>
+
+      <div v-if="priorityEvents.length" class="monitoring__priority-grid">
+        <article
+          v-for="event in priorityEvents"
+          :key="event.id"
+          class="monitoring__priority-card"
+          :class="`tone-${SEVERITY_TONES[event.severity]}`"
+        >
+          <div class="monitoring__priority-head">
+            <strong>{{ event.ruleName }}</strong>
+            <el-tag :type="SEVERITY_TONES[event.severity] === 'risk' ? 'danger' : SEVERITY_TONES[event.severity]" size="small">
+              {{ SEVERITY_LABELS[event.severity] || event.severity }}
+            </el-tag>
+          </div>
+          <p>{{ getMetricLabel(event.metricName) }} · 触发值 {{ event.triggeredValue?.toFixed(2) }}</p>
+          <span>{{ STATUS_LABELS[event.status] || event.status }} · {{ formatAlertTime(event.triggeredAt) }}</span>
+        </article>
+      </div>
+      <div v-else class="monitoring__empty monitoring__empty--compact">当前没有待处理告警</div>
+    </section>
+
     <!-- Alert Rules -->
     <section class="monitoring__section">
       <div class="monitoring__section-header">
@@ -267,6 +321,15 @@ onMounted(loadAll);
             class="monitoring__template-card"
             @click="handleCreateFromTemplate(template)"
           >
+            <div class="monitoring__template-meta">
+              <el-tag
+                size="small"
+                :type="SEVERITY_TONES[template.severity] === 'risk' ? 'danger' : SEVERITY_TONES[template.severity]"
+              >
+                {{ SEVERITY_LABELS[template.severity] || template.severity }}
+              </el-tag>
+              <span>{{ getNotificationChannelLabel(template.notification_channels[0]) }}</span>
+            </div>
             <div class="monitoring__template-title">{{ template.name }}</div>
             <div class="monitoring__template-detail">
               {{ getMetricLabel(template.metric_name) }} · {{ CONDITION_LABELS[template.condition] || template.condition }} {{ template.threshold }}
@@ -474,11 +537,103 @@ onMounted(loadAll);
   margin-top: 8px;
 }
 
+.monitoring__inline-link {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--brand, #2457c5);
+  text-decoration: none;
+}
+
+.monitoring__alert-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.monitoring__alert-summary-card {
+  padding: 16px 18px;
+  border-radius: 14px;
+  border: 1px solid var(--line-soft, #e5e7eb);
+  background: var(--surface-0, #f9fafb);
+}
+
+.monitoring__alert-summary-card span {
+  display: block;
+  font-size: 12px;
+  color: var(--text-secondary, #6b7280);
+}
+
+.monitoring__alert-summary-card strong {
+  display: block;
+  margin-top: 6px;
+  font-size: 26px;
+  line-height: 1;
+  color: var(--text-primary, #111827);
+}
+
+.monitoring__priority-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.monitoring__priority-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 16px 18px;
+  border-radius: 14px;
+  border: 1px solid var(--line-soft, #e5e7eb);
+  background: var(--surface-0, #f9fafb);
+}
+
+.monitoring__priority-card.tone-risk {
+  border-color: rgba(239, 68, 68, 0.24);
+}
+
+.monitoring__priority-card.tone-warning {
+  border-color: rgba(245, 158, 11, 0.24);
+}
+
+.monitoring__priority-card.tone-info {
+  border-color: rgba(36, 87, 197, 0.24);
+}
+
+.monitoring__priority-head,
+.monitoring__template-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.monitoring__priority-card strong,
+.monitoring__template-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-primary, #111827);
+}
+
+.monitoring__priority-card p,
+.monitoring__priority-card span,
+.monitoring__template-meta span {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--text-secondary, #6b7280);
+}
+
 .monitoring__empty {
   text-align: center;
   padding: 32px;
   color: var(--text-secondary, #6b7280);
   font-size: 13px;
+}
+
+.monitoring__empty--compact {
+  padding: 20px 0 8px;
 }
 
 .text-secondary {
@@ -604,6 +759,8 @@ onMounted(loadAll);
 }
 
 @media (max-width: 900px) {
+  .monitoring__alert-summary-grid,
+  .monitoring__priority-grid,
   .monitoring__service-grid,
   .monitoring__gauge-grid {
     grid-template-columns: 1fr 1fr;
@@ -615,6 +772,8 @@ onMounted(loadAll);
 }
 
 @media (max-width: 600px) {
+  .monitoring__alert-summary-grid,
+  .monitoring__priority-grid,
   .monitoring__service-grid,
   .monitoring__gauge-grid {
     grid-template-columns: 1fr;
