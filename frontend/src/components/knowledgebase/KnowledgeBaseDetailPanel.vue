@@ -70,7 +70,7 @@ const tabs = [
 </script>
 
 <template>
-  <div class="kb-detail ui-card">
+  <div :class="['kb-detail', 'ui-card', `kb-detail--${document?.statusTone || 'neutral'}`]">
     <template v-if="document">
       <div class="kb-detail__header">
         <div class="kb-detail__title-area">
@@ -159,11 +159,11 @@ const tabs = [
 
       <div v-else-if="activeTab === 'versions'" class="kb-detail__section">
         <div class="kb-version-summary">
-          <div>
+          <div class="kb-summary-card">
             <span class="meta-label">根文档 ID</span>
             <strong>{{ document.rootDocumentId }}</strong>
           </div>
-          <div>
+          <div class="kb-summary-card">
             <span class="meta-label">版本总数</span>
             <strong>{{ document.versionCount }}</strong>
           </div>
@@ -189,7 +189,7 @@ const tabs = [
           <article
             v-for="version in versions"
             :key="`${version.documentId}-${version.versionNumber}`"
-            class="kb-version-card"
+            :class="['kb-version-card', { 'is-current': version.isCurrent }]"
           >
             <div class="kb-version-card__header">
               <strong>v{{ version.versionNumber }}</strong>
@@ -251,11 +251,37 @@ const tabs = [
 
 <style scoped>
 .kb-detail {
+  --kb-accent: var(--brand);
+  --kb-accent-soft: color-mix(in oklab, var(--kb-accent) 12%, var(--surface-2));
+  --kb-accent-wash: color-mix(in oklab, var(--kb-accent) 8%, var(--surface-3));
+  --kb-accent-border: color-mix(in oklab, var(--kb-accent) 18%, var(--line-soft));
+  --kb-accent-ink: color-mix(in oklab, var(--kb-accent) 48%, var(--text-primary));
+  position: relative;
+  overflow: hidden;
   display: flex;
   flex-direction: column;
   gap: 20px;
-  background: var(--surface-2);
+  border: 1px solid var(--kb-accent-border);
+  background:
+    radial-gradient(circle at top right, color-mix(in oklab, var(--kb-accent) 14%, transparent) 0, transparent 42%),
+    linear-gradient(180deg, color-mix(in oklab, var(--kb-accent) 8%, var(--surface-2)) 0%, var(--surface-2) 140px);
   padding: 24px;
+}
+
+.kb-detail--neutral {
+  --kb-accent: color-mix(in oklab, var(--brand) 55%, var(--text-secondary));
+}
+
+.kb-detail--accent {
+  --kb-accent: var(--brand);
+}
+
+.kb-detail--success {
+  --kb-accent: var(--success);
+}
+
+.kb-detail--danger {
+  --kb-accent: var(--risk);
 }
 
 .kb-detail__header {
@@ -263,6 +289,8 @@ const tabs = [
   align-items: flex-start;
   justify-content: space-between;
   gap: 16px;
+  padding-bottom: 18px;
+  border-bottom: 1px solid var(--kb-accent-border);
 }
 
 .kb-detail__title-area {
@@ -294,9 +322,10 @@ const tabs = [
 .kb-detail__summary {
   margin: 0;
   font-family: 'PingFang SC', 'Noto Sans SC', 'Microsoft YaHei', sans-serif;
-  color: var(--text-secondary);
+  color: var(--kb-accent-ink);
   line-height: 1.6;
   font-size: 14px;
+  max-width: 72ch;
 }
 
 .kb-meta-row {
@@ -310,10 +339,11 @@ const tabs = [
   align-items: center;
   padding: 4px 10px;
   border-radius: 8px;
-  background: var(--surface-3);
+  border: 1px solid var(--kb-accent-border);
+  background: var(--kb-accent-soft);
   font-family: 'PingFang SC', 'Noto Sans SC', 'Microsoft YaHei', sans-serif;
   font-size: 12px;
-  color: var(--text-secondary);
+  color: var(--kb-accent-ink);
 }
 
 .kb-primary-btn,
@@ -327,18 +357,27 @@ const tabs = [
   font-weight: 600;
   cursor: pointer;
   white-space: nowrap;
+  transition: background 0.18s ease, color 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease;
 }
 
 .kb-primary-btn {
   border: none;
   background: var(--brand);
-  color: #fff;
+  color: var(--text-inverse);
+}
+
+.kb-primary-btn:hover {
+  background: var(--brand-hover);
 }
 
 .kb-secondary-btn {
-  border: 1px solid var(--line-strong);
-  background: var(--surface-2);
+  border: 1px solid var(--kb-accent-border);
+  background: color-mix(in oklab, var(--kb-accent) 6%, var(--surface-2));
   color: var(--text-primary);
+}
+
+.kb-secondary-btn:hover {
+  background: color-mix(in oklab, var(--kb-accent) 12%, var(--surface-2));
 }
 
 .kb-ghost-btn {
@@ -349,8 +388,16 @@ const tabs = [
 }
 
 .kb-ghost-btn:hover {
-  color: var(--brand);
-  background: var(--brand-soft);
+  color: var(--kb-accent-ink);
+  background: var(--kb-accent-soft);
+}
+
+.kb-primary-btn:focus-visible,
+.kb-secondary-btn:focus-visible,
+.kb-ghost-btn:focus-visible,
+.kb-tab:focus-visible {
+  outline: 2px solid color-mix(in oklab, var(--kb-accent) 55%, transparent);
+  outline-offset: 2px;
 }
 
 .kb-version-summary,
@@ -363,12 +410,22 @@ const tabs = [
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
+.kb-summary-card,
 .kb-provenance-card,
 .kb-version-card {
-  border: 1px solid var(--line-soft);
+  border: 1px solid var(--kb-accent-border);
   border-radius: 12px;
   padding: 14px;
-  background: var(--surface-3);
+  background: var(--kb-accent-wash);
+}
+
+.kb-summary-card strong {
+  color: var(--kb-accent-ink);
+}
+
+.kb-version-card.is-current {
+  background: color-mix(in oklab, var(--success) 10%, var(--surface-2));
+  border-color: color-mix(in oklab, var(--success) 24%, var(--line-soft));
 }
 
 .kb-version-card__header {
@@ -387,6 +444,9 @@ const tabs = [
   overflow-x: auto;
   white-space: pre-wrap;
   margin: 8px 0 0;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: color-mix(in oklab, var(--kb-accent) 5%, var(--surface-2));
   font-family: 'JetBrains Mono', ui-monospace, Consolas, monospace;
   font-size: 12px;
   line-height: 1.6;
@@ -407,10 +467,21 @@ const tabs = [
   color: var(--text-primary);
 }
 
+.task-grid > div,
+.kb-summary-card {
+  padding: 12px;
+  border-radius: 14px;
+}
+
+.task-grid > div {
+  border: 1px solid color-mix(in oklab, var(--kb-accent) 16%, var(--line-soft));
+  background: color-mix(in oklab, var(--kb-accent) 5%, var(--surface-2));
+}
+
 .kb-tabs {
   display: flex;
   gap: 6px;
-  border-bottom: 1px solid var(--line-soft);
+  border-bottom: 1px solid var(--kb-accent-border);
   padding-bottom: 12px;
 }
 
@@ -428,12 +499,13 @@ const tabs = [
 }
 
 .kb-tab:hover {
-  background: var(--surface-3);
+  background: var(--kb-accent-soft);
 }
 
 .kb-tab.active {
-  background: var(--brand-soft);
-  color: var(--brand);
+  border-color: var(--kb-accent-border);
+  background: var(--kb-accent-soft);
+  color: var(--kb-accent-ink);
 }
 
 .kb-detail__section {
@@ -453,21 +525,25 @@ const tabs = [
   overflow: hidden;
   height: 8px;
   border-radius: 999px;
-  background: var(--surface-3);
+  background: color-mix(in oklab, var(--kb-accent) 8%, var(--surface-3));
 }
 
 .kb-progress__value {
   height: 100%;
   border-radius: inherit;
-  background: var(--brand);
+  background: linear-gradient(
+    90deg,
+    color-mix(in oklab, var(--kb-accent) 64%, var(--surface-2)),
+    var(--kb-accent)
+  );
 }
 
 .kb-task-card {
   margin-top: 14px;
-  border: 1px solid var(--line-soft);
+  border: 1px solid var(--kb-accent-border);
   border-radius: 12px;
   padding: 14px;
-  background: var(--surface-3);
+  background: var(--kb-accent-wash);
 }
 
 .kb-task-card__hint,
@@ -498,12 +574,12 @@ const tabs = [
 }
 
 .kb-error-log {
-  border: 1px solid rgba(181, 58, 58, 0.15);
+  border: 1px solid color-mix(in oklab, var(--risk) 24%, var(--line-soft));
   border-radius: 12px;
   padding: 14px;
-  background: rgba(181, 58, 58, 0.06);
+  background: color-mix(in oklab, var(--risk) 8%, var(--surface-2));
   font-family: 'PingFang SC', 'Noto Sans SC', 'Microsoft YaHei', sans-serif;
-  color: #8d3030;
+  color: color-mix(in oklab, var(--risk) 74%, var(--text-primary));
   line-height: 1.6;
   white-space: pre-wrap;
   font-size: 14px;
@@ -522,22 +598,47 @@ const tabs = [
 }
 
 .tone-neutral {
-  background: var(--surface-3);
-  color: var(--text-secondary);
+  border: 1px solid var(--kb-accent-border);
+  background: var(--kb-accent-soft);
+  color: var(--kb-accent-ink);
 }
 
 .tone-accent {
-  background: var(--brand-soft);
-  color: var(--brand);
+  border: 1px solid color-mix(in oklab, var(--brand) 22%, var(--line-soft));
+  background: color-mix(in oklab, var(--brand) 12%, var(--surface-2));
+  color: color-mix(in oklab, var(--brand) 72%, var(--text-primary));
 }
 
 .tone-success {
-  background: var(--success-50);
-  color: var(--success);
+  border: 1px solid color-mix(in oklab, var(--success) 22%, var(--line-soft));
+  background: color-mix(in oklab, var(--success) 12%, var(--surface-2));
+  color: color-mix(in oklab, var(--success) 72%, var(--text-primary));
 }
 
 .tone-danger {
-  background: var(--risk-50);
-  color: var(--risk);
+  border: 1px solid color-mix(in oklab, var(--risk) 22%, var(--line-soft));
+  background: color-mix(in oklab, var(--risk) 12%, var(--surface-2));
+  color: color-mix(in oklab, var(--risk) 72%, var(--text-primary));
+}
+
+@media (max-width: 900px) {
+  .kb-detail__header {
+    flex-direction: column;
+  }
+
+  .kb-detail__header-actions {
+    flex-wrap: wrap;
+  }
+}
+
+@media (max-width: 640px) {
+  .kb-version-summary,
+  .task-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .kb-tabs {
+    flex-wrap: wrap;
+  }
 }
 </style>

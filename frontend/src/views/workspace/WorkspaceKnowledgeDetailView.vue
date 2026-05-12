@@ -206,18 +206,24 @@ onUnmounted(() => {
   gap: 6px;
   width: fit-content;
   padding: 8px 14px;
-  border: 1px solid var(--line-soft);
+  border: 1px solid color-mix(in oklab, var(--brand) 16%, var(--line-soft));
   border-radius: 10px;
-  background: var(--surface-2);
+  background: color-mix(in oklab, var(--brand) 5%, var(--surface-2));
   color: var(--text-secondary);
   font-size: 13px;
   font-weight: 600;
   cursor: pointer;
-  transition: background 0.15s ease, color 0.15s ease;
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
 }
 
 .back-btn:hover {
-  background: var(--brand-soft);
+  border-color: color-mix(in oklab, var(--brand) 28%, var(--line-soft));
+  background: color-mix(in oklab, var(--brand) 10%, var(--surface-2));
   color: var(--brand);
+}
+
+.back-btn:focus-visible {
+  outline: 2px solid color-mix(in oklab, var(--brand) 52%, transparent);
+  outline-offset: 2px;
 }
 </style>

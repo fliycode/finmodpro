@@ -21,7 +21,11 @@ defineEmits(['toggle-chunk']);
   <div v-if="isLoading" class="kb-empty-state">正在加载切块数据...</div>
   <div v-else-if="chunks.length === 0" class="kb-empty-state">当前文档暂无切块数据。</div>
   <div v-else class="kb-chunks">
-    <article v-for="chunk in chunks" :key="chunk.id" class="kb-chunk">
+    <article
+      v-for="chunk in chunks"
+      :key="chunk.id"
+      :class="['kb-chunk', { 'is-expanded': expandedChunkIds.includes(chunk.id) }]"
+    >
       <div class="kb-chunk__meta">
         <div>
           <strong>{{ chunk.pageLabel }}</strong>
@@ -58,10 +62,17 @@ defineEmits(['toggle-chunk']);
 }
 
 .kb-chunk {
-  border: 1px solid var(--line-soft);
+  border: 1px solid color-mix(in oklab, var(--kb-accent, var(--brand)) 14%, var(--line-soft));
   border-radius: 16px;
   padding: 14px 16px;
-  background: var(--surface-3);
+  background: color-mix(in oklab, var(--kb-accent, var(--brand)) 4%, var(--surface-3));
+  transition: background 0.18s ease, border-color 0.18s ease, transform 0.18s ease;
+}
+
+.kb-chunk.is-expanded {
+  border-color: color-mix(in oklab, var(--kb-accent, var(--brand)) 24%, var(--line-soft));
+  background: color-mix(in oklab, var(--kb-accent, var(--brand)) 8%, var(--surface-2));
+  transform: translateY(-1px);
 }
 
 .kb-chunk__meta {
@@ -97,25 +108,35 @@ defineEmits(['toggle-chunk']);
 }
 
 .kb-chunk__vector {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: color-mix(in oklab, var(--kb-accent, var(--brand)) 7%, var(--surface-2));
   font-family: 'JetBrains Mono', ui-monospace, Consolas, monospace;
   font-size: 12px;
   color: var(--text-muted);
 }
 
 .kb-link-btn {
-  border: 1px solid var(--line-strong);
+  border: 1px solid color-mix(in oklab, var(--kb-accent, var(--brand)) 16%, var(--line-strong));
   border-radius: 12px;
   padding: 6px 10px;
-  background: var(--surface-2);
-  color: var(--text-primary);
+  background: color-mix(in oklab, var(--kb-accent, var(--brand)) 4%, var(--surface-2));
+  color: color-mix(in oklab, var(--kb-accent, var(--brand)) 42%, var(--text-primary));
   font-family: 'PingFang SC', 'Noto Sans SC', 'Microsoft YaHei', sans-serif;
   font-size: 13px;
   font-weight: 500;
   cursor: pointer;
-  transition: background 0.12s ease, border-color 0.12s ease;
+  transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease;
 }
 
 .kb-link-btn:hover {
-  background: var(--surface-hover);
+  background: color-mix(in oklab, var(--kb-accent, var(--brand)) 10%, var(--surface-2));
+}
+
+.kb-link-btn:focus-visible {
+  outline: 2px solid color-mix(in oklab, var(--kb-accent, var(--brand)) 50%, transparent);
+  outline-offset: 2px;
 }
 </style>
