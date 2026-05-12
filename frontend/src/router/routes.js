@@ -152,7 +152,7 @@ export const appRoutes = [
       {
         path: 'cleaning',
         component: () => import('../views/admin/AdminCleaningView.vue'),
-        meta: { title: '数据清洗', subtitle: '配置清洗规则、查看清洗质量与问题报告。', breadcrumb: [{ label: '知识库管理' }, { label: '数据清洗' }] },
+        meta: { title: '数据清洗', subtitle: '规则与最近结果。', breadcrumb: [{ label: '知识库管理' }, { label: '数据清洗' }] },
       },
       {
         path: 'audit-logs',
