@@ -39,6 +39,7 @@ const appliedFilters = reactive({
 });
 
 const createDialogVisible = ref(false);
+const roleDialogVisible = ref(false);
 const createForm = reactive({
   name: '',
   permissions: [],
@@ -142,11 +143,15 @@ const loadData = async () => {
     roles.value = sortRolesByPriority((rolesData || []).map(decorateRole));
     permissions.value = permissionsData || [];
 
-    const preferredRoleId = roles.value.find((role) => role.id === selectedRoleId.value)?.id
-      ?? roles.value[0]?.id
-      ?? null;
+    const preferredRoleId = roles.value.find((role) => role.id === selectedRoleId.value)?.id ?? null;
     selectedRoleId.value = preferredRoleId;
-    await loadRoleDetail(preferredRoleId, { preserveError: true });
+
+    if (roleDialogVisible.value && preferredRoleId) {
+      await loadRoleDetail(preferredRoleId, { preserveError: true });
+    } else if (!preferredRoleId) {
+      selectedRole.value = null;
+      syncDraft(null);
+    }
   } catch (err) {
     error.value = err.message || '加载角色与权限数据失败。';
   } finally {
@@ -158,20 +163,23 @@ watch(filteredRoles, (nextRoles) => {
   if (!nextRoles.length) {
     selectedRoleId.value = null;
     selectedRole.value = null;
+    roleDialogVisible.value = false;
     syncDraft(null);
     return;
   }
 
   if (!nextRoles.some((role) => role.id === selectedRoleId.value)) {
-    selectedRoleId.value = nextRoles[0].id;
+    selectedRoleId.value = null;
   }
 }, { immediate: true });
 
-watch(selectedRoleId, async (roleId) => {
-  if (roleId && roleId !== selectedRole.value?.id) {
-    await loadRoleDetail(roleId, { preserveError: true });
+const openRoleDialog = async (roleId) => {
+  selectedRoleId.value = roleId;
+  await loadRoleDetail(roleId);
+  if (selectedRole.value?.id === roleId) {
+    roleDialogVisible.value = true;
   }
-});
+};
 
 const applyFilters = () => {
   Object.assign(appliedFilters, draftFilters);
@@ -192,7 +200,7 @@ const resetFilters = () => {
 };
 
 const handleRoleRowClick = (row) => {
-  selectedRoleId.value = row.id;
+  openRoleDialog(row.id);
 };
 
 const openCreateDialog = () => {
@@ -280,6 +288,12 @@ const handleDeleteRole = async (roleOverride = null) => {
   isSaving.value = true;
   try {
     await adminApi.deleteRole(roleTarget.id);
+    if (selectedRole.value?.id === roleTarget.id) {
+      roleDialogVisible.value = false;
+      selectedRoleId.value = null;
+      selectedRole.value = null;
+      syncDraft(null);
+    }
     flash.success('角色已删除。');
     await loadData();
   } catch (err) {
@@ -472,109 +486,6 @@ onMounted(loadData);
       </el-table>
     </AppSectionCard>
 
-    <AppSectionCard
-      admin
-      class="roles-page__detail-card"
-      title="角色权限"
-      desc="直接查看当前角色已拥有的权限，并在这里调整选择。"
-    >
-      <template #header>
-        <div v-if="selectedRole" class="roles-page__detail-actions">
-          <el-button
-            v-if="canRestoreDefaults"
-            :disabled="isSaving"
-            @click="handleRestoreDefaults"
-          >
-            恢复默认
-          </el-button>
-        </div>
-      </template>
-
-      <div v-if="!selectedRole" class="roles-page__empty">
-        请选择一个角色查看权限。
-      </div>
-
-      <div v-else class="roles-page__permission-editor">
-        <div class="roles-page__permission-editor-header">
-          <div class="roles-page__selected-role">
-            <strong>{{ selectedRole.label }}</strong>
-            <small>{{ selectedRole.name }}</small>
-          </div>
-
-          <div class="roles-page__summary-row">
-            <span :class="['roles-page__role-badge', selectedRole.is_system ? 'is-admin' : 'is-member']">
-              <AppIcon :name="selectedRole.is_system ? 'shield' : 'user'" />
-              {{ selectedRole.is_system ? '系统角色' : '自定义角色' }}
-            </span>
-            <span class="roles-page__summary-chip">已选 {{ roleDraft.permissions.length }}</span>
-            <span v-if="selectedRole.is_system" class="roles-page__summary-chip">
-              默认 {{ selectedRole.default_permissions.length }}
-            </span>
-          </div>
-        </div>
-
-        <section class="roles-page__detail-section">
-          <div class="roles-page__section-heading">
-            <strong>当前权限</strong>
-            <span>只保留权限查看与调整，角色详情信息不再展开。</span>
-          </div>
-
-          <div v-if="selectedPermissionItems.length" class="roles-page__permission-tags">
-            <div
-              v-for="permission in selectedPermissionItems"
-              :key="permission.codename"
-              class="roles-page__permission-pill"
-            >
-              <strong>{{ permission.codename }}</strong>
-              <span>{{ permission.name }}</span>
-            </div>
-          </div>
-          <div v-else class="roles-page__muted-text">当前角色还没有分配权限。</div>
-        </section>
-
-        <section class="roles-page__dialog-section">
-          <div class="roles-page__section-heading">
-            <strong>权限选择</strong>
-            <span>按治理域展开，勾选父节点可整组选中。</span>
-          </div>
-
-          <el-tree-select
-            v-model="roleDraft.permissions"
-            class="roles-page__permission-tree"
-            :data="permissionTreeOptions"
-            node-key="value"
-            value-key="value"
-            multiple
-            show-checkbox
-            check-on-click-node
-            clearable
-            filterable
-            collapse-tags
-            collapse-tags-tooltip
-            default-expand-all
-            :render-after-expand="false"
-            :disabled="!canManageRoles || isSaving"
-            placeholder="请选择角色权限"
-          />
-        </section>
-
-        <div class="roles-page__detail-footer">
-          <span v-if="!canManageRoles" class="roles-page__muted-text">
-            你当前只有查看权限，不能修改角色配置。
-          </span>
-          <el-button
-            v-else
-            type="primary"
-            :loading="isSaving"
-            :disabled="!isSelectedRoleDirty"
-            @click="handleSaveRole"
-          >
-            保存修改
-          </el-button>
-        </div>
-      </div>
-    </AppSectionCard>
-
     <el-dialog
       v-model="createDialogVisible"
       title="新增角色"
@@ -634,6 +545,110 @@ onMounted(loadData);
           >
             创建角色
           </el-button>
+        </div>
+      </template>
+    </el-dialog>
+
+    <el-dialog
+      v-model="roleDialogVisible"
+      :title="selectedRole ? `角色权限 · ${selectedRole.label}` : '角色权限'"
+      width="720px"
+      class="roles-page__dialog-modal"
+      destroy-on-close
+    >
+      <div v-if="selectedRole" class="roles-page__permission-editor">
+        <div class="roles-page__permission-editor-header">
+          <div class="roles-page__selected-role">
+            <strong>{{ selectedRole.label }}</strong>
+            <small>{{ selectedRole.name }}</small>
+          </div>
+
+          <div class="roles-page__summary-row">
+            <span :class="['roles-page__role-badge', selectedRole.is_system ? 'is-admin' : 'is-member']">
+              <AppIcon :name="selectedRole.is_system ? 'shield' : 'user'" />
+              {{ selectedRole.is_system ? '系统角色' : '自定义角色' }}
+            </span>
+            <span class="roles-page__summary-chip">已选 {{ roleDraft.permissions.length }}</span>
+            <span v-if="selectedRole.is_system" class="roles-page__summary-chip">
+              默认 {{ selectedRole.default_permissions.length }}
+            </span>
+          </div>
+        </div>
+
+        <section class="roles-page__detail-section">
+          <div class="roles-page__section-heading">
+            <strong>当前权限</strong>
+            <span>弹窗内直接展示当前角色的全部权限。</span>
+          </div>
+
+          <div v-if="selectedPermissionItems.length" class="roles-page__permission-tags">
+            <div
+              v-for="permission in selectedPermissionItems"
+              :key="permission.codename"
+              class="roles-page__permission-pill"
+            >
+              <strong>{{ permission.codename }}</strong>
+              <span>{{ permission.name }}</span>
+            </div>
+          </div>
+          <div v-else class="roles-page__muted-text">当前角色还没有分配权限。</div>
+        </section>
+
+        <section class="roles-page__dialog-section">
+          <div class="roles-page__section-heading">
+            <strong>权限选择</strong>
+            <span>按治理域展开，勾选父节点可整组选中。</span>
+          </div>
+
+          <el-tree-select
+            v-model="roleDraft.permissions"
+            class="roles-page__permission-tree"
+            :data="permissionTreeOptions"
+            node-key="value"
+            value-key="value"
+            multiple
+            show-checkbox
+            check-on-click-node
+            clearable
+            filterable
+            collapse-tags
+            collapse-tags-tooltip
+            default-expand-all
+            :render-after-expand="false"
+            :disabled="!canManageRoles || isSaving"
+            placeholder="请选择角色权限"
+          />
+        </section>
+
+        <div v-if="!canManageRoles" class="roles-page__muted-text">
+          你当前只有查看权限，不能修改角色配置。
+        </div>
+      </div>
+
+      <template #footer>
+        <div class="roles-page__dialog-footer">
+          <div class="roles-page__detail-actions">
+            <el-button
+              v-if="canRestoreDefaults"
+              :disabled="isSaving"
+              @click="handleRestoreDefaults"
+            >
+              恢复默认
+            </el-button>
+          </div>
+
+          <div class="roles-page__dialog-actions">
+            <el-button @click="roleDialogVisible = false" :disabled="isSaving">关闭</el-button>
+            <el-button
+              v-if="canManageRoles"
+              type="primary"
+              :loading="isSaving"
+              :disabled="!isSelectedRoleDirty"
+              @click="handleSaveRole"
+            >
+              保存修改
+            </el-button>
+          </div>
         </div>
       </template>
     </el-dialog>
@@ -697,6 +712,7 @@ onMounted(loadData);
 .roles-page__table-toolbar,
 .roles-page__table-toolbar-left,
 .roles-page__table-toolbar-right,
+.roles-page__dialog-footer,
 .roles-page__detail-actions,
 .roles-page__dialog-actions,
 .roles-page__summary-row,
@@ -708,6 +724,7 @@ onMounted(loadData);
 
 .roles-page__filter-actions,
 .roles-page__table-toolbar,
+.roles-page__dialog-footer,
 .roles-page__detail-footer {
   justify-content: space-between;
 }
@@ -985,6 +1002,7 @@ onMounted(loadData);
 
   .roles-page__filter-actions,
   .roles-page__table-toolbar,
+  .roles-page__dialog-footer,
   .roles-page__detail-footer {
     width: 100%;
     justify-content: space-between;
@@ -993,6 +1011,7 @@ onMounted(loadData);
 
 @media (max-width: 640px) {
   .roles-page__table-toolbar,
+  .roles-page__dialog-footer,
   .roles-page__permission-editor-header,
   .roles-page__section-heading,
   .roles-page__dialog-actions {
