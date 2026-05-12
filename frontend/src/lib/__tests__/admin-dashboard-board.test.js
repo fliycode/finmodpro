@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
+  buildDashboardDocumentFlow,
   buildDashboardSummaryMetrics,
   buildDashboardTrendOption,
   normalizeDashboardPayload,
@@ -68,4 +69,29 @@ test('dashboard trend chart uses real model invocation and token usage series', 
   assert.deepEqual(option.xAxis.data, ['05-01', '05-02', '05-03', '05-04', '05-05', '05-06', '05-07']);
   assert.deepEqual(option.series[0].data, [10, 12, 8, 14, 16, 20, 18]);
   assert.deepEqual(option.series[1].data, [2200, 1850, 2410, 2980, 2640, 3160, 2875]);
+});
+
+test('dashboard document flow converts status counts into pipeline stages and branch summary', () => {
+  const stats = normalizeDashboardPayload({
+    processing_document_count: 5,
+    retryable_ingestion_count: 2,
+    document_status_distribution: {
+      uploaded: 3,
+      parsed: 2,
+      chunked: 1,
+      indexed: 12,
+      failed: 2,
+    },
+  });
+
+  const flow = buildDashboardDocumentFlow(stats);
+
+  assert.equal(flow.total, 20);
+  assert.deepEqual(flow.stages.map((item) => item.label), ['上传', '解析', '切块', '已索引']);
+  assert.deepEqual(flow.stages.map((item) => item.percent), [15, 10, 5, 60]);
+  assert.equal(flow.failure.value, 2);
+  assert.equal(flow.failure.percent, 10);
+  assert.equal(flow.summary[0].value, '60%');
+  assert.equal(flow.summary[1].value, '5');
+  assert.equal(flow.summary[2].value, '2');
 });

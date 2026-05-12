@@ -4,7 +4,7 @@ import { ElMessage } from 'element-plus';
 
 import { dashboardApi } from '../api/dashboard.js';
 import {
-  buildDashboardDocumentOption,
+  buildDashboardDocumentFlow,
   buildDashboardSummaryMetrics,
   buildDashboardTokenOption,
   buildDashboardTrendOption,
@@ -42,26 +42,8 @@ onMounted(fetchData);
 
 const summaryMetrics = computed(() => buildDashboardSummaryMetrics(dashboardStats.value));
 const trendOption = computed(() => buildDashboardTrendOption(dashboardStats.value));
-const documentOption = computed(() => buildDashboardDocumentOption(dashboardStats.value));
+const documentFlow = computed(() => buildDashboardDocumentFlow(dashboardStats.value));
 const tokenOption = computed(() => buildDashboardTokenOption(dashboardStats.value));
-
-const documentHighlights = computed(() => ([
-  {
-    label: '处理中',
-    value: formatNumber(dashboardStats.value.processing_document_count),
-    tone: 'processing',
-  },
-  {
-    label: '失败',
-    value: formatNumber(dashboardStats.value.failed_document_count),
-    tone: 'risk',
-  },
-  {
-    label: '可重试入库',
-    value: formatNumber(dashboardStats.value.retryable_ingestion_count),
-    tone: 'retry',
-  },
-]));
 
 const tokenHighlights = computed(() => {
   const total7d = Number(dashboardStats.value.token_count_7d) || 0;
@@ -131,7 +113,6 @@ const tokenHighlights = computed(() => {
         <header class="ops-board__hero-header">
           <div>
             <h2>模型调用与 Token 走势 <span class="ops-board__eyebrow">近 7 天</span></h2>
-            <p>调用频次与整体 Token 消耗放在同一视图里，更适合判断负载变化。</p>
           </div>
 
           <div class="ops-board__hero-aside">
@@ -153,7 +134,6 @@ const tokenHighlights = computed(() => {
         <header class="board-panel__header board-panel__header--stacked">
           <div>
             <strong>Token 近 7 天结构</strong>
-            <span>输入与输出拆开看，更容易定位成本上升来自哪里。</span>
           </div>
           <div class="board-panel__badge">
             <AppIcon name="activity" />
@@ -177,15 +157,55 @@ const tokenHighlights = computed(() => {
         <header class="board-panel__header">
           <div>
             <strong>文档处理状态</strong>
-            <span>入库管线当前各阶段数量，用来识别处理积压和失败点。</span>
+            <span>按入库阶段查看推进情况与异常分叉。</span>
+          </div>
+          <div class="board-panel__badge">
+            <AppIcon name="database" />
+            <span>总文档 {{ formatNumber(documentFlow.total) }}</span>
           </div>
         </header>
 
         <div class="board-panel__document-grid">
-          <AdminChart :option="documentOption" height="220px" />
+          <div class="document-flow">
+            <ol class="document-flow__track">
+              <li
+                v-for="(stage, index) in documentFlow.stages"
+                :key="stage.key"
+                class="document-stage"
+                :class="`is-${stage.tone}`"
+              >
+                <span class="document-stage__index">{{ index + 1 }}</span>
+                <div class="document-stage__body">
+                  <div class="document-stage__topline">
+                    <span>{{ stage.label }}</span>
+                    <strong>{{ formatNumber(stage.value) }}</strong>
+                  </div>
+                  <p>{{ stage.detail }}</p>
+                  <div class="document-stage__meter">
+                    <span :style="{ width: `${stage.value > 0 ? Math.max(stage.percent, 10) : 0}%` }" />
+                  </div>
+                  <small>{{ stage.percent }}%</small>
+                </div>
+              </li>
+            </ol>
+
+            <div class="document-branch">
+              <div class="document-branch__line" aria-hidden="true"></div>
+              <div class="document-branch__body">
+                <span class="document-branch__label">失败分叉</span>
+                <strong>{{ formatNumber(documentFlow.failure.value) }}</strong>
+                <p>当前失败占比 {{ documentFlow.failure.percent }}%，可重试 {{ formatNumber(documentFlow.failure.retryable) }}</p>
+              </div>
+            </div>
+          </div>
 
           <div class="board-panel__metrics board-panel__metrics--document">
-            <div v-for="item in documentHighlights" :key="item.label" class="board-panel__metric" :class="`is-${item.tone}`">
+            <div
+              v-for="item in documentFlow.summary"
+              :key="item.key"
+              class="board-panel__metric"
+              :class="`is-${item.tone}`"
+            >
               <span>{{ item.label }}</span>
               <strong>{{ item.value }}</strong>
             </div>
@@ -358,7 +378,7 @@ const tokenHighlights = computed(() => {
 }
 
 .ops-board__hero-header h2 {
-  margin: 0 0 4px;
+  margin: 0;
   color: var(--text-primary);
   font-family: var(--heading);
   font-size: 1.25rem;
@@ -459,6 +479,12 @@ const tokenHighlights = computed(() => {
   font-weight: 700;
 }
 
+.board-panel__badge span {
+  color: inherit;
+  font-size: inherit;
+  line-height: inherit;
+}
+
 .board-panel__badge :deep(.app-icon) {
   width: 14px;
   height: 14px;
@@ -467,9 +493,9 @@ const tokenHighlights = computed(() => {
 
 .board-panel__document-grid {
   display: grid;
-  grid-template-columns: minmax(0, 1.2fr) minmax(220px, 0.8fr);
+  grid-template-columns: minmax(0, 1.35fr) minmax(220px, 0.75fr);
   gap: 18px;
-  align-items: center;
+  align-items: start;
 }
 
 .board-panel__metrics {
@@ -485,6 +511,183 @@ const tokenHighlights = computed(() => {
 .board-panel__metrics--document {
   grid-template-columns: 1fr;
   align-content: start;
+}
+
+.document-flow {
+  display: grid;
+  gap: 18px;
+  min-width: 0;
+}
+
+.document-flow__track {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 14px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.document-stage {
+  position: relative;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+  min-width: 0;
+}
+
+.document-stage:not(:last-child)::after {
+  content: '';
+  position: absolute;
+  top: 15px;
+  left: calc(100% - 7px);
+  width: 14px;
+  height: 1px;
+  background: var(--line-strong);
+}
+
+.document-stage__index {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  border: 1px solid var(--line-strong);
+  color: var(--text-primary);
+  font-size: 0.75rem;
+  font-weight: 700;
+  background: var(--surface-2);
+  flex-shrink: 0;
+}
+
+.document-stage.is-processing .document-stage__index {
+  border-color: color-mix(in srgb, var(--brand) 40%, var(--line-strong));
+  color: var(--brand);
+}
+
+.document-stage.is-success .document-stage__index {
+  border-color: rgba(33, 129, 92, 0.28);
+  color: var(--success);
+}
+
+.document-stage__body {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.document-stage__topline {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.document-stage__topline span {
+  color: var(--text-primary);
+  font-size: 0.8125rem;
+  font-weight: 700;
+}
+
+.document-stage__topline strong {
+  color: var(--text-primary);
+  font-family: var(--heading);
+  font-size: 1rem;
+  line-height: 1;
+  font-weight: 600;
+}
+
+.document-stage__body p,
+.document-branch__body p {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 0.75rem;
+  line-height: 1.5;
+}
+
+.document-stage__meter {
+  width: 100%;
+  height: 6px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--surface-2);
+}
+
+.document-stage__meter span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: color-mix(in srgb, var(--brand) 70%, var(--surface-2));
+}
+
+.document-stage.is-success .document-stage__meter span {
+  background: color-mix(in srgb, var(--success) 72%, var(--surface-2));
+}
+
+.document-stage__body small {
+  color: var(--text-muted);
+  font-size: 0.6875rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+.document-branch {
+  display: grid;
+  grid-template-columns: 58px minmax(0, 1fr);
+  gap: 12px;
+  align-items: start;
+}
+
+.document-branch__line {
+  position: relative;
+  min-height: 58px;
+}
+
+.document-branch__line::before,
+.document-branch__line::after {
+  content: '';
+  position: absolute;
+  background: rgba(196, 73, 61, 0.28);
+}
+
+.document-branch__line::before {
+  top: 0;
+  left: 28px;
+  width: 1px;
+  height: 22px;
+}
+
+.document-branch__line::after {
+  top: 22px;
+  left: 28px;
+  width: 18px;
+  height: 1px;
+}
+
+.document-branch__body {
+  display: grid;
+  gap: 6px;
+  padding: 12px 14px;
+  border: 1px solid rgba(196, 73, 61, 0.18);
+  border-radius: var(--radius-lg);
+  background: color-mix(in srgb, var(--risk) 7%, var(--surface-2));
+}
+
+.document-branch__label {
+  color: var(--risk);
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+.document-branch__body strong {
+  color: var(--text-primary);
+  font-family: var(--heading);
+  font-size: 1.125rem;
+  line-height: 1;
+  font-weight: 600;
 }
 
 .board-panel__metric {
@@ -540,6 +743,14 @@ const tokenHighlights = computed(() => {
   .board-panel__document-grid {
     grid-template-columns: 1fr;
   }
+
+  .document-flow__track {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .document-stage:nth-child(2)::after {
+    display: none;
+  }
 }
 
 @media (max-width: 900px) {
@@ -564,6 +775,29 @@ const tokenHighlights = computed(() => {
   .ops-board__hero-aside,
   .board-panel__metrics {
     grid-template-columns: 1fr;
+  }
+
+  .document-flow__track {
+    grid-template-columns: 1fr;
+  }
+
+  .document-stage:not(:last-child)::after {
+    top: calc(100% + 7px);
+    left: 14px;
+    width: 1px;
+    height: 14px;
+  }
+
+  .document-branch {
+    grid-template-columns: 30px minmax(0, 1fr);
+  }
+
+  .document-branch__line::before {
+    left: 14px;
+  }
+
+  .document-branch__line::after {
+    left: 14px;
   }
 }
 </style>

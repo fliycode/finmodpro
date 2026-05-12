@@ -522,6 +522,52 @@ export function buildDashboardDocumentOption(stats) {
   };
 }
 
+export function buildDashboardDocumentFlow(stats) {
+  const distribution = stats?.document_status_distribution || {};
+  const total = sumObjectValues(distribution);
+  const safeTotal = Math.max(total, 1);
+  const indexedCount = toNumber(distribution.indexed);
+  const failedCount = toNumber(distribution.failed);
+
+  return {
+    total,
+    stages: [
+      { key: 'uploaded', label: '上传', detail: '待进入解析', value: toNumber(distribution.uploaded), tone: 'neutral' },
+      { key: 'parsed', label: '解析', detail: '结构提取', value: toNumber(distribution.parsed), tone: 'processing' },
+      { key: 'chunked', label: '切块', detail: '索引准备', value: toNumber(distribution.chunked), tone: 'processing' },
+      { key: 'indexed', label: '已索引', detail: '进入检索链路', value: indexedCount, tone: 'success' },
+    ].map((stage) => ({
+      ...stage,
+      percent: total > 0 ? Math.round((stage.value / safeTotal) * 100) : 0,
+    })),
+    failure: {
+      value: failedCount,
+      percent: total > 0 ? Math.round((failedCount / safeTotal) * 100) : 0,
+      retryable: toNumber(stats?.retryable_ingestion_count),
+    },
+    summary: [
+      {
+        key: 'completion',
+        label: '完成率',
+        value: total > 0 ? `${Math.round((indexedCount / safeTotal) * 100)}%` : '0%',
+        tone: 'success',
+      },
+      {
+        key: 'processing',
+        label: '处理中',
+        value: formatInteger(stats?.processing_document_count),
+        tone: 'processing',
+      },
+      {
+        key: 'retryable',
+        label: '可重试',
+        value: formatInteger(stats?.retryable_ingestion_count),
+        tone: 'retry',
+      },
+    ],
+  };
+}
+
 export function summarizeOperationalPosture(stats) {
   const pendingRisk = toNumber(stats?.pending_risk_event_count);
   const failedDocuments = toNumber(stats?.failed_document_count);
