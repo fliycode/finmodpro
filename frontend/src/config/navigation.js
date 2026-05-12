@@ -35,7 +35,7 @@ export const navigationMap = {
     },
     {
       id: 'admin-roles',
-      label: '权限管理',
+      label: '角色管理',
       to: '/admin/roles',
       icon: 'shield',
       group: 'admin-governance',

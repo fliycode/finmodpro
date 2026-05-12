@@ -97,6 +97,17 @@ export const groupPermissionsCatalog = (permissions = []) => {
   }));
 };
 
+export const buildPermissionTreeOptions = (groups = []) => groups.map((group) => ({
+  key: group.key,
+  value: group.key,
+  label: `${group.label} · ${group.items.length} 项能力`,
+  children: group.items.map((permission) => ({
+    key: permission.codename,
+    value: permission.codename,
+    label: `${permission.codename} · ${permission.name}`,
+  })),
+}));
+
 export const roleMatchesQuery = (role, query) => {
   const keyword = query.trim().toLowerCase();
   if (!keyword) {

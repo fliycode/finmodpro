@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
+  buildPermissionTreeOptions,
   decorateRole,
   groupPermissionsCatalog,
   roleMatchesQuery,
@@ -35,6 +36,39 @@ test('groupPermissionsCatalog groups permissions by governance domain', () => {
     '治理与权限',
     '知识资产',
     '模型与评测',
+  ]);
+});
+
+test('buildPermissionTreeOptions converts permission groups to leaf-only tree values', () => {
+  const tree = buildPermissionTreeOptions([
+    {
+      key: 'governance',
+      label: '治理与权限',
+      items: [
+        { codename: 'view_user', name: 'Can view user' },
+        { codename: 'assign_role', name: 'Can assign role' },
+      ],
+    },
+  ]);
+
+  assert.deepEqual(tree, [
+    {
+      key: 'governance',
+      value: 'governance',
+      label: '治理与权限 · 2 项能力',
+      children: [
+        {
+          key: 'view_user',
+          value: 'view_user',
+          label: 'view_user · Can view user',
+        },
+        {
+          key: 'assign_role',
+          value: 'assign_role',
+          label: 'assign_role · Can assign role',
+        },
+      ],
+    },
   ]);
 });
 

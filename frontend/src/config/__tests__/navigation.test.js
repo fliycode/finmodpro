@@ -24,6 +24,8 @@ test('workspace and admin navigation keep separate grouping vocabularies', () =>
   assert.ok(workspaceLabels.includes('智能问答'));
   assert.ok(adminLabels.includes('模型管理'));
   assert.ok(adminLabels.includes('知识库管理'));
+  assert.ok(adminLabels.includes('角色管理'));
+  assert.ok(!adminLabels.includes('权限管理'));
   assert.ok(!adminLabels.includes('图谱管理'));
   assert.deepEqual(workspaceGroups, ['workspace-core', 'workspace-support']);
   assert.ok(adminGroups.includes('admin-llm'));

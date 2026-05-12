@@ -100,9 +100,9 @@ export const appRoutes = [
         path: 'roles',
         component: () => import('../views/admin/AdminRolesView.vue'),
         meta: {
-          title: '权限管理',
-          subtitle: '管理角色、权限矩阵与自定义角色的治理边界。',
-          breadcrumb: [{ label: '治理审阅' }, { label: '权限管理' }],
+          title: '角色管理',
+          subtitle: '管理角色定义、成员归属与权限矩阵。',
+          breadcrumb: [{ label: '治理审阅' }, { label: '角色管理' }],
           requiredPermissions: ['view_role'],
         },
       },
