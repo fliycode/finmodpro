@@ -118,6 +118,9 @@ class AuthenticationApiTests(TestCase):
         self.assertIn("access_token", payload)
         self.assertEqual(payload["expires_in"], 3600)
         self.assertEqual(payload["user"]["username"], "alice")
+        self.assertEqual(payload["profile"]["username"], "alice")
+        self.assertEqual(payload["profile"]["groups"], ["member"])
+        self.assertEqual(payload["profile"]["permissions"], [])
 
         claims = decode_access_token(payload["access_token"])
         self.assertEqual(claims["sub"], "alice")
@@ -200,12 +203,23 @@ class AuthenticationApiTests(TestCase):
         )
 
         self.assertEqual(login_response.status_code, 200)
-        access_token = login_response.json()["access_token"]
+        login_payload = login_response.json()
+        access_token = login_payload["access_token"]
 
         staff_user.refresh_from_db()
         self.assertEqual(
             sorted(staff_user.groups.values_list("name", flat=True)),
             ["admin"],
+        )
+        self.assertEqual(login_payload["profile"]["groups"], ["admin"])
+        self.assertTrue(
+            {
+                "view_dashboard",
+                "view_document",
+                "ask_financial_qa",
+                "manage_model_config",
+                "view_evaluation",
+            }.issubset(set(login_payload["profile"]["permissions"]))
         )
 
         profile_response = self.client.get(
@@ -339,12 +353,14 @@ class AuthenticationCookieResponseTests(SimpleTestCase):
     def setUp(self):
         self.factory = RequestFactory()
 
+    @patch("authentication.controllers.auth_controller.build_user_auth_profile")
     @patch("authentication.controllers.auth_controller.build_user_summary")
     @patch("authentication.controllers.auth_controller.create_refresh_session")
     def test_login_sets_session_cookie_without_max_age_by_default(
         self,
         create_refresh_session_mock,
         build_user_summary_mock,
+        build_user_auth_profile_mock,
     ):
         request = self.factory.post(
             "/api/auth/login",
@@ -360,6 +376,13 @@ class AuthenticationCookieResponseTests(SimpleTestCase):
             "username": "alice",
             "email": "alice@example.com",
         }
+        build_user_auth_profile_mock.return_value = {
+            "id": 1,
+            "username": "alice",
+            "email": "alice@example.com",
+            "groups": [],
+            "permissions": [],
+        }
 
         with patch(
             "authentication.controllers.auth_controller.authenticate_user",
@@ -373,10 +396,12 @@ class AuthenticationCookieResponseTests(SimpleTestCase):
         self.assertEqual(cookie["path"], "/api/auth")
         self.assertEqual(cookie["max-age"], "")
 
+    @patch("authentication.controllers.auth_controller.build_user_auth_profile")
     @patch("authentication.controllers.auth_controller.build_user_summary")
     def test_register_does_not_set_refresh_cookie(
         self,
         build_user_summary_mock,
+        build_user_auth_profile_mock,
     ):
         request = self.factory.post(
             "/api/auth/register",
@@ -394,6 +419,13 @@ class AuthenticationCookieResponseTests(SimpleTestCase):
             "username": "alice",
             "email": "alice@example.com",
         }
+        build_user_auth_profile_mock.return_value = {
+            "id": 1,
+            "username": "alice",
+            "email": "alice@example.com",
+            "groups": [],
+            "permissions": [],
+        }
 
         with patch(
             "authentication.controllers.auth_controller.username_exists",
@@ -407,12 +439,14 @@ class AuthenticationCookieResponseTests(SimpleTestCase):
         self.assertEqual(response.status_code, 201)
         self.assertNotIn("finmodpro_refresh", response.cookies)
 
+    @patch("authentication.controllers.auth_controller.build_user_auth_profile")
     @patch("authentication.controllers.auth_controller.build_user_summary")
     @patch("authentication.controllers.auth_controller.create_refresh_session")
     def test_login_sets_persistent_cookie_when_remember_me_enabled(
         self,
         create_refresh_session_mock,
         build_user_summary_mock,
+        build_user_auth_profile_mock,
     ):
         request = self.factory.post(
             "/api/auth/login",
@@ -434,6 +468,13 @@ class AuthenticationCookieResponseTests(SimpleTestCase):
             "username": "alice",
             "email": "alice@example.com",
         }
+        build_user_auth_profile_mock.return_value = {
+            "id": 1,
+            "username": "alice",
+            "email": "alice@example.com",
+            "groups": [],
+            "permissions": [],
+        }
 
         with patch(
             "authentication.controllers.auth_controller.authenticate_user",
@@ -445,12 +486,14 @@ class AuthenticationCookieResponseTests(SimpleTestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(cookie["max-age"], 7 * 24 * 60 * 60)
 
+    @patch("authentication.controllers.auth_controller.build_user_auth_profile")
     @patch("authentication.controllers.auth_controller.get_user_by_id")
     @patch("authentication.controllers.auth_controller.rotate_refresh_session")
     def test_refresh_rotates_cookie_and_returns_new_access_token(
         self,
         rotate_refresh_session_mock,
         get_user_by_id_mock,
+        build_user_auth_profile_mock,
     ):
         request = self.factory.post("/api/auth/refresh")
         request.COOKIES["finmodpro_refresh"] = "old-cookie"
@@ -463,12 +506,21 @@ class AuthenticationCookieResponseTests(SimpleTestCase):
             username="alice",
             email="alice@example.com",
         )
+        build_user_auth_profile_mock.return_value = {
+            "id": 9,
+            "username": "alice",
+            "email": "alice@example.com",
+            "groups": [],
+            "permissions": [],
+        }
 
         response = refresh_view(request)
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.cookies["finmodpro_refresh"].value, "new-cookie")
-        self.assertIn("access_token", json.loads(response.content))
+        payload = json.loads(response.content)
+        self.assertIn("access_token", payload)
+        self.assertEqual(payload["profile"]["username"], "alice")
 
     @patch("authentication.controllers.auth_controller.revoke_refresh_session")
     def test_logout_revokes_cookie_and_clears_browser_cookie(self, revoke_refresh_session_mock):

@@ -10,6 +10,15 @@ export const createAuthSession = ({
   let bootstrapPromise = null;
   let refreshPromise = null;
 
+  const saveEmbeddedProfile = (response) => {
+    if (!response?.profile) {
+      return null;
+    }
+
+    storage.saveProfile(response.profile);
+    return response.profile;
+  };
+
   const syncProfile = async (options = {}) => {
     const profile = await api.me(options);
     storage.saveProfile(profile);
@@ -29,7 +38,9 @@ export const createAuthSession = ({
         }
 
         storage.saveToken(response.access_token);
-        await syncProfile({ skipAuthRefresh: true });
+        if (!saveEmbeddedProfile(response)) {
+          await syncProfile({ skipAuthRefresh: true });
+        }
         return true;
       } catch {
         storage.clear();
@@ -70,7 +81,7 @@ export const createAuthSession = ({
     }
 
     storage.saveToken(response.access_token);
-    const profile = await syncProfile({ skipAuthRefresh: true });
+    const profile = saveEmbeddedProfile(response) || await syncProfile({ skipAuthRefresh: true });
     return { response, profile };
   };
 

@@ -8,6 +8,7 @@ from django.views.decorators.http import require_GET
 
 from authentication.services.auth_service import (
     authenticate_user,
+    build_user_auth_profile,
     build_user_summary,
     get_user_by_id,
     register_user,
@@ -45,13 +46,15 @@ def _build_auth_response(message, user, status_code):
 
 
 def _build_auth_response_with_lifetime(message, user, status_code, lifetime_seconds):
+    user_summary = build_user_summary(user)
     return JsonResponse(
         {
             "message": message,
             "access_token": generate_access_token(user, lifetime_seconds=lifetime_seconds),
             "access_token_type": "Bearer",
             "expires_in": lifetime_seconds,
-            "user": build_user_summary(user),
+            "user": user_summary,
+            "profile": build_user_auth_profile(user, summary=user_summary),
         },
         status=status_code,
     )

@@ -1,7 +1,13 @@
 from django.contrib.auth import authenticate
 
 from authentication.models import User
-from rbac.services.rbac_service import assign_default_member_group, ensure_user_role_bindings, get_avatar_url
+from rbac.services.rbac_service import (
+    assign_default_member_group,
+    collect_user_groups,
+    collect_user_permission_names,
+    ensure_user_role_bindings,
+    get_avatar_url,
+)
 
 
 def build_user_summary(user):
@@ -10,6 +16,15 @@ def build_user_summary(user):
         "username": user.username,
         "email": user.email,
         "avatar_url": get_avatar_url(user),
+    }
+
+
+def build_user_auth_profile(user, *, summary=None):
+    resolved_summary = summary or build_user_summary(user)
+    return {
+        **resolved_summary,
+        "groups": collect_user_groups(user),
+        "permissions": collect_user_permission_names(user),
     }
 
 
