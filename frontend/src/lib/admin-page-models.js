@@ -31,6 +31,14 @@ const MODELS = Object.freeze({
       { id: 'decision', label: '决策' },
     ],
   },
+  knowledge: {
+    mobileMode: 'review-stack',
+    regions: [
+      { id: 'summary', label: '摘要' },
+      { id: 'ledger', label: '台账' },
+      { id: 'inspector', label: '治理' },
+    ],
+  },
 });
 
 export const getAdminPageModel = (key) => MODELS[key] || MODELS.operations;

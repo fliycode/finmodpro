@@ -6,7 +6,9 @@ import { kbApi } from '../api/knowledgebase.js';
 import { ElMessageBox } from 'element-plus';
 import KnowledgeBaseTable from './knowledgebase/KnowledgeBaseTable.vue';
 import KnowledgeBaseToolbar from './knowledgebase/KnowledgeBaseToolbar.vue';
+import KnowledgeBaseMetricsRail from './knowledgebase/KnowledgeBaseMetricsRail.vue';
 import AppIcon from './ui/AppIcon.vue';
+import AppSectionCard from './ui/AppSectionCard.vue';
 import { useFlash } from '../lib/flash.js';
 import { isIngestionInFlight } from '../lib/knowledgebase-actions.js';
 import {
@@ -87,48 +89,117 @@ const activeProcessingCount = computed(() =>
   items.value.filter((item) => isIngestionInFlight(item)).length,
 );
 
-const summaryCards = computed(() => [
-  {
-    id: 'datasets',
-    label: '数据集总数',
-    value: stats.value.total_datasets,
-    tone: 'violet',
-    icon: 'layers',
-  },
-  {
-    id: 'documents',
-    label: '文档总数',
-    value: stats.value.total_documents,
-    tone: 'blue',
-    icon: 'file-text',
-  },
-  {
-    id: 'storage',
-    label: '数据总量',
-    value: stats.value.total_storage_formatted,
-    tone: 'green',
-    icon: 'database',
-  },
-  {
-    id: 'vectors',
-    label: '向量总数',
-    value: Number(stats.value.total_vectors || 0).toLocaleString('zh-CN'),
-    tone: 'amber',
-    icon: 'zap',
-  },
-  {
-    id: 'ready',
-    label: '可检索率',
-    value: stats.value.ready_rate,
-    delta: `${stats.value.failed_count} 个失败`,
-    tone: 'purple',
-    icon: 'check',
-  },
-]);
-
 const activeDataset = computed(() =>
   datasets.value.find((dataset) => String(dataset.id) === String(selectedDatasetId.value)) || null,
 );
+
+const selectedDatasetLabel = computed(() => activeDataset.value?.name || '全部数据集');
+
+const summaryCards = computed(() => (
+  props.showAdminMetrics
+    ? [
+      {
+        id: 'datasets',
+        label: '数据集总数',
+        value: stats.value.total_datasets,
+        tone: 'violet',
+        icon: 'layers',
+      },
+      {
+        id: 'documents',
+        label: '文档总数',
+        value: stats.value.total_documents,
+        tone: 'blue',
+        icon: 'file-text',
+      },
+      {
+        id: 'processing',
+        label: '处理中任务',
+        value: stats.value.processing_count,
+        delta: activeProcessingCount.value > 0 ? `当前筛选内 ${activeProcessingCount.value} 个活动任务` : '当前筛选内无活动任务',
+        tone: 'amber',
+        icon: 'activity',
+      },
+      {
+        id: 'failed',
+        label: '失败文档',
+        value: stats.value.failed_count,
+        delta: stats.value.failed_count > 0 ? '建议优先回到明细排查失败步骤' : '当前没有失败文档',
+        tone: 'red',
+        icon: 'alert-triangle',
+      },
+      {
+        id: 'vectors',
+        label: '向量总数',
+        value: Number(stats.value.total_vectors || 0).toLocaleString('zh-CN'),
+        tone: 'green',
+        icon: 'zap',
+      },
+      {
+        id: 'ready',
+        label: '可检索率',
+        value: stats.value.ready_rate,
+        delta: `${stats.value.indexed_count} 个已入库`,
+        tone: 'purple',
+        icon: 'check',
+      },
+    ]
+    : [
+      {
+        id: 'datasets',
+        label: '数据集总数',
+        value: stats.value.total_datasets,
+        tone: 'violet',
+        icon: 'layers',
+      },
+      {
+        id: 'documents',
+        label: '文档总数',
+        value: stats.value.total_documents,
+        tone: 'blue',
+        icon: 'file-text',
+      },
+      {
+        id: 'storage',
+        label: '数据总量',
+        value: stats.value.total_storage_formatted,
+        tone: 'green',
+        icon: 'database',
+      },
+      {
+        id: 'vectors',
+        label: '向量总数',
+        value: Number(stats.value.total_vectors || 0).toLocaleString('zh-CN'),
+        tone: 'amber',
+        icon: 'zap',
+      },
+      {
+        id: 'ready',
+        label: '可检索率',
+        value: stats.value.ready_rate,
+        delta: `${stats.value.failed_count} 个失败`,
+        tone: 'purple',
+        icon: 'check',
+      },
+    ]
+));
+
+const adminSummaryMeta = computed(() => [
+  `当前范围：${selectedDatasetLabel.value}`,
+  `失败文档：${stats.value.failed_count}`,
+]);
+
+const adminLedgerMeta = computed(() => [
+  `筛选结果：${pagination.value.total || 0} 条`,
+  checkedDocumentIds.value.length > 0 ? `已选：${checkedDocumentIds.value.length} 个文档` : '已选：0 个文档',
+  activeProcessingCount.value > 0 ? '当前筛选范围已启用轮询' : '当前筛选范围无活动任务',
+]);
+
+const shouldPoll = computed(() => (
+  props.showAdminMetrics
+    ? Number(stats.value.processing_count || 0) > 0 || activeProcessingCount.value > 0
+    : activeProcessingCount.value > 0
+));
 
 const fetchDatasets = async () => {
   isLoadingDatasets.value = true;
@@ -218,7 +289,7 @@ const handleFileChange = async (event) => {
   try {
     const uploadResult = await kbApi.uploadDocument(file, { datasetId });
     const datasetName = datasetId
-      ? datasets.value.find((d) => String(d.id) === String(datasetId))?.name
+      ? datasets.value.find((dataset) => String(dataset.id) === String(datasetId))?.name
       : null;
     flash.success(
       datasetName
@@ -324,7 +395,7 @@ const handleRowAction = async ({ item, action }) => {
       await ElMessageBox.confirm(
         `确认删除文档"${item.title}"吗？删除后不可恢复。`,
         '删除文档',
-        { confirmButtonText: '删除', cancelButtonText: '取消', type: 'warning' }
+        { confirmButtonText: '删除', cancelButtonText: '取消', type: 'warning' },
       );
     } catch {
       return;
@@ -382,7 +453,7 @@ const handleBatchDelete = async () => {
     await ElMessageBox.confirm(
       `确认删除选中的 ${checkedDocumentIds.value.length} 个文档吗？删除后不可恢复。`,
       '批量删除',
-      { confirmButtonText: '删除', cancelButtonText: '取消', type: 'warning' }
+      { confirmButtonText: '删除', cancelButtonText: '取消', type: 'warning' },
     );
   } catch {
     return;
@@ -404,7 +475,7 @@ const handleBatchDelete = async () => {
 
 const startPolling = () => {
   pollInterval = setInterval(async () => {
-    if (activeProcessingCount.value === 0) return;
+    if (!shouldPoll.value) return;
     try {
       await fetchDocuments();
       await fetchStats();
@@ -451,7 +522,7 @@ onUnmounted(() => {
               @click="uploadSelectedDatasetId = String(ds.id)"
             >
               <span class="kb-dataset-option__name">{{ ds.name }}</span>
-              <span class="kb-dataset-option__hint">{{ ds.document_count ?? 0 }} 个文档</span>
+              <span class="kb-dataset-option__hint">{{ ds.documentCount ?? 0 }} 个文档</span>
             </button>
             <button
               type="button"
@@ -459,7 +530,7 @@ onUnmounted(() => {
               @click="uploadSelectedDatasetId = ''"
             >
               <span class="kb-dataset-option__name">不指定数据集</span>
-              <span class="kb-dataset-option__hint">文档将归入"未分组"</span>
+              <span class="kb-dataset-option__hint">文档将归入“未分组”</span>
             </button>
           </div>
           <div class="kb-dialog__actions">
@@ -470,103 +541,245 @@ onUnmounted(() => {
       </div>
     </Teleport>
 
-    <section class="kb-overview">
-      <div class="kb-overview__stats">
-        <article
-          v-for="card in summaryCards"
-          :key="card.id"
-          :class="['stat-card', `stat-card--${card.tone}`]"
-        >
-          <span class="stat-card__icon" aria-hidden="true">
-            <AppIcon :name="card.icon" :width="20" :height="20" />
-          </span>
-          <div class="stat-card__body">
-            <span class="stat-label">{{ card.label }}</span>
-            <strong>{{ card.value }}</strong>
-            <small v-if="card.delta">{{ card.delta }}</small>
+    <template v-if="showAdminMetrics">
+      <AppSectionCard
+        admin
+        title="知识资产治理摘要"
+        desc="保留最关键的六个判断：规模、健康度、处理中任务、失败文档、向量量级和检索就绪率。"
+      >
+        <template #header>
+          <div class="kb-admin-pillbar">
+            <span v-for="item in adminSummaryMeta" :key="item" class="kb-admin-pill">{{ item }}</span>
           </div>
-        </article>
-      </div>
-    </section>
+        </template>
 
-    <section class="kb-ledger-panel">
-      <KnowledgeBaseToolbar
-        :search-keyword="searchKeyword"
-        :status-filter="statusFilter"
-        :time-range="timeRange"
-        :datasets="datasets"
-        :selected-dataset-id="selectedDatasetId"
-        :is-uploading="isUploading"
-        @update:search-keyword="searchKeyword = $event"
-        @update:status-filter="statusFilter = $event"
-        @update:time-range="timeRange = $event"
-        @update:selected-dataset-id="selectedDatasetId = $event"
-        @create-dataset="isDatasetComposerOpen = !isDatasetComposerOpen"
-        @upload="triggerUpload"
-      />
-
-      <section v-if="isDatasetComposerOpen" class="kb-dataset-composer">
-        <div class="kb-dataset-composer__copy">
-          <p class="eyebrow">Dataset composer</p>
-          <h3>创建一个新的知识数据集</h3>
-          <p>
-            用于组织上传文档、限定检索范围，并为后续问答与风险抽取提供稳定的数据边界。
-          </p>
+        <div class="kb-overview__stats kb-overview__stats--admin">
+          <article
+            v-for="card in summaryCards"
+            :key="card.id"
+            :class="['stat-card', `stat-card--${card.tone}`]"
+          >
+            <span class="stat-card__icon" aria-hidden="true">
+              <AppIcon :name="card.icon" :width="20" :height="20" />
+            </span>
+            <div class="stat-card__body">
+              <span class="stat-label">{{ card.label }}</span>
+              <strong>{{ card.value }}</strong>
+              <small v-if="card.delta">{{ card.delta }}</small>
+            </div>
+          </article>
         </div>
-        <div class="kb-dataset-composer__form">
-          <input
-            v-model="datasetForm.name"
-            class="kb-search"
-            type="text"
-            placeholder="例如：2025 年报数据集"
+      </AppSectionCard>
+
+      <section class="kb-admin-layout">
+        <AppSectionCard
+          admin
+          title="知识资产台账"
+          desc="按数据集、状态和时间筛选文档，并在同一处完成上传、批量入库和批量删除。"
+          class="kb-admin-main"
+        >
+          <template #header>
+            <div class="kb-admin-pillbar kb-admin-pillbar--muted">
+              <span v-for="item in adminLedgerMeta" :key="item" class="kb-admin-pill">{{ item }}</span>
+            </div>
+          </template>
+
+          <KnowledgeBaseToolbar
+            :search-keyword="searchKeyword"
+            :status-filter="statusFilter"
+            :time-range="timeRange"
+            :datasets="datasets"
+            :selected-dataset-id="selectedDatasetId"
+            :is-uploading="isUploading"
+            @update:search-keyword="searchKeyword = $event"
+            @update:status-filter="statusFilter = $event"
+            @update:time-range="timeRange = $event"
+            @update:selected-dataset-id="selectedDatasetId = $event"
+            @create-dataset="isDatasetComposerOpen = !isDatasetComposerOpen"
+            @upload="triggerUpload"
           />
-          <textarea
-            v-model="datasetForm.description"
-            class="kb-textarea"
-            rows="3"
-            placeholder="补充该数据集的用途、来源或适用场景"
-          />
-          <div class="kb-dataset-composer__actions">
-            <button
-              class="kb-secondary-btn"
-              :disabled="isCreatingDataset"
-              @click="isDatasetComposerOpen = false"
-            >
-              取消
-            </button>
-            <button
-              class="kb-primary-btn"
-              :disabled="isCreatingDataset"
-              @click="createDataset"
-            >
-              {{ isCreatingDataset ? '创建中...' : '创建数据集' }}
-            </button>
+
+          <section v-if="isDatasetComposerOpen" class="kb-dataset-composer kb-dataset-composer--admin">
+            <div class="kb-dataset-composer__copy">
+              <p class="eyebrow">Dataset composer</p>
+              <h3>创建一个新的知识数据集</h3>
+              <p>
+                用于组织上传文档、限定检索范围，并为后续问答与风险抽取提供稳定的数据边界。
+              </p>
+            </div>
+            <div class="kb-dataset-composer__form">
+              <input
+                v-model="datasetForm.name"
+                class="kb-search"
+                type="text"
+                placeholder="例如：2025 年报数据集"
+              />
+              <textarea
+                v-model="datasetForm.description"
+                class="kb-textarea"
+                rows="3"
+                placeholder="补充该数据集的用途、来源或适用场景"
+              />
+              <div class="kb-dataset-composer__actions">
+                <button
+                  class="kb-secondary-btn"
+                  :disabled="isCreatingDataset"
+                  @click="isDatasetComposerOpen = false"
+                >
+                  取消
+                </button>
+                <button
+                  class="kb-primary-btn"
+                  :disabled="isCreatingDataset"
+                  @click="createDataset"
+                >
+                  {{ isCreatingDataset ? '创建中...' : '创建数据集' }}
+                </button>
+              </div>
+            </div>
+          </section>
+
+          <div v-if="checkedDocumentIds.length > 0" class="kb-batchbar kb-batchbar--admin">
+            <span>已选择 {{ checkedDocumentIds.length }} 个文档</span>
+            <div class="kb-batchbar__actions">
+              <button class="kb-secondary-btn" @click="handleBatchIngest">批量重新入库</button>
+              <button class="kb-danger-btn" @click="handleBatchDelete">批量删除</button>
+            </div>
           </div>
+
+          <KnowledgeBaseTable
+            :items="decoratedItems"
+            :checked-ids="checkedDocumentIds"
+            :is-loading="isLoading"
+            :page="pagination.page"
+            :total-pages="pagination.totalPages"
+            :total="pagination.total"
+            @navigate="navigateToDetail"
+            @toggle-row="toggleRow"
+            @toggle-all="toggleAll"
+            @row-action="handleRowAction"
+            @change-page="changePage"
+          />
+        </AppSectionCard>
+
+        <AppSectionCard
+          admin
+          title="治理巡检"
+          desc="把存储、向量、数据集分布和最近活动固定在侧边，减少在主台账中来回跳转。"
+          class="kb-admin-side"
+        >
+          <KnowledgeBaseMetricsRail
+            :documents="decoratedItems"
+            :datasets="datasets"
+            :stats="stats"
+            :total-documents="stats.total_documents"
+            :active-count="stats.processing_count"
+            :indexed-count="stats.indexed_count"
+            :failed-count="stats.failed_count"
+          />
+        </AppSectionCard>
+      </section>
+    </template>
+
+    <template v-else>
+      <section class="kb-overview">
+        <div class="kb-overview__stats">
+          <article
+            v-for="card in summaryCards"
+            :key="card.id"
+            :class="['stat-card', `stat-card--${card.tone}`]"
+          >
+            <span class="stat-card__icon" aria-hidden="true">
+              <AppIcon :name="card.icon" :width="20" :height="20" />
+            </span>
+            <div class="stat-card__body">
+              <span class="stat-label">{{ card.label }}</span>
+              <strong>{{ card.value }}</strong>
+              <small v-if="card.delta">{{ card.delta }}</small>
+            </div>
+          </article>
         </div>
       </section>
 
-      <div v-if="checkedDocumentIds.length > 0" class="kb-batchbar">
-        <span>已选择 {{ checkedDocumentIds.length }} 个文档</span>
-        <div class="kb-batchbar__actions">
-          <button class="kb-secondary-btn" @click="handleBatchIngest">批量重新入库</button>
-          <button class="kb-danger-btn" @click="handleBatchDelete">批量删除</button>
-        </div>
-      </div>
+      <section class="kb-ledger-panel">
+        <KnowledgeBaseToolbar
+          :search-keyword="searchKeyword"
+          :status-filter="statusFilter"
+          :time-range="timeRange"
+          :datasets="datasets"
+          :selected-dataset-id="selectedDatasetId"
+          :is-uploading="isUploading"
+          @update:search-keyword="searchKeyword = $event"
+          @update:status-filter="statusFilter = $event"
+          @update:time-range="timeRange = $event"
+          @update:selected-dataset-id="selectedDatasetId = $event"
+          @create-dataset="isDatasetComposerOpen = !isDatasetComposerOpen"
+          @upload="triggerUpload"
+        />
 
-      <KnowledgeBaseTable
-        :items="decoratedItems"
-        :checked-ids="checkedDocumentIds"
-        :is-loading="isLoading"
-        :page="pagination.page"
-        :total-pages="pagination.totalPages"
-        :total="pagination.total"
-        @navigate="navigateToDetail"
-        @toggle-row="toggleRow"
-        @toggle-all="toggleAll"
-        @row-action="handleRowAction"
-        @change-page="changePage"
-      />
-    </section>
+        <section v-if="isDatasetComposerOpen" class="kb-dataset-composer">
+          <div class="kb-dataset-composer__copy">
+            <p class="eyebrow">Dataset composer</p>
+            <h3>创建一个新的知识数据集</h3>
+            <p>
+              用于组织上传文档、限定检索范围，并为后续问答与风险抽取提供稳定的数据边界。
+            </p>
+          </div>
+          <div class="kb-dataset-composer__form">
+            <input
+              v-model="datasetForm.name"
+              class="kb-search"
+              type="text"
+              placeholder="例如：2025 年报数据集"
+            />
+            <textarea
+              v-model="datasetForm.description"
+              class="kb-textarea"
+              rows="3"
+              placeholder="补充该数据集的用途、来源或适用场景"
+            />
+            <div class="kb-dataset-composer__actions">
+              <button
+                class="kb-secondary-btn"
+                :disabled="isCreatingDataset"
+                @click="isDatasetComposerOpen = false"
+              >
+                取消
+              </button>
+              <button
+                class="kb-primary-btn"
+                :disabled="isCreatingDataset"
+                @click="createDataset"
+              >
+                {{ isCreatingDataset ? '创建中...' : '创建数据集' }}
+              </button>
+            </div>
+          </div>
+        </section>
+
+        <div v-if="checkedDocumentIds.length > 0" class="kb-batchbar">
+          <span>已选择 {{ checkedDocumentIds.length }} 个文档</span>
+          <div class="kb-batchbar__actions">
+            <button class="kb-secondary-btn" @click="handleBatchIngest">批量重新入库</button>
+            <button class="kb-danger-btn" @click="handleBatchDelete">批量删除</button>
+          </div>
+        </div>
+
+        <KnowledgeBaseTable
+          :items="decoratedItems"
+          :checked-ids="checkedDocumentIds"
+          :is-loading="isLoading"
+          :page="pagination.page"
+          :total-pages="pagination.totalPages"
+          :total="pagination.total"
+          @navigate="navigateToDetail"
+          @toggle-row="toggleRow"
+          @toggle-all="toggleAll"
+          @row-action="handleRowAction"
+          @change-page="changePage"
+        />
+      </section>
+    </template>
   </div>
 </template>
 
@@ -574,9 +787,45 @@ onUnmounted(() => {
 .kb-page {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 18px;
   min-height: 0;
   color: var(--text-secondary);
+}
+
+.kb-page--admin {
+  gap: 20px;
+}
+
+.kb-admin-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.45fr) minmax(320px, 0.8fr);
+  gap: 18px;
+  align-items: start;
+}
+
+.kb-admin-pillbar {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.kb-admin-pill {
+  display: inline-flex;
+  align-items: center;
+  min-height: 30px;
+  padding: 0 10px;
+  border-radius: 999px;
+  background: color-mix(in oklab, var(--brand) 6%, var(--surface-3));
+  color: var(--text-secondary);
+  font-family: 'PingFang SC', 'Noto Sans SC', 'Microsoft YaHei', sans-serif;
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.kb-admin-pillbar--muted .kb-admin-pill {
+  background: var(--surface-3);
 }
 
 .kb-overview {
@@ -621,11 +870,15 @@ onUnmounted(() => {
   gap: 12px;
 }
 
+.kb-overview__stats--admin {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
 .stat-card {
   display: flex;
   align-items: center;
   gap: 12px;
-  min-height: 72px;
+  min-height: 82px;
   padding: 12px 16px;
   border: 1px solid var(--line-soft);
   border-radius: 16px;
@@ -664,6 +917,11 @@ onUnmounted(() => {
   color: #4b357e;
 }
 
+.stat-card--red .stat-card__icon {
+  background: rgba(181, 58, 58, 0.12);
+  color: #9b3131;
+}
+
 .stat-card__body {
   min-width: 0;
 }
@@ -694,6 +952,7 @@ onUnmounted(() => {
   color: var(--text-muted);
   font-family: 'PingFang SC', 'Noto Sans SC', 'Microsoft YaHei', sans-serif;
   font-size: 11px;
+  line-height: 1.5;
 }
 
 .kb-ledger-panel {
@@ -714,6 +973,13 @@ onUnmounted(() => {
   border-radius: 16px;
   background: var(--surface-2);
   box-shadow: var(--shadow-md);
+}
+
+.kb-dataset-composer--admin {
+  margin: 0;
+  padding: 20px;
+  background: color-mix(in oklab, var(--brand) 2%, var(--surface-2));
+  box-shadow: none;
 }
 
 .kb-dataset-composer__form {
@@ -761,6 +1027,10 @@ onUnmounted(() => {
   box-shadow: var(--shadow-sm);
 }
 
+.kb-batchbar--admin {
+  margin: 0;
+}
+
 .kb-batchbar span {
   color: var(--text-primary);
   font-family: 'PingFang SC', 'Noto Sans SC', 'Microsoft YaHei', sans-serif;
@@ -796,16 +1066,6 @@ onUnmounted(() => {
   border: 1px solid rgba(181, 58, 58, 0.18);
   background: rgba(181, 58, 58, 0.08);
   color: #9b3131;
-}
-
-@media (max-width: 1180px) {
-  .kb-dataset-composer {
-    grid-template-columns: 1fr;
-  }
-
-  .kb-overview__stats {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
 }
 
 .kb-dialog-overlay {
@@ -899,8 +1159,25 @@ onUnmounted(() => {
   gap: 10px;
 }
 
+@media (max-width: 1180px) {
+  .kb-admin-layout,
+  .kb-dataset-composer {
+    grid-template-columns: 1fr;
+  }
+
+  .kb-overview__stats,
+  .kb-overview__stats--admin {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
 @media (max-width: 720px) {
-  .kb-overview__stats {
+  .kb-admin-pillbar {
+    justify-content: flex-start;
+  }
+
+  .kb-overview__stats,
+  .kb-overview__stats--admin {
     grid-template-columns: 1fr;
   }
 
