@@ -1019,7 +1019,8 @@ const handleAsk = async () => {
 
 .qa-msg__avatar--ai {
   overflow: hidden;
-  background: rgba(12, 20, 35, 0.92);
+  background: transparent;
+  border: none;
   color: #b8ccff;
 }
 
