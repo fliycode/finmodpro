@@ -83,7 +83,7 @@ const ACTION_TONES = Object.freeze({
   'llm.fine_tune_run.dispatch': 'accent',
 });
 
-const DETAIL_LABELS = Object.freeze({
+export const DETAIL_LABELS = Object.freeze({
   username: '用户',
   email: '邮箱',
   groups: '角色组',
@@ -155,7 +155,7 @@ const DETAIL_LABELS = Object.freeze({
   error: '错误',
 });
 
-const DETAIL_ORDER = Object.freeze([
+export const DETAIL_ORDER = Object.freeze([
   'username',
   'name',
   'title',
@@ -191,7 +191,7 @@ const DETAIL_ORDER = Object.freeze([
   'error',
 ]);
 
-function hasDisplayValue(value) {
+export function hasDisplayValue(value) {
   if (value === null || value === undefined) return false;
   if (typeof value === 'string') return value.trim().length > 0;
   if (Array.isArray(value)) return value.length > 0;
@@ -199,7 +199,7 @@ function hasDisplayValue(value) {
   return true;
 }
 
-function formatDetailValue(value) {
+export function formatDetailValue(value) {
   if (Array.isArray(value)) {
     return value.join(', ');
   }
