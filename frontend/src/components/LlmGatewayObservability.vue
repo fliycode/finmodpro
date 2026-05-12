@@ -5,80 +5,179 @@ import { llmGatewayApi } from '../api/llm-gateway.js';
 import {
   normalizeGatewayLogs,
   normalizeGatewayLogsSummary,
+  normalizeGatewaySummary,
   normalizeGatewayTrace,
 } from '../lib/llm-gateway.js';
+import { buildBoardAxis, buildBoardTooltip, chartColors } from '../lib/admin-dashboard.js';
 import AdminChart from './admin/AdminChart.vue';
+import AdminDataTable from './admin/AdminDataTable.vue';
 import OpsInspectorDrawer from './admin/ops/OpsInspectorDrawer.vue';
 import OpsSectionFrame from './admin/ops/OpsSectionFrame.vue';
+import OpsStatusBand from './admin/ops/OpsStatusBand.vue';
 import AppSectionCard from './ui/AppSectionCard.vue';
+
+/* ---------- State ---------- */
 
 const logs = ref(normalizeGatewayLogs());
 const summary = ref(normalizeGatewayLogsSummary());
+const summaryStats = ref(normalizeGatewaySummary());
 const trace = ref(normalizeGatewayTrace());
 const traceDrawerVisible = ref(false);
 const isLoading = ref(false);
 const isTraceLoading = ref(false);
 const errorMsg = ref('');
+
+const timeWindow = ref('24h');
+const modelFilter = ref('');
+const statusFilter = ref('');
 const page = ref(1);
-const pageSize = ref(20);
+const pageSize = ref(25);
 
-const formatTime = (iso) => {
-  if (!iso) {
-    return '--';
-  }
-  try {
-    const d = new Date(iso);
-    if (Number.isNaN(d.getTime())) {
-      return iso;
-    }
-    const pad = (n) => String(n).padStart(2, '0');
-    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
-  } catch {
-    return iso;
-  }
-};
+/* ---------- Options ---------- */
 
-const fetchObservability = async () => {
-  isLoading.value = true;
-  errorMsg.value = '';
-  try {
-    const params = {
-      time: '24h',
-      page: page.value,
-      page_size: pageSize.value,
-    };
-    const [logsPayload, summaryPayload] = await Promise.all([
-      llmGatewayApi.getLogs(params),
-      llmGatewayApi.getLogsSummary(params),
-    ]);
-    logs.value = logsPayload;
-    summary.value = summaryPayload;
-  } catch (error) {
-    errorMsg.value = error.message || '加载模型日志失败';
-  } finally {
-    isLoading.value = false;
-  }
-};
+const timeOptions = [
+  { label: '1 小时', value: '1h' },
+  { label: '6 小时', value: '6h' },
+  { label: '24 小时', value: '24h' },
+  { label: '7 天', value: '7d' },
+];
 
-const fetchTrace = async (traceId) => {
-  if (!traceId) {
-    return;
-  }
-  isTraceLoading.value = true;
-  try {
-    trace.value = await llmGatewayApi.getTrace(traceId);
-    traceDrawerVisible.value = true;
-  } catch (error) {
-    errorMsg.value = error.message || '加载 Trace 失败';
-  } finally {
-    isTraceLoading.value = false;
-  }
-};
+const statusOptions = [
+  { label: '全部状态', value: '' },
+  { label: '成功', value: 'success' },
+  { label: '失败', value: 'failed' },
+];
 
-const handlePageChange = async (nextPage) => {
-  page.value = nextPage;
-  await fetchObservability();
-};
+const modelOptions = computed(() =>
+  (summaryStats.value.top_models || []).map((m) => ({
+    label: m.alias,
+    value: m.alias,
+  })),
+);
+
+/* ---------- Summary band ---------- */
+
+const summaryItems = computed(() => {
+  const traffic = summaryStats.value.traffic || {};
+  const gateway = summaryStats.value.gateway || {};
+  const errorRate = Number(traffic.error_rate_pct) || 0;
+  const avgLatency = Number(summary.value.avg_latency_ms) || 0;
+
+  return [
+    {
+      key: 'requests',
+      label: '总请求',
+      value: formatInteger(traffic.request_count),
+      icon: 'activity',
+      tone: 'brand',
+    },
+    {
+      key: 'error-rate',
+      label: '错误率',
+      value: `${errorRate.toFixed(1)}%`,
+      icon: 'alert-triangle',
+      tone: errorRate > 5 ? 'risk' : errorRate > 2 ? 'warning' : 'success',
+    },
+    {
+      key: 'latency',
+      label: '平均延迟',
+      value: `${avgLatency.toFixed(0)} ms`,
+      icon: 'clock',
+      tone: avgLatency > 5000 ? 'risk' : avgLatency > 2000 ? 'warning' : 'success',
+    },
+    {
+      key: 'models',
+      label: '活跃模型',
+      value: String(gateway.active_model_count || 0),
+      icon: 'brain-circuit',
+      tone: 'accent',
+    },
+  ];
+});
+
+/* ---------- Charts ---------- */
+
+const tokenChartOption = computed(() => {
+  const data = tokenUsageByModel.value;
+  if (data.length === 0) return {};
+  const c = chartColors();
+  const axis = buildBoardAxis();
+
+  return {
+    tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' }, ...buildBoardTooltip() },
+    legend: {
+      top: 4,
+      textStyle: { color: c.textSecondary, fontSize: 11 },
+    },
+    grid: { left: 12, right: 16, top: 40, bottom: 8, containLabel: true },
+    xAxis: {
+      type: 'category',
+      data: data.map((d) => d.name),
+      axisLabel: { color: c.textSecondary, fontSize: 10, rotate: data.length > 5 ? 20 : 0 },
+      axisLine: axis.axisLine,
+    },
+    yAxis: {
+      type: 'value',
+      axisLabel: axis.axisLabel,
+      splitLine: { lineStyle: { color: c.gridLine } },
+    },
+    series: [
+      {
+        name: '输入 Token',
+        type: 'bar',
+        stack: 'tokens',
+        data: data.map((d) => d.input),
+        itemStyle: { color: c.brand },
+      },
+      {
+        name: '输出 Token',
+        type: 'bar',
+        stack: 'tokens',
+        data: data.map((d) => d.output),
+        itemStyle: { color: c.brandSoft, borderRadius: [4, 4, 0, 0] },
+      },
+    ],
+  };
+});
+
+const latencyChartOption = computed(() => {
+  const buckets = summary.value.latency_buckets;
+  if (buckets.length === 0) return {};
+  const c = chartColors();
+  const axis = buildBoardAxis();
+
+  return {
+    tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' }, ...buildBoardTooltip() },
+    grid: { left: 12, right: 16, top: 16, bottom: 8, containLabel: true },
+    xAxis: {
+      type: 'category',
+      data: buckets.map((b) => b.label),
+      axisLabel: { color: c.textSecondary, fontSize: 10 },
+      axisLine: axis.axisLine,
+    },
+    yAxis: {
+      type: 'value',
+      axisLabel: axis.axisLabel,
+      splitLine: { lineStyle: { color: c.gridLine } },
+    },
+    series: [
+      {
+        type: 'bar',
+        data: buckets.map((b) => b.count),
+        itemStyle: {
+          color: (params) => {
+            const ratio = params.dataIndex / Math.max(buckets.length - 1, 1);
+            return ratio < 0.5
+              ? interpolateColor(c.brand, c.warning, ratio * 2)
+              : interpolateColor(c.warning, c.risk, (ratio - 0.5) * 2);
+          },
+          borderRadius: [4, 4, 0, 0],
+        },
+        barMaxWidth: 40,
+      },
+    ],
+  };
+});
 
 const tokenUsageByModel = computed(() => {
   const map = new Map();
@@ -95,92 +194,112 @@ const tokenUsageByModel = computed(() => {
     .slice(0, 10);
 });
 
-const tokenChartOption = computed(() => {
-  const data = tokenUsageByModel.value;
-  if (data.length === 0) {
-    return {};
-  }
-  return {
-    tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
-    legend: { top: 4, textStyle: { color: '#8a95a7', fontSize: 11 } },
-    grid: { left: 12, right: 16, top: 40, bottom: 8, containLabel: true },
-    xAxis: {
-      type: 'category',
-      data: data.map((d) => d.name),
-      axisLabel: { color: '#8a95a7', fontSize: 10, rotate: data.length > 5 ? 20 : 0 },
-      axisLine: { lineStyle: { color: 'rgba(148,163,184,0.16)' } },
-    },
-    yAxis: {
-      type: 'value',
-      axisLabel: { color: '#8a95a7', fontSize: 10 },
-      splitLine: { lineStyle: { color: 'rgba(148,163,184,0.1)' } },
-    },
-    series: [
-      {
-        name: '输入 Token',
-        type: 'bar',
-        stack: 'tokens',
-        data: data.map((d) => d.input),
-        itemStyle: { color: 'rgba(36,87,197,0.72)', borderRadius: [0, 0, 0, 0] },
-      },
-      {
-        name: '输出 Token',
-        type: 'bar',
-        stack: 'tokens',
-        data: data.map((d) => d.output),
-        itemStyle: { color: 'rgba(36,87,197,0.32)', borderRadius: [4, 4, 0, 0] },
-      },
-    ],
-  };
-});
+/* ---------- Helpers ---------- */
 
-const latencyChartOption = computed(() => {
-  const buckets = summary.value.latency_buckets;
-  if (buckets.length === 0) {
-    return {};
+const formatInteger = (v) => {
+  const n = Number(v);
+  return Number.isFinite(n) ? new Intl.NumberFormat('zh-CN').format(Math.round(n)) : '0';
+};
+
+const formatTime = (iso) => {
+  if (!iso) return '--';
+  try {
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return iso;
+    const pad = (n) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+  } catch {
+    return iso;
   }
-  return {
-    tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
-    grid: { left: 12, right: 16, top: 16, bottom: 8, containLabel: true },
-    xAxis: {
-      type: 'category',
-      data: buckets.map((b) => b.label),
-      axisLabel: { color: '#8a95a7', fontSize: 10 },
-      axisLine: { lineStyle: { color: 'rgba(148,163,184,0.16)' } },
-    },
-    yAxis: {
-      type: 'value',
-      axisLabel: { color: '#8a95a7', fontSize: 10 },
-      splitLine: { lineStyle: { color: 'rgba(148,163,184,0.1)' } },
-    },
-    series: [
-      {
-        type: 'bar',
-        data: buckets.map((b) => b.count),
-        itemStyle: {
-          color: (params) => {
-            const ratio = params.dataIndex / Math.max(buckets.length - 1, 1);
-            const r = Math.round(36 + ratio * 60);
-            const g = Math.round(87 - ratio * 30);
-            const b = Math.round(197 - ratio * 80);
-            return `rgba(${r},${g},${b},0.78)`;
-          },
-          borderRadius: [4, 4, 0, 0],
-        },
-        barMaxWidth: 40,
-      },
-    ],
-  };
-});
+};
+
+function hexToRgb(hex) {
+  const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+  return result
+    ? { r: parseInt(result[1], 16), g: parseInt(result[2], 16), b: parseInt(result[3], 16) }
+    : { r: 0, g: 0, b: 0 };
+}
+
+function interpolateColor(hex1, hex2, t) {
+  const c1 = hexToRgb(hex1);
+  const c2 = hexToRgb(hex2);
+  const r = Math.round(c1.r + (c2.r - c1.r) * t);
+  const g = Math.round(c1.g + (c2.g - c1.g) * t);
+  const b = Math.round(c1.b + (c2.b - c1.b) * t);
+  return `rgba(${r},${g},${b},0.78)`;
+}
+
+/* ---------- Data fetching ---------- */
+
+const fetchObservability = async () => {
+  isLoading.value = true;
+  errorMsg.value = '';
+  try {
+    const params = {
+      time: timeWindow.value,
+      page: page.value,
+      page_size: pageSize.value,
+    };
+    if (modelFilter.value) params.model = modelFilter.value;
+    if (statusFilter.value) params.status = statusFilter.value;
+
+    const [logsPayload, summaryPayload, summaryStatsPayload] = await Promise.all([
+      llmGatewayApi.getLogs(params),
+      llmGatewayApi.getLogsSummary(params),
+      llmGatewayApi.getSummary(),
+    ]);
+    logs.value = logsPayload;
+    summary.value = summaryPayload;
+    summaryStats.value = summaryStatsPayload;
+  } catch (error) {
+    errorMsg.value = error.message || '加载模型日志失败';
+  } finally {
+    isLoading.value = false;
+  }
+};
+
+const fetchTrace = async (traceId) => {
+  if (!traceId) return;
+  isTraceLoading.value = true;
+  try {
+    trace.value = await llmGatewayApi.getTrace(traceId);
+    traceDrawerVisible.value = true;
+  } catch (error) {
+    errorMsg.value = error.message || '加载 Trace 失败';
+  } finally {
+    isTraceLoading.value = false;
+  }
+};
+
+const onTimeChange = () => { page.value = 1; fetchObservability(); };
+const onFilterChange = () => { page.value = 1; fetchObservability(); };
+const handlePageChange = (p) => { page.value = p; fetchObservability(); };
+const handleSizeChange = (s) => { pageSize.value = s; page.value = 1; fetchObservability(); };
 
 onMounted(fetchObservability);
 </script>
 
 <template>
   <OpsSectionFrame>
+    <template #actions>
+      <el-radio-group v-model="timeWindow" size="small" @change="onTimeChange">
+        <el-radio-button v-for="opt in timeOptions" :key="opt.value" :value="opt.value">
+          {{ opt.label }}
+        </el-radio-button>
+      </el-radio-group>
+      <el-select v-model="modelFilter" clearable placeholder="全部模型" size="small" style="width: 160px;" @change="onFilterChange">
+        <el-option v-for="opt in modelOptions" :key="opt.value" :label="opt.label" :value="opt.value" />
+      </el-select>
+      <el-select v-model="statusFilter" clearable placeholder="全部状态" size="small" style="width: 120px;" @change="onFilterChange">
+        <el-option v-for="opt in statusOptions" :key="opt.value" :label="opt.label" :value="opt.value" />
+      </el-select>
+    </template>
+
     <template #alerts>
       <el-alert v-if="errorMsg" :title="errorMsg" type="error" show-icon :closable="false" />
     </template>
+
+    <OpsStatusBand :items="summaryItems" />
 
     <div class="obs-chart-grid">
       <AppSectionCard title="Token 用量" desc="按模型聚合当前窗口的输入/输出 Token 消耗。" admin>
@@ -195,23 +314,28 @@ onMounted(fetchObservability);
     </div>
 
     <OpsInspectorDrawer title="请求摘要" desc="请求级别摘要，不暴露原始 prompt / response。">
-      <el-table :data="logs.logs" stripe border class="obs-table">
+      <AdminDataTable
+        :data="logs.logs"
+        :loading="isLoading"
+        :current-page="page"
+        :page-size="pageSize"
+        :total="logs.total"
+        :page-sizes="[10, 25, 50, 100]"
+        :show-search="false"
+        row-key="request_id"
+        @update:current-page="handlePageChange"
+        @update:page-size="handleSizeChange"
+      >
         <el-table-column label="时间" min-width="158">
-          <template #default="{ row }">
-            {{ formatTime(row.time) }}
-          </template>
+          <template #default="{ row }">{{ formatTime(row.time) }}</template>
         </el-table-column>
         <el-table-column prop="alias" label="模型别名" min-width="120" />
         <el-table-column prop="capability" label="类型" width="90" />
         <el-table-column prop="latency_ms" label="延迟" width="90">
-          <template #default="{ row }">
-            {{ row.latency_ms }} ms
-          </template>
+          <template #default="{ row }">{{ row.latency_ms }} ms</template>
         </el-table-column>
         <el-table-column label="Token" width="130">
-          <template #default="{ row }">
-            {{ row.request_tokens }} / {{ row.response_tokens }}
-          </template>
+          <template #default="{ row }">{{ row.request_tokens }} / {{ row.response_tokens }}</template>
         </el-table-column>
         <el-table-column label="状态" width="90">
           <template #default="{ row }">
@@ -234,18 +358,7 @@ onMounted(fetchObservability);
             <span v-else class="muted-text">--</span>
           </template>
         </el-table-column>
-      </el-table>
-
-      <div class="obs-pagination">
-        <el-pagination
-          background
-          layout="prev, pager, next"
-          :total="logs.total"
-          :page-size="pageSize"
-          :current-page="page"
-          @current-change="handlePageChange"
-        />
-      </div>
+      </AdminDataTable>
     </OpsInspectorDrawer>
 
     <el-drawer v-model="traceDrawerVisible" size="520px" title="Trace 明细" destroy-on-close>
@@ -289,16 +402,6 @@ onMounted(fetchObservability);
 
 .obs-chart-grid :deep(.admin-section-card:first-child) {
   border-left: 0;
-}
-
-.obs-table {
-  width: 100%;
-}
-
-.obs-pagination {
-  display: flex;
-  justify-content: flex-end;
-  margin-top: 16px;
 }
 
 .trace-panel {

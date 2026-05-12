@@ -15,6 +15,13 @@ export const createRagEvalApi = (overrides = {}) => {
   const fetchJson = overrides.fetchJson || apiConfig.fetchJson;
 
   return {
+    async getEvaluationHistory() {
+      return unwrap(await fetchJson('/api/ops/evaluations/', {
+        method: 'GET',
+        auth: true,
+      }));
+    },
+
     async runEvaluation(mode = 'all') {
       return unwrap(await fetchJson('/api/rag/evaluations/', {
         method: 'POST',

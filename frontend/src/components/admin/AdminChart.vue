@@ -1,8 +1,8 @@
 <script setup>
 import { onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { init, use } from 'echarts/core';
-import { BarChart, FunnelChart, LineChart, PieChart } from 'echarts/charts';
-import { GridComponent, GraphicComponent, LegendComponent, TooltipComponent } from 'echarts/components';
+import { BarChart, FunnelChart, LineChart, PieChart, RadarChart } from 'echarts/charts';
+import { GridComponent, GraphicComponent, LegendComponent, RadarComponent, TooltipComponent } from 'echarts/components';
 import { CanvasRenderer } from 'echarts/renderers';
 
 use([
@@ -10,9 +10,11 @@ use([
   FunnelChart,
   LineChart,
   PieChart,
+  RadarChart,
   GridComponent,
   GraphicComponent,
   LegendComponent,
+  RadarComponent,
   TooltipComponent,
   CanvasRenderer,
 ]);

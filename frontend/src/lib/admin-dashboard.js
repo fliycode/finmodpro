@@ -7,7 +7,7 @@ const readCSS = (name, fallback) => {
   }
 };
 
-const chartColors = () => ({
+export const chartColors = () => ({
   brand: readCSS('--brand', '#2457c5'),
   brandSoft: readCSS('--brand-200', '#9db7f2'),
   risk: readCSS('--risk', '#c4493d'),
@@ -295,7 +295,7 @@ export function buildDashboardSourceRows(stats) {
   ];
 }
 
-const buildBoardTooltip = () => {
+export const buildBoardTooltip = () => {
   const c = chartColors();
   return {
     backgroundColor: c.surfaceBg,
@@ -304,7 +304,7 @@ const buildBoardTooltip = () => {
   };
 };
 
-const buildBoardAxis = () => {
+export const buildBoardAxis = () => {
   const c = chartColors();
   return {
     axisLine: { lineStyle: { color: 'rgba(91, 132, 205, 0.26)' } },
