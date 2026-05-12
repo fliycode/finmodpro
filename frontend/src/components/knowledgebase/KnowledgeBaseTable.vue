@@ -50,7 +50,7 @@ const showReingest = (item) => {
 </script>
 
 <template>
-  <div class="kb-table ui-card">
+  <div class="kb-table">
     <div class="kb-table__header">
       <label class="kb-checkbox" @click.stop>
         <input type="checkbox" :checked="isAllChecked()" @change="emit('toggle-all')" />
@@ -148,10 +148,7 @@ const showReingest = (item) => {
 <style scoped>
 .kb-table {
   overflow-x: auto;
-  border: 0;
-  border-radius: 0;
   background: transparent;
-  box-shadow: none;
 }
 
 .kb-table__header,
@@ -160,13 +157,12 @@ const showReingest = (item) => {
   grid-template-columns: 30px minmax(160px, 1fr) 100px 78px 88px 100px 100px 110px;
   gap: 8px;
   align-items: center;
-  padding: 10px 14px;
+  padding: 10px 18px;
 }
 
 .kb-table__header {
-  border-top: 1px solid var(--line-soft);
   border-bottom: 1px solid var(--line-soft);
-  background: var(--surface-3);
+  background: color-mix(in oklab, var(--brand) 4%, var(--surface-3));
   color: var(--text-muted);
   font-family: 'PingFang SC', 'Noto Sans SC', 'Microsoft YaHei', sans-serif;
   font-size: 11px;
@@ -194,6 +190,50 @@ const showReingest = (item) => {
 .kb-checkbox {
   display: flex;
   justify-content: center;
+}
+
+.kb-checkbox input {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  display: grid;
+  place-items: center;
+  border: 1px solid color-mix(in oklab, var(--brand) 18%, var(--line-strong));
+  border-radius: 6px;
+  background: color-mix(in oklab, var(--brand) 3%, var(--surface-2));
+  cursor: pointer;
+  transition: border-color 0.14s ease, background 0.14s ease, box-shadow 0.14s ease;
+}
+
+.kb-checkbox input::before {
+  content: '';
+  width: 4px;
+  height: 8px;
+  border-right: 2px solid var(--text-inverse);
+  border-bottom: 2px solid var(--text-inverse);
+  transform: rotate(45deg) scale(0);
+  transition: transform 0.12s ease;
+}
+
+.kb-checkbox input:hover {
+  border-color: color-mix(in oklab, var(--brand) 42%, var(--line-strong));
+  background: color-mix(in oklab, var(--brand) 8%, var(--surface-2));
+}
+
+.kb-checkbox input:checked {
+  border-color: var(--brand);
+  background: var(--brand);
+}
+
+.kb-checkbox input:checked::before {
+  transform: rotate(45deg) scale(1);
+}
+
+.kb-checkbox input:focus-visible {
+  outline: 2px solid color-mix(in oklab, var(--brand) 48%, transparent);
+  outline-offset: 2px;
 }
 
 .kb-table__title {
@@ -244,7 +284,7 @@ const showReingest = (item) => {
   max-width: 100%;
   padding: 3px 7px;
   border-radius: 6px;
-  background: var(--surface-3);
+  background: color-mix(in oklab, var(--brand) 4%, var(--surface-3));
   color: var(--text-secondary);
   font-family: 'PingFang SC', 'Noto Sans SC', 'Microsoft YaHei', sans-serif;
   font-size: 11px;
@@ -324,7 +364,8 @@ const showReingest = (item) => {
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  padding: 12px 14px;
+  padding: 12px 18px 16px;
+  border-top: 1px solid var(--line-soft);
   color: var(--text-muted);
   font-family: 'PingFang SC', 'Noto Sans SC', 'Microsoft YaHei', sans-serif;
   font-size: 13px;

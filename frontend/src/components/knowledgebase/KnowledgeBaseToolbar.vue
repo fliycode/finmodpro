@@ -113,7 +113,7 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <section ref="toolbarRef" class="kb-toolbar ui-card">
+  <section ref="toolbarRef" class="kb-toolbar">
     <div
       v-for="control in controls"
       :key="control.id"
@@ -164,11 +164,9 @@ onUnmounted(() => {
   display: flex;
   flex-wrap: wrap;
   gap: 10px;
-  padding: 14px;
-  border: 0;
-  border-radius: 0;
-  box-shadow: none;
-  background: transparent;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--line-soft);
+  background: color-mix(in oklab, var(--brand) 3%, var(--surface-2));
   align-items: center;
 }
 
