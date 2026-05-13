@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onMounted, reactive, ref, watch } from 'vue';
+import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue';
 import { ElMessageBox } from 'element-plus';
 
 import { adminApi } from '../../api/admin.js';
@@ -40,6 +40,7 @@ const appliedFilters = reactive({
 
 const createDialogVisible = ref(false);
 const roleDialogVisible = ref(false);
+const rolePermissionTreeRef = ref(null);
 const createForm = reactive({
   name: '',
   permissions: [],
@@ -50,12 +51,8 @@ const roleDraft = reactive({
 });
 
 const canManageRoles = computed(() => permissionHelper.hasPermission('assign_role'));
-const canRestoreDefaults = computed(() => canManageRoles.value && selectedRole.value?.is_system);
 const groupedPermissions = computed(() => groupPermissionsCatalog(permissions.value));
 const permissionTreeOptions = computed(() => buildPermissionTreeOptions(groupedPermissions.value));
-const permissionLookup = computed(() => new Map(
-  permissions.value.map((permission) => [permission.codename, permission]),
-));
 
 const filteredRoles = computed(() => {
   const sortedRoles = sortRolesByPriority(roles.value);
@@ -86,10 +83,6 @@ const roleRows = computed(() => filteredRoles.value.map((role) => ({
   permissionCount: role.permissions.length,
 })));
 
-const selectedPermissionItems = computed(() => roleDraft.permissions.map((codename) => (
-  permissionLookup.value.get(codename) ?? { codename, name: codename }
-)));
-
 const isSelectedRoleDirty = computed(() => {
   if (!selectedRole.value) {
     return false;
@@ -105,6 +98,11 @@ const syncDraft = (role) => {
   roleDraft.permissions = [...(role?.permissions ?? [])];
 };
 
+const syncRolePermissionTree = async () => {
+  await nextTick();
+  rolePermissionTreeRef.value?.setCheckedKeys(roleDraft.permissions);
+};
+
 const loadRoleDetail = async (roleId, { preserveError = false } = {}) => {
   if (!roleId) {
     selectedRole.value = null;
@@ -116,6 +114,9 @@ const loadRoleDetail = async (roleId, { preserveError = false } = {}) => {
     const detail = decorateRole(await adminApi.getRole(roleId));
     selectedRole.value = detail;
     syncDraft(detail);
+    if (roleDialogVisible.value) {
+      await syncRolePermissionTree();
+    }
 
     const index = roles.value.findIndex((role) => role.id === detail.id);
     if (index >= 0) {
@@ -178,7 +179,12 @@ const openRoleDialog = async (roleId) => {
   await loadRoleDetail(roleId);
   if (selectedRole.value?.id === roleId) {
     roleDialogVisible.value = true;
+    await syncRolePermissionTree();
   }
+};
+
+const handleRolePermissionTreeCheck = () => {
+  roleDraft.permissions = rolePermissionTreeRef.value?.getCheckedKeys(true) ?? [];
 };
 
 const applyFilters = () => {
@@ -303,48 +309,6 @@ const handleDeleteRole = async (roleOverride = null) => {
   }
 };
 
-const handleRestoreDefaults = async () => {
-  if (!selectedRole.value || !selectedRole.value.is_system || !canManageRoles.value) {
-    return;
-  }
-
-  try {
-    await ElMessageBox.confirm(
-      `确认将角色 ${selectedRole.value.name} 恢复到系统默认权限吗？`,
-      '恢复默认权限',
-      {
-        confirmButtonText: '恢复默认',
-        cancelButtonText: '取消',
-        type: 'warning',
-      },
-    );
-  } catch (reason) {
-    if (reason === 'cancel' || reason === 'close') {
-      return;
-    }
-    throw reason;
-  }
-
-  isSaving.value = true;
-  try {
-    const restoredRole = decorateRole(await adminApi.restoreRoleDefaults(selectedRole.value.id));
-    flash.success('系统角色已恢复默认权限。');
-
-    const index = roles.value.findIndex((role) => role.id === restoredRole.id);
-    if (index >= 0) {
-      roles.value.splice(index, 1, restoredRole);
-      roles.value = sortRolesByPriority(roles.value);
-    }
-
-    selectedRole.value = restoredRole;
-    syncDraft(restoredRole);
-  } catch (err) {
-    flash.error(err.message || '恢复默认失败。');
-  } finally {
-    isSaving.value = false;
-  }
-};
-
 onMounted(loadData);
 </script>
 
@@ -453,7 +417,7 @@ onMounted(loadData);
         <el-table-column label="操作" width="108" fixed="right" align="right" header-align="right">
           <template #default="{ row }">
             <div class="roles-page__row-actions">
-              <el-tooltip content="查看详情" placement="top">
+              <el-tooltip content="编辑权限" placement="top">
                 <button
                   type="button"
                   class="roles-page__icon-button"
@@ -552,73 +516,29 @@ onMounted(loadData);
     <el-dialog
       v-model="roleDialogVisible"
       :title="selectedRole ? `角色权限 · ${selectedRole.label}` : '角色权限'"
-      width="720px"
+      width="640px"
       class="roles-page__dialog-modal"
       destroy-on-close
     >
       <div v-if="selectedRole" class="roles-page__permission-editor">
-        <div class="roles-page__permission-editor-header">
-          <div class="roles-page__selected-role">
-            <strong>{{ selectedRole.label }}</strong>
-            <small>{{ selectedRole.name }}</small>
-          </div>
-
-          <div class="roles-page__summary-row">
-            <span :class="['roles-page__role-badge', selectedRole.is_system ? 'is-admin' : 'is-member']">
-              <AppIcon :name="selectedRole.is_system ? 'shield' : 'user'" />
-              {{ selectedRole.is_system ? '系统角色' : '自定义角色' }}
-            </span>
-            <span class="roles-page__summary-chip">已选 {{ roleDraft.permissions.length }}</span>
-            <span v-if="selectedRole.is_system" class="roles-page__summary-chip">
-              默认 {{ selectedRole.default_permissions.length }}
-            </span>
-          </div>
-        </div>
-
-        <section class="roles-page__detail-section">
-          <div class="roles-page__section-heading">
-            <strong>当前权限</strong>
-            <span>弹窗内直接展示当前角色的全部权限。</span>
-          </div>
-
-          <div v-if="selectedPermissionItems.length" class="roles-page__permission-tags">
-            <div
-              v-for="permission in selectedPermissionItems"
-              :key="permission.codename"
-              class="roles-page__permission-pill"
-            >
-              <strong>{{ permission.codename }}</strong>
-              <span>{{ permission.name }}</span>
-            </div>
-          </div>
-          <div v-else class="roles-page__muted-text">当前角色还没有分配权限。</div>
-        </section>
-
-        <section class="roles-page__dialog-section">
-          <div class="roles-page__section-heading">
-            <strong>权限选择</strong>
-            <span>按治理域展开，勾选父节点可整组选中。</span>
-          </div>
-
-          <el-tree-select
-            v-model="roleDraft.permissions"
-            class="roles-page__permission-tree"
+        <div
+          :class="[
+            'roles-page__permission-tree-panel',
+            !canManageRoles && 'is-readonly',
+          ]"
+        >
+          <el-tree
+            ref="rolePermissionTreeRef"
             :data="permissionTreeOptions"
             node-key="value"
-            value-key="value"
-            multiple
             show-checkbox
             check-on-click-node
-            clearable
-            filterable
-            collapse-tags
-            collapse-tags-tooltip
             default-expand-all
-            :render-after-expand="false"
-            :disabled="!canManageRoles || isSaving"
-            placeholder="请选择角色权限"
+            :expand-on-click-node="false"
+            :check-on-click-leaf="true"
+            @check="handleRolePermissionTreeCheck"
           />
-        </section>
+        </div>
 
         <div v-if="!canManageRoles" class="roles-page__muted-text">
           你当前只有查看权限，不能修改角色配置。
@@ -627,16 +547,6 @@ onMounted(loadData);
 
       <template #footer>
         <div class="roles-page__dialog-footer">
-          <div class="roles-page__detail-actions">
-            <el-button
-              v-if="canRestoreDefaults"
-              :disabled="isSaving"
-              @click="handleRestoreDefaults"
-            >
-              恢复默认
-            </el-button>
-          </div>
-
           <div class="roles-page__dialog-actions">
             <el-button @click="roleDialogVisible = false" :disabled="isSaving">关闭</el-button>
             <el-button
@@ -713,10 +623,8 @@ onMounted(loadData);
 .roles-page__table-toolbar-left,
 .roles-page__table-toolbar-right,
 .roles-page__dialog-footer,
-.roles-page__detail-actions,
 .roles-page__dialog-actions,
-.roles-page__summary-row,
-.roles-page__detail-footer {
+.roles-page__selection-summary {
   display: flex;
   align-items: center;
   gap: 10px;
@@ -724,8 +632,7 @@ onMounted(loadData);
 
 .roles-page__filter-actions,
 .roles-page__table-toolbar,
-.roles-page__dialog-footer,
-.roles-page__detail-footer {
+.roles-page__dialog-footer {
   justify-content: space-between;
 }
 
@@ -738,16 +645,12 @@ onMounted(loadData);
 }
 
 .roles-page__name-cell strong,
-.roles-page__section-heading strong,
-.roles-page__selected-role strong,
-.roles-page__permission-pill strong {
+.roles-page__section-heading strong {
   color: var(--text-primary);
 }
 
 .roles-page__name-cell small,
 .roles-page__section-heading span,
-.roles-page__selected-role small,
-.roles-page__permission-pill span,
 .roles-page__muted-text {
   color: var(--text-muted);
   font-size: 0.75rem;
@@ -835,30 +738,11 @@ onMounted(loadData);
   color: var(--risk);
 }
 
-.roles-page__detail-section {
-  display: grid;
-  gap: 12px;
-}
-
-.roles-page__section-heading,
-.roles-page__permission-editor-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  flex-wrap: wrap;
-  gap: 12px;
-}
-
 .roles-page__dialog-section,
 .roles-page__selection-summary {
   display: flex;
   align-items: center;
   gap: 10px;
-}
-
-.roles-page__selected-role {
-  display: grid;
-  gap: 4px;
 }
 
 .roles-page__dialog-section {
@@ -870,31 +754,18 @@ onMounted(loadData);
   background: var(--surface-2);
 }
 
-.roles-page__selection-summary,
-.roles-page__permission-tags {
-  flex-wrap: wrap;
-}
-
-.roles-page__permission-tags {
-  display: flex;
-  gap: 10px;
-}
-
-.roles-page__permission-pill {
-  display: grid;
-  gap: 4px;
-  padding: 10px 12px;
+.roles-page__permission-tree-panel {
+  min-height: 360px;
+  padding: 8px 12px;
   border: 1px solid var(--line-soft);
-  border-radius: 14px;
-  background: var(--surface-1);
+  border-radius: 18px;
+  background: var(--surface-2);
+  overflow: auto;
 }
 
-.roles-page__empty {
-  min-height: 160px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--text-secondary);
+.roles-page__permission-tree-panel.is-readonly {
+  pointer-events: none;
+  opacity: 0.72;
 }
 
 .roles-page :deep(.admin-section-card) {
@@ -914,6 +785,23 @@ onMounted(loadData);
 
 .roles-page :deep(.el-tree-select__wrapper) {
   align-items: flex-start;
+}
+
+.roles-page :deep(.roles-page__permission-tree-panel .el-tree) {
+  background: transparent;
+}
+
+.roles-page :deep(.roles-page__permission-tree-panel .el-tree-node__content) {
+  min-height: 36px;
+  border-radius: 10px;
+}
+
+.roles-page :deep(.roles-page__permission-tree-panel .el-tree-node__content:hover) {
+  background: var(--surface-1);
+}
+
+.roles-page :deep(.roles-page__permission-tree-panel .el-tree-node__label) {
+  color: var(--text-primary);
 }
 
 .roles-page :deep(.roles-page__permission-tree .el-select__wrapper) {
@@ -981,11 +869,6 @@ onMounted(loadData);
     grid-template-columns: 1fr;
   }
 
-  .roles-page__permission-editor-header {
-    flex-direction: column;
-    align-items: stretch;
-  }
-
   .roles-page__field--keyword {
     grid-column: span 1;
   }
@@ -1003,7 +886,7 @@ onMounted(loadData);
   .roles-page__filter-actions,
   .roles-page__table-toolbar,
   .roles-page__dialog-footer,
-  .roles-page__detail-footer {
+  .roles-page__dialog-actions {
     width: 100%;
     justify-content: space-between;
   }
@@ -1012,8 +895,6 @@ onMounted(loadData);
 @media (max-width: 640px) {
   .roles-page__table-toolbar,
   .roles-page__dialog-footer,
-  .roles-page__permission-editor-header,
-  .roles-page__section-heading,
   .roles-page__dialog-actions {
     flex-direction: column;
     align-items: stretch;
