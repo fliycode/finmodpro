@@ -1,3 +1,5 @@
+from datetime import timedelta
+
 from django.conf import settings
 from django.db import transaction
 from django.utils import timezone
@@ -12,6 +14,43 @@ STATUS_LABELS = {
     RiskExtractionTask.STATUS_SUCCEEDED: "SUCCESS",
     RiskExtractionTask.STATUS_FAILED: "FAILURE",
 }
+
+
+def _resolve_stale_seconds():
+    configured = int(getattr(settings, "RISK_EXTRACTION_STALE_SECONDS", 900) or 900)
+    return max(60, configured)
+
+
+def _is_task_stale(task):
+    if task is None or task.updated_at is None:
+        return False
+    deadline = timezone.now() - timedelta(seconds=_resolve_stale_seconds())
+    return task.updated_at <= deadline
+
+
+def _expire_stale_task(task):
+    message = "上一次风险抽取任务已超时或工作进程中断，已自动重置。"
+    task.status = RiskExtractionTask.STATUS_FAILED
+    task.current_step = RiskExtractionTask.STEP_FAILED
+    task.progress = 100
+    task.message = message
+    task.error_message = message
+    task.result_payload = {}
+    task.created_count = 0
+    task.finished_at = timezone.now()
+    task.save(
+        update_fields=[
+            "status",
+            "current_step",
+            "progress",
+            "message",
+            "error_message",
+            "result_payload",
+            "created_count",
+            "finished_at",
+            "updated_at",
+        ]
+    )
 
 
 def serialize_risk_extraction_task(task):
@@ -50,12 +89,19 @@ def submit_risk_extraction(document):
 
     with transaction.atomic():
         locked_document = Document.objects.select_for_update().get(id=document.id)
-        latest_task = locked_document.risk_extraction_tasks.order_by("created_at", "id").last()
+        latest_task = (
+            RiskExtractionTask.objects.select_for_update()
+            .filter(document=locked_document)
+            .order_by("created_at", "id")
+            .last()
+        )
         if latest_task and latest_task.status in {
             RiskExtractionTask.STATUS_QUEUED,
             RiskExtractionTask.STATUS_RUNNING,
         }:
-            return latest_task, False
+            if not _is_task_stale(latest_task):
+                return latest_task, False
+            _expire_stale_task(latest_task)
 
         task = RiskExtractionTask.objects.create(
             document=locked_document,

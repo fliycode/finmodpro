@@ -415,18 +415,34 @@ const pollDocumentIndexed = async (documentId, { timeout = 60000, interval = 200
 };
 
 const runRiskPipeline = async (documentId) => {
-  const ingestPayload = await kbApi.ingestDocument(documentId);
-  if (ingestPayload.document) {
-    activeDocument.value = ingestPayload.document;
+  const currentDocument = activeDocument.value?.id === documentId
+    ? activeDocument.value
+    : await syncActiveDocument(documentId);
+  const currentStatus = String(currentDocument?.status || '').toLowerCase();
+
+  if (currentStatus !== 'indexed') {
+    const ingestPayload = await kbApi.ingestDocument(documentId);
+    if (ingestPayload.document) {
+      activeDocument.value = ingestPayload.document;
+      updatePipelineRun({
+        status: 'ingesting',
+        documentId,
+        ingestLabel: ingestPayload.document.processStep.label,
+        ingestProgress: ingestPayload.document.processStep.progress,
+        detail: ingestPayload.document.processStep.detail,
+      });
+    }
+    await pollDocumentIndexed(documentId);
+  } else {
     updatePipelineRun({
-      status: 'ingesting',
+      status: 'extracting',
       documentId,
-      ingestLabel: ingestPayload.document.processStep.label,
-      ingestProgress: ingestPayload.document.processStep.progress,
-      detail: ingestPayload.document.processStep.detail,
+      ingestLabel: '已完成',
+      ingestProgress: 100,
+      detail: '知识库中已有可用文档，直接开始风险提取',
     });
   }
-  await pollDocumentIndexed(documentId);
+
   updatePipelineRun({
     status: 'extracting',
     extractLabel: '已提交',
@@ -482,9 +498,9 @@ const handleFileChange = async (event) => {
     if (error.code === 'DUPLICATE' && error.existingDocument) {
       try {
         await ElMessageBox.confirm(
-          `文件已存在（《${error.existingDocument.title}》），是否作为新版本上传？`,
-          '文件重复',
-          { confirmButtonText: '上传新版本', cancelButtonText: '取消', type: 'info' },
+          `知识库已存在《${error.existingDocument.title}》，是否直接使用这份文档进行风险提取？`,
+          '使用已有文档',
+          { confirmButtonText: '直接使用', cancelButtonText: '取消', type: 'info' },
         );
       } catch {
         resetPipelineRun();
@@ -492,36 +508,21 @@ const handleFileChange = async (event) => {
       }
 
       try {
-        const versionResult = await kbApi.uploadNewVersion(error.existingDocument.id, file, {
-          title: file.name,
-          sourceLabel: file.name,
-          onProgress: (progress) => {
-            updatePipelineRun({
-              status: 'uploading',
-              uploadProgress: progress,
-              detail: '正在上传新版本',
-            });
-          },
+        updatePipelineRun({
+          fileName: error.existingDocument.filename || error.existingDocument.title || file.name,
+          uploadProgress: 100,
+          documentId: error.existingDocument.id,
+          status: 'ingesting',
+          detail: '正在切换到知识库已有文档',
         });
-        const newDocumentId = versionResult.document?.id;
-        if (newDocumentId) {
-          activeDocument.value = versionResult.document;
-          updatePipelineRun({
-            uploadProgress: 100,
-            status: 'ingesting',
-            documentId: newDocumentId,
-            ingestLabel: versionResult.document.processStep.label,
-            ingestProgress: versionResult.document.processStep.progress,
-            detail: '新版本已保存，正在提交入库任务',
-          });
-          await runRiskPipeline(newDocumentId);
-        }
+        await syncActiveDocument(error.existingDocument.id);
+        await runRiskPipeline(error.existingDocument.id);
       } catch (versionError) {
         updatePipelineRun({
           status: 'failed',
-          detail: versionError.message || '上传新版本失败',
+          detail: versionError.message || '使用已有文档失败',
         });
-        flash.error(versionError.message || '上传新版本失败');
+        flash.error(versionError.message || '使用已有文档失败');
       }
       return;
     }

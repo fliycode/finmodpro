@@ -1,6 +1,7 @@
 import json
 import shutil
 import tempfile
+from datetime import timedelta
 from decimal import Decimal
 from unittest.mock import MagicMock, patch
 
@@ -387,6 +388,80 @@ class RiskExtractionAsyncApiTests(TestCase):
         self.assertEqual(status_payload["data"]["result"]["created_count"], 1)
         self.assertEqual(RiskEvent.objects.count(), 1)
         self.assertEqual(RiskExtractionTask.objects.count(), 1)
+
+    @override_settings(RISK_EXTRACTION_STALE_SECONDS=60)
+    @patch("risk.services.extraction_service.select_risk_relevant_chunks")
+    @patch("risk.services.verification_service.get_chat_provider")
+    @patch("risk.services.task_service.run_background_job")
+    def test_extract_document_replaces_stale_running_task(
+        self,
+        mocked_run_background_job,
+        mocked_get_chat_provider,
+        mocked_select_chunks,
+    ):
+        document = self.create_document(title="卡住的异步风险纪要", filename="stale-risk.pdf")
+        chunk = DocumentChunk.objects.create(
+            document=document,
+            chunk_index=0,
+            content="FinModPro Holdings 现金流承压，需要重新发起抽取。",
+            metadata={"page": 1},
+        )
+        stale_task = RiskExtractionTask.objects.create(
+            document=document,
+            status=RiskExtractionTask.STATUS_RUNNING,
+            current_step=RiskExtractionTask.STEP_EXTRACTING,
+            progress=72,
+            message="正在分析文档中的风险事件。",
+        )
+        stale_timestamp = timezone.now() - timedelta(minutes=20)
+        RiskExtractionTask.objects.filter(id=stale_task.id).update(
+            updated_at=stale_timestamp,
+            started_at=stale_timestamp,
+        )
+
+        mocked_select_chunks.side_effect = lambda document, all_chunks, **kw: list(all_chunks)
+        mocked_get_chat_provider.return_value.chat.side_effect = [
+            _make_extraction_response([
+                {
+                    "company_name": "FinModPro Holdings",
+                    "risk_type": "liquidity",
+                    "risk_level": "high",
+                    "event_time": None,
+                    "summary": "现金流承压。",
+                    "evidence_text": "FinModPro Holdings 现金流承压，需要重新发起抽取。",
+                    "confidence_score": "0.910",
+                    "chunk_id": chunk.id,
+                }
+            ]),
+            _make_verification_response(is_complete=True),
+        ]
+        mocked_run_background_job.side_effect = lambda *, target, args, **kwargs: target(*args)
+
+        response = self.client.post(
+            f"/api/risk/documents/{document.id}/extract",
+            data=json.dumps({}),
+            content_type="application/json",
+            HTTP_AUTHORIZATION=f"Bearer {self.access_token}",
+        )
+
+        self.assertEqual(response.status_code, 202)
+        payload = response.json()
+        self.assertEqual(payload["code"], 0)
+        replacement_task_id = payload["data"]["task_id"]
+        self.assertNotEqual(replacement_task_id, str(stale_task.id))
+
+        stale_task.refresh_from_db()
+        self.assertEqual(stale_task.status, RiskExtractionTask.STATUS_FAILED)
+        self.assertIn("已超时或工作进程中断", stale_task.error_message)
+
+        status_response = self.client.get(
+            f"/api/risk/documents/extract/status/{replacement_task_id}",
+            HTTP_AUTHORIZATION=f"Bearer {self.access_token}",
+        )
+        self.assertEqual(status_response.status_code, 200)
+        status_payload = status_response.json()
+        self.assertEqual(status_payload["data"]["status"], "SUCCESS")
+        self.assertEqual(status_payload["data"]["result"]["created_count"], 1)
 
 
 @override_settings(
@@ -1412,6 +1487,70 @@ class ChunkFilterTests(TestCase):
 
         result = select_risk_relevant_chunks(document=self.document, all_chunks=chunks)
         self.assertEqual(len(result), 15)
+
+    @patch("risk.services.chunk_filter_service.query_llamaindex_store")
+    def test_falls_back_when_retrieval_errors(self, mocked_query):
+        from risk.services.chunk_filter_service import select_risk_relevant_chunks
+
+        chunks = []
+        for i in range(12):
+            chunks.append(DocumentChunk.objects.create(
+                document=self.document,
+                chunk_index=i,
+                content=f"切块内容 {i}",
+                metadata={},
+            ))
+
+        mocked_query.side_effect = RuntimeError("milvus timeout")
+
+        result = select_risk_relevant_chunks(document=self.document, all_chunks=chunks)
+        self.assertEqual(len(result), 12)
+
+
+@override_settings(
+    JWT_SECRET_KEY="test-jwt-secret",
+    JWT_ACCESS_TOKEN_LIFETIME_SECONDS=3600,
+    RISK_EXTRACTION_CONTEXT_MAX_CHUNKS=5,
+    RISK_EXTRACTION_CONTEXT_MAX_CHARS=10000,
+)
+class ExtractionChunkBudgetTests(TestCase):
+    def setUp(self):
+        self.document = Document.objects.create(
+            title="上下文预算测试文档",
+            file=SimpleUploadedFile("budget-test.pdf", b"content", content_type="application/pdf"),
+            filename="budget-test.pdf",
+            doc_type="pdf",
+        )
+
+    @patch("risk.services.extraction_service.run_extraction_with_verification")
+    @patch("risk.services.extraction_service.select_risk_relevant_chunks")
+    def test_extract_risk_events_limits_context_chunk_count(
+        self,
+        mocked_select_chunks,
+        mocked_run_extraction,
+    ):
+        from risk.services.extraction_service import extract_risk_events_for_document
+
+        chunks = []
+        for i in range(8):
+            chunks.append(DocumentChunk.objects.create(
+                document=self.document,
+                chunk_index=i,
+                content=f"切块内容 {i} " * 20,
+                metadata={},
+            ))
+
+        mocked_select_chunks.side_effect = lambda document, all_chunks, **kw: list(all_chunks)
+        mocked_run_extraction.return_value = (
+            [],
+            {"rounds_completed": 1, "verification_passed": True, "total_llm_calls": 1},
+        )
+
+        extract_risk_events_for_document(document=self.document)
+
+        limited_chunks = mocked_run_extraction.call_args.kwargs["chunks"]
+        self.assertEqual(len(limited_chunks), 5)
+        self.assertEqual([chunk.id for chunk in limited_chunks], [chunk.id for chunk in chunks[:5]])
 
 
 @override_settings(

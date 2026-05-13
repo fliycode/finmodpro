@@ -1,7 +1,11 @@
+import logging
+
 from django.conf import settings
 
 from common.observability import trace_span
 from rag.services.llamaindex_store_service import query_llamaindex_store
+
+logger = logging.getLogger(__name__)
 
 RISK_QUERY_VARIANTS = [
     "金融风险事件",
@@ -28,13 +32,25 @@ def select_risk_relevant_chunks(*, document, all_chunks, top_k=None):
         "risk.chunk_filter",
         metadata={"total_chunks": total, "top_k": effective_top_k},
     ) as observation:
-        results = query_llamaindex_store(
-            query=RISK_QUERY_VARIANTS[0],
-            filters={"document_id": document.id},
-            top_k=min(effective_top_k, total),
-            query_variants=RISK_QUERY_VARIANTS[1:],
-            allow_keyword_fallback=True,
-        )
+        try:
+            results = query_llamaindex_store(
+                query=RISK_QUERY_VARIANTS[0],
+                filters={"document_id": document.id},
+                top_k=min(effective_top_k, total),
+                query_variants=RISK_QUERY_VARIANTS[1:],
+                allow_keyword_fallback=True,
+            )
+        except Exception:
+            logger.exception(
+                "Risk chunk retrieval failed; falling back to document-order chunks",
+                extra={"document_id": document.id, "total_chunks": total},
+            )
+            observation.update(output={
+                "filtered_chunks": total,
+                "fallback": True,
+                "reason": "retrieval_failed",
+            })
+            return list(all_chunks)
 
         retrieved_ids = {int(r["chunk_id"]) for r in results if r.get("chunk_id") is not None}
         chunk_by_id = {chunk.id: chunk for chunk in all_chunks}

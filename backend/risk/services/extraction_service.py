@@ -1,3 +1,4 @@
+from django.conf import settings
 from django.db import transaction
 
 from common.exceptions import UpstreamServiceError
@@ -29,6 +30,38 @@ def _resolve_chunk(*, raw_chunk_id, chunk_by_id):
         return None
 
 
+def limit_extraction_chunks(*, chunks, max_chunks=None, max_chars=None):
+    if not chunks:
+        return []
+
+    resolved_max_chunks = max_chunks
+    if resolved_max_chunks is None:
+        resolved_max_chunks = getattr(settings, "RISK_EXTRACTION_CONTEXT_MAX_CHUNKS", 8)
+    resolved_max_chars = max_chars
+    if resolved_max_chars is None:
+        resolved_max_chars = getattr(settings, "RISK_EXTRACTION_CONTEXT_MAX_CHARS", 6000)
+
+    limited = []
+    consumed_chars = 0
+
+    for chunk in chunks:
+        if resolved_max_chunks and len(limited) >= resolved_max_chunks:
+            break
+
+        chunk_length = len(chunk.content or "")
+        next_total = consumed_chars + chunk_length
+        if limited and resolved_max_chars and next_total > resolved_max_chars:
+            break
+
+        limited.append(chunk)
+        consumed_chars = next_total
+
+        if resolved_max_chars and consumed_chars >= resolved_max_chars:
+            break
+
+    return limited or [chunks[0]]
+
+
 def extract_risk_events_for_document(*, document):
     chunks = list_document_chunks(document=document)
     if not chunks:
@@ -43,10 +76,11 @@ def extract_risk_events_for_document(*, document):
             document=document,
             all_chunks=chunks,
         )
+        extraction_chunks = limit_extraction_chunks(chunks=filtered_chunks)
 
         extracted_events, pipeline_meta = run_extraction_with_verification(
             document=document,
-            chunks=filtered_chunks,
+            chunks=extraction_chunks,
         )
 
         chunk_by_id = {chunk.id: chunk for chunk in chunks}
@@ -79,6 +113,7 @@ def extract_risk_events_for_document(*, document):
                                 "chunk_filter": {
                                     "total_chunks": len(chunks),
                                     "filtered_chunks": len(filtered_chunks),
+                                    "used_chunks": len(extraction_chunks),
                                 },
                             },
                         },
@@ -90,6 +125,7 @@ def extract_risk_events_for_document(*, document):
             "rounds_completed": pipeline_meta["rounds_completed"],
             "verification_passed": pipeline_meta["verification_passed"],
             "total_llm_calls": pipeline_meta["total_llm_calls"],
+            "used_chunks": len(extraction_chunks),
         })
         return created_events
 
