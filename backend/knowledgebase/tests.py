@@ -277,6 +277,7 @@ class KnowledgebaseApiTests(AuditRecordAssertionMixin, TestCase):
         self.assertEqual(document.status, Document.STATUS_INDEXED)
         self.assertEqual(document.error_message, "")
 
+
     def test_dataset_create_list_detail_and_dataset_scoped_documents(self):
         create_response = self.client.post(
             "/api/knowledgebase/datasets",
@@ -1440,6 +1441,55 @@ class KnowledgebaseApiTests(AuditRecordAssertionMixin, TestCase):
             response.json()["message"],
             "知识库数据表尚未初始化，请先执行后端迁移与 RBAC 初始化。",
         )
+
+
+@override_settings(
+    JWT_SECRET_KEY="test-jwt-secret",
+    JWT_ACCESS_TOKEN_LIFETIME_SECONDS=3600,
+    CELERY_TASK_ALWAYS_EAGER=False,
+    CELERY_BROKER_URL="memory://",
+)
+class KnowledgebaseInProcessDispatchTests(TestCase):
+    def setUp(self):
+        self.client = Client()
+        seed_roles_and_permissions()
+        self.media_root = tempfile.mkdtemp()
+        self.override = override_settings(MEDIA_ROOT=self.media_root)
+        self.override.enable()
+        self.user = User.objects.create_user(
+            username="kb-async-admin",
+            password="secret123",
+            email="kb-async@example.com",
+        )
+        self.user.groups.add(Group.objects.get(name=ROLE_ADMIN))
+
+    def tearDown(self):
+        self.override.disable()
+        shutil.rmtree(self.media_root, ignore_errors=True)
+
+    @patch("knowledgebase.services.document_service.run_background_job")
+    def test_enqueue_document_ingestion_uses_background_dispatch_for_memory_broker(
+        self,
+        mocked_run_background_job,
+    ):
+        document = create_document_from_upload(
+            uploaded_file=SimpleUploadedFile(
+                "async.txt",
+                b"dispatch ingestion outside the request",
+                content_type="text/plain",
+            ),
+            title="Async doc",
+            source_date="2025-03-01",
+            uploaded_by=self.user,
+        )
+
+        ingestion_task, created = enqueue_document_ingestion(document)
+
+        self.assertTrue(created)
+        mocked_run_background_job.assert_called_once()
+        self.assertEqual(ingestion_task.status, IngestionTask.STATUS_QUEUED)
+        self.assertEqual(ingestion_task.current_step, IngestionTask.STEP_QUEUED)
+        self.assertTrue(ingestion_task.celery_task_id.startswith("local-ingest:"))
 
 
 class ParserServiceTests(TestCase):

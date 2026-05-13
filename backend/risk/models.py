@@ -1,3 +1,5 @@
+import uuid
+
 from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
 
@@ -94,3 +96,57 @@ class RiskReport(models.Model):
 
     class Meta:
         ordering = ["-created_at", "-id"]
+
+
+class RiskExtractionTask(models.Model):
+    STATUS_QUEUED = "queued"
+    STATUS_RUNNING = "running"
+    STATUS_SUCCEEDED = "succeeded"
+    STATUS_FAILED = "failed"
+    STATUS_CHOICES = (
+        (STATUS_QUEUED, "Queued"),
+        (STATUS_RUNNING, "Running"),
+        (STATUS_SUCCEEDED, "Succeeded"),
+        (STATUS_FAILED, "Failed"),
+    )
+
+    STEP_QUEUED = "queued"
+    STEP_EXTRACTING = "extracting"
+    STEP_COMPLETED = "completed"
+    STEP_FAILED = "failed"
+    STEP_CHOICES = (
+        (STEP_QUEUED, "Queued"),
+        (STEP_EXTRACTING, "Extracting"),
+        (STEP_COMPLETED, "Completed"),
+        (STEP_FAILED, "Failed"),
+    )
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    document = models.ForeignKey(
+        Document,
+        related_name="risk_extraction_tasks",
+        on_delete=models.CASCADE,
+    )
+    celery_task_id = models.CharField(max_length=255, blank=True, db_index=True)
+    status = models.CharField(
+        max_length=32,
+        choices=STATUS_CHOICES,
+        default=STATUS_QUEUED,
+    )
+    current_step = models.CharField(
+        max_length=32,
+        choices=STEP_CHOICES,
+        default=STEP_QUEUED,
+    )
+    progress = models.PositiveSmallIntegerField(default=6)
+    created_count = models.PositiveIntegerField(default=0)
+    message = models.TextField(blank=True)
+    error_message = models.TextField(blank=True)
+    result_payload = models.JSONField(default=dict, blank=True)
+    started_at = models.DateTimeField(blank=True, null=True)
+    finished_at = models.DateTimeField(blank=True, null=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-created_at", "-updated_at"]

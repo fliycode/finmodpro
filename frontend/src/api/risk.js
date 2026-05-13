@@ -60,9 +60,16 @@ export const createRiskApi = (overrides = {}) => {
       });
     },
 
-    async extractDocumentWithPolling(documentId, { timeout = 300000, interval = 3000 } = {}) {
+    async extractDocumentWithPolling(documentId, {
+      timeout = 300000,
+      interval = 3000,
+      onProgress,
+    } = {}) {
       const submitResult = await this.extractDocument(documentId);
       const data = submitResult.data || submitResult;
+      if (typeof onProgress === 'function') {
+        onProgress(data);
+      }
 
       if (data.task_id) {
         const deadline = Date.now() + timeout;
@@ -70,6 +77,9 @@ export const createRiskApi = (overrides = {}) => {
           await new Promise((r) => setTimeout(r, interval));
           const statusResult = await this.getExtractStatus(data.task_id);
           const statusData = statusResult.data || statusResult;
+          if (typeof onProgress === 'function') {
+            onProgress(statusData);
+          }
           if (statusData.status === 'SUCCESS') {
             return statusData.result;
           }

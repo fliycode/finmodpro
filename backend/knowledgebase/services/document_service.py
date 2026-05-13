@@ -12,6 +12,7 @@ from django.db import DatabaseError, OperationalError, ProgrammingError, transac
 from django.db.models import Q, Count, Sum
 from django.utils import timezone
 
+from common.background_jobs import run_background_job
 from common.logging import build_log_extra
 from common.observability import trace_span
 from common.exceptions import (
@@ -974,7 +975,8 @@ def enqueue_document_ingestion(document):
     from knowledgebase.tasks import ingest_document_task
 
     broker_url = str(getattr(settings, "CELERY_BROKER_URL", "") or "")
-    should_run_inline = settings.CELERY_TASK_ALWAYS_EAGER or broker_url.startswith("memory://")
+    should_run_inline = settings.CELERY_TASK_ALWAYS_EAGER
+    should_run_in_process = not should_run_inline and broker_url.startswith("memory://")
 
     with transaction.atomic():
         locked_document = Document.objects.select_for_update().get(id=document.id)
@@ -1005,6 +1007,13 @@ def enqueue_document_ingestion(document):
     try:
         if should_run_inline:
             async_result = ingest_document_task.apply(args=(locked_document.id, ingestion_task.id))
+        elif should_run_in_process:
+            run_background_job(
+                name=f"knowledgebase-ingest-{ingestion_task.id}",
+                target=ingest_document_task,
+                args=(locked_document.id, ingestion_task.id),
+            )
+            async_result = type("InProcessTaskResult", (), {"id": f"local-ingest:{ingestion_task.id}"})()
         else:
             async_result = ingest_document_task.delay(locked_document.id, ingestion_task.id)
     except Exception:

@@ -13,7 +13,7 @@ from authentication.models import User
 from authentication.services.jwt_service import generate_access_token
 from knowledgebase.models import Dataset, Document, DocumentChunk
 from rbac.services.rbac_service import ROLE_ADMIN, seed_roles_and_permissions
-from risk.models import RiskEvent, RiskReport
+from risk.models import RiskEvent, RiskExtractionTask, RiskReport
 from systemcheck.models import AuditRecord
 
 
@@ -40,6 +40,7 @@ def _make_verification_response(is_complete=True):
 @override_settings(
     JWT_SECRET_KEY="test-jwt-secret",
     JWT_ACCESS_TOKEN_LIFETIME_SECONDS=3600,
+    CELERY_TASK_ALWAYS_EAGER=True,
 )
 class RiskExtractionApiTests(TestCase):
     def setUp(self):
@@ -292,6 +293,100 @@ class RiskExtractionApiTests(TestCase):
                 status=AuditRecord.STATUS_RETRIED,
             ).exists()
         )
+
+
+@override_settings(
+    JWT_SECRET_KEY="test-jwt-secret",
+    JWT_ACCESS_TOKEN_LIFETIME_SECONDS=3600,
+    CELERY_TASK_ALWAYS_EAGER=False,
+    CELERY_BROKER_URL="memory://",
+)
+class RiskExtractionAsyncApiTests(TestCase):
+    def setUp(self):
+        self.client = Client()
+        seed_roles_and_permissions()
+        self.media_root = tempfile.mkdtemp()
+        self.override = override_settings(MEDIA_ROOT=self.media_root)
+        self.override.enable()
+
+        self.user = User.objects.create_user(
+            username="risk-async-admin",
+            password="secret123",
+            email="risk-async-admin@example.com",
+        )
+        self.user.groups.add(Group.objects.get(name=ROLE_ADMIN))
+        self.access_token = generate_access_token(self.user)
+
+    def tearDown(self):
+        self.override.disable()
+        shutil.rmtree(self.media_root, ignore_errors=True)
+
+    def create_document(self, *, title="异步风险纪要", filename="async-risk.pdf"):
+        return Document.objects.create(
+            title=title,
+            file=SimpleUploadedFile(filename, b"risk-content", content_type="application/pdf"),
+            filename=filename,
+            doc_type="pdf",
+        )
+
+    @patch("risk.services.extraction_service.select_risk_relevant_chunks")
+    @patch("risk.services.verification_service.get_chat_provider")
+    @patch("risk.services.task_service.run_background_job")
+    def test_extract_document_uses_background_task_status_when_memory_broker_is_configured(
+        self,
+        mocked_run_background_job,
+        mocked_get_chat_provider,
+        mocked_select_chunks,
+    ):
+        document = self.create_document()
+        chunk = DocumentChunk.objects.create(
+            document=document,
+            chunk_index=0,
+            content="FinModPro Holdings 现金流承压，需要异步抽取。",
+            metadata={"page": 1},
+        )
+        mocked_select_chunks.side_effect = lambda document, all_chunks, **kw: list(all_chunks)
+        mocked_get_chat_provider.return_value.chat.side_effect = [
+            _make_extraction_response([
+                {
+                    "company_name": "FinModPro Holdings",
+                    "risk_type": "liquidity",
+                    "risk_level": "high",
+                    "event_time": None,
+                    "summary": "现金流承压。",
+                    "evidence_text": "FinModPro Holdings 现金流承压，需要异步抽取。",
+                    "confidence_score": "0.910",
+                    "chunk_id": chunk.id,
+                }
+            ]),
+            _make_verification_response(is_complete=True),
+        ]
+        mocked_run_background_job.side_effect = lambda *, target, args, **kwargs: target(*args)
+
+        response = self.client.post(
+            f"/api/risk/documents/{document.id}/extract",
+            data=json.dumps({}),
+            content_type="application/json",
+            HTTP_AUTHORIZATION=f"Bearer {self.access_token}",
+        )
+
+        self.assertEqual(response.status_code, 202)
+        payload = response.json()
+        self.assertEqual(payload["code"], 0)
+        task_id = payload["data"]["task_id"]
+        self.assertEqual(payload["data"]["status"], "QUEUED")
+
+        status_response = self.client.get(
+            f"/api/risk/documents/extract/status/{task_id}",
+            HTTP_AUTHORIZATION=f"Bearer {self.access_token}",
+        )
+        self.assertEqual(status_response.status_code, 200)
+        status_payload = status_response.json()
+        self.assertEqual(status_payload["data"]["status"], "SUCCESS")
+        self.assertEqual(status_payload["data"]["document_id"], document.id)
+        self.assertEqual(status_payload["data"]["result"]["created_count"], 1)
+        self.assertEqual(RiskEvent.objects.count(), 1)
+        self.assertEqual(RiskExtractionTask.objects.count(), 1)
 
 
 @override_settings(
@@ -1479,6 +1574,7 @@ class VerificationLoopTests(TestCase):
     JWT_SECRET_KEY="test-jwt-secret",
     JWT_ACCESS_TOKEN_LIFETIME_SECONDS=3600,
     RISK_EXTRACTION_MAX_ROUNDS=2,
+    CELERY_TASK_ALWAYS_EAGER=True,
 )
 class ExtractionMetadataTests(TestCase):
     def setUp(self):

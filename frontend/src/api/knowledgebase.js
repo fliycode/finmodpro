@@ -1,4 +1,4 @@
-import { createApiConfig } from './config.js';
+import { createApiConfig, joinUrl } from './config.js';
 import { buildKnowledgebaseQuery } from '../lib/knowledgebase-workspace.js';
 
 const apiConfig = createApiConfig();
@@ -9,6 +9,64 @@ const parseResponse = async (response) => {
     throw new Error(data.message || '请求失败，请稍后重试');
   }
   return data;
+};
+
+const parseJsonText = (value) => {
+  try {
+    return JSON.parse(value || '{}');
+  } catch {
+    return {};
+  }
+};
+
+const requestFormData = async (path, { formData, onProgress } = {}) => {
+  if (typeof XMLHttpRequest !== 'function' || typeof onProgress !== 'function') {
+    const headers = apiConfig.getAuthHeaders();
+    delete headers['Content-Type'];
+    return apiConfig.fetchWithAuth(path, {
+      method: 'POST',
+      headers,
+      body: formData,
+      auth: true,
+    });
+  }
+
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    const headers = apiConfig.getAuthHeaders();
+    delete headers['Content-Type'];
+
+    xhr.open('POST', joinUrl(apiConfig.baseURL, path), true);
+    xhr.withCredentials = true;
+
+    Object.entries(headers).forEach(([key, value]) => {
+      if (value !== undefined && value !== null && value !== '') {
+        xhr.setRequestHeader(key, value);
+      }
+    });
+
+    xhr.upload.addEventListener('progress', (event) => {
+      if (!event.lengthComputable) {
+        return;
+      }
+      onProgress(Math.min(100, Math.round((event.loaded / event.total) * 100)));
+    });
+
+    xhr.addEventListener('load', () => {
+      const responsePayload = parseJsonText(xhr.responseText);
+      resolve({
+        ok: xhr.status >= 200 && xhr.status < 300,
+        status: xhr.status,
+        json: async () => responsePayload,
+      });
+    });
+
+    xhr.addEventListener('error', () => {
+      reject(new Error('网络异常，请稍后重试'));
+    });
+
+    xhr.send(formData);
+  });
 };
 
 const formatDateTime = (value) => {
@@ -309,14 +367,9 @@ export const kbApi = {
       formData.append('dataset_id', options.datasetId);
     }
 
-    const headers = apiConfig.getAuthHeaders();
-    delete headers['Content-Type'];
-
-    const response = await apiConfig.fetchWithAuth('/api/knowledgebase/documents', {
-      method: 'POST',
-      headers,
-      body: formData,
-      auth: true,
+    const response = await requestFormData('/api/knowledgebase/documents', {
+      formData,
+      onProgress: options.onProgress,
     });
 
     if (response.status === 409) {
@@ -364,14 +417,9 @@ export const kbApi = {
     );
     formData.append('processing_notes', metadata.processingNotes || '');
 
-    const headers = apiConfig.getAuthHeaders();
-    delete headers['Content-Type'];
-
-    const response = await apiConfig.fetchWithAuth(`/api/knowledgebase/documents/${documentId}/versions`, {
-      method: 'POST',
-      headers,
-      body: formData,
-      auth: true,
+    const response = await requestFormData(`/api/knowledgebase/documents/${documentId}/versions`, {
+      formData,
+      onProgress: metadata.onProgress,
     });
     const data = await parseResponse(response);
     return {

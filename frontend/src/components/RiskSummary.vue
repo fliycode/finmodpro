@@ -40,6 +40,22 @@ const eventsDrawerOpen = ref(false);
 const reportType = ref('company');
 const reportForm = ref({ company_name: '', period_start: '', period_end: '' });
 const generatedReport = ref(null);
+const activeDocument = ref(null);
+const createPipelineRunState = () => ({
+  status: 'idle',
+  fileName: '',
+  documentId: null,
+  detail: '等待新文档',
+  uploadProgress: 0,
+  ingestLabel: '待开始',
+  ingestProgress: 0,
+  extractLabel: '待开始',
+  extractStatus: 'IDLE',
+  extractProgress: 0,
+  createdCount: 0,
+  reviewReady: false,
+});
+const pipelineRun = ref(createPipelineRunState());
 
 let workspaceAbort = null;
 
@@ -86,14 +102,17 @@ const groupedRiskResults = computed(() => riskTypeDist.value.map((item) => {
 const recentEvents = computed(() => events.value.slice(0, 8));
 
 const sourceDoc = computed(() => {
+  const currentDocument = activeDocument.value;
   const firstEvent = events.value[0];
-  const fileSize = firstEvent?.document_file_size || 0;
+  const fileSize = currentDocument
+    ? Number.parseFloat(currentDocument.size) || 0
+    : (firstEvent?.document_file_size || 0);
 
   return {
-    title: firstEvent?.document_title || firstEvent?.document_filename || '暂无文档',
+    title: currentDocument?.title || firstEvent?.document_title || firstEvent?.document_filename || '暂无文档',
     company: firstEvent?.company_name || '未识别公司',
-    size: fileSize > 0 ? `${(fileSize / 1024 / 1024).toFixed(1)} MB` : '--',
-    date: firstEvent?.document_source_date || '--',
+    size: currentDocument?.size || (fileSize > 0 ? `${(fileSize / 1024 / 1024).toFixed(1)} MB` : '--'),
+    date: currentDocument?.sourceDate || firstEvent?.document_source_date || '--',
   };
 });
 
@@ -132,7 +151,131 @@ const summaryCards = computed(() => ([
   },
 ]));
 
+const pipelinePercent = computed(() => {
+  if (pipelineRun.value.status === 'idle' && !pipelineRun.value.fileName) {
+    return 0;
+  }
+
+  const weighted =
+    (pipelineRun.value.uploadProgress * 0.2)
+    + (pipelineRun.value.ingestProgress * 0.35)
+    + (pipelineRun.value.extractProgress * 0.35)
+    + ((pipelineRun.value.reviewReady ? 100 : 0) * 0.1);
+
+  return Math.max(
+    pipelineRun.value.status === 'idle' ? 0 : 6,
+    Math.min(100, Math.round(weighted)),
+  );
+});
+
+const pipelineStatusText = computed(() => ({
+  idle: '待命',
+  uploading: '上传中',
+  ingesting: '入库中',
+  extracting: '抽取中',
+  succeeded: '已完成',
+  failed: '已中断',
+}[pipelineRun.value.status] || '处理中'));
+
+const pipelineTone = computed(() => ({
+  idle: 'muted',
+  uploading: 'active',
+  ingesting: 'active',
+  extracting: 'active',
+  succeeded: 'success',
+  failed: 'danger',
+}[pipelineRun.value.status] || 'muted'));
+
+const uploadButtonLabel = computed(() => {
+  if (!isUploading.value) {
+    return '上传文档';
+  }
+  return `上传 ${Math.max(1, pipelineRun.value.uploadProgress)}%`;
+});
+
+const pipelineSteps = computed(() => ([
+  {
+    key: 'upload',
+    label: '上传',
+    progress: pipelineRun.value.uploadProgress,
+    note: pipelineRun.value.fileName || 'PDF / DOCX / TXT',
+    state: pipelineRun.value.uploadProgress >= 100 ? 'done' : (pipelineRun.value.status === 'uploading' ? 'active' : 'idle'),
+  },
+  {
+    key: 'ingest',
+    label: '入库',
+    progress: pipelineRun.value.ingestProgress,
+    note: pipelineRun.value.ingestLabel,
+    state: pipelineRun.value.status === 'failed'
+      ? 'failed'
+      : (pipelineRun.value.ingestProgress >= 100 ? 'done' : (['ingesting', 'extracting', 'succeeded'].includes(pipelineRun.value.status) ? 'active' : 'idle')),
+  },
+  {
+    key: 'extract',
+    label: '提取',
+    progress: pipelineRun.value.extractProgress,
+    note: pipelineRun.value.extractLabel,
+    state: pipelineRun.value.status === 'failed'
+      ? 'failed'
+      : (pipelineRun.value.extractProgress >= 100 ? 'done' : (pipelineRun.value.status === 'extracting' ? 'active' : 'idle')),
+  },
+  {
+    key: 'review',
+    label: '审核',
+    progress: pipelineRun.value.reviewReady ? 100 : 0,
+    note: pipelineRun.value.reviewReady ? `${pendingReviews.value} 待审核` : '等待结果',
+    state: pipelineRun.value.status === 'failed'
+      ? 'failed'
+      : (pipelineRun.value.reviewReady ? 'done' : 'idle'),
+  },
+]));
+
+const pipelineMetaCards = computed(() => ([
+  {
+    key: 'document',
+    label: '当前文档',
+    value: pipelineRun.value.fileName || sourceDoc.value.title,
+  },
+  {
+    key: 'stage',
+    label: '当前阶段',
+    value: pipelineRun.value.detail,
+  },
+  {
+    key: 'created',
+    label: '已提取',
+    value: `${fmt.format(pipelineRun.value.createdCount)} 条`,
+  },
+  {
+    key: 'pending',
+    label: '待审核',
+    value: `${fmt.format(pendingReviews.value)} 条`,
+  },
+]));
+
 const isAbortError = (error) => error?.name === 'AbortError';
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+const updatePipelineRun = (patch) => {
+  pipelineRun.value = {
+    ...pipelineRun.value,
+    ...patch,
+  };
+};
+
+const resetPipelineRun = () => {
+  pipelineRun.value = createPipelineRunState();
+  activeDocument.value = null;
+};
+
+const startPipelineRun = (file) => {
+  pipelineRun.value = {
+    ...createPipelineRunState(),
+    status: 'uploading',
+    fileName: file.name,
+    detail: '正在接收文件',
+  };
+  activeDocument.value = null;
+};
 
 const fetchEvents = async (signal) => {
   isEventsLoading.value = true;
@@ -211,32 +354,96 @@ const resetFilters = () => {
 
 const triggerUpload = () => fileInput.value?.click();
 
+const syncActiveDocument = async (documentId) => {
+  const document = await kbApi.getDocumentDetail(documentId);
+  activeDocument.value = document;
+  updatePipelineRun({
+    documentId,
+    status: document.processStep.code === 'failed'
+      ? 'failed'
+      : (pipelineRun.value.status === 'uploading' ? 'ingesting' : pipelineRun.value.status),
+    ingestLabel: document.processStep.label,
+    ingestProgress: document.processStep.progress,
+    detail: document.processStep.detail,
+  });
+  return document;
+};
+
+const applyExtractionProgress = (payload = {}) => {
+  const status = String(payload.status || '').toUpperCase();
+  const resolvedProgress = Number.isFinite(Number(payload.progress))
+    ? Math.max(0, Math.min(100, Number(payload.progress)))
+    : ({ QUEUED: 6, RUNNING: 72, SUCCESS: 100, FAILURE: 100 }[status] || pipelineRun.value.extractProgress);
+
+  const nextLabel = ({
+    QUEUED: '已排队',
+    RUNNING: '抽取中',
+    SUCCESS: '已完成',
+    FAILURE: '已失败',
+  }[status] || pipelineRun.value.extractLabel);
+
+  updatePipelineRun({
+    status: status === 'FAILURE'
+      ? 'failed'
+      : (status === 'SUCCESS' ? 'succeeded' : 'extracting'),
+    extractStatus: status || pipelineRun.value.extractStatus,
+    extractLabel: nextLabel,
+    extractProgress: resolvedProgress,
+    detail: payload.message || pipelineRun.value.detail,
+    createdCount: payload.result?.created_count ?? pipelineRun.value.createdCount,
+    reviewReady: status === 'SUCCESS',
+  });
+};
+
 const pollDocumentIndexed = async (documentId, { timeout = 60000, interval = 2000 } = {}) => {
   const deadline = Date.now() + timeout;
   while (Date.now() < deadline) {
-    const document = await kbApi.getDocumentDetail(documentId);
+    const document = await syncActiveDocument(documentId);
     const status = (document.status || '').toLowerCase();
 
     if (status === 'indexed') {
       return document;
     }
     if (status === 'failed') {
-      throw new Error('文档处理失败');
+      throw new Error(document.processError || '文档处理失败');
     }
 
-    await new Promise((resolve) => setTimeout(resolve, interval));
+    await sleep(interval);
   }
 
   throw new Error('文档处理超时，请稍后重试');
 };
 
 const runRiskPipeline = async (documentId) => {
-  flash.success('上传完成，文档处理中...');
-  await kbApi.ingestDocument(documentId);
+  const ingestPayload = await kbApi.ingestDocument(documentId);
+  if (ingestPayload.document) {
+    activeDocument.value = ingestPayload.document;
+    updatePipelineRun({
+      status: 'ingesting',
+      documentId,
+      ingestLabel: ingestPayload.document.processStep.label,
+      ingestProgress: ingestPayload.document.processStep.progress,
+      detail: ingestPayload.document.processStep.detail,
+    });
+  }
   await pollDocumentIndexed(documentId);
-  flash.success('文档就绪，正在提取风险事件...');
-  await riskApi.extractDocumentWithPolling(documentId);
+  updatePipelineRun({
+    status: 'extracting',
+    extractLabel: '已提交',
+    extractProgress: 6,
+    detail: '文档已入库，准备抽取风险',
+  });
+  const result = await riskApi.extractDocumentWithPolling(documentId, {
+    onProgress: applyExtractionProgress,
+  });
+  applyExtractionProgress({
+    status: 'SUCCESS',
+    progress: 100,
+    message: result.message || (result.created_count ? '风险抽取完成' : '未识别到风险事件'),
+    result,
+  });
   flash.success('风险提取完成');
+  await refreshWorkspace();
 };
 
 const handleFileChange = async (event) => {
@@ -246,16 +453,31 @@ const handleFileChange = async (event) => {
   }
 
   isUploading.value = true;
+  startPipelineRun(file);
   try {
-    flash.success('文档上传中...');
-    const result = await kbApi.uploadDocument(file);
+    const result = await kbApi.uploadDocument(file, {
+      onProgress: (progress) => {
+        updatePipelineRun({
+          status: 'uploading',
+          uploadProgress: progress,
+          detail: '文件正在上传',
+        });
+      },
+    });
     const documentId = result.document?.id;
 
     if (documentId) {
+      activeDocument.value = result.document;
+      updatePipelineRun({
+        uploadProgress: 100,
+        status: 'ingesting',
+        documentId,
+        ingestLabel: result.document.processStep.label,
+        ingestProgress: result.document.processStep.progress,
+        detail: '文件已保存，正在提交入库任务',
+      });
       await runRiskPipeline(documentId);
     }
-
-    await refreshWorkspace();
   } catch (error) {
     if (error.code === 'DUPLICATE' && error.existingDocument) {
       try {
@@ -265,26 +487,49 @@ const handleFileChange = async (event) => {
           { confirmButtonText: '上传新版本', cancelButtonText: '取消', type: 'info' },
         );
       } catch {
+        resetPipelineRun();
         return;
       }
 
       try {
-        flash.success('正在上传新版本...');
         const versionResult = await kbApi.uploadNewVersion(error.existingDocument.id, file, {
           title: file.name,
           sourceLabel: file.name,
+          onProgress: (progress) => {
+            updatePipelineRun({
+              status: 'uploading',
+              uploadProgress: progress,
+              detail: '正在上传新版本',
+            });
+          },
         });
         const newDocumentId = versionResult.document?.id;
         if (newDocumentId) {
+          activeDocument.value = versionResult.document;
+          updatePipelineRun({
+            uploadProgress: 100,
+            status: 'ingesting',
+            documentId: newDocumentId,
+            ingestLabel: versionResult.document.processStep.label,
+            ingestProgress: versionResult.document.processStep.progress,
+            detail: '新版本已保存，正在提交入库任务',
+          });
           await runRiskPipeline(newDocumentId);
         }
-        await refreshWorkspace();
       } catch (versionError) {
+        updatePipelineRun({
+          status: 'failed',
+          detail: versionError.message || '上传新版本失败',
+        });
         flash.error(versionError.message || '上传新版本失败');
       }
       return;
     }
 
+    updatePipelineRun({
+      status: 'failed',
+      detail: error.message || '上传或提取失败',
+    });
     flash.error(error.message || '上传或提取失败');
   } finally {
     isUploading.value = false;
@@ -432,13 +677,37 @@ onBeforeUnmount(() => {
     />
 
     <section class="risk-page__hero">
-      <div class="risk-page__hero-copy">
-        <span class="risk-page__eyebrow">Risk Extraction</span>
-        <h2>上传文档，提取风险，确认结果</h2>
-        <p>这个页面只保留三件事：跑提取、看结果、做审核。报告导出放到次级区，不再和主流程抢注意力。</p>
+      <div class="risk-page__hero-main">
+        <div class="risk-page__hero-copy">
+          <span class="risk-page__eyebrow">Risk Extraction</span>
+          <h2>风险提取控制台</h2>
+        </div>
+
+        <div class="risk-page__runline">
+          <span class="risk-page__run-badge" :data-tone="pipelineTone">{{ pipelineStatusText }}</span>
+          <strong>{{ pipelineRun.fileName || '选择文档开始新一轮提取' }}</strong>
+          <span>{{ pipelineRun.detail }}</span>
+        </div>
+
+        <div class="risk-page__progress-rail" aria-hidden="true">
+          <span :style="{ width: `${pipelinePercent}%` }" />
+        </div>
+
+        <div class="risk-page__step-grid">
+          <article
+            v-for="step in pipelineSteps"
+            :key="step.key"
+            class="risk-page__step-card"
+            :data-state="step.state"
+          >
+            <small>{{ step.label }}</small>
+            <strong>{{ step.progress }}%</strong>
+            <span>{{ step.note }}</span>
+          </article>
+        </div>
       </div>
 
-      <div class="risk-page__hero-actions">
+      <div class="risk-page__hero-side">
         <input
           ref="fileInput"
           type="file"
@@ -448,17 +717,35 @@ onBeforeUnmount(() => {
           aria-hidden="true"
           tabindex="-1"
         />
-        <el-button type="primary" :loading="isUploading" @click="triggerUpload">
-          <AppIcon name="upload" />
-          {{ isUploading ? '上传中...' : '上传文档' }}
-        </el-button>
-        <el-button :loading="isEventsLoading || isAnalyticsLoading" @click="refreshWorkspace">
-          <AppIcon name="refresh" />
-          刷新
-        </el-button>
-        <el-button @click="eventsDrawerOpen = true">
-          查看全部事件
-        </el-button>
+
+        <div class="risk-page__dropzone">
+          <div class="risk-page__dropzone-mark">
+            <AppIcon name="upload" />
+          </div>
+          <strong>{{ pipelineRun.fileName || 'PDF / DOCX / TXT' }}</strong>
+          <span>{{ sourceDoc.size !== '--' ? sourceDoc.size : '单次 50 MB 内' }}</span>
+        </div>
+
+        <div class="risk-page__hero-actions">
+          <el-button type="primary" :loading="isUploading" @click="triggerUpload">
+            <AppIcon name="upload" />
+            {{ uploadButtonLabel }}
+          </el-button>
+          <el-button :loading="isEventsLoading || isAnalyticsLoading" @click="refreshWorkspace">
+            <AppIcon name="refresh" />
+            刷新
+          </el-button>
+          <el-button @click="eventsDrawerOpen = true">
+            查看全部事件
+          </el-button>
+        </div>
+
+        <div class="risk-page__hero-meta">
+          <article v-for="item in pipelineMetaCards" :key="item.key" class="risk-page__hero-meta-card">
+            <small>{{ item.label }}</small>
+            <strong>{{ item.value }}</strong>
+          </article>
+        </div>
       </div>
     </section>
 
@@ -822,15 +1109,21 @@ onBeforeUnmount(() => {
 }
 
 .risk-page__hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1.45fr) minmax(320px, 0.95fr);
+  gap: 18px;
+}
+
+.risk-page__hero-main,
+.risk-page__hero-side {
   display: flex;
-  flex-wrap: wrap;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 20px;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
 }
 
 .risk-page__hero-copy {
-  max-width: 760px;
+  max-width: 640px;
 }
 
 .risk-page__eyebrow {
@@ -847,6 +1140,126 @@ onBeforeUnmount(() => {
 .risk-page__panel-head h3 {
   margin: 0;
   color: var(--text-primary);
+}
+
+.risk-page__runline {
+  display: grid;
+  gap: 6px;
+  padding: 18px 20px;
+  border: 1px solid var(--line-soft);
+  border-radius: 20px;
+  background:
+    linear-gradient(135deg, rgba(36, 87, 197, 0.08), rgba(36, 87, 197, 0.02)),
+    var(--surface-2);
+}
+
+.risk-page__runline strong,
+.risk-page__step-card strong,
+.risk-page__dropzone strong,
+.risk-page__hero-meta-card strong {
+  color: var(--text-primary);
+}
+
+.risk-page__runline span:last-child,
+.risk-page__step-card span,
+.risk-page__dropzone span {
+  color: var(--text-secondary);
+}
+
+.risk-page__run-badge {
+  display: inline-flex;
+  width: fit-content;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 0.6875rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.risk-page__run-badge[data-tone='muted'] {
+  background: rgba(125, 135, 152, 0.12);
+  color: var(--text-muted);
+}
+
+.risk-page__run-badge[data-tone='active'] {
+  background: rgba(36, 87, 197, 0.12);
+  color: var(--brand);
+}
+
+.risk-page__run-badge[data-tone='success'] {
+  background: rgba(33, 129, 92, 0.12);
+  color: var(--success);
+}
+
+.risk-page__run-badge[data-tone='danger'] {
+  background: rgba(196, 73, 61, 0.12);
+  color: var(--risk);
+}
+
+.risk-page__progress-rail {
+  position: relative;
+  overflow: hidden;
+  height: 10px;
+  border-radius: 999px;
+  background: var(--surface-3);
+}
+
+.risk-page__progress-rail > span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, rgba(36, 87, 197, 0.4), rgba(36, 87, 197, 1));
+  transition: width 180ms ease;
+}
+
+.risk-page__step-grid,
+.risk-page__hero-meta {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.risk-page__step-card,
+.risk-page__hero-meta-card,
+.risk-page__dropzone {
+  display: grid;
+  gap: 6px;
+  padding: 16px 18px;
+  border: 1px solid var(--line-soft);
+  border-radius: 18px;
+  background: var(--surface-2);
+}
+
+.risk-page__step-card[data-state='active'] {
+  border-color: rgba(36, 87, 197, 0.28);
+  box-shadow: inset 0 0 0 1px rgba(36, 87, 197, 0.08);
+}
+
+.risk-page__step-card[data-state='done'] {
+  border-color: rgba(33, 129, 92, 0.24);
+}
+
+.risk-page__step-card[data-state='failed'] {
+  border-color: rgba(196, 73, 61, 0.24);
+}
+
+.risk-page__dropzone {
+  align-items: start;
+  background:
+    radial-gradient(circle at top left, rgba(36, 87, 197, 0.1), transparent 55%),
+    var(--surface-2);
+}
+
+.risk-page__dropzone-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 14px;
+  background: rgba(36, 87, 197, 0.12);
+  color: var(--brand);
 }
 
 .risk-page__hero-copy p,
@@ -1118,6 +1531,7 @@ onBeforeUnmount(() => {
 }
 
 @media (max-width: 1200px) {
+  .risk-page__hero,
   .risk-page__summary,
   .risk-page__main,
   .risk-page__secondary,
@@ -1129,7 +1543,14 @@ onBeforeUnmount(() => {
 
 @media (max-width: 900px) {
   .risk-page__hero,
+  .risk-page__panel-head,
+  .risk-page__step-grid,
+  .risk-page__hero-meta {
+    grid-template-columns: 1fr;
+  }
+
   .risk-page__panel-head {
+    display: flex;
     flex-direction: column;
   }
 }

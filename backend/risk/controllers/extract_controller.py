@@ -1,4 +1,5 @@
 from django.conf import settings
+from django.core.exceptions import ValidationError
 
 from celery.result import AsyncResult
 from rest_framework.views import APIView
@@ -6,6 +7,8 @@ from rest_framework.views import APIView
 from common.api_response import error_response, success_response
 from knowledgebase.models import Document
 from rbac.services.authz_service import get_authenticated_user, user_has_permission
+from risk.models import RiskExtractionTask
+from risk.services.task_service import serialize_risk_extraction_task, submit_risk_extraction
 from systemcheck.services.audit_service import record_audit_event
 
 
@@ -25,49 +28,55 @@ class RiskDocumentExtractView(APIView):
         except Document.DoesNotExist:
             return error_response(code=404, message="文档不存在。", status_code=404)
 
-        from risk.tasks import extract_document_task
+        should_run_inline = settings.CELERY_TASK_ALWAYS_EAGER
 
-        broker_url = str(getattr(settings, "CELERY_BROKER_URL", "") or "")
-        should_run_inline = settings.CELERY_TASK_ALWAYS_EAGER or broker_url.startswith("memory://")
-
+        task, created = submit_risk_extraction(document)
         if should_run_inline:
-            try:
-                result_data = extract_document_task.apply(args=(document.id,)).get()
-            except Exception as exc:
-                record_audit_event(
-                    actor=user,
-                    action="risk.extract",
-                    target_type="document",
-                    target_id=document.id,
-                    status="failed",
-                    detail_payload={"message": str(exc)},
-                )
-                return error_response(code=500, message=f"风险抽取失败: {exc}")
+            task.refresh_from_db()
+        task_payload = serialize_risk_extraction_task(task)
 
+        if should_run_inline and task.status == RiskExtractionTask.STATUS_SUCCEEDED:
             record_audit_event(
                 actor=user,
                 action="risk.extract",
                 target_type="document",
                 target_id=document.id,
-                status="succeeded" if result_data.get("status") == "succeeded" else "failed",
-                detail_payload={"created_count": result_data.get("created_count", 0)},
+                status="succeeded",
+                detail_payload={"created_count": task.created_count, "task_id": str(task.id)},
             )
-            if result_data.get("status") == "succeeded":
-                return success_response(message=result_data["message"], data=result_data, status_code=201)
-            return error_response(code=500, message=result_data.get("message", "风险抽取失败。"), data=result_data)
+            return success_response(
+                message=task.message or "风险抽取完成。",
+                data=task.result_payload,
+                status_code=200 if task.result_payload.get("status") == "no_chunks" else 201,
+            )
 
-        result = extract_document_task.delay(document.id)
+        if should_run_inline and task.status == RiskExtractionTask.STATUS_FAILED:
+            record_audit_event(
+                actor=user,
+                action="risk.extract",
+                target_type="document",
+                target_id=document.id,
+                status="failed",
+                detail_payload={"message": task.error_message, "task_id": str(task.id)},
+            )
+            return error_response(
+                code=500,
+                message=task.error_message or "风险抽取失败。",
+                data=task_payload,
+            )
+
         record_audit_event(
             actor=user,
             action="risk.extract",
             target_type="document",
             target_id=document.id,
-            status="submitted",
-            detail_payload={"task_id": result.id},
+            status="submitted" if created else "skipped",
+            detail_payload={"task_id": str(task.id)},
         )
         return success_response(
-            message="风险抽取任务已提交。",
-            data={"task_id": result.id, "status": "PENDING", "document_id": document.id},
+            message="风险抽取任务已提交。" if created else "已有进行中的风险抽取任务。",
+            data=task_payload,
+            status_code=202,
         )
 
 
@@ -96,25 +105,31 @@ class RiskDocumentExtractRetryView(APIView):
             detail_payload={"retry_from_action": "risk.extract"},
         )
 
-        from risk.tasks import extract_document_task
+        should_run_inline = settings.CELERY_TASK_ALWAYS_EAGER
 
-        broker_url = str(getattr(settings, "CELERY_BROKER_URL", "") or "")
-        should_run_inline = settings.CELERY_TASK_ALWAYS_EAGER or broker_url.startswith("memory://")
-
+        task, _created = submit_risk_extraction(document)
         if should_run_inline:
-            try:
-                result_data = extract_document_task.apply(args=(document.id,)).get()
-            except Exception as exc:
-                return error_response(code=500, message=f"风险抽取失败: {exc}")
+            task.refresh_from_db()
+        task_payload = serialize_risk_extraction_task(task)
 
-            if result_data.get("status") == "succeeded":
-                return success_response(message=result_data["message"], data=result_data, status_code=201)
-            return error_response(code=500, message=result_data.get("message", "风险抽取失败。"), data=result_data)
+        if should_run_inline and task.status == RiskExtractionTask.STATUS_SUCCEEDED:
+            return success_response(
+                message=task.message or "风险抽取完成。",
+                data=task.result_payload,
+                status_code=200 if task.result_payload.get("status") == "no_chunks" else 201,
+            )
 
-        result = extract_document_task.delay(document.id)
+        if should_run_inline and task.status == RiskExtractionTask.STATUS_FAILED:
+            return error_response(
+                code=500,
+                message=task.error_message or "风险抽取失败。",
+                data=task_payload,
+            )
+
         return success_response(
             message="风险抽取任务已提交。",
-            data={"task_id": result.id, "status": "PENDING", "document_id": document.id},
+            data=task_payload,
+            status_code=202,
         )
 
 
@@ -127,17 +142,31 @@ class RiskExtractStatusView(APIView):
         if user is None:
             return error_response(code=401, message="未认证。", status_code=401)
 
+        try:
+            task = RiskExtractionTask.objects.filter(id=task_id).select_related("document").first()
+        except (ValidationError, ValueError):
+            task = None
+        if task is not None:
+            payload = serialize_risk_extraction_task(task)
+            if task.status == RiskExtractionTask.STATUS_FAILED:
+                return error_response(
+                    code=500,
+                    message=task.error_message or "风险抽取任务失败。",
+                    data=payload,
+                )
+            return success_response(data=payload)
+
         result = AsyncResult(task_id)
         if result.state == "PENDING":
-            return success_response(data={"task_id": task_id, "status": "PENDING"})
+            return success_response(data={"task_id": task_id, "status": "PENDING", "progress": 0})
         if result.state == "FAILURE":
             return error_response(
                 code=500,
                 message=f"风险抽取任务失败: {result.result}",
-                data={"task_id": task_id, "status": "FAILURE"},
+                data={"task_id": task_id, "status": "FAILURE", "progress": 100},
             )
         if result.state == "SUCCESS":
             return success_response(
-                data={"task_id": task_id, "status": "SUCCESS", "result": result.result}
+                data={"task_id": task_id, "status": "SUCCESS", "progress": 100, "result": result.result}
             )
-        return success_response(data={"task_id": task_id, "status": result.state})
+        return success_response(data={"task_id": task_id, "status": result.state, "progress": 72})
