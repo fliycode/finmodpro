@@ -10,6 +10,37 @@ from risk.serializers import RiskEventSummarySerializer
 from risk.services.chunk_filter_service import select_risk_relevant_chunks
 from risk.services.verification_service import run_extraction_with_verification
 
+RISK_SIGNAL_KEYWORDS = (
+    "风险",
+    "金融",
+    "流动性",
+    "信用",
+    "市场",
+    "合规",
+    "违约",
+    "债务",
+    "现金流",
+    "兑付",
+    "监管",
+    "罚款",
+    "诉讼",
+    "破产",
+    "融资",
+    "亏损",
+    "risk",
+    "liquidity",
+    "credit",
+    "market",
+    "compliance",
+    "default",
+    "debt",
+    "cash flow",
+    "lawsuit",
+    "penalty",
+    "bankruptcy",
+    "financing",
+)
+
 
 def list_document_chunks(*, document):
     return list(DocumentChunk.objects.filter(document=document).order_by("chunk_index", "id"))
@@ -60,6 +91,18 @@ def limit_extraction_chunks(*, chunks, max_chunks=None, max_chars=None):
             break
 
     return limited or [chunks[0]]
+
+
+def detect_risk_signals(*, document, chunks):
+    text_parts = [document.title or ""]
+    text_parts.extend(chunk.content or "" for chunk in chunks[:24])
+    corpus = "\n".join(text_parts).lower()
+
+    matched_keywords = [keyword for keyword in RISK_SIGNAL_KEYWORDS if keyword.lower() in corpus]
+    return {
+        "has_signal": bool(matched_keywords),
+        "matched_keywords": matched_keywords[:8],
+    }
 
 
 def extract_risk_events_for_document(*, document):

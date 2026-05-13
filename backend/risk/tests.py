@@ -156,6 +156,39 @@ class RiskExtractionApiTests(TestCase):
 
     @patch("risk.services.extraction_service.select_risk_relevant_chunks")
     @patch("risk.services.verification_service.get_chat_provider")
+    def test_extract_document_skips_non_financial_document_without_llm(
+        self,
+        mocked_get_chat_provider,
+        mocked_select_chunks,
+    ):
+        document = self.create_document(title="论文格式参考", filename="template.txt")
+        DocumentChunk.objects.create(
+            document=document,
+            chunk_index=0,
+            content="这是一份本科毕业论文排版模板，包含封面、目录、摘要、参考文献与致谢格式。",
+            metadata={"page": 1},
+        )
+
+        response = self.client.post(
+            f"/api/risk/documents/{document.id}/extract",
+            data=json.dumps({}),
+            content_type="application/json",
+            HTTP_AUTHORIZATION=f"Bearer {self.access_token}",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["code"], 0)
+        self.assertEqual(payload["message"], "文档未检测到金融风险相关信号，已跳过风险抽取。")
+        self.assertEqual(payload["data"]["document_id"], document.id)
+        self.assertEqual(payload["data"]["created_count"], 0)
+        self.assertEqual(payload["data"]["risk_events"], [])
+        self.assertEqual(payload["data"]["signal_summary"]["has_signal"], False)
+        mocked_select_chunks.assert_not_called()
+        mocked_get_chat_provider.assert_not_called()
+
+    @patch("risk.services.extraction_service.select_risk_relevant_chunks")
+    @patch("risk.services.verification_service.get_chat_provider")
     def test_extract_document_ignores_events_without_company_name(self, mocked_get_chat_provider, mocked_select_chunks):
         document = self.create_document(title="匿名风险纪要", filename="anonymous-risk.pdf")
         DocumentChunk.objects.create(
@@ -1747,7 +1780,7 @@ class ExtractionMetadataTests(TestCase):
         chunk = DocumentChunk.objects.create(
             document=document,
             chunk_index=0,
-            content="测试内容。",
+            content="Test Corp 现金流风险上升，测试内容。",
             metadata={},
         )
         mocked_select_chunks.side_effect = lambda document, all_chunks, **kw: list(all_chunks)
@@ -1782,6 +1815,7 @@ class ExtractionMetadataTests(TestCase):
         self.assertEqual(pipeline["total_llm_calls"], 2)
         self.assertEqual(pipeline["chunk_filter"]["total_chunks"], 1)
         self.assertEqual(pipeline["chunk_filter"]["filtered_chunks"], 1)
+        self.assertEqual(pipeline["chunk_filter"]["used_chunks"], 1)
 
         payload = response.json()
         event_data = payload["data"]["risk_events"][0]

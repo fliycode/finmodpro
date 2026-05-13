@@ -36,6 +36,7 @@ class RiskDocumentExtractView(APIView):
         task_payload = serialize_risk_extraction_task(task)
 
         if should_run_inline and task.status == RiskExtractionTask.STATUS_SUCCEEDED:
+            result_status = task.result_payload.get("status")
             record_audit_event(
                 actor=user,
                 action="risk.extract",
@@ -47,7 +48,7 @@ class RiskDocumentExtractView(APIView):
             return success_response(
                 message=task.message or "风险抽取完成。",
                 data=task.result_payload,
-                status_code=200 if task.result_payload.get("status") == "no_chunks" else 201,
+                status_code=200 if result_status in {"no_chunks", "no_signals"} else 201,
             )
 
         if should_run_inline and task.status == RiskExtractionTask.STATUS_FAILED:
@@ -113,10 +114,11 @@ class RiskDocumentExtractRetryView(APIView):
         task_payload = serialize_risk_extraction_task(task)
 
         if should_run_inline and task.status == RiskExtractionTask.STATUS_SUCCEEDED:
+            result_status = task.result_payload.get("status")
             return success_response(
                 message=task.message or "风险抽取完成。",
                 data=task.result_payload,
-                status_code=200 if task.result_payload.get("status") == "no_chunks" else 201,
+                status_code=200 if result_status in {"no_chunks", "no_signals"} else 201,
             )
 
         if should_run_inline and task.status == RiskExtractionTask.STATUS_FAILED:

@@ -4,6 +4,7 @@ from knowledgebase.models import Document
 from risk.models import RiskExtractionTask
 from risk.serializers import RiskEventSummarySerializer
 from risk.services.extraction_service import (
+    detect_risk_signals,
     extract_risk_events_for_document,
     list_document_chunks,
 )
@@ -42,6 +43,25 @@ def extract_document_task(document_id, extraction_task_id=None):
             "created_count": 0,
             "risk_events": [],
             "document_id": document.id,
+        }
+        if extraction_task is not None:
+            finish_risk_extraction_task(
+                extraction_task,
+                status=RiskExtractionTask.STATUS_SUCCEEDED,
+                message=result["message"],
+                result_payload=result,
+            )
+        return result
+
+    signal_summary = detect_risk_signals(document=document, chunks=chunks)
+    if not signal_summary["has_signal"]:
+        result = {
+            "status": "no_signals",
+            "message": "文档未检测到金融风险相关信号，已跳过风险抽取。",
+            "created_count": 0,
+            "risk_events": [],
+            "document_id": document.id,
+            "signal_summary": signal_summary,
         }
         if extraction_task is not None:
             finish_risk_extraction_task(
