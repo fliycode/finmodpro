@@ -57,6 +57,12 @@ const createPipelineRunState = () => ({
   failureCode: '',
 });
 const pipelineRun = ref(createPipelineRunState());
+const sourceMode = ref('upload');
+const knowledgebaseSearch = ref('');
+const knowledgebaseDocs = ref([]);
+const selectedKnowledgebaseId = ref('');
+const isKnowledgebaseLoading = ref(false);
+const showUtilities = ref(false);
 
 let workspaceAbort = null;
 
@@ -64,6 +70,9 @@ const analytics = computed(() => normalizeRiskAnalytics(analyticsPayload.value))
 const riskTypeDist = computed(() => analytics.value.risk_type_distribution || []);
 const totalEvents = computed(() => analytics.value.summary.total_events || 0);
 const pendingReviews = computed(() => analytics.value.summary.pending_reviews || 0);
+const selectedKnowledgeDocument = computed(() => (
+  knowledgebaseDocs.value.find((doc) => String(doc.id) === String(selectedKnowledgebaseId.value)) || null
+));
 
 const eventsByType = computed(() => {
   const groups = {};
@@ -313,6 +322,27 @@ const fetchAnalytics = async (signal) => {
   }
 };
 
+const fetchKnowledgebaseDocuments = async () => {
+  isKnowledgebaseLoading.value = true;
+  try {
+    const result = await kbApi.listDocuments({
+      searchKeyword: knowledgebaseSearch.value,
+      statusFilter: 'indexed',
+      pageSize: 8,
+    });
+    knowledgebaseDocs.value = result.documents || [];
+    if (!knowledgebaseDocs.value.some((doc) => String(doc.id) === String(selectedKnowledgebaseId.value))) {
+      selectedKnowledgebaseId.value = activeDocument.value?.id
+        ? String(activeDocument.value.id)
+        : String(knowledgebaseDocs.value[0]?.id || '');
+    }
+  } catch (error) {
+    flash.error(error.message || '加载知识库文档失败');
+  } finally {
+    isKnowledgebaseLoading.value = false;
+  }
+};
+
 const refreshWorkspace = async () => {
   if (workspaceAbort) {
     workspaceAbort.abort();
@@ -330,6 +360,39 @@ const refreshWorkspace = async () => {
     if (workspaceAbort === controller) {
       workspaceAbort = null;
     }
+  }
+};
+
+const handleKnowledgebaseExtract = async () => {
+  if (!selectedKnowledgebaseId.value) {
+    flash.warning('请先选择一份知识库文档');
+    return;
+  }
+
+  isUploading.value = true;
+  try {
+    const document = selectedKnowledgeDocument.value || await kbApi.getDocumentDetail(selectedKnowledgebaseId.value);
+    activeDocument.value = document;
+    updatePipelineRun({
+      ...createPipelineRunState(),
+      status: 'extracting',
+      fileName: document.title,
+      documentId: document.id,
+      uploadProgress: 100,
+      ingestProgress: document.status === 'indexed' ? 100 : 0,
+      ingestLabel: document.status === 'indexed' ? '已完成' : '待开始',
+      detail: '使用知识库已有文档开始风险提取',
+    });
+    await runRiskPipeline(document.id);
+  } catch (error) {
+    applyPipelineFailure(error);
+    if (pipelineRun.value.status === 'busy' || pipelineRun.value.status === 'timed_out') {
+      flash.warning(error.message || '知识库提取失败');
+    } else {
+      flash.error(error.message || '知识库提取失败');
+    }
+  } finally {
+    isUploading.value = false;
   }
 };
 
@@ -502,7 +565,10 @@ const runRiskPipeline = async (documentId) => {
     result,
   });
   flash.success('风险提取完成');
-  await refreshWorkspace();
+  await Promise.all([
+    refreshWorkspace(),
+    fetchKnowledgebaseDocuments(),
+  ]);
 };
 
 const handleFileChange = async (event) => {
@@ -703,6 +769,7 @@ const getSourceTooltip = (event) => {
 
 onMounted(() => {
   refreshWorkspace();
+  fetchKnowledgebaseDocuments();
 });
 
 onBeforeUnmount(() => {
@@ -723,75 +790,124 @@ onBeforeUnmount(() => {
     />
 
     <section class="risk-page__hero">
-      <div class="risk-page__hero-main">
-        <div class="risk-page__hero-copy">
-          <span class="risk-page__eyebrow">Risk Extraction</span>
-          <h2>风险提取控制台</h2>
+      <input
+        ref="fileInput"
+        type="file"
+        accept=".pdf,.docx,.txt"
+        class="risk-page__file-input"
+        @change="handleFileChange"
+        aria-hidden="true"
+        tabindex="-1"
+      />
+
+      <div class="risk-page__hero-copy">
+        <span class="risk-page__eyebrow">Risk Extraction</span>
+        <h2>先选文档，再提取风险</h2>
+        <p>主任务只有一件事，选一份文档，完成提取，然后回到审核队列。</p>
+      </div>
+
+      <div class="risk-page__runline">
+        <span class="risk-page__run-badge" :data-tone="pipelineTone">{{ pipelineStatusText }}</span>
+        <strong>{{ pipelineRun.fileName || selectedKnowledgeDocument?.title || '还未选择文档' }}</strong>
+        <span>{{ pipelineRun.detail }}</span>
+      </div>
+
+      <div class="risk-page__progress-rail" aria-hidden="true">
+        <span :style="{ width: `${pipelinePercent}%` }" />
+      </div>
+
+      <div class="risk-page__launcher">
+        <div class="risk-page__source-switch">
+          <span>来源</span>
+          <el-radio-group v-model="sourceMode" size="small">
+            <el-radio-button label="upload">上传新文档</el-radio-button>
+            <el-radio-button label="knowledgebase">从知识库提取</el-radio-button>
+          </el-radio-group>
         </div>
 
-        <div class="risk-page__runline">
-          <span class="risk-page__run-badge" :data-tone="pipelineTone">{{ pipelineStatusText }}</span>
-          <strong>{{ pipelineRun.fileName || '选择文档开始新一轮提取' }}</strong>
-          <span>{{ pipelineRun.detail }}</span>
+        <div v-if="sourceMode === 'upload'" class="risk-page__launcher-body">
+          <div class="risk-page__dropzone">
+            <div class="risk-page__dropzone-mark">
+              <AppIcon name="upload" />
+            </div>
+            <div>
+              <strong>{{ pipelineRun.fileName || 'PDF / DOCX / TXT' }}</strong>
+              <span>{{ sourceDoc.size !== '--' ? sourceDoc.size : '单次 50 MB 内' }}</span>
+            </div>
+          </div>
+          <div class="risk-page__launcher-actions">
+            <el-button type="primary" :loading="isUploading" @click="triggerUpload">
+              <AppIcon name="upload" />
+              {{ uploadButtonLabel }}
+            </el-button>
+            <el-button :loading="isEventsLoading || isAnalyticsLoading" @click="refreshWorkspace">
+              <AppIcon name="refresh" />
+              刷新结果
+            </el-button>
+          </div>
         </div>
 
-        <div class="risk-page__progress-rail" aria-hidden="true">
-          <span :style="{ width: `${pipelinePercent}%` }" />
-        </div>
+        <div v-else class="risk-page__launcher-body">
+          <div class="risk-page__knowledge-search">
+            <el-input
+              v-model="knowledgebaseSearch"
+              placeholder="搜索知识库文档"
+              clearable
+              @keyup.enter="fetchKnowledgebaseDocuments"
+            />
+            <el-button :loading="isKnowledgebaseLoading" @click="fetchKnowledgebaseDocuments">
+              <AppIcon name="refresh" />
+              刷新
+            </el-button>
+          </div>
 
-        <div class="risk-page__step-grid">
-          <article
-            v-for="step in pipelineSteps"
-            :key="step.key"
-            class="risk-page__step-card"
-            :data-state="step.state"
-          >
-            <small>{{ step.label }}</small>
-            <strong>{{ step.progress }}%</strong>
-            <span>{{ step.note }}</span>
-          </article>
+          <div class="risk-page__knowledge-list">
+            <button
+              v-for="doc in knowledgebaseDocs"
+              :key="doc.id"
+              type="button"
+              class="risk-page__knowledge-item"
+              :data-active="String(doc.id) === String(selectedKnowledgebaseId)"
+              @click="selectedKnowledgebaseId = String(doc.id)"
+            >
+              <div>
+                <strong>{{ doc.title }}</strong>
+                <span>{{ doc.datasetName }} · {{ doc.size }}</span>
+              </div>
+              <small>{{ doc.processStep.label }}</small>
+            </button>
+            <div v-if="!knowledgebaseDocs.length && !isKnowledgebaseLoading" class="risk-page__empty">
+              暂无已入库文档。
+            </div>
+          </div>
+
+          <div class="risk-page__launcher-actions">
+            <el-button
+              type="primary"
+              :loading="isUploading"
+              :disabled="!selectedKnowledgebaseId"
+              @click="handleKnowledgebaseExtract"
+            >
+              开始提取
+            </el-button>
+            <el-button @click="eventsDrawerOpen = true">
+              查看全部事件
+            </el-button>
+          </div>
         </div>
       </div>
 
-      <div class="risk-page__hero-side">
-        <input
-          ref="fileInput"
-          type="file"
-          accept=".pdf,.docx,.txt"
-          class="risk-page__file-input"
-          @change="handleFileChange"
-          aria-hidden="true"
-          tabindex="-1"
-        />
-
-        <div class="risk-page__dropzone">
-          <div class="risk-page__dropzone-mark">
-            <AppIcon name="upload" />
-          </div>
-          <strong>{{ pipelineRun.fileName || 'PDF / DOCX / TXT' }}</strong>
-          <span>{{ sourceDoc.size !== '--' ? sourceDoc.size : '单次 50 MB 内' }}</span>
-        </div>
-
-        <div class="risk-page__hero-actions">
-          <el-button type="primary" :loading="isUploading" @click="triggerUpload">
-            <AppIcon name="upload" />
-            {{ uploadButtonLabel }}
-          </el-button>
-          <el-button :loading="isEventsLoading || isAnalyticsLoading" @click="refreshWorkspace">
-            <AppIcon name="refresh" />
-            刷新
-          </el-button>
-          <el-button @click="eventsDrawerOpen = true">
-            查看全部事件
-          </el-button>
-        </div>
-
-        <div class="risk-page__hero-meta">
-          <article v-for="item in pipelineMetaCards" :key="item.key" class="risk-page__hero-meta-card">
-            <small>{{ item.label }}</small>
-            <strong>{{ item.value }}</strong>
-          </article>
-        </div>
+      <div class="risk-page__step-grid">
+        <article
+          v-for="step in pipelineSteps"
+          :key="step.key"
+          class="risk-page__step-card"
+          :data-state="step.state"
+        >
+          <small>{{ step.label }}</small>
+          <strong>{{ step.progress }}%</strong>
+          <span>{{ step.note }}</span>
+        </article>
       </div>
     </section>
 
@@ -906,106 +1022,103 @@ onBeforeUnmount(() => {
       </section>
     </div>
 
-    <div class="risk-page__secondary">
-      <section class="risk-page__panel">
-        <header class="risk-page__panel-head">
-          <div>
-            <h3>来源与证据</h3>
-            <p>把文档元信息和原文证据收在一起，减少来回切换。</p>
-          </div>
-        </header>
-
-        <div class="risk-page__source-grid">
-          <div class="risk-page__source-field">
-            <span>文档</span>
-            <strong>{{ sourceDoc.title }}</strong>
-          </div>
-          <div class="risk-page__source-field">
-            <span>公司</span>
-            <strong>{{ sourceDoc.company }}</strong>
-          </div>
-          <div class="risk-page__source-field">
-            <span>大小</span>
-            <strong>{{ sourceDoc.size }}</strong>
-          </div>
-          <div class="risk-page__source-field">
-            <span>日期</span>
-            <strong>{{ sourceDoc.date }}</strong>
-          </div>
+    <section class="risk-page__panel risk-page__utilities">
+      <header class="risk-page__panel-head">
+        <div>
+          <h3>更多工具</h3>
+          <p>把证据和导出收起来，需要时再展开。</p>
         </div>
+        <el-button text @click="showUtilities = !showUtilities">
+          {{ showUtilities ? '收起' : '展开' }}
+        </el-button>
+      </header>
 
-        <div v-if="extractionQuality" class="risk-page__quality">
-          <span>{{ extractionQuality.rounds }} 轮提取</span>
-          <span>{{ extractionQuality.verified ? '验证通过' : '待人工确认' }}</span>
-          <span v-if="extractionQuality.totalChunks">筛选 {{ extractionQuality.filteredChunks }}/{{ extractionQuality.totalChunks }} 切块</span>
-        </div>
-
-        <div v-if="events.length" class="risk-page__evidence-list">
-          <article
-            v-for="event in events.slice(0, 5)"
-            :key="event.id || event.event_id"
-            class="risk-page__evidence-item"
-          >
-            <div class="risk-page__evidence-head">
-              <strong>{{ event.risk_type }}</strong>
-              <span>{{ event.company_name }}</span>
+      <div v-if="showUtilities" class="risk-page__secondary">
+        <section class="risk-page__utility-block">
+          <div class="risk-page__source-grid">
+            <div class="risk-page__source-field">
+              <span>文档</span>
+              <strong>{{ sourceDoc.title }}</strong>
             </div>
-            <p>{{ event.evidence_text || event.summary || '暂无证据文本。' }}</p>
-          </article>
-        </div>
-        <div v-else class="risk-page__empty">暂无证据片段。</div>
-      </section>
-
-      <section class="risk-page__panel">
-        <header class="risk-page__panel-head">
-          <div>
-            <h3>报告与导出</h3>
-            <p>保留导出能力，但降到次要层级，不干扰提取和审核主任务。</p>
+            <div class="risk-page__source-field">
+              <span>公司</span>
+              <strong>{{ sourceDoc.company }}</strong>
+            </div>
+            <div class="risk-page__source-field">
+              <span>大小</span>
+              <strong>{{ sourceDoc.size }}</strong>
+            </div>
+            <div class="risk-page__source-field">
+              <span>日期</span>
+              <strong>{{ sourceDoc.date }}</strong>
+            </div>
           </div>
-        </header>
 
-        <div v-if="reportErrorMsg" class="risk-page__report-error">{{ reportErrorMsg }}</div>
+          <div v-if="extractionQuality" class="risk-page__quality">
+            <span>{{ extractionQuality.rounds }} 轮提取</span>
+            <span>{{ extractionQuality.verified ? '验证通过' : '待人工确认' }}</span>
+            <span v-if="extractionQuality.totalChunks">筛选 {{ extractionQuality.filteredChunks }}/{{ extractionQuality.totalChunks }} 切块</span>
+          </div>
 
-        <div class="risk-page__report-type">
-          <el-radio-group v-model="reportType" size="small">
-            <el-radio-button label="company">公司报告</el-radio-button>
-            <el-radio-button label="time_range">时间范围</el-radio-button>
-          </el-radio-group>
-        </div>
+          <div v-if="events.length" class="risk-page__evidence-list">
+            <article
+              v-for="event in events.slice(0, 3)"
+              :key="event.id || event.event_id"
+              class="risk-page__evidence-item"
+            >
+              <div class="risk-page__evidence-head">
+                <strong>{{ event.risk_type }}</strong>
+                <span>{{ event.company_name }}</span>
+              </div>
+              <p>{{ event.evidence_text || event.summary || '暂无证据文本。' }}</p>
+            </article>
+          </div>
+        </section>
 
-        <div v-if="reportType === 'company'" class="risk-page__report-fields">
-          <el-input v-model="reportForm.company_name" placeholder="公司名称" clearable />
-        </div>
-        <div v-else class="risk-page__report-fields risk-page__report-fields--dates">
-          <el-date-picker
-            v-model="reportForm.period_start"
-            type="date"
-            placeholder="开始日期"
-            value-format="YYYY-MM-DD"
-            style="width: 100%"
-          />
-          <el-date-picker
-            v-model="reportForm.period_end"
-            type="date"
-            placeholder="结束日期"
-            value-format="YYYY-MM-DD"
-            style="width: 100%"
-          />
-        </div>
+        <section class="risk-page__utility-block">
+          <div v-if="reportErrorMsg" class="risk-page__report-error">{{ reportErrorMsg }}</div>
 
-        <div class="risk-page__report-actions">
-          <el-button type="primary" :loading="isReportLoading" @click="generateReport">
-            生成报告
-          </el-button>
-          <el-button :disabled="!generatedReport || isReportExporting" :loading="isReportExporting" @click="downloadGeneratedReport('markdown')">
-            导出 Markdown
-          </el-button>
-          <el-button @click="exportEventsAsJson">
-            导出事件 JSON
-          </el-button>
-        </div>
-      </section>
-    </div>
+          <div class="risk-page__report-type">
+            <el-radio-group v-model="reportType" size="small">
+              <el-radio-button label="company">公司报告</el-radio-button>
+              <el-radio-button label="time_range">时间范围</el-radio-button>
+            </el-radio-group>
+          </div>
+
+          <div v-if="reportType === 'company'" class="risk-page__report-fields">
+            <el-input v-model="reportForm.company_name" placeholder="公司名称" clearable />
+          </div>
+          <div v-else class="risk-page__report-fields risk-page__report-fields--dates">
+            <el-date-picker
+              v-model="reportForm.period_start"
+              type="date"
+              placeholder="开始日期"
+              value-format="YYYY-MM-DD"
+              style="width: 100%"
+            />
+            <el-date-picker
+              v-model="reportForm.period_end"
+              type="date"
+              placeholder="结束日期"
+              value-format="YYYY-MM-DD"
+              style="width: 100%"
+            />
+          </div>
+
+          <div class="risk-page__report-actions">
+            <el-button type="primary" :loading="isReportLoading" @click="generateReport">
+              生成报告
+            </el-button>
+            <el-button :disabled="!generatedReport || isReportExporting" :loading="isReportExporting" @click="downloadGeneratedReport('markdown')">
+              导出 Markdown
+            </el-button>
+            <el-button @click="exportEventsAsJson">
+              导出事件 JSON
+            </el-button>
+          </div>
+        </section>
+      </div>
+    </section>
 
     <el-drawer
       v-model="eventsDrawerOpen"
@@ -1156,20 +1269,12 @@ onBeforeUnmount(() => {
 
 .risk-page__hero {
   display: grid;
-  grid-template-columns: minmax(0, 1.45fr) minmax(320px, 0.95fr);
-  gap: 18px;
-}
-
-.risk-page__hero-main,
-.risk-page__hero-side {
-  display: flex;
-  flex-direction: column;
   gap: 16px;
   min-width: 0;
 }
 
 .risk-page__hero-copy {
-  max-width: 640px;
+  max-width: 720px;
 }
 
 .risk-page__eyebrow {
@@ -1202,7 +1307,7 @@ onBeforeUnmount(() => {
 .risk-page__runline strong,
 .risk-page__step-card strong,
 .risk-page__dropzone strong,
-.risk-page__hero-meta-card strong {
+.risk-page__knowledge-item strong {
   color: var(--text-primary);
 }
 
@@ -1260,14 +1365,13 @@ onBeforeUnmount(() => {
 }
 
 .risk-page__step-grid,
-.risk-page__hero-meta {
+.risk-page__knowledge-list {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;
 }
 
 .risk-page__step-card,
-.risk-page__hero-meta-card,
 .risk-page__dropzone {
   display: grid;
   gap: 6px;
@@ -1291,7 +1395,8 @@ onBeforeUnmount(() => {
 }
 
 .risk-page__dropzone {
-  align-items: start;
+  grid-template-columns: auto 1fr;
+  align-items: center;
   background:
     radial-gradient(circle at top left, rgba(36, 87, 197, 0.1), transparent 55%),
     var(--surface-2);
@@ -1318,10 +1423,7 @@ onBeforeUnmount(() => {
   line-height: 1.6;
 }
 
-.risk-page__hero-actions,
 .risk-page__summary,
-.risk-page__main,
-.risk-page__secondary,
 .risk-page__report-actions,
 .risk-page__actions,
 .risk-page__quality {
@@ -1329,7 +1431,7 @@ onBeforeUnmount(() => {
   gap: 10px;
 }
 
-.risk-page__hero-actions,
+.risk-page__launcher-actions,
 .risk-page__quality,
 .risk-page__actions {
   flex-wrap: wrap;
@@ -1376,6 +1478,79 @@ onBeforeUnmount(() => {
 .risk-page__secondary {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.risk-page__launcher,
+.risk-page__utility-block {
+  display: grid;
+  gap: 14px;
+  padding: 16px 18px;
+  border: 1px solid var(--line-soft);
+  border-radius: 20px;
+  background: var(--surface-2);
+}
+
+.risk-page__source-switch {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.risk-page__source-switch > span,
+.risk-page__knowledge-item span,
+.risk-page__knowledge-item small {
+  color: var(--text-muted);
+  font-size: 0.75rem;
+}
+
+.risk-page__launcher-body {
+  display: grid;
+  gap: 12px;
+}
+
+.risk-page__launcher-actions {
+  display: flex;
+  gap: 10px;
+}
+
+.risk-page__knowledge-search {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+}
+
+.risk-page__knowledge-item {
+  appearance: none;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 16px;
+  border: 1px solid var(--line-soft);
+  border-radius: 16px;
+  background: var(--surface-1);
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 160ms ease, background-color 160ms ease, transform 160ms ease;
+}
+
+.risk-page__knowledge-item:hover,
+.risk-page__knowledge-item[data-active='true'] {
+  border-color: rgba(36, 87, 197, 0.24);
+  background: rgba(36, 87, 197, 0.06);
+  transform: translateY(-1px);
+}
+
+.risk-page__knowledge-item > div {
+  display: grid;
+  gap: 4px;
+}
+
+.risk-page__utilities {
+  gap: 14px;
 }
 
 .risk-page__panel {
@@ -1581,6 +1756,7 @@ onBeforeUnmount(() => {
   .risk-page__summary,
   .risk-page__main,
   .risk-page__secondary,
+  .risk-page__knowledge-list,
   .risk-page__source-grid,
   .risk-page__report-fields--dates {
     grid-template-columns: 1fr;
@@ -1591,13 +1767,20 @@ onBeforeUnmount(() => {
   .risk-page__hero,
   .risk-page__panel-head,
   .risk-page__step-grid,
-  .risk-page__hero-meta {
+  .risk-page__knowledge-search {
     grid-template-columns: 1fr;
   }
 
   .risk-page__panel-head {
     display: flex;
     flex-direction: column;
+  }
+
+  .risk-page__source-switch,
+  .risk-page__launcher-actions,
+  .risk-page__knowledge-item {
+    flex-direction: column;
+    align-items: flex-start;
   }
 }
 </style>
