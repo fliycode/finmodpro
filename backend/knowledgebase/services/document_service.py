@@ -502,6 +502,7 @@ def create_document_from_upload(
     dataset=None,
     dataset_id=None,
     skip_initial_version=False,
+    allow_duplicate_hash=False,
 ):
     filename = uploaded_file.name
     doc_type = _detect_doc_type(filename)
@@ -510,10 +511,12 @@ def create_document_from_upload(
 
     file_hash = _compute_file_hash(uploaded_file)
 
-    existing_doc = Document.objects.filter(
-        file_hash=file_hash,
-        file_size=uploaded_file.size,
-    ).order_by("-id").first()
+    existing_doc = None
+    if not allow_duplicate_hash:
+        existing_doc = Document.objects.filter(
+            file_hash=file_hash,
+            file_size=uploaded_file.size,
+        ).order_by("-id").first()
     if existing_doc is not None:
         raise DuplicateDocumentError(
             f"文件已存在（《{existing_doc.title}》），请勿重复上传。",

@@ -131,6 +131,7 @@ def create_new_document_version(
         visibility=root_document.visibility,
         dataset=root_document.dataset,
         skip_initial_version=True,
+        allow_duplicate_hash=True,
     )
 
     version_record = DocumentVersion.objects.create(

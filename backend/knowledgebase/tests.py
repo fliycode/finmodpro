@@ -464,6 +464,46 @@ class KnowledgebaseApiTests(AuditRecordAssertionMixin, TestCase):
             "abc123",
         )
 
+    def test_document_version_upload_allows_same_file_as_new_revision(self):
+        upload_response = self.client.post(
+            "/api/knowledgebase/documents",
+            data={
+                "title": "重复版本源文档",
+                "file": SimpleUploadedFile(
+                    "duplicate-version.txt",
+                    b"same bytes for versioning",
+                    content_type="text/plain",
+                ),
+            },
+            HTTP_AUTHORIZATION=f"Bearer {self.access_token}",
+        )
+
+        self.assertEqual(upload_response.status_code, 201)
+        initial_document = upload_response.json()["document"]
+
+        version_upload_response = self.client.post(
+            f"/api/knowledgebase/documents/{initial_document['id']}/versions",
+            data={
+                "title": "重复版本源文档 V2",
+                "source_type": "upload",
+                "source_label": "重复版本源文档 V2",
+                "file": SimpleUploadedFile(
+                    "duplicate-version-v2.txt",
+                    b"same bytes for versioning",
+                    content_type="text/plain",
+                ),
+            },
+            HTTP_AUTHORIZATION=f"Bearer {self.access_token}",
+        )
+
+        self.assertEqual(version_upload_response.status_code, 201)
+        payload = version_upload_response.json()
+        self.assertEqual(payload["document"]["root_document_id"], initial_document["id"])
+        self.assertEqual(payload["document"]["version_number"], 2)
+        root_document = Document.objects.get(id=initial_document["id"])
+        new_document = Document.objects.get(id=payload["document"]["id"])
+        self.assertEqual(root_document.file_hash, new_document.file_hash)
+
         list_response = self.client.get(
             "/api/knowledgebase/documents",
             HTTP_AUTHORIZATION=f"Bearer {self.access_token}",
