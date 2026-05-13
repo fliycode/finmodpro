@@ -1,5 +1,5 @@
 from django.core.management.base import BaseCommand
-from django_celery_beat.models import CrontabSchedule, PeriodicTask
+from django_celery_beat.models import CrontabSchedule, IntervalSchedule, PeriodicTask
 
 from ops.services import seed_default_alert_rules
 
@@ -31,6 +31,20 @@ class Command(BaseCommand):
             defaults={
                 "crontab": schedule,
                 "task": "ops.evaluate_alerts_task",
+                "enabled": True,
+            },
+        )
+
+        interval, _ = IntervalSchedule.objects.get_or_create(
+            every=1,
+            period=IntervalSchedule.MINUTES,
+        )
+
+        PeriodicTask.objects.get_or_create(
+            name="risk-expire-stale-extractions",
+            defaults={
+                "interval": interval,
+                "task": "risk.expire_stale_extractions_task",
                 "enabled": True,
             },
         )

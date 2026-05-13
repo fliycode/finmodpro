@@ -30,7 +30,14 @@ class OllamaApiMixin:
     def _build_url(self, path):
         return f"{self.endpoint}{path}"
 
-    def _post_json(self, path, payload, *, capability):
+    def _resolve_timeout_seconds(self, options=None):
+        merged_options = {**self.options, **(options or {})}
+        try:
+            return max(1, int(merged_options.get("timeout_seconds") or 30))
+        except (TypeError, ValueError):
+            return 30
+
+    def _post_json(self, path, payload, *, capability, options=None):
         url = self._build_url(path)
         body = json.dumps(payload).encode("utf-8")
         headers = {"Content-Type": "application/json"}
@@ -47,7 +54,7 @@ class OllamaApiMixin:
         try:
             response = request.urlopen(
                 request.Request(url, data=body, headers=headers, method="POST"),
-                timeout=30,
+                timeout=self._resolve_timeout_seconds(options),
             )
             return json.loads(response.read().decode("utf-8"))
         except error.HTTPError as exc:
@@ -164,7 +171,7 @@ class OllamaChatProvider(OllamaApiMixin, BaseChatProvider):
             payload["options"] = merged_options
         started_at = time.monotonic()
         try:
-            response_payload = self._post_json("/api/chat", payload, capability="chat")
+            response_payload = self._post_json("/api/chat", payload, capability="chat", options=options)
         except (UpstreamServiceError, UpstreamRateLimitError) as exc:
             self._record_failure(
                 capability="chat",
@@ -220,7 +227,7 @@ class OllamaEmbeddingProvider(OllamaApiMixin, BaseEmbeddingProvider):
         payload.update(merged_options)
         started_at = time.monotonic()
         try:
-            response_payload = self._post_json("/api/embed", payload, capability="embedding")
+            response_payload = self._post_json("/api/embed", payload, capability="embedding", options=options)
         except (UpstreamServiceError, UpstreamRateLimitError) as exc:
             self._record_failure(
                 capability="embedding",

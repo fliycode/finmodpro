@@ -54,6 +54,7 @@ const createPipelineRunState = () => ({
   extractProgress: 0,
   createdCount: 0,
   reviewReady: false,
+  failureCode: '',
 });
 const pipelineRun = ref(createPipelineRunState());
 
@@ -174,6 +175,8 @@ const pipelineStatusText = computed(() => ({
   ingesting: '入库中',
   extracting: '抽取中',
   succeeded: '已完成',
+  busy: '系统繁忙',
+  timed_out: '已超时',
   failed: '已中断',
 }[pipelineRun.value.status] || '处理中'));
 
@@ -183,6 +186,8 @@ const pipelineTone = computed(() => ({
   ingesting: 'active',
   extracting: 'active',
   succeeded: 'success',
+  busy: 'warning',
+  timed_out: 'warning',
   failed: 'danger',
 }[pipelineRun.value.status] || 'muted'));
 
@@ -371,27 +376,65 @@ const syncActiveDocument = async (documentId) => {
 
 const applyExtractionProgress = (payload = {}) => {
   const status = String(payload.status || '').toUpperCase();
+  const errorCode = payload.error_code || '';
   const resolvedProgress = Number.isFinite(Number(payload.progress))
     ? Math.max(0, Math.min(100, Number(payload.progress)))
-    : ({ QUEUED: 6, RUNNING: 72, SUCCESS: 100, FAILURE: 100 }[status] || pipelineRun.value.extractProgress);
+    : ({
+      QUEUED: 6,
+      RUNNING: 72,
+      SUCCESS: 100,
+      FAILURE: 100,
+      BUSY: 100,
+      TIMED_OUT: 100,
+    }[status] || pipelineRun.value.extractProgress);
 
   const nextLabel = ({
     QUEUED: '已排队',
     RUNNING: '抽取中',
     SUCCESS: '已完成',
     FAILURE: '已失败',
+    BUSY: '系统繁忙',
+    TIMED_OUT: '执行超时',
   }[status] || pipelineRun.value.extractLabel);
 
+  const pipelineStatus = status === 'BUSY'
+    ? 'busy'
+    : (status === 'TIMED_OUT'
+      || ['risk_extraction_timeout', 'risk_extraction_stage_timeout', 'risk_extraction_queue_timeout', 'risk_extraction_poll_timeout'].includes(errorCode)
+      ? 'timed_out'
+      : (status === 'FAILURE'
+        ? 'failed'
+        : (status === 'SUCCESS' ? 'succeeded' : 'extracting')));
+
   updatePipelineRun({
-    status: status === 'FAILURE'
-      ? 'failed'
-      : (status === 'SUCCESS' ? 'succeeded' : 'extracting'),
+    status: pipelineStatus,
     extractStatus: status || pipelineRun.value.extractStatus,
     extractLabel: nextLabel,
     extractProgress: resolvedProgress,
     detail: payload.message || pipelineRun.value.detail,
     createdCount: payload.result?.created_count ?? pipelineRun.value.createdCount,
     reviewReady: status === 'SUCCESS',
+    failureCode: errorCode,
+  });
+};
+
+const applyPipelineFailure = (error) => {
+  const failureCode = error?.code || error?.data?.error_code || '';
+  const nextStatus = failureCode === 'risk_extraction_busy'
+    ? 'busy'
+    : ([
+      'risk_extraction_timeout',
+      'risk_extraction_stage_timeout',
+      'risk_extraction_queue_timeout',
+      'risk_extraction_poll_timeout',
+    ].includes(failureCode)
+      ? 'timed_out'
+      : 'failed');
+
+  updatePipelineRun({
+    status: nextStatus,
+    detail: error?.message || '上传或提取失败',
+    failureCode,
   });
 };
 
@@ -518,20 +561,22 @@ const handleFileChange = async (event) => {
         await syncActiveDocument(error.existingDocument.id);
         await runRiskPipeline(error.existingDocument.id);
       } catch (versionError) {
-        updatePipelineRun({
-          status: 'failed',
-          detail: versionError.message || '使用已有文档失败',
-        });
-        flash.error(versionError.message || '使用已有文档失败');
+        applyPipelineFailure(versionError);
+        if (pipelineRun.value.status === 'busy' || pipelineRun.value.status === 'timed_out') {
+          flash.warning(versionError.message || '使用已有文档失败');
+        } else {
+          flash.error(versionError.message || '使用已有文档失败');
+        }
       }
       return;
     }
 
-    updatePipelineRun({
-      status: 'failed',
-      detail: error.message || '上传或提取失败',
-    });
-    flash.error(error.message || '上传或提取失败');
+    applyPipelineFailure(error);
+    if (pipelineRun.value.status === 'busy' || pipelineRun.value.status === 'timed_out') {
+      flash.warning(error.message || '上传或提取失败');
+    } else {
+      flash.error(error.message || '上传或提取失败');
+    }
   } finally {
     isUploading.value = false;
     if (event.target) {

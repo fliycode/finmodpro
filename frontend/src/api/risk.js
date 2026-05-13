@@ -23,6 +23,15 @@ const resolveFilenameFromDisposition = (contentDisposition, fallback) => {
 export const createRiskApi = (overrides = {}) => {
   const apiConfig = createApiConfig(overrides);
 
+  const buildRiskError = (payload = {}, fallbackMessage, status = 500) => {
+    const data = payload.data || {};
+    const error = new Error(payload.message || fallbackMessage || '请求失败，请稍后重试');
+    error.code = data.error_code || payload.error_code || payload.code || '';
+    error.status = status;
+    error.data = data;
+    return error;
+  };
+
   const requestJson = async (path, { method = 'GET', body, signal } = {}) => {
     return apiConfig.fetchJson(path, {
       method,
@@ -30,6 +39,20 @@ export const createRiskApi = (overrides = {}) => {
       auth: true,
       signal,
     });
+  };
+
+  const requestTaskJson = async (path, { method = 'GET', body, signal } = {}) => {
+    const response = await apiConfig.fetchWithAuth(path, {
+      method,
+      body: body ? JSON.stringify(body) : undefined,
+      auth: true,
+      signal,
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw buildRiskError(payload, '请求失败，请稍后重试', response.status);
+    }
+    return payload;
   };
 
   return {
@@ -48,14 +71,14 @@ export const createRiskApi = (overrides = {}) => {
     },
 
     extractDocument(documentId) {
-      return requestJson(`/api/risk/documents/${documentId}/extract`, {
+      return requestTaskJson(`/api/risk/documents/${documentId}/extract`, {
         method: 'POST',
         body: {},
       });
     },
 
     getExtractStatus(taskId) {
-      return requestJson(`/api/risk/documents/extract/status/${taskId}`, {
+      return requestTaskJson(`/api/risk/documents/extract/status/${taskId}`, {
         method: 'GET',
       });
     },
@@ -65,7 +88,15 @@ export const createRiskApi = (overrides = {}) => {
       interval = 3000,
       onProgress,
     } = {}) {
-      const submitResult = await this.extractDocument(documentId);
+      let submitResult;
+      try {
+        submitResult = await this.extractDocument(documentId);
+      } catch (error) {
+        if (typeof onProgress === 'function' && error?.data) {
+          onProgress(error.data);
+        }
+        throw error;
+      }
       const data = submitResult.data || submitResult;
       if (typeof onProgress === 'function') {
         onProgress(data);
@@ -75,7 +106,15 @@ export const createRiskApi = (overrides = {}) => {
         const deadline = Date.now() + timeout;
         while (Date.now() < deadline) {
           await new Promise((r) => setTimeout(r, interval));
-          const statusResult = await this.getExtractStatus(data.task_id);
+          let statusResult;
+          try {
+            statusResult = await this.getExtractStatus(data.task_id);
+          } catch (error) {
+            if (typeof onProgress === 'function' && error?.data) {
+              onProgress(error.data);
+            }
+            throw error;
+          }
           const statusData = statusResult.data || statusResult;
           if (typeof onProgress === 'function') {
             onProgress(statusData);
@@ -87,7 +126,18 @@ export const createRiskApi = (overrides = {}) => {
             throw new Error(statusData.message || '风险抽取任务失败');
           }
         }
-        throw new Error('风险抽取任务超时，请稍后查看结果');
+        const timeoutError = new Error('风险抽取任务超时，请稍后查看结果');
+        timeoutError.code = 'risk_extraction_poll_timeout';
+        timeoutError.data = {
+          status: 'TIMED_OUT',
+          progress: 100,
+          message: timeoutError.message,
+          error_code: 'risk_extraction_poll_timeout',
+        };
+        if (typeof onProgress === 'function') {
+          onProgress(timeoutError.data);
+        }
+        throw timeoutError;
       }
 
       return data;

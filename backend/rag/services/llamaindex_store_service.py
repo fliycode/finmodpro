@@ -15,6 +15,7 @@ from llama_index.core.vector_stores.types import (
 from llama_index.vector_stores.milvus import MilvusVectorStore
 
 from knowledgebase.models import DocumentChunk
+from llm.services.runtime_service import provider_runtime_options
 from rag.services.llamaindex_embedding_adapter import FinModProEmbeddingAdapter
 
 logger = logging.getLogger(__name__)
@@ -795,49 +796,51 @@ def query_llamaindex_store(
     top_k=5,
     query_variants=None,
     allow_keyword_fallback=True,
+    provider_options=None,
 ):
-    if getattr(settings, "RAG_HYBRID_SEARCH_ENABLED", False):
-        return _hybrid_query(query, filters=filters, top_k=top_k, query_variants=query_variants)
+    with provider_runtime_options(provider_options):
+        if getattr(settings, "RAG_HYBRID_SEARCH_ENABLED", False):
+            return _hybrid_query(query, filters=filters, top_k=top_k, query_variants=query_variants)
 
-    candidate_limit = _candidate_limit(top_k)
-    queries = _normalize_queries(query, query_variants)
-    ranked_lists = []
+        candidate_limit = _candidate_limit(top_k)
+        queries = _normalize_queries(query, query_variants)
+        ranked_lists = []
 
-    for query_text in queries:
-        vector_results = search(
-            query=query_text,
-            filters=filters,
-            top_k=candidate_limit,
-        )
-        if vector_results:
-            ranked_lists.append(("llamaindex_vector", query_text, vector_results))
+        for query_text in queries:
+            vector_results = search(
+                query=query_text,
+                filters=filters,
+                top_k=candidate_limit,
+            )
+            if vector_results:
+                ranked_lists.append(("llamaindex_vector", query_text, vector_results))
 
-        bm25_results = _bm25_search(
-            query_text,
-            filters=filters,
-            limit=candidate_limit,
-        )
-        if bm25_results:
-            ranked_lists.append(("bm25", query_text, bm25_results))
-
-        mysql_fulltext_results = _mysql_full_text_search(
-            query_text,
-            filters=filters,
-            limit=candidate_limit,
-        )
-        if mysql_fulltext_results:
-            ranked_lists.append(("mysql_fulltext", query_text, mysql_fulltext_results))
-
-        should_run_keyword_fallback = allow_keyword_fallback and not (
-            vector_results or bm25_results or mysql_fulltext_results
-        )
-        if should_run_keyword_fallback:
-            fallback_keyword_results = _fallback_keyword_search(
+            bm25_results = _bm25_search(
                 query_text,
                 filters=filters,
                 limit=candidate_limit,
             )
-            if fallback_keyword_results:
-                ranked_lists.append(("token_keyword", query_text, fallback_keyword_results))
+            if bm25_results:
+                ranked_lists.append(("bm25", query_text, bm25_results))
 
-    return _merge_ranked_results(ranked_lists)[: int(top_k)]
+            mysql_fulltext_results = _mysql_full_text_search(
+                query_text,
+                filters=filters,
+                limit=candidate_limit,
+            )
+            if mysql_fulltext_results:
+                ranked_lists.append(("mysql_fulltext", query_text, mysql_fulltext_results))
+
+            should_run_keyword_fallback = allow_keyword_fallback and not (
+                vector_results or bm25_results or mysql_fulltext_results
+            )
+            if should_run_keyword_fallback:
+                fallback_keyword_results = _fallback_keyword_search(
+                    query_text,
+                    filters=filters,
+                    limit=candidate_limit,
+                )
+                if fallback_keyword_results:
+                    ranked_lists.append(("token_keyword", query_text, fallback_keyword_results))
+
+        return _merge_ranked_results(ranked_lists)[: int(top_k)]

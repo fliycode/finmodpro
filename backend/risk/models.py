@@ -99,6 +99,12 @@ class RiskReport(models.Model):
 
 
 class RiskExtractionTask(models.Model):
+    ERROR_BUSY = "risk_extraction_busy"
+    ERROR_TIMEOUT = "risk_extraction_timeout"
+    ERROR_QUEUE_TIMEOUT = "risk_extraction_queue_timeout"
+    ERROR_STAGE_TIMEOUT = "risk_extraction_stage_timeout"
+    ERROR_TASK_MISSING = "risk_extraction_task_missing"
+
     STATUS_QUEUED = "queued"
     STATUS_RUNNING = "running"
     STATUS_SUCCEEDED = "succeeded"
@@ -111,12 +117,18 @@ class RiskExtractionTask(models.Model):
     )
 
     STEP_QUEUED = "queued"
+    STEP_RETRIEVING = "retrieving"
     STEP_EXTRACTING = "extracting"
+    STEP_VERIFYING = "verifying"
+    STEP_PERSISTING = "persisting"
     STEP_COMPLETED = "completed"
     STEP_FAILED = "failed"
     STEP_CHOICES = (
         (STEP_QUEUED, "Queued"),
+        (STEP_RETRIEVING, "Retrieving"),
         (STEP_EXTRACTING, "Extracting"),
+        (STEP_VERIFYING, "Verifying"),
+        (STEP_PERSISTING, "Persisting"),
         (STEP_COMPLETED, "Completed"),
         (STEP_FAILED, "Failed"),
     )

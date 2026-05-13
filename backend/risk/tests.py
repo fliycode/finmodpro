@@ -363,6 +363,32 @@ class RiskExtractionAsyncApiTests(TestCase):
             doc_type="pdf",
         )
 
+    @override_settings(RISK_EXTRACTION_SUBMISSION_LIMIT=1)
+    def test_extract_document_returns_busy_when_global_limit_is_reached(self):
+        busy_document = self.create_document(title="占位任务", filename="busy-risk.pdf")
+        target_document = self.create_document(title="新提交任务", filename="new-risk.pdf")
+        RiskExtractionTask.objects.create(
+            document=busy_document,
+            status=RiskExtractionTask.STATUS_RUNNING,
+            current_step=RiskExtractionTask.STEP_EXTRACTING,
+            progress=72,
+            message="正在分析文档中的风险事件。",
+        )
+
+        response = self.client.post(
+            f"/api/risk/documents/{target_document.id}/extract",
+            data=json.dumps({}),
+            content_type="application/json",
+            HTTP_AUTHORIZATION=f"Bearer {self.access_token}",
+        )
+
+        self.assertEqual(response.status_code, 429)
+        payload = response.json()
+        self.assertEqual(payload["code"], 429)
+        self.assertEqual(payload["message"], "风险提取队列繁忙，请稍后再试。")
+        self.assertEqual(payload["data"]["status"], "BUSY")
+        self.assertEqual(payload["data"]["error_code"], RiskExtractionTask.ERROR_BUSY)
+
     @patch("risk.services.extraction_service.select_risk_relevant_chunks")
     @patch("risk.services.verification_service.get_chat_provider")
     @patch("risk.services.task_service.run_background_job")
@@ -485,7 +511,8 @@ class RiskExtractionAsyncApiTests(TestCase):
 
         stale_task.refresh_from_db()
         self.assertEqual(stale_task.status, RiskExtractionTask.STATUS_FAILED)
-        self.assertIn("已超时或工作进程中断", stale_task.error_message)
+        self.assertEqual(stale_task.error_message, "风险提取执行超时，已自动终止。")
+        self.assertEqual(stale_task.result_payload["error_code"], RiskExtractionTask.ERROR_STAGE_TIMEOUT)
 
         status_response = self.client.get(
             f"/api/risk/documents/extract/status/{replacement_task_id}",
@@ -495,6 +522,30 @@ class RiskExtractionAsyncApiTests(TestCase):
         status_payload = status_response.json()
         self.assertEqual(status_payload["data"]["status"], "SUCCESS")
         self.assertEqual(status_payload["data"]["result"]["created_count"], 1)
+
+    @override_settings(RISK_EXTRACTION_QUEUE_TIMEOUT_SECONDS=60)
+    def test_status_endpoint_expires_queued_task_with_timeout_code(self):
+        document = self.create_document(title="排队超时文档", filename="queued-timeout.pdf")
+        task = RiskExtractionTask.objects.create(
+            document=document,
+            status=RiskExtractionTask.STATUS_QUEUED,
+            current_step=RiskExtractionTask.STEP_QUEUED,
+            progress=6,
+            message="风险抽取任务已排队。",
+        )
+        stale_timestamp = timezone.now() - timedelta(minutes=5)
+        RiskExtractionTask.objects.filter(id=task.id).update(updated_at=stale_timestamp)
+
+        response = self.client.get(
+            f"/api/risk/documents/extract/status/{task.id}",
+            HTTP_AUTHORIZATION=f"Bearer {self.access_token}",
+        )
+
+        self.assertEqual(response.status_code, 504)
+        payload = response.json()
+        self.assertEqual(payload["code"], 504)
+        self.assertEqual(payload["data"]["error_code"], RiskExtractionTask.ERROR_QUEUE_TIMEOUT)
+        self.assertEqual(payload["data"]["status"], "FAILURE")
 
 
 @override_settings(

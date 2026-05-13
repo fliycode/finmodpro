@@ -67,6 +67,7 @@ class OpsMonitoringApiTests(TestCase):
 
         self.assertTrue(PeriodicTask.objects.filter(name="ops-collect-metrics").exists())
         self.assertTrue(PeriodicTask.objects.filter(name="ops-evaluate-alerts").exists())
+        self.assertTrue(PeriodicTask.objects.filter(name="risk-expire-stale-extractions").exists())
         self.assertEqual(AlertRule.objects.count(), 4)
 
     def test_alert_event_api_handles_acknowledge_and_resolve_lifecycle(self):

@@ -6,6 +6,7 @@ from common.observability import trace_span
 from knowledgebase.models import Document
 from knowledgebase.models import DocumentChunk
 from risk.models import RiskEvent
+from risk.models import RiskExtractionTask
 from risk.serializers import RiskEventSummarySerializer
 from risk.services.chunk_filter_service import select_risk_relevant_chunks
 from risk.services.verification_service import run_extraction_with_verification
@@ -105,7 +106,7 @@ def detect_risk_signals(*, document, chunks):
     }
 
 
-def extract_risk_events_for_document(*, document):
+def extract_risk_events_for_document(*, document, stage_callback=None):
     chunks = list_document_chunks(document=document)
     if not chunks:
         return []
@@ -115,17 +116,36 @@ def extract_risk_events_for_document(*, document):
         metadata={"document_id": document.id, "chunk_count": len(chunks)},
         input_data={"document_title": document.title},
     ) as observation:
+        if callable(stage_callback):
+            stage_callback(
+                step=RiskExtractionTask.STEP_RETRIEVING,
+                progress=28,
+                message="正在检索风险相关切块。",
+            )
         filtered_chunks = select_risk_relevant_chunks(
             document=document,
             all_chunks=chunks,
         )
         extraction_chunks = limit_extraction_chunks(chunks=filtered_chunks)
 
+        if callable(stage_callback):
+            stage_callback(
+                step=RiskExtractionTask.STEP_EXTRACTING,
+                progress=62,
+                message="正在调用模型抽取风险事件。",
+            )
         extracted_events, pipeline_meta = run_extraction_with_verification(
             document=document,
             chunks=extraction_chunks,
+            on_stage_update=stage_callback,
         )
 
+        if callable(stage_callback):
+            stage_callback(
+                step=RiskExtractionTask.STEP_PERSISTING,
+                progress=88,
+                message="正在写入风险事件结果。",
+            )
         chunk_by_id = {chunk.id: chunk for chunk in chunks}
         created_events = []
         with transaction.atomic():

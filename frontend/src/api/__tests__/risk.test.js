@@ -59,3 +59,42 @@ test('extractDocumentWithPolling emits task progress updates before resolving', 
   assert.equal(result.document_id, 12);
   assert.equal(result.created_count, 2);
 });
+
+test('extractDocumentWithPolling surfaces busy payloads before throwing', async () => {
+  const responses = [
+    {
+      ok: false,
+      status: 429,
+      json: async () => ({
+        code: 429,
+        message: '风险提取队列繁忙，请稍后再试。',
+        data: {
+          status: 'BUSY',
+          progress: 100,
+          error_code: 'risk_extraction_busy',
+          message: '风险提取队列繁忙，请稍后再试。',
+        },
+      }),
+    },
+  ];
+
+  const seenProgress = [];
+  const riskApi = createRiskApi({
+    baseURL: 'http://example.test',
+    fetchImpl: async () => responses.shift(),
+  });
+
+  await assert.rejects(
+    () => riskApi.extractDocumentWithPolling(12, {
+      interval: 0,
+      onProgress: (payload) => seenProgress.push(`${payload.status}:${payload.error_code}`),
+    }),
+    (error) => {
+      assert.equal(error.code, 'risk_extraction_busy');
+      assert.equal(error.message, '风险提取队列繁忙，请稍后再试。');
+      return true;
+    },
+  );
+
+  assert.deepEqual(seenProgress, ['BUSY:risk_extraction_busy']);
+});

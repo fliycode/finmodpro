@@ -59,6 +59,18 @@ class OpenAICompatibleApiMixin:
             return self.endpoint
         return f"{self.endpoint}/v1"
 
+    def _resolve_timeout_seconds(self, resolved_options):
+        try:
+            return max(1, int(resolved_options.get("timeout_seconds") or 30))
+        except (TypeError, ValueError):
+            return 30
+
+    def _resolve_retry_attempts(self, resolved_options):
+        try:
+            return max(1, int(resolved_options.get("transport_retry_attempts") or TRANSPORT_RETRY_ATTEMPTS))
+        except (TypeError, ValueError):
+            return TRANSPORT_RETRY_ATTEMPTS
+
     def _build_url(self, path):
         return f"{self._api_base()}{path}"
 
@@ -126,6 +138,8 @@ class OpenAICompatibleApiMixin:
 
     def _post_json(self, path, payload, *, options=None, capability):
         resolved_options = self._resolve_options(options)
+        timeout_seconds = self._resolve_timeout_seconds(resolved_options)
+        retry_attempts = self._resolve_retry_attempts(resolved_options)
         body = json.dumps(payload).encode("utf-8")
         url = self._build_url(path)
         logger.info(
@@ -138,11 +152,11 @@ class OpenAICompatibleApiMixin:
                 "url": url,
             },
         )
-        for attempt in range(1, TRANSPORT_RETRY_ATTEMPTS + 1):
+        for attempt in range(1, retry_attempts + 1):
             try:
                 response = request.urlopen(
                     request.Request(url, data=body, headers=self._build_headers(resolved_options["api_key"]), method="POST"),
-                    timeout=30,
+                    timeout=timeout_seconds,
                 )
                 return json.loads(response.read().decode("utf-8"))
             except error.HTTPError as exc:
@@ -185,7 +199,7 @@ class OpenAICompatibleApiMixin:
                     provider=self.provider_name,
                 ) from exc
             except (error.URLError, TimeoutError) as exc:
-                if attempt < TRANSPORT_RETRY_ATTEMPTS:
+                if attempt < retry_attempts:
                     logger.warning(
                         "Retrying %s provider call after transport error",
                         self.provider_name,
@@ -318,7 +332,7 @@ class OpenAICompatibleChatProvider(OpenAICompatibleApiMixin, BaseChatProvider):
                     headers=self._build_headers(merged_options["api_key"]),
                     method="POST",
                 ),
-                timeout=30,
+                timeout=self._resolve_timeout_seconds(merged_options),
             )
             for raw_line in response:
                 line = raw_line.decode("utf-8", errors="ignore").strip()

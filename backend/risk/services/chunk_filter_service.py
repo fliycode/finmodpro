@@ -39,6 +39,10 @@ def select_risk_relevant_chunks(*, document, all_chunks, top_k=None):
                 top_k=min(effective_top_k, total),
                 query_variants=RISK_QUERY_VARIANTS[1:],
                 allow_keyword_fallback=True,
+                provider_options={
+                    "timeout_seconds": getattr(settings, "RISK_EXTRACTION_RETRIEVAL_TIMEOUT_SECONDS", 20),
+                    "transport_retry_attempts": 1,
+                },
             )
         except Exception:
             logger.exception(

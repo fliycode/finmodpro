@@ -42,7 +42,11 @@ def _call_extraction_llm(*, document, chunk_context, additional_guidance=None):
             {"role": "system", "content": SYSTEM_MESSAGE},
             {"role": "user", "content": prompt},
         ],
-        options={"temperature": 0},
+        options={
+            "temperature": 0,
+            "timeout_seconds": getattr(settings, "RISK_EXTRACTION_LLM_TIMEOUT_SECONDS", 25),
+            "transport_retry_attempts": 1,
+        },
     ).content
 
     events = _parse_extraction_output(raw_content)
@@ -64,7 +68,11 @@ def _call_verification_llm(*, document, chunk_context, extracted_events):
             {"role": "system", "content": VERIFY_SYSTEM_MESSAGE},
             {"role": "user", "content": prompt},
         ],
-        options={"temperature": 0},
+        options={
+            "temperature": 0,
+            "timeout_seconds": getattr(settings, "RISK_EXTRACTION_LLM_TIMEOUT_SECONDS", 25),
+            "transport_retry_attempts": 1,
+        },
     ).content
 
     return _parse_verification_output(raw_content), raw_content
@@ -121,7 +129,7 @@ def _deduplicate_events(events_list):
     return deduplicated
 
 
-def run_extraction_with_verification(*, document, chunks, max_rounds=None):
+def run_extraction_with_verification(*, document, chunks, max_rounds=None, on_stage_update=None):
     if max_rounds is None:
         max_rounds = getattr(settings, "RISK_EXTRACTION_MAX_ROUNDS", 2)
 
@@ -138,6 +146,12 @@ def run_extraction_with_verification(*, document, chunks, max_rounds=None):
         metadata={"max_rounds": max_rounds, "chunk_count": len(chunks)},
     ) as observation:
         for round_num in range(1, max_rounds + 1):
+            if callable(on_stage_update):
+                on_stage_update(
+                    step="extracting",
+                    progress=min(78, 62 + (round_num - 1) * 8),
+                    message=f"正在执行第 {round_num} 轮风险抽取。",
+                )
             additional_guidance = None
             if round_num > 1 and not verification_passed:
                 missing = last_verification.get("missing_aspects", [])
@@ -164,6 +178,12 @@ def run_extraction_with_verification(*, document, chunks, max_rounds=None):
                 break
 
             try:
+                if callable(on_stage_update):
+                    on_stage_update(
+                        step="verifying",
+                        progress=min(86, 74 + (round_num - 1) * 6),
+                        message=f"正在校验第 {round_num} 轮抽取结果。",
+                    )
                 verification, raw_verify = _call_verification_llm(
                     document=document,
                     chunk_context=chunk_context,

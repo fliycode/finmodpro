@@ -8,7 +8,13 @@ from common.api_response import error_response, success_response
 from knowledgebase.models import Document
 from rbac.services.authz_service import get_authenticated_user, user_has_permission
 from risk.models import RiskExtractionTask
-from risk.services.task_service import serialize_risk_extraction_task, submit_risk_extraction
+from risk.services.task_service import (
+    RiskExtractionBusyError,
+    expire_stale_risk_extractions,
+    get_risk_extraction_failure_status_code,
+    serialize_risk_extraction_task,
+    submit_risk_extraction,
+)
 from systemcheck.services.audit_service import record_audit_event
 
 
@@ -30,7 +36,31 @@ class RiskDocumentExtractView(APIView):
 
         should_run_inline = settings.CELERY_TASK_ALWAYS_EAGER
 
-        task, created = submit_risk_extraction(document)
+        try:
+            task, created = submit_risk_extraction(document)
+        except RiskExtractionBusyError as exc:
+            busy_payload = {
+                "task_id": None,
+                "document_id": document.id,
+                "status": "BUSY",
+                "progress": 100,
+                "message": exc.message,
+                "error_code": RiskExtractionTask.ERROR_BUSY,
+            }
+            record_audit_event(
+                actor=user,
+                action="risk.extract",
+                target_type="document",
+                target_id=document.id,
+                status="blocked",
+                detail_payload={"error_code": RiskExtractionTask.ERROR_BUSY},
+            )
+            return error_response(
+                code=429,
+                message=exc.message,
+                data=busy_payload,
+                status_code=429,
+            )
         if should_run_inline:
             task.refresh_from_db()
         task_payload = serialize_risk_extraction_task(task)
@@ -61,9 +91,10 @@ class RiskDocumentExtractView(APIView):
                 detail_payload={"message": task.error_message, "task_id": str(task.id)},
             )
             return error_response(
-                code=500,
+                code=get_risk_extraction_failure_status_code(task),
                 message=task.error_message or "风险抽取失败。",
                 data=task_payload,
+                status_code=get_risk_extraction_failure_status_code(task),
             )
 
         record_audit_event(
@@ -108,7 +139,22 @@ class RiskDocumentExtractRetryView(APIView):
 
         should_run_inline = settings.CELERY_TASK_ALWAYS_EAGER
 
-        task, _created = submit_risk_extraction(document)
+        try:
+            task, _created = submit_risk_extraction(document)
+        except RiskExtractionBusyError as exc:
+            return error_response(
+                code=429,
+                message=exc.message,
+                data={
+                    "task_id": None,
+                    "document_id": document.id,
+                    "status": "BUSY",
+                    "progress": 100,
+                    "message": exc.message,
+                    "error_code": RiskExtractionTask.ERROR_BUSY,
+                },
+                status_code=429,
+            )
         if should_run_inline:
             task.refresh_from_db()
         task_payload = serialize_risk_extraction_task(task)
@@ -123,9 +169,10 @@ class RiskDocumentExtractRetryView(APIView):
 
         if should_run_inline and task.status == RiskExtractionTask.STATUS_FAILED:
             return error_response(
-                code=500,
+                code=get_risk_extraction_failure_status_code(task),
                 message=task.error_message or "风险抽取失败。",
                 data=task_payload,
+                status_code=get_risk_extraction_failure_status_code(task),
             )
 
         return success_response(
@@ -144,6 +191,8 @@ class RiskExtractStatusView(APIView):
         if user is None:
             return error_response(code=401, message="未认证。", status_code=401)
 
+        expire_stale_risk_extractions()
+
         try:
             task = RiskExtractionTask.objects.filter(id=task_id).select_related("document").first()
         except (ValidationError, ValueError):
@@ -152,9 +201,10 @@ class RiskExtractStatusView(APIView):
             payload = serialize_risk_extraction_task(task)
             if task.status == RiskExtractionTask.STATUS_FAILED:
                 return error_response(
-                    code=500,
+                    code=get_risk_extraction_failure_status_code(task),
                     message=task.error_message or "风险抽取任务失败。",
                     data=payload,
+                    status_code=get_risk_extraction_failure_status_code(task),
                 )
             return success_response(data=payload)
 
