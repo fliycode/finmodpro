@@ -568,42 +568,42 @@ export function buildDashboardDocumentFlow(stats) {
   };
 }
 
-export function buildDocumentFlowFunnelOption(stats) {
+export function buildDocumentFlowPieOption(stats) {
   const distribution = stats?.document_status_distribution || {};
-  const total = Math.max(1, sumObjectValues(distribution));
+  const total = sumObjectValues(distribution);
+  const safeTotal = Math.max(total, 1);
   const c = chartColors();
 
-  const stageColors = [
-    c.muted,
-    c.brandSoft,
-    c.brand,
-    c.success,
-  ];
-
-  const stageLabels = ['上传', '解析', '切块', '已索引'];
-  const stageKeys = ['uploaded', 'parsed', 'chunked', 'indexed'];
-
-  const data = stageKeys.map((key, i) => {
-    const value = toNumber(distribution[key]);
+  const stages = [
+    { key: 'uploaded', name: '上传', color: c.muted },
+    { key: 'parsed', name: '解析', color: c.brandSoft },
+    { key: 'chunked', name: '切块', color: c.brand },
+    { key: 'indexed', name: '已索引', color: c.success },
+    { key: 'failed', name: '失败', color: c.risk },
+  ].map((stage) => {
+    const value = toNumber(distribution[stage.key]);
     return {
-      name: stageLabels[i],
-      value: Math.max(value, total * 0.03),
-      _raw: value,
-      _percent: total > 0 ? Math.round((value / total) * 100) : 0,
+      ...stage,
+      value,
+      percent: total > 0 ? Math.round((value / safeTotal) * 100) : 0,
       itemStyle: {
-        color: stageColors[i],
+        color: stage.color,
         borderColor: c.surfaceBg,
-        borderWidth: 2,
-        borderRadius: [4, 4, 4, 4],
+        borderWidth: 3,
       },
     };
   });
 
-  const failedCount = toNumber(distribution.failed);
-  const failPercent = total > 0 ? Math.round((failedCount / total) * 100) : 0;
+  const lookupStage = (name) => stages.find((stage) => stage.name === name) || {
+    name,
+    value: 0,
+    percent: 0,
+    color: c.textSecondary,
+  };
 
   return {
     backgroundColor: 'transparent',
+    color: stages.map((stage) => stage.color),
     tooltip: {
       trigger: 'item',
       backgroundColor: c.surface2,
@@ -611,86 +611,115 @@ export function buildDocumentFlowFunnelOption(stats) {
       borderWidth: 1,
       textStyle: { color: c.textPrimary, fontSize: 12 },
       formatter: (params) => {
-        const d = params.data;
+        const stage = lookupStage(params.name);
         return `<div style="font-weight:600;margin-bottom:4px">${params.name}</div>
           <div style="font-size:12px;color:${c.textSecondary}">
-            数量：${formatInteger(d._raw)}<br/>
-            占比：${d._percent}%
+            数量：${formatInteger(stage.value)}<br/>
+            占比：${stage.percent}%
           </div>`;
       },
     },
-    graphic: failedCount > 0 ? [
+    legend: {
+      orient: 'vertical',
+      top: 'center',
+      right: 4,
+      itemWidth: 8,
+      itemHeight: 8,
+      itemGap: 14,
+      icon: 'circle',
+      selectedMode: false,
+      textStyle: {
+        color: c.textSecondary,
+        fontSize: 12,
+        fontWeight: 600,
+        rich: {
+          name: {
+            width: 38,
+            color: c.textPrimary,
+            fontWeight: 700,
+          },
+          value: {
+            width: 54,
+            align: 'right',
+            color: c.textPrimary,
+            fontWeight: 700,
+          },
+          percent: {
+            width: 40,
+            align: 'right',
+            color: c.textSecondary,
+          },
+        },
+      },
+      formatter: (name) => {
+        const stage = lookupStage(name);
+        return `{name|${name}} {value|${formatInteger(stage.value)}} {percent|${stage.percent}%}`;
+      },
+    },
+    graphic: [
       {
         type: 'group',
-        right: 20,
-        bottom: 20,
+        left: '25%',
+        top: 'center',
+        silent: true,
         children: [
           {
             type: 'text',
             style: {
-              text: `失败 ${formatInteger(failedCount)}`,
-              fill: c.risk,
-              fontSize: 13,
+              text: formatInteger(total),
+              fill: c.textPrimary,
+              fontSize: 22,
               fontWeight: 700,
               fontFamily: 'var(--heading)',
+              textAlign: 'center',
             },
+            x: -20,
+            y: -12,
           },
           {
             type: 'text',
-            top: 20,
             style: {
-              text: `占比 ${failPercent}%`,
+              text: '总文档',
               fill: c.textSecondary,
               fontSize: 11,
+              fontWeight: 700,
+              textAlign: 'center',
             },
+            x: -18,
+            y: 14,
           },
         ],
       },
-    ] : [],
+    ],
     series: [
       {
-        type: 'funnel',
-        left: 16,
-        right: failedCount > 0 ? 120 : 40,
-        top: 12,
-        bottom: 12,
-        width: 'auto',
-        minSize: '18%',
-        maxSize: '100%',
-        sort: 'descending',
-        gap: 4,
-        label: {
-          show: true,
-          position: 'inside',
-          formatter: (params) => `{name|${params.name}}  {val|${formatInteger(params.data._raw)}}`,
-          rich: {
-            name: {
-              color: '#fff',
-              fontSize: 12,
-              fontWeight: 700,
-              padding: [0, 0, 0, 4],
-            },
-            val: {
-              color: 'rgba(255,255,255,0.78)',
-              fontSize: 11,
-              fontWeight: 600,
-            },
-          },
-        },
+        type: 'pie',
+        radius: ['56%', '76%'],
+        center: ['28%', '50%'],
+        startAngle: 92,
+        minAngle: total > 0 ? 4 : 0,
+        stillShowZeroSum: true,
+        avoidLabelOverlap: true,
+        label: { show: false },
         labelLine: { show: false },
         emphasis: {
-          label: { fontSize: 13 },
-          itemStyle: { shadowBlur: 12, shadowColor: 'rgba(0,0,0,0.18)' },
+          scale: true,
+          scaleSize: 6,
+          label: {
+            show: true,
+            formatter: ({ data }) => `${data.name}\n${formatInteger(data.value)} · ${data.percent}%`,
+            color: c.textPrimary,
+            fontSize: 12,
+            fontWeight: 700,
+          },
         },
-        itemStyle: {
-          borderColor: c.surfaceBg,
-          borderWidth: 2,
-        },
-        data,
+        data: stages,
       },
     ],
   };
 }
+
+export const buildDocumentFlowFunnelOption = buildDocumentFlowPieOption;
 
 export function summarizeOperationalPosture(stats) {
   const pendingRisk = toNumber(stats?.pending_risk_event_count);

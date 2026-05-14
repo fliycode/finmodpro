@@ -8,7 +8,7 @@ import {
   buildDashboardSummaryMetrics,
   buildDashboardTokenOption,
   buildDashboardTrendOption,
-  buildDocumentFlowFunnelOption,
+  buildDocumentFlowPieOption,
   normalizeDashboardPayload,
 } from '../lib/admin-dashboard.js';
 import AdminChart from './admin/AdminChart.vue';
@@ -44,7 +44,7 @@ onMounted(fetchData);
 const summaryMetrics = computed(() => buildDashboardSummaryMetrics(dashboardStats.value));
 const trendOption = computed(() => buildDashboardTrendOption(dashboardStats.value));
 const documentFlow = computed(() => buildDashboardDocumentFlow(dashboardStats.value));
-const documentFunnelOption = computed(() => buildDocumentFlowFunnelOption(dashboardStats.value));
+const documentPieOption = computed(() => buildDocumentFlowPieOption(dashboardStats.value));
 const tokenOption = computed(() => buildDashboardTokenOption(dashboardStats.value));
 
 const tokenHighlights = computed(() => {
@@ -167,7 +167,7 @@ const tokenHighlights = computed(() => {
           </div>
         </header>
 
-        <AdminChart :option="documentFunnelOption" height="220px" />
+        <AdminChart :option="documentPieOption" height="220px" />
 
         <div class="document-summary-row">
           <div
@@ -346,6 +346,11 @@ const tokenHighlights = computed(() => {
   gap: 20px;
 }
 
+.ops-board__hero-header {
+  align-items: flex-start;
+  flex-wrap: wrap;
+}
+
 .ops-board__hero-header h2 {
   margin: 0;
   color: var(--text-primary);
@@ -373,14 +378,23 @@ const tokenHighlights = computed(() => {
 
 .ops-board__hero-aside {
   display: grid;
+  grid-template-columns: repeat(2, minmax(168px, 1fr));
   gap: 12px;
-  min-width: 196px;
+  flex: 1 1 392px;
+  max-width: 392px;
+  margin-left: auto;
+  min-width: 0;
 }
 
 .ops-board__hero-stat {
+  display: grid;
+  align-content: space-between;
+  gap: 10px;
+  min-height: 92px;
   padding: 12px 14px;
   border-radius: var(--radius-lg);
   background: color-mix(in srgb, var(--brand) 8%, var(--surface-2));
+  border: 1px solid color-mix(in srgb, var(--brand) 10%, transparent);
   transition: background 0.2s ease;
 }
 
@@ -398,11 +412,14 @@ const tokenHighlights = computed(() => {
 
 .ops-board__hero-stat strong {
   display: block;
-  margin-top: 4px;
   color: var(--text-primary);
-  font-size: 1.25rem;
+  font-family: var(--heading);
+  font-size: clamp(1.25rem, 1rem + 0.65vw, 1.65rem);
   line-height: 1.1;
   font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+  white-space: nowrap;
 }
 
 .ops-board__secondary {
