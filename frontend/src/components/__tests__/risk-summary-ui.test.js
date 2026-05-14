@@ -13,6 +13,7 @@ test('risk summary reduces the page to upload button and results panel', () => {
   const source = readComponent();
 
   assert.match(source, /上传文档/);
+  assert.match(source, /导出结果/);
   assert.match(source, /提取结果/);
   assert.doesNotMatch(source, /前往审核队列/);
   assert.doesNotMatch(source, /审核队列/);
