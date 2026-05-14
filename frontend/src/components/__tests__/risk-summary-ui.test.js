@@ -9,14 +9,13 @@ const componentPath = resolve(currentDir, '../RiskSummary.vue');
 
 const readComponent = () => readFileSync(componentPath, 'utf8');
 
-test('risk summary centers the document-to-review workflow and removes retired utilities', () => {
+test('risk summary reduces the page to upload button and results panel', () => {
   const source = readComponent();
 
-  assert.match(source, /先选文档，再提取风险/);
-  assert.match(source, /前往审核队列/);
-  assert.doesNotMatch(source, /Risk Extraction/);
-  assert.doesNotMatch(source, /更多工具/);
+  assert.match(source, /上传文档/);
+  assert.match(source, /提取结果/);
+  assert.doesNotMatch(source, /前往审核队列/);
+  assert.doesNotMatch(source, /审核队列/);
+  assert.doesNotMatch(source, /知识库文档/);
   assert.doesNotMatch(source, /生成报告/);
-  assert.doesNotMatch(source, /导出 Markdown/);
-  assert.doesNotMatch(source, /导出事件 JSON/);
 });
