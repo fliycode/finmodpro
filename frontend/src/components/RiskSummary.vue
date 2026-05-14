@@ -17,6 +17,7 @@ const riskLevelTextMap = { critical: '严重', high: '高', medium: '中', low: 
 
 const fileInput = ref(null);
 const isUploading = ref(false);
+const isGeneratingReport = ref(false);
 const activeDocument = ref(null);
 const resultEvents = ref([]);
 const resultErrorMsg = ref('');
@@ -168,26 +169,26 @@ const exportHint = computed(() => (
 
 const summaryItems = computed(() => [
   {
-    label: '最高等级',
-    value: highestRiskGroup.value ? getRiskLevelText(highestRiskGroup.value.dominantLevel) : '待识别',
-    note: highestRiskGroup.value ? highestRiskGroup.value.key : '等待结果',
-  },
-  {
     label: '风险类别',
     value: groupedRiskResults.value.length ? `${fmt.format(groupedRiskResults.value.length)} 类` : '未识别',
     note: groupedRiskResults.value.length ? '仅当前文档' : '无历史批次',
   },
   {
-    label: '高优先事件',
-    value: pipelineRun.value.status === 'succeeded' ? `${fmt.format(severeEventCount.value)} 条` : '等待结果',
+    label: '风险事件',
+    value: pipelineRun.value.status === 'succeeded' ? `${fmt.format(resultEvents.value.length)} 条` : '等待结果',
     note: pipelineRun.value.status === 'succeeded'
-      ? (severeEventCount.value ? '优先复核' : '暂无高风险')
+      ? (severeEventCount.value ? `${fmt.format(severeEventCount.value)} 条高优先级` : '暂无高风险')
       : '等待提取',
   },
   {
-    label: '导出准备',
-    value: canExportResults.value ? '已就绪' : '未就绪',
-    note: canExportResults.value ? `覆盖 ${evidenceCoverage.value}%` : '等待完成',
+    label: '最高等级',
+    value: highestRiskGroup.value ? getRiskLevelText(highestRiskGroup.value.dominantLevel) : '待识别',
+    note: highestRiskGroup.value ? highestRiskGroup.value.key : '等待结果',
+  },
+  {
+    label: '证据覆盖',
+    value: pipelineRun.value.status === 'succeeded' ? `${evidenceCoverage.value}%` : '等待结果',
+    note: pipelineRun.value.status === 'succeeded' ? '用于报告与导出' : '完成后生成',
   },
 ]);
 
@@ -357,37 +358,52 @@ const resultListCaption = computed(() => (
     : '按等级与事件数排序'
 ));
 
-const exportStatusText = computed(() => (
-  canExportResults.value
-    ? '可导出'
-    : (resultErrorMsg.value ? '失败' : (isProcessing.value ? '生成中' : '待完成'))
+const uploadActionLabel = computed(() => (
+  activeDocument.value || pipelineRun.value.fileName ? '重新上传' : '上传文档'
 ));
 
-const exportStatusTone = computed(() => (
-  canExportResults.value
-    ? 'success'
-    : (resultErrorMsg.value ? 'danger' : (isProcessing.value ? 'active' : 'muted'))
+const canGenerateReport = computed(() => (
+  !isProcessing.value
+  && !resultErrorMsg.value
+  && pipelineRun.value.status === 'succeeded'
+  && Boolean(activeDocument.value?.id)
+  && resultEvents.value.length > 0
 ));
 
-const reviewChecklist = computed(() => [
+const documentSourceFacts = computed(() => [
   {
-    label: '链路状态',
-    value: pipelineStatusText.value,
-    note: pipelineRun.value.detail || '等待上传',
+    label: '文件类型',
+    value: (activeDocument.value?.docType || pipelineRun.value.fileName?.split('.').pop() || '未知').toUpperCase(),
   },
   {
-    label: '最高风险',
-    value: resultSpotlight.value?.title || '待识别',
-    note: resultSpotlight.value
-      ? `${resultSpotlight.value.levelText} · ${resultSpotlight.value.countText}`
-      : '完成后自动定位',
+    label: '文件体积',
+    value: activeDocument.value?.size || '待识别',
   },
   {
-    label: '留痕摘要',
-    value: canExportResults.value ? '可生成' : '未完成',
-    note: canExportResults.value ? `证据覆盖 ${evidenceCoverage.value}%` : exportHint.value,
+    label: '来源日期',
+    value: activeDocument.value?.sourceDate || '待生成',
+  },
+  {
+    label: '切块 / 向量',
+    value: activeDocument.value
+      ? `${fmt.format(activeDocument.value.chunkCount || 0)} / ${fmt.format(activeDocument.value.vectorCount || 0)}`
+      : '待生成',
   },
 ]);
+
+const previewMode = computed(() => {
+  if (activeDocument.value?.docType === 'pdf' && activeDocument.value?.previewUrl) {
+    return 'pdf';
+  }
+  return 'text';
+});
+
+const documentPreviewText = computed(() => (
+  activeDocument.value?.parsedTextPreview
+  || activeDocument.value?.processResult
+  || pipelineRun.value.detail
+  || '上传文档后在这里查看预览。'
+));
 
 const updatePipelineRun = (patch) => {
   pipelineRun.value = {
@@ -689,6 +705,30 @@ const handleExport = () => {
     flash.error('导出结果失败，请稍后重试');
   }
 };
+
+const handleGenerateReport = async () => {
+  if (!canGenerateReport.value) {
+    flash.warning('提取完成并识别到风险后才可生成报告');
+    return;
+  }
+
+  isGeneratingReport.value = true;
+  try {
+    const payload = await riskApi.generateDocumentReport(activeDocument.value.id);
+    const report = payload?.data?.report || payload?.report || null;
+    if (!report?.id) {
+      throw new Error('未获取到报告结果');
+    }
+
+    const attachment = await riskApi.exportReport(report.id);
+    downloadTextFile(attachment);
+    flash.success('风险报告已生成');
+  } catch (error) {
+    flash.error(error.message || '生成风险报告失败，请稍后重试');
+  } finally {
+    isGeneratingReport.value = false;
+  }
+};
 </script>
 
 <template>
@@ -703,78 +743,149 @@ const handleExport = () => {
       tabindex="-1"
     />
 
-    <section class="risk-page__bench" :aria-busy="isProcessing ? 'true' : 'false'">
-      <div class="risk-page__bench-header">
-        <div class="risk-page__bench-copy">
-          <span class="risk-page__eyebrow">风险提取工作台</span>
-          <h2>单文档判读链路</h2>
-          <p>上传后自动入库、提取，并收束成一份可复核摘要。</p>
-        </div>
-
-        <div class="risk-page__bench-actions">
-          <span class="risk-page__status" :data-tone="pipelineTone">{{ pipelineStatusText }}</span>
-          <el-button type="primary" :loading="isUploading" @click="triggerUpload">
-            <AppIcon name="upload" />
-            {{ uploadButtonLabel }}
-          </el-button>
-        </div>
+    <section class="risk-page__hero">
+      <div class="risk-page__hero-copy">
+        <span class="risk-page__eyebrow">风险提取工作台</span>
+        <h2>风险信息提取</h2>
+        <p>围绕当前文档完成提取、判读、导出与报告生成。</p>
       </div>
 
-      <div class="risk-page__bench-body">
-        <div class="risk-page__chain-state">
-          <span class="risk-page__eyebrow">当前链路</span>
-          <strong class="risk-page__chain-title">{{ documentDisplayTitle }}</strong>
-          <div class="risk-page__chain-meta">
-            <span class="risk-page__chain-percent">{{ pipelinePercent }}%</span>
-            <p class="risk-page__chain-detail">{{ resultSubline }}</p>
-          </div>
-          <div
-            class="risk-page__progress"
-            role="progressbar"
-            :aria-valuenow="pipelinePercent"
-            aria-valuemin="0"
-            aria-valuemax="100"
-            aria-label="风险提取总进度"
-          >
-            <span :style="{ width: `${pipelinePercent}%` }" />
-          </div>
-        </div>
-
-        <ol class="risk-page__pipeline-list" aria-label="处理链路">
-          <li
-            v-for="stage in pipelineStages"
-            :key="stage.key"
-            class="risk-page__pipeline-item"
-            :data-tone="stage.tone"
-          >
-            <div class="risk-page__pipeline-top">
-              <span class="risk-page__pipeline-icon" aria-hidden="true">
-                <AppIcon :name="stage.icon" />
-              </span>
-              <span class="risk-page__status" :data-tone="stage.tone">{{ stage.statusText }}</span>
-            </div>
-            <div class="risk-page__pipeline-copy">
-              <strong>{{ stage.label }}</strong>
-              <p>{{ stage.note }}</p>
-            </div>
-            <span class="risk-page__pipeline-progress">{{ stage.progressText }}</span>
-          </li>
-        </ol>
+      <div class="risk-page__hero-actions">
+        <span class="risk-page__status" :data-tone="pipelineTone">{{ pipelineStatusText }}</span>
+        <el-button plain :disabled="!canExportResults" @click="handleExport">
+          <AppIcon name="download" />
+          导出结果
+        </el-button>
+        <el-button
+          type="primary"
+          :loading="isGeneratingReport"
+          :disabled="!canGenerateReport && !isGeneratingReport"
+          @click="handleGenerateReport"
+        >
+          <AppIcon name="request-page" />
+          生成风险报告
+        </el-button>
       </div>
     </section>
 
-    <div class="risk-page__workspace">
+    <section class="risk-page__source-card">
+      <div class="risk-page__source-head">
+        <div class="risk-page__source-copy">
+          <span class="risk-page__eyebrow">文档来源</span>
+          <strong>{{ documentDisplayTitle }}</strong>
+          <p>{{ resultSubline }}</p>
+        </div>
+
+        <el-button :loading="isUploading" @click="triggerUpload">
+          <AppIcon name="upload" />
+          {{ uploadActionLabel }}
+        </el-button>
+      </div>
+
+      <div v-if="activeDocument || pipelineRun.fileName" class="risk-page__source-body">
+        <div class="risk-page__source-file">
+          <span class="risk-page__file-type">{{ (activeDocument?.docType || pipelineRun.fileName?.split('.').pop() || 'doc').toUpperCase() }}</span>
+          <div class="risk-page__source-file-copy">
+            <strong>{{ documentTitle }}</strong>
+            <span>
+              {{ activeDocument?.size || '待识别' }}
+              <template v-if="activeDocument?.sourceDate && activeDocument.sourceDate !== 'N/A'">
+                · {{ activeDocument.sourceDate }}
+              </template>
+              <template v-if="activeDocument?.uploadTime">
+                · {{ activeDocument.uploadTime }}
+              </template>
+            </span>
+          </div>
+        </div>
+
+        <dl class="risk-page__source-facts">
+          <div
+            v-for="fact in documentSourceFacts"
+            :key="fact.label"
+            class="risk-page__source-fact"
+          >
+            <dt>{{ fact.label }}</dt>
+            <dd>{{ fact.value }}</dd>
+          </div>
+        </dl>
+      </div>
+
+      <div
+        class="risk-page__progress"
+        role="progressbar"
+        :aria-valuenow="pipelinePercent"
+        aria-valuemin="0"
+        aria-valuemax="100"
+        aria-label="风险提取总进度"
+      >
+        <span :style="{ width: `${pipelinePercent}%` }" />
+      </div>
+    </section>
+
+    <ol class="risk-page__stage-strip" aria-label="处理链路">
+      <li
+        v-for="stage in pipelineStages"
+        :key="stage.key"
+        class="risk-page__stage-item"
+        :data-tone="stage.tone"
+      >
+        <span class="risk-page__stage-index">{{ stage.label.split(' ')[0] }}</span>
+        <div class="risk-page__stage-copy">
+          <strong>{{ stage.label.replace(/^\d+\s*/, '') }}</strong>
+          <p>{{ stage.note }}</p>
+        </div>
+        <span class="risk-page__status" :data-tone="stage.tone">{{ stage.statusText }}</span>
+      </li>
+    </ol>
+
+    <section class="risk-page__studio">
+      <AppSectionCard
+        class="risk-page__viewer-card"
+        title="文档判读"
+        :desc="documentDisplayTitle"
+        icon="file-text"
+      >
+        <template #header>
+          <span class="risk-page__heading-note">{{ activeDocument?.datasetName || '当前文档' }}</span>
+        </template>
+
+        <div v-if="resultErrorMsg" class="risk-page__state risk-page__state--error" role="alert">
+          <strong>提取失败</strong>
+          <p>{{ resultSubline }}</p>
+        </div>
+
+        <div v-else-if="!activeDocument && !pipelineRun.fileName" class="risk-page__state" role="status" aria-live="polite">
+          <strong>还没有文档</strong>
+          <p>{{ resultSubline }}</p>
+        </div>
+
+        <div v-else-if="isProcessing" class="risk-page__state" role="status" aria-live="polite">
+          <strong>{{ pipelineRun.fileName || activeDocument?.title || '正在处理文档' }}</strong>
+          <p>{{ resultSubline }}</p>
+        </div>
+
+        <iframe
+          v-else-if="previewMode === 'pdf' && activeDocument?.previewUrl"
+          class="risk-page__preview-frame"
+          :src="activeDocument.previewUrl"
+          title="文档预览"
+          loading="lazy"
+        />
+
+        <div v-else class="risk-page__text-preview">
+          <pre>{{ documentPreviewText }}</pre>
+        </div>
+      </AppSectionCard>
+
       <AppSectionCard
         class="risk-page__results-card"
-        title="最高优先风险"
-        :desc="documentDisplayTitle"
+        title="提取结果"
+        desc="按优先级查看当前文档的风险聚合"
         icon="shield"
       >
         <template #header>
-          <div class="risk-page__heading-meta">
-            <span class="risk-page__status" :data-tone="pipelineTone">{{ pipelineStatusText }}</span>
-            <span class="risk-page__heading-note" aria-live="polite">{{ resultSubline }}</span>
-          </div>
+          <span class="risk-page__heading-note">{{ resultListCaption }}</span>
         </template>
 
         <div class="risk-page__summary-rail" aria-label="结果摘要">
@@ -795,7 +906,7 @@ const handleExport = () => {
           :data-tone="riskTagTypeMap[resultSpotlight.levelKey] || 'muted'"
         >
           <div class="risk-page__spotlight-main">
-            <span class="risk-page__eyebrow">当前最需复核</span>
+            <span class="risk-page__eyebrow">当前最高优先级</span>
             <div class="risk-page__spotlight-head">
               <h4>{{ resultSpotlight.title }}</h4>
               <div class="risk-page__spotlight-meta">
@@ -816,12 +927,12 @@ const handleExport = () => {
         </div>
 
         <div v-else-if="!activeDocument && !pipelineRun.fileName" class="risk-page__state" role="status" aria-live="polite">
-          <strong>还没有文档</strong>
+          <strong>等待上传</strong>
           <p>{{ resultSubline }}</p>
         </div>
 
         <div v-else-if="isProcessing" class="risk-page__state" role="status" aria-live="polite">
-          <strong>{{ pipelineRun.fileName || activeDocument?.title || '正在处理文档' }}</strong>
+          <strong>正在提取</strong>
           <p>{{ resultSubline }}</p>
         </div>
 
@@ -830,99 +941,40 @@ const handleExport = () => {
           <p>{{ resultSubline }}</p>
         </div>
 
-        <div v-else class="risk-page__result-stack">
-          <div class="risk-page__list-header">
-            <span class="risk-page__eyebrow">风险序列</span>
-            <span class="risk-page__heading-note">{{ resultListCaption }}</span>
-          </div>
-
-          <ol class="risk-page__result-list">
-            <li
-              v-for="(item, index) in groupedRiskResults"
-              :key="item.key"
-              class="risk-page__result-item"
-              :data-tone="riskTagTypeMap[item.dominantLevel] || 'muted'"
-            >
-              <div class="risk-page__result-index">{{ String(index + 1).padStart(2, '0') }}</div>
-              <div class="risk-page__result-body">
-                <div class="risk-page__result-head">
-                  <div class="risk-page__result-copy">
-                    <strong>{{ item.key }}</strong>
-                    <p>{{ item.summary }}</p>
-                  </div>
-                  <div class="risk-page__result-meta">
-                    <el-tag :type="getRiskTagType(item.dominantLevel)" size="small">
-                      {{ getRiskLevelText(item.dominantLevel) }}
-                    </el-tag>
-                    <span>{{ item.count }} 条事件</span>
-                  </div>
+        <ol v-else class="risk-page__result-list">
+          <li
+            v-for="(item, index) in groupedRiskResults"
+            :key="item.key"
+            class="risk-page__result-item"
+            :data-tone="riskTagTypeMap[item.dominantLevel] || 'muted'"
+          >
+            <div class="risk-page__result-index">{{ String(index + 1).padStart(2, '0') }}</div>
+            <div class="risk-page__result-body">
+              <div class="risk-page__result-head">
+                <div class="risk-page__result-copy">
+                  <strong>{{ item.key }}</strong>
+                  <p>{{ item.summary }}</p>
                 </div>
-                <p class="risk-page__evidence">{{ item.evidence }}</p>
+                <div class="risk-page__result-meta">
+                  <el-tag :type="getRiskTagType(item.dominantLevel)" size="small">
+                    {{ getRiskLevelText(item.dominantLevel) }}
+                  </el-tag>
+                  <span>{{ item.count }} 条事件</span>
+                </div>
               </div>
-            </li>
-          </ol>
-        </div>
+              <p class="risk-page__evidence">{{ item.evidence }}</p>
+            </div>
+          </li>
+        </ol>
       </AppSectionCard>
-
-      <AppSectionCard
-        class="risk-page__dossier-card"
-        title="复核留痕"
-        desc="链路状态、文档事实与导出准备"
-        icon="clipboard"
-      >
-        <template #header>
-          <span class="risk-page__status" :data-tone="exportStatusTone">{{ exportStatusText }}</span>
-        </template>
-
-        <div class="risk-page__dossier-grid">
-          <div
-            v-for="item in reviewChecklist"
-            :key="item.label"
-            class="risk-page__dossier-item"
-          >
-            <span class="risk-page__summary-label">{{ item.label }}</span>
-            <strong class="risk-page__summary-value">{{ item.value }}</strong>
-            <span class="risk-page__summary-note">{{ item.note }}</span>
-          </div>
-        </div>
-
-        <dl v-if="activeDocument || pipelineRun.fileName" class="risk-page__facts">
-          <div
-            v-for="fact in documentFacts"
-            :key="fact.label"
-            class="risk-page__fact"
-          >
-            <dt>{{ fact.label }}</dt>
-            <dd>{{ fact.value }}</dd>
-          </div>
-        </dl>
-
-        <div v-else class="risk-page__side-empty">
-          <strong>等待上传</strong>
-          <p>上传后在这里查看链路留痕与文档事实。</p>
-        </div>
-
-        <div class="risk-page__export-panel">
-          <div class="risk-page__export-copy">
-            <span class="risk-page__eyebrow">摘要导出</span>
-            <strong>{{ canExportResults ? '生成可留痕 Markdown' : '等待链路完成' }}</strong>
-            <p>{{ exportHint }}</p>
-          </div>
-
-          <el-button plain :disabled="!canExportResults" @click="handleExport">
-            <AppIcon name="download" />
-            导出结果
-          </el-button>
-        </div>
-      </AppSectionCard>
-    </div>
+    </section>
   </div>
 </template>
 
 <style scoped>
 .risk-page {
   display: grid;
-  gap: 20px;
+  gap: 18px;
   min-width: 0;
 }
 
@@ -934,48 +986,44 @@ const handleExport = () => {
   pointer-events: none;
 }
 
-.risk-page__bench,
-.risk-page__bench-copy,
-.risk-page__bench-body,
-.risk-page__chain-state,
-.risk-page__result-stack,
+.risk-page__hero,
+.risk-page__source-card,
+.risk-page__source-copy,
+.risk-page__source-body,
+.risk-page__source-file,
 .risk-page__spotlight,
 .risk-page__spotlight-main,
-.risk-page__dossier-grid,
-.risk-page__export-copy,
-.risk-page__side-empty,
-.risk-page__pipeline-item,
 .risk-page__result-body,
-.risk-page__result-copy {
+.risk-page__result-copy,
+.risk-page__state {
   display: grid;
   gap: 10px;
   min-width: 0;
 }
 
-.risk-page__bench {
-  gap: 18px;
-  padding: 26px 28px;
+.risk-page__hero,
+.risk-page__source-card {
+  padding: 24px 28px;
   border: 1px solid var(--line-soft);
-  border-radius: 28px;
+  border-radius: 24px;
   background: var(--surface-1);
-  box-shadow: 0 20px 48px -34px rgba(16, 24, 40, 0.2);
+  box-shadow: 0 18px 44px -32px rgba(16, 24, 40, 0.18);
 }
 
-.risk-page__bench-header,
-.risk-page__chain-meta,
-.risk-page__pipeline-top,
-.risk-page__list-header,
+.risk-page__hero,
+.risk-page__hero-actions,
+.risk-page__source-head,
 .risk-page__result-head,
 .risk-page__spotlight-head,
 .risk-page__spotlight-meta,
-.risk-page__export-panel {
+.risk-page__stage-item {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
   gap: 12px;
 }
 
-.risk-page__bench-header {
+.risk-page__hero {
   align-items: end;
   flex-wrap: wrap;
 }
@@ -988,34 +1036,33 @@ const handleExport = () => {
   text-transform: uppercase;
 }
 
-.risk-page__bench-copy h2,
+.risk-page__hero-copy h2,
 .risk-page__spotlight-head h4 {
   margin: 0;
   color: var(--text-primary);
 }
 
-.risk-page__bench-copy h2 {
-  font-size: clamp(1.55rem, 2.8vw, 2.1rem);
-  line-height: 1.1;
+.risk-page__hero-copy h2 {
+  font-size: clamp(1.6rem, 2.6vw, 2rem);
+  line-height: 1.2;
 }
 
-.risk-page__bench-copy p,
+.risk-page__hero-copy p,
 .risk-page__heading-note,
-.risk-page__chain-detail,
 .risk-page__summary-note,
 .risk-page__state p,
 .risk-page__result-head p,
 .risk-page__evidence,
-.risk-page__pipeline-copy p,
-.risk-page__side-empty p,
+.risk-page__stage-copy p,
+.risk-page__source-copy p,
 .risk-page__spotlight p,
-.risk-page__export-copy p {
+.risk-page__source-file-copy span {
   margin: 0;
   color: var(--text-secondary);
   line-height: 1.6;
 }
 
-.risk-page__bench-actions {
+.risk-page__hero-actions {
   display: flex;
   align-items: center;
   justify-content: flex-end;
@@ -1023,143 +1070,30 @@ const handleExport = () => {
   flex-wrap: wrap;
 }
 
-.risk-page__bench-body {
-  grid-template-columns: minmax(280px, 0.86fr) minmax(0, 1.14fr);
+.risk-page__source-head {
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.risk-page__source-body {
+  grid-template-columns: minmax(0, 1.2fr) minmax(320px, 0.8fr);
   gap: 16px;
   align-items: stretch;
 }
 
-.risk-page__chain-state {
-  align-content: start;
-  padding: 20px 22px;
-  border: 1px solid rgba(36, 87, 197, 0.14);
-  border-radius: 24px;
-  background:
-    linear-gradient(180deg, rgba(36, 87, 197, 0.06), rgba(36, 87, 197, 0.02)),
-    var(--surface-2);
-}
-
-.risk-page__chain-title {
+.risk-page__source-copy strong,
+.risk-page__source-file-copy strong {
   color: var(--text-primary);
-  font-size: 1.1rem;
+  font-size: 1rem;
   line-height: 1.35;
 }
 
-.risk-page__chain-meta {
-  align-items: end;
-  flex-wrap: wrap;
-}
-
-.risk-page__chain-percent {
-  color: var(--text-primary);
-  font-family: var(--mono);
-  font-size: clamp(1.5rem, 3.4vw, 2rem);
-  line-height: 1;
-}
-
-.risk-page__chain-detail {
-  max-width: 30ch;
-}
-
-.risk-page__pipeline-list {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 12px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.risk-page__pipeline-item {
-  align-content: start;
-  gap: 14px;
+.risk-page__source-file,
+.risk-page__source-fact {
   padding: 18px;
   border: 1px solid var(--line-soft);
-  border-radius: 22px;
+  border-radius: 18px;
   background: var(--surface-2);
-}
-
-.risk-page__pipeline-item[data-tone='active'] {
-  border-color: rgba(36, 87, 197, 0.22);
-  background: rgba(36, 87, 197, 0.05);
-}
-
-.risk-page__pipeline-item[data-tone='success'] {
-  border-color: rgba(33, 129, 92, 0.22);
-  background: rgba(33, 129, 92, 0.05);
-}
-
-.risk-page__pipeline-item[data-tone='warning'] {
-  border-color: rgba(186, 128, 40, 0.24);
-  background: rgba(186, 128, 40, 0.07);
-}
-
-.risk-page__pipeline-item[data-tone='danger'] {
-  border-color: rgba(196, 73, 61, 0.24);
-  background: rgba(196, 73, 61, 0.06);
-}
-
-.risk-page__pipeline-icon,
-.risk-page__result-index {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-}
-
-.risk-page__pipeline-icon {
-  width: 42px;
-  height: 42px;
-  border-radius: 15px;
-  border: 1px solid rgba(20, 32, 51, 0.08);
-  background: rgba(255, 255, 255, 0.78);
-  color: var(--text-secondary);
-}
-
-.risk-page__pipeline-top {
-  align-items: center;
-}
-
-.risk-page__pipeline-copy strong,
-.risk-page__state strong,
-.risk-page__result-head strong,
-.risk-page__side-empty strong,
-.risk-page__fact dd,
-.risk-page__spotlight-meta strong,
-.risk-page__export-copy strong {
-  color: var(--text-primary);
-}
-
-.risk-page__pipeline-progress {
-  color: var(--text-muted);
-  font-size: 0.75rem;
-  font-weight: 600;
-  letter-spacing: 0.08em;
-}
-
-.risk-page__workspace {
-  display: grid;
-  grid-template-columns: minmax(0, 1.55fr) minmax(320px, 0.85fr);
-  gap: 18px;
-  min-width: 0;
-}
-
-.risk-page__results-card,
-.risk-page__dossier-card {
-  min-width: 0;
-}
-
-.risk-page__results-card :deep(.el-card__body),
-.risk-page__dossier-card :deep(.el-card__body) {
-  display: grid;
-  gap: 18px;
-}
-
-.risk-page__heading-meta {
-  display: grid;
-  justify-items: end;
-  gap: 8px;
-  max-width: 34ch;
 }
 
 .risk-page__status {
@@ -1216,6 +1150,167 @@ const handleExport = () => {
   transition: width 180ms ease;
 }
 
+.risk-page__file-type,
+.risk-page__stage-index,
+.risk-page__result-index {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.risk-page__file-type,
+.risk-page__stage-index {
+  min-width: 40px;
+  height: 40px;
+  padding: 0 12px;
+  border-radius: 14px;
+  background: rgba(36, 87, 197, 0.12);
+  color: var(--brand);
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+}
+
+.risk-page__source-file {
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 14px;
+}
+
+.risk-page__source-file-copy {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.risk-page__source-facts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin: 0;
+}
+
+.risk-page__source-fact {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.risk-page__source-fact dt,
+.risk-page__summary-label,
+.risk-page__heading-note {
+  color: var(--text-muted);
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+}
+
+.risk-page__source-fact dt,
+.risk-page__summary-label {
+  text-transform: uppercase;
+}
+
+.risk-page__source-fact dd,
+.risk-page__summary-value {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: 1rem;
+}
+
+.risk-page__stage-strip {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.risk-page__stage-item {
+  align-items: center;
+  padding: 16px 18px;
+  border: 1px solid var(--line-soft);
+  border-radius: 18px;
+  background: var(--surface-2);
+}
+
+.risk-page__stage-item[data-tone='active'] {
+  border-color: rgba(36, 87, 197, 0.22);
+  background: rgba(36, 87, 197, 0.05);
+}
+
+.risk-page__stage-item[data-tone='success'] {
+  border-color: rgba(33, 129, 92, 0.22);
+  background: rgba(33, 129, 92, 0.05);
+}
+
+.risk-page__stage-item[data-tone='warning'] {
+  border-color: rgba(186, 128, 40, 0.24);
+  background: rgba(186, 128, 40, 0.07);
+}
+
+.risk-page__stage-item[data-tone='danger'] {
+  border-color: rgba(196, 73, 61, 0.24);
+  background: rgba(196, 73, 61, 0.06);
+}
+
+.risk-page__stage-copy {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.risk-page__stage-copy strong,
+.risk-page__result-head strong,
+.risk-page__spotlight-meta strong,
+.risk-page__state strong {
+  color: var(--text-primary);
+}
+
+.risk-page__studio {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(360px, 0.88fr);
+  gap: 18px;
+  min-width: 0;
+}
+
+.risk-page__viewer-card,
+.risk-page__results-card {
+  min-width: 0;
+}
+
+.risk-page__viewer-card :deep(.el-card__body),
+.risk-page__results-card :deep(.el-card__body) {
+  display: grid;
+  gap: 18px;
+}
+
+.risk-page__preview-frame {
+  width: 100%;
+  min-height: 720px;
+  border: 1px solid var(--line-soft);
+  border-radius: 20px;
+  background: var(--surface-2);
+}
+
+.risk-page__text-preview {
+  min-height: 720px;
+  padding: 20px;
+  border: 1px solid var(--line-soft);
+  border-radius: 20px;
+  background: var(--surface-2);
+}
+
+.risk-page__text-preview pre {
+  margin: 0;
+  color: var(--text-primary);
+  font-family: var(--font-body);
+  font-size: 0.95rem;
+  line-height: 1.8;
+  white-space: pre-wrap;
+}
+
 .risk-page__summary-rail {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -1231,20 +1326,6 @@ const handleExport = () => {
   min-width: 0;
   padding: 16px 18px;
   background: var(--surface-2);
-}
-
-.risk-page__summary-label,
-.risk-page__fact dt {
-  color: var(--text-muted);
-  font-size: 0.75rem;
-  font-weight: 600;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-}
-
-.risk-page__summary-value {
-  color: var(--text-primary);
-  font-size: 1rem;
 }
 
 .risk-page__spotlight {
@@ -1283,27 +1364,12 @@ const handleExport = () => {
   background: var(--surface-3);
 }
 
-.risk-page__state,
-.risk-page__side-empty,
-.risk-page__dossier-item,
-.risk-page__fact,
-.risk-page__export-panel {
-  display: grid;
-  gap: 8px;
-  min-width: 0;
-}
-
-.risk-page__state,
-.risk-page__side-empty {
+.risk-page__state {
   align-content: center;
   min-height: 220px;
   padding: 22px 24px;
   border-radius: 20px;
   background: var(--surface-2);
-}
-
-.risk-page__state {
-  min-height: 260px;
 }
 
 .risk-page__state--error {
@@ -1364,98 +1430,54 @@ const handleExport = () => {
   font-size: 0.75rem;
 }
 
-.risk-page__facts {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
-  margin: 0;
-}
-
-.risk-page__fact {
-  padding: 14px 16px;
-  border: 1px solid var(--line-soft);
-  border-radius: 16px;
-  background: var(--surface-2);
-}
-
-.risk-page__fact dd {
-  margin: 0;
-  line-height: 1.5;
-}
-
-.risk-page__dossier-item {
-  padding: 16px 18px;
-  border: 1px solid var(--line-soft);
-  border-radius: 18px;
-  background: var(--surface-2);
-}
-
-.risk-page__export-panel {
-  gap: 14px;
-  padding: 18px;
-  border-radius: 20px;
-  background: var(--surface-3);
-}
-
-.risk-page__export-panel .el-button {
-  justify-self: start;
-}
-
 @media (max-width: 1200px) {
-  .risk-page__bench-body,
-  .risk-page__workspace {
+  .risk-page__source-body,
+  .risk-page__studio {
     grid-template-columns: minmax(0, 1fr);
   }
 }
 
 @media (max-width: 900px) {
-  .risk-page__pipeline-list,
+  .risk-page__stage-strip,
   .risk-page__summary-rail,
-  .risk-page__facts,
+  .risk-page__source-facts,
   .risk-page__spotlight {
     grid-template-columns: minmax(0, 1fr);
   }
 
-  .risk-page__heading-meta {
-    justify-items: start;
+  .risk-page__hero,
+  .risk-page__hero-actions,
+  .risk-page__source-head,
+  .risk-page__stage-item,
+  .risk-page__source-file,
+  .risk-page__result-head,
+  .risk-page__spotlight-head {
+    flex-direction: column;
+    align-items: flex-start;
   }
 
   .risk-page__result-item,
-  .risk-page__result-head,
-  .risk-page__spotlight-head,
-  .risk-page__export-panel {
+  .risk-page__result-head {
     grid-template-columns: minmax(0, 1fr);
-    flex-direction: column;
   }
 
   .risk-page__result-index {
     width: 36px;
     height: 36px;
   }
-
-  .risk-page__chain-meta,
-  .risk-page__list-header,
-  .risk-page__pipeline-top {
-    flex-direction: column;
-    align-items: flex-start;
-  }
-
-  .risk-page__result-meta {
-    align-items: flex-start;
-  }
 }
 
 @media (max-width: 720px) {
-  .risk-page__bench,
+  .risk-page__hero,
+  .risk-page__source-card,
   .risk-page__state,
-  .risk-page__side-empty {
+  .risk-page__text-preview {
     padding: 20px;
   }
 
-  .risk-page__bench-header,
-  .risk-page__bench-actions {
-    align-items: flex-start;
-    justify-content: flex-start;
+  .risk-page__preview-frame,
+  .risk-page__text-preview {
+    min-height: 520px;
   }
 }
 

@@ -62,6 +62,14 @@ export const createRiskApi = (overrides = {}) => {
       return requestJson(path, { signal });
     },
 
+    generateDocumentReport(documentId, { signal } = {}) {
+      return requestJson(`/api/risk/documents/${documentId}/report`, {
+        method: 'POST',
+        body: {},
+        signal,
+      });
+    },
+
     reviewEvent(eventId, reviewStatus, { signal } = {}) {
       return requestJson(`/api/risk/events/${eventId}/review`, {
         method: 'POST',

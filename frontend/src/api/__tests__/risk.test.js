@@ -3,6 +3,34 @@ import assert from 'node:assert/strict';
 
 import { createRiskApi } from '../risk.js';
 
+test('generateDocumentReport posts to the document report endpoint', async () => {
+  const seenRequests = [];
+  const riskApi = createRiskApi({
+    baseURL: 'http://example.test',
+    fetchImpl: async (url, options) => {
+      seenRequests.push({ url, options });
+      return {
+        ok: true,
+        json: async () => ({
+          data: {
+            report: {
+              id: 7,
+              title: '示例文档风险报告',
+            },
+          },
+        }),
+      };
+    },
+  });
+
+  const payload = await riskApi.generateDocumentReport(42);
+
+  assert.equal(seenRequests.length, 1);
+  assert.match(seenRequests[0].url, /\/api\/risk\/documents\/42\/report$/);
+  assert.equal(seenRequests[0].options.method, 'POST');
+  assert.equal(payload.data.report.id, 7);
+});
+
 test('extractDocumentWithPolling emits task progress updates before resolving', async () => {
   const responses = [
     {

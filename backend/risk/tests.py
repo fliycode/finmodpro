@@ -1318,6 +1318,139 @@ class TimeRangeRiskReportApiTests(TestCase):
     JWT_SECRET_KEY="test-jwt-secret",
     JWT_ACCESS_TOKEN_LIFETIME_SECONDS=3600,
 )
+class DocumentRiskReportApiTests(TestCase):
+    def setUp(self):
+        self.client = Client()
+        seed_roles_and_permissions()
+        self.authorized_user = User.objects.create_user(
+            username="document-report-admin",
+            password="secret123",
+            email="document-report-admin@example.com",
+        )
+        self.authorized_user.groups.add(Group.objects.get(name=ROLE_ADMIN))
+        self.authorized_token = generate_access_token(self.authorized_user)
+
+        self.unauthorized_user = User.objects.create_user(
+            username="document-report-member",
+            password="secret123",
+            email="document-report-member@example.com",
+        )
+        self.unauthorized_token = generate_access_token(self.unauthorized_user)
+
+        self.document = Document.objects.create(
+            title="单文档风险来源",
+            file=SimpleUploadedFile("document-report.pdf", b"risk-content", content_type="application/pdf"),
+            filename="document-report.pdf",
+            doc_type="pdf",
+            source_date="2025-03-20",
+        )
+        self.other_document = Document.objects.create(
+            title="其他文档",
+            file=SimpleUploadedFile("other-report.pdf", b"risk-content", content_type="application/pdf"),
+            filename="other-report.pdf",
+            doc_type="pdf",
+        )
+
+    def test_generate_document_report_requires_authentication(self):
+        response = self.client.post(f"/api/risk/documents/{self.document.id}/report")
+
+        self.assertEqual(response.status_code, 401)
+        self.assertEqual(
+            response.json(),
+            {"code": 401, "message": "未认证。", "data": {}},
+        )
+
+    def test_generate_document_report_rejects_user_without_permission(self):
+        response = self.client.post(
+            f"/api/risk/documents/{self.document.id}/report",
+            HTTP_AUTHORIZATION=f"Bearer {self.unauthorized_token}",
+        )
+
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(
+            response.json(),
+            {"code": 403, "message": "无权限。", "data": {}},
+        )
+
+    def test_generate_document_report_returns_404_when_document_has_no_events(self):
+        response = self.client.post(
+            f"/api/risk/documents/{self.document.id}/report",
+            HTTP_AUTHORIZATION=f"Bearer {self.authorized_token}",
+        )
+
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(
+            response.json(),
+            {"code": 404, "message": "当前文档暂无可生成报告的风险事件。", "data": {}},
+        )
+
+    def test_generate_document_report_uses_current_document_events_without_review_gate(self):
+        included_event = RiskEvent.objects.create(
+            company_name="FinModPro Holdings",
+            risk_type="liquidity",
+            risk_level=RiskEvent.LEVEL_HIGH,
+            event_time="2025-03-20T09:00:00+08:00",
+            summary="流动性风险上升",
+            evidence_text="短债覆盖倍数下降。",
+            confidence_score=Decimal("0.920"),
+            review_status=RiskEvent.STATUS_PENDING,
+            document=self.document,
+        )
+        second_event = RiskEvent.objects.create(
+            company_name="FinModPro Holdings",
+            risk_type="credit",
+            risk_level=RiskEvent.LEVEL_MEDIUM,
+            event_time="2025-03-21T09:00:00+08:00",
+            summary="信用风险增加",
+            evidence_text="客户回款周期拉长。",
+            confidence_score=Decimal("0.760"),
+            review_status=RiskEvent.STATUS_REJECTED,
+            document=self.document,
+        )
+        RiskEvent.objects.create(
+            company_name="Other Corp",
+            risk_type="market",
+            risk_level=RiskEvent.LEVEL_LOW,
+            summary="其他文档事件",
+            evidence_text="不应被纳入。",
+            confidence_score=Decimal("0.510"),
+            review_status=RiskEvent.STATUS_APPROVED,
+            document=self.other_document,
+        )
+
+        response = self.client.post(
+            f"/api/risk/documents/{self.document.id}/report",
+            HTTP_AUTHORIZATION=f"Bearer {self.authorized_token}",
+        )
+
+        self.assertEqual(response.status_code, 201)
+        payload = response.json()
+        self.assertEqual(payload["code"], 0)
+        report_payload = payload["data"]["report"]
+        self.assertEqual(report_payload["scope_type"], RiskReport.SCOPE_DOCUMENT)
+        self.assertIn("单文档风险来源 风险报告", report_payload["title"])
+        self.assertIn("共识别 2 条风险事件", report_payload["summary"])
+        self.assertIn("流动性风险上升", report_payload["content"])
+        self.assertIn("信用风险增加", report_payload["content"])
+        self.assertEqual(
+            report_payload["source_metadata"]["event_ids"],
+            [included_event.id, second_event.id],
+        )
+        self.assertEqual(
+            report_payload["source_metadata"]["document_ids"],
+            [self.document.id],
+        )
+        self.assertEqual(
+            report_payload["source_metadata"]["document_title"],
+            "单文档风险来源",
+        )
+        self.assertEqual(RiskReport.objects.count(), 1)
+
+
+@override_settings(
+    JWT_SECRET_KEY="test-jwt-secret",
+    JWT_ACCESS_TOKEN_LIFETIME_SECONDS=3600,
+)
 class RiskAnalyticsOverviewApiTests(TestCase):
     def setUp(self):
         self.client = Client()

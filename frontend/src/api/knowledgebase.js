@@ -269,6 +269,7 @@ export const normalizeDocument = (doc, fallback = {}) => {
     id: doc.id || fallback.id || '',
     title: doc.title || doc.filename || fallback.title || '未命名文档',
     filename: doc.filename || doc.title || fallback.filename || '未命名文档',
+    docType: String(doc.doc_type || fallback.docType || '').toLowerCase(),
     status: String(doc.status || fallback.status || 'uploaded').toLowerCase(),
     visibility: doc.visibility || 'internal',
     dataset,

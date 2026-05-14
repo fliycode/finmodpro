@@ -2,6 +2,7 @@ import json
 
 from django.db.models import Count
 
+from knowledgebase.models import Document
 from risk.models import RiskEvent, RiskReport
 
 
@@ -71,6 +72,43 @@ def _build_company_report_content(*, company_name, title, events, risk_type_coun
 
 def _build_time_range_report_title(*, period_start, period_end):
     return f"时间区间风险报告（{period_start} 至 {period_end}）"
+
+
+def _build_document_report_title(*, document):
+    title = document.title or document.filename or f"文档 {document.id}"
+    if document.source_date:
+        return f"{title} 风险报告（{document.source_date}）"
+    return f"{title} 风险报告"
+
+
+def _build_document_report_summary(*, document, event_count, risk_type_counts):
+    ordered_types = sorted(risk_type_counts.items(), key=lambda item: (-item[1], item[0]))
+    top_risk_types = "、".join(f"{risk_type}({count})" for risk_type, count in ordered_types[:3])
+    return (
+        f"{document.title or document.filename or f'文档 {document.id}'}"
+        f" 共识别 {event_count} 条风险事件。"
+        f"主要风险类型分布：{top_risk_types or '无'}。"
+    )
+
+
+def _build_document_report_content(*, document, title, events, risk_type_counts, risk_level_counts):
+    lines = [
+        title,
+        "",
+        f"文档：{document.title or document.filename or f'文档 {document.id}'}",
+        f"文件名：{document.filename or '-'}",
+        f"来源日期：{document.source_date or '-'}",
+        f"风险事件数：{len(events)}",
+        f"风险类型分布：{risk_type_counts}",
+        f"风险等级分布：{risk_level_counts}",
+        "",
+        "风险事件明细：",
+    ]
+    for event in events:
+        lines.append(
+            f"- [{event.company_name}][{event.risk_type}/{event.risk_level}] {event.summary}（event_id={event.id}）"
+        )
+    return "\n".join(lines)
 
 
 def _build_time_range_report_summary(*, period_start, period_end, event_count, risk_type_counts):
@@ -182,6 +220,49 @@ def generate_time_range_risk_report(*, period_start, period_end):
         title=title,
         period_start=period_start,
         period_end=period_end,
+        summary=summary,
+        content=content,
+        source_metadata=source_metadata,
+    )
+    return report
+
+
+def generate_document_risk_report(*, document):
+    if not isinstance(document, Document):
+        raise TypeError("document 必须是 Document 实例。")
+
+    events = list(
+        RiskEvent.objects.filter(document=document)
+        .select_related("document")
+        .order_by("event_time", "id")
+    )
+    if not events:
+        raise RiskEvent.DoesNotExist
+
+    source_metadata = _collect_source_metadata(events=events)
+    source_metadata["document_title"] = document.title
+    source_metadata["document_filename"] = document.filename
+    source_metadata["document_source_date"] = (
+        document.source_date.isoformat() if document.source_date else None
+    )
+
+    title = _build_document_report_title(document=document)
+    summary = _build_document_report_summary(
+        document=document,
+        event_count=len(events),
+        risk_type_counts=source_metadata["risk_type_counts"],
+    )
+    content = _build_document_report_content(
+        document=document,
+        title=title,
+        events=events,
+        risk_type_counts=source_metadata["risk_type_counts"],
+        risk_level_counts=source_metadata["risk_level_counts"],
+    )
+
+    report = RiskReport.objects.create(
+        scope_type=RiskReport.SCOPE_DOCUMENT,
+        title=title,
         summary=summary,
         content=content,
         source_metadata=source_metadata,

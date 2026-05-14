@@ -11,6 +11,7 @@ from risk.controllers.extract_controller import (
 from risk.controllers.list_controller import RiskEventListView
 from risk.controllers.report_controller import (
     CompanyRiskReportCreateView,
+    DocumentRiskReportCreateView,
     RiskReportExportView,
     TimeRangeRiskReportCreateView,
 )
@@ -19,6 +20,7 @@ from risk.controllers.sentiment_controller import SentimentAnalyzeView
 
 __all__ = [
     "CompanyRiskReportCreateView",
+    "DocumentRiskReportCreateView",
     "RiskAnalyticsOverviewView",
     "RiskDocumentBatchExtractRetryView",
     "RiskDocumentBatchExtractView",

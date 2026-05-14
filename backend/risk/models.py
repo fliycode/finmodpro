@@ -73,9 +73,11 @@ class RiskEvent(models.Model):
 
 class RiskReport(models.Model):
     SCOPE_COMPANY = "company"
+    SCOPE_DOCUMENT = "document"
     SCOPE_TIME_RANGE = "time_range"
     SCOPE_CHOICES = (
         (SCOPE_COMPANY, "Company"),
+        (SCOPE_DOCUMENT, "Document"),
         (SCOPE_TIME_RANGE, "Time Range"),
     )
 

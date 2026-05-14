@@ -2,6 +2,7 @@ from django.urls import path
 
 from risk.controllers import (
     CompanyRiskReportCreateView,
+    DocumentRiskReportCreateView,
     RiskAnalyticsOverviewView,
     RiskDocumentBatchExtractRetryView,
     RiskDocumentBatchExtractView,
@@ -43,6 +44,11 @@ urlpatterns = [
         "documents/<int:document_id>/extract",
         RiskDocumentExtractView.as_view(),
         name="risk-document-extract",
+    ),
+    path(
+        "documents/<int:document_id>/report",
+        DocumentRiskReportCreateView.as_view(),
+        name="risk-document-report-create",
     ),
     path(
         "documents/<int:document_id>/extract/retry",
