@@ -63,12 +63,11 @@ export const navigationMap = {
       to: '/admin/llm/models',
       icon: 'brain-circuit',
       group: 'admin-llm',
-      requiredPermissions: ['manage_model_config', 'view_evaluation', 'run_evaluation'],
+      requiredPermissions: ['manage_model_config'],
       children: [
         { id: 'admin-llm-model-overview', label: '模型总览', to: '/admin/llm/models', requiredPermissions: ['manage_model_config'] },
         { id: 'admin-llm-logs', label: '模型日志', to: '/admin/llm/logs', requiredPermissions: ['manage_model_config'] },
         { id: 'admin-llm-usage', label: '用量统计', to: '/admin/llm/usage', requiredPermissions: ['manage_model_config'] },
-        { id: 'admin-llm-rag-eval', label: 'RAG 评测', to: '/admin/llm/rag-evaluation', requiredPermissions: ['view_evaluation', 'run_evaluation'] },
       ],
     },
     {

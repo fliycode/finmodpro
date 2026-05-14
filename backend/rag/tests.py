@@ -1,13 +1,11 @@
 import json
 import shutil
 import tempfile
-from io import StringIO
 from types import SimpleNamespace
 from unittest.mock import patch
 
 
 from django.contrib.auth.models import Group
-from django.core.management import call_command
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import Client, SimpleTestCase, TestCase, override_settings
 
@@ -22,7 +20,6 @@ from rag.services.retrieval_backend_service import (
     retrieve_chat_context,
     retrieve_rag_context,
 )
-from rag.services.retrieval_evaluation_service import evaluate_retrieval_cases
 from rag.services.llamaindex_store_service import clear_store, sync_document
 from rag.services.retrieval_service import retrieve
 from rbac.services.rbac_service import ROLE_ADMIN, seed_roles_and_permissions
@@ -467,7 +464,7 @@ class RagRetrievalApiTests(TestCase):
         self.assertEqual(RetrievalLog.objects.count(), 0)
 
 
-class RetrievalEvaluationServiceTests(TestCase):
+class RetrievalServiceTests(TestCase):
     @patch("rag.services.retrieval_service.retrieve_rag_context")
     def test_retrieve_passes_query_variants_to_query_store(self, mocked_retrieve):
         mocked_retrieve.return_value = []
@@ -484,73 +481,6 @@ class RetrievalEvaluationServiceTests(TestCase):
             top_k=5,
             query_variants=["capital adequacy", "car stress scenario"],
         )
-
-    def test_evaluate_retrieval_cases_computes_metrics_from_chunk_ids(self):
-        result = evaluate_retrieval_cases(
-            [
-                {
-                    "name": "chunk-id-hit",
-                    "query": "capital adequacy",
-                    "top_k": 3,
-                    "relevant_chunk_ids": [11],
-                }
-            ],
-            retrieve_fn=lambda **kwargs: [
-                {
-                    "chunk_id": 11,
-                    "document_title": "Stress Test Report",
-                    "page_label": "chunk-1",
-                }
-            ],
-        )
-
-        self.assertEqual(result["total_cases"], 1)
-        self.assertEqual(result["summary"]["recall_at_k"], 1.0)
-        self.assertEqual(result["summary"]["mrr"], 1.0)
-        self.assertEqual(result["summary"]["ndcg_at_k"], 1.0)
-
-    def test_evaluate_retrieval_command_prints_summary(self):
-        import rag.management.commands.evaluate_retrieval as eval_cmd
-
-        with patch.object(eval_cmd, "evaluate_retrieval_fixture") as mock_eval:
-            mock_eval.return_value = {
-                "total_cases": 1,
-                "summary": {
-                    "recall_at_k": 1.0,
-                    "mrr": 1.0,
-                    "ndcg_at_k": 1.0,
-                    "average_latency_ms": 12.5,
-                },
-                "cases": [],
-            }
-            stdout = StringIO()
-            call_command("evaluate_retrieval", stdout=stdout)
-            output = stdout.getvalue()
-            self.assertIn("RETRIEVAL EVALUATION", output)
-            self.assertIn("recall_at_k", output)
-
-    def test_evaluate_retrieval_command_all_mode_runs_both(self):
-        import rag.management.commands.evaluate_retrieval as eval_cmd
-
-        with patch.object(eval_cmd, "evaluate_retrieval_fixture") as mock_retrieval, \
-             patch.object(eval_cmd, "evaluate_generation_fixture") as mock_generation:
-            mock_retrieval.return_value = {
-                "total_cases": 1,
-                "summary": {"recall_at_k": 1.0, "mrr": 1.0, "ndcg_at_k": 1.0, "average_latency_ms": 10.0},
-                "cases": [],
-            }
-            mock_generation.return_value = {
-                "total_cases": 1,
-                "summary": {"avg_faithfulness": 0.9, "avg_relevancy": 0.8},
-                "cases": [],
-            }
-            stdout = StringIO()
-            call_command("evaluate_retrieval", "--mode", "all", stdout=stdout)
-            output = stdout.getvalue()
-            self.assertIn("RETRIEVAL EVALUATION", output)
-            self.assertIn("GENERATION EVALUATION", output)
-            mock_retrieval.assert_called_once()
-            mock_generation.assert_called_once()
 
 
 class BM25RetrieverTests(TestCase):
@@ -582,49 +512,6 @@ class BM25RetrieverTests(TestCase):
         invalidate_bm25_cache()
         self.assertIsNone(_bm25_cache["retriever"])
         self.assertEqual(_bm25_cache["built_at"], 0.0)
-
-
-class GenerationEvaluationTests(TestCase):
-    def test_evaluate_generation_case_requires_query(self):
-        from rag.services.retrieval_evaluation_service import evaluate_generation_case
-
-        with self.assertRaises(ValueError):
-            evaluate_generation_case({"query": ""})
-
-    @patch("rag.services.retrieval_evaluation_service._build_eval_llm")
-    def test_evaluate_generation_case_returns_faithfulness_and_relevancy(self, mock_build_llm):
-        from types import SimpleNamespace
-
-        from rag.services.retrieval_evaluation_service import evaluate_generation_case
-
-        mock_llm = SimpleNamespace(
-            complete=lambda prompt: SimpleNamespace(text="test answer"),
-        )
-        mock_build_llm.return_value = mock_llm
-
-        mock_faithfulness = SimpleNamespace(score=0.9, passing=True)
-        mock_relevancy = SimpleNamespace(score=0.85, passing=True)
-
-        with patch(
-            "llama_index.core.evaluation.FaithfulnessEvaluator"
-        ) as MockFaith, patch(
-            "llama_index.core.evaluation.RelevancyEvaluator"
-        ) as MockRel:
-            MockFaith.return_value.evaluate.return_value = mock_faithfulness
-            MockRel.return_value.evaluate.return_value = mock_relevancy
-
-            result = evaluate_generation_case(
-                {"query": "test query", "top_k": 3},
-                retrieve_fn=lambda **kwargs: [
-                    {"document_title": "Doc", "page_label": "p1", "snippet": "text"}
-                ],
-                llm=mock_llm,
-            )
-
-        self.assertEqual(result["faithfulness_score"], 0.9)
-        self.assertEqual(result["relevancy_score"], 0.85)
-        self.assertTrue(result["faithfulness_passing"])
-        self.assertTrue(result["relevancy_passing"])
 
 
 class SentenceWindowRetrievalTests(TestCase):

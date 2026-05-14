@@ -11,7 +11,6 @@ test('admin llm navigation collapses into one model-management parent entry', ()
     '/admin/llm/models',
     '/admin/llm/logs',
     '/admin/llm/usage',
-    '/admin/llm/rag-evaluation',
   ]);
 });
 

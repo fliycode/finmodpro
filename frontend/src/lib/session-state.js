@@ -7,8 +7,6 @@ export const ADMIN_PROFILE_PERMISSIONS = [
   'view_monitoring',
   'view_audit_log',
   'manage_model_config',
-  'view_evaluation',
-  'run_evaluation',
   'manage_cleaning_rules',
 ];
 
@@ -20,7 +18,6 @@ const ADMIN_HOME_ROUTE_CANDIDATES = [
   { to: '/admin/audit-logs', requiredPermissions: ['view_audit_log'] },
   { to: '/admin/knowledge', requiredPermissions: ['view_document'] },
   { to: '/admin/llm/models', requiredPermissions: ['manage_model_config'] },
-  { to: '/admin/llm/rag-evaluation', requiredPermissions: ['view_evaluation', 'run_evaluation'] },
   { to: '/admin/cleaning', requiredPermissions: ['manage_cleaning_rules'] },
 ];
 

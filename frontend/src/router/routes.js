@@ -178,16 +178,6 @@ export const appRoutes = [
         },
       },
       {
-        path: 'llm/rag-evaluation',
-        component: () => import('../views/admin/AdminRagEvalView.vue'),
-        meta: {
-          title: 'RAG 评测',
-          subtitle: '运行检索与生成质量评测，查看 Recall、MRR、忠实度等指标。',
-          breadcrumb: [{ label: 'Gateway Ops' }, { label: '模型管理' }, { label: 'RAG 评测' }],
-          requiredPermissions: ['view_evaluation', 'run_evaluation'],
-        },
-      },
-      {
         path: 'graph',
         redirect: '/admin/knowledge',
       },
