@@ -20,6 +20,7 @@ const MODELS = Object.freeze({
     regions: Object.freeze([
       Object.freeze({ id: 'upload', label: '上传' }),
       Object.freeze({ id: 'results', label: '结果' }),
+      Object.freeze({ id: 'inspector', label: '文档' }),
     ]),
   }),
   history: Object.freeze({
