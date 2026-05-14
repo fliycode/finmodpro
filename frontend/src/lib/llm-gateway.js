@@ -170,7 +170,7 @@ export const normalizeGatewayCostsModels = (payload = {}) => {
     filters: normalizeFilters(data.filters),
     total_requests: toNumber(data.total_requests, 0),
     models: normalizeArray(data.models).map((item) => ({
-      alias: item?.alias ?? '',
+      alias: item?.alias ?? item?.model ?? item?.model_name ?? '未命名模型',
       request_count: toNumber(item?.request_count, 0),
       request_share_pct: toNumber(item?.request_share_pct, 0),
       total_request_tokens: toNumber(item?.total_request_tokens, 0),

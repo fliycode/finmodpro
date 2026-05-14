@@ -10,7 +10,6 @@ import {
 } from '../lib/llm-gateway.js';
 import { buildBoardAxis, buildBoardTooltip, chartColors } from '../lib/admin-dashboard.js';
 import AdminChart from './admin/AdminChart.vue';
-import AdminDataTable from './admin/AdminDataTable.vue';
 import OpsInspectorDrawer from './admin/ops/OpsInspectorDrawer.vue';
 import OpsSectionFrame from './admin/ops/OpsSectionFrame.vue';
 import OpsStatusBand from './admin/ops/OpsStatusBand.vue';
@@ -140,6 +139,37 @@ const tokenChartOption = computed(() => {
   };
 });
 
+const latencyChartOption = computed(() => {
+  const data = summary.value.latency_buckets || [];
+  if (data.length === 0) return {};
+  const c = chartColors();
+  const axis = buildBoardAxis();
+
+  return {
+    tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' }, ...buildBoardTooltip() },
+    grid: { left: 12, right: 16, top: 16, bottom: 8, containLabel: true },
+    xAxis: {
+      type: 'category',
+      data: data.map((bucket) => bucket.label),
+      axisLabel: { color: c.textSecondary, fontSize: 10, rotate: data.length > 5 ? 18 : 0 },
+      axisLine: axis.axisLine,
+    },
+    yAxis: {
+      type: 'value',
+      axisLabel: axis.axisLabel,
+      splitLine: { lineStyle: { color: c.gridLine } },
+    },
+    series: [
+      {
+        type: 'bar',
+        data: data.map((bucket) => bucket.count),
+        itemStyle: { color: c.brandSoft, borderRadius: [4, 4, 0, 0] },
+        barMaxWidth: 40,
+      },
+    ],
+  };
+});
+
 const tokenUsageByModel = computed(() => {
   const map = new Map();
   for (const log of logs.value.logs) {
@@ -251,21 +281,16 @@ onMounted(fetchObservability);
         <AdminChart v-if="tokenUsageByModel.length > 0" :option="tokenChartOption" height="260px" />
         <div v-else class="admin-empty-state">当前窗口暂无请求数据</div>
       </AppSectionCard>
+
+      <AppSectionCard title="延迟区间" icon="timer" admin>
+        <AdminChart v-if="summary.latency_buckets.length > 0" :option="latencyChartOption" height="260px" />
+        <div v-else class="admin-empty-state">当前窗口暂无延迟分布数据</div>
+      </AppSectionCard>
     </div>
 
-    <OpsInspectorDrawer title="请求摘要" icon="frame-inspect" :eyebrow="''">
-      <AdminDataTable
-        :data="logs.logs"
-        :loading="isLoading"
-        :current-page="page"
-        :page-size="pageSize"
-        :total="logs.total"
-        :page-sizes="[10, 25, 50, 100]"
-        :show-search="false"
-        row-key="request_id"
-        @update:current-page="handlePageChange"
-        @update:page-size="handleSizeChange"
-      >
+    <OpsInspectorDrawer title="调用记录" icon="request-page" desc="逐条查看每次模型调用的时间、Token、状态与 Trace。" :eyebrow="''">
+      <div class="obs-log-table">
+        <el-table :data="logs.logs" size="small" stripe v-loading="isLoading" empty-text="当前窗口暂无调用记录">
         <el-table-column label="时间" min-width="158">
           <template #default="{ row }">{{ formatTime(row.time) }}</template>
         </el-table-column>
@@ -275,12 +300,12 @@ onMounted(fetchObservability);
           <template #default="{ row }">{{ row.latency_ms }} ms</template>
         </el-table-column>
         <el-table-column label="Token" width="130">
-          <template #default="{ row }">{{ row.request_tokens }} / {{ row.response_tokens }}</template>
+          <template #default="{ row }">{{ formatInteger(row.request_tokens) }} / {{ formatInteger(row.response_tokens) }}</template>
         </el-table-column>
         <el-table-column label="状态" width="90">
           <template #default="{ row }">
             <el-tag :type="row.status === 'failed' ? 'danger' : 'success'" effect="plain" size="small">
-              {{ row.status }}
+              {{ row.status === 'failed' ? '失败' : '成功' }}
             </el-tag>
           </template>
         </el-table-column>
@@ -298,7 +323,21 @@ onMounted(fetchObservability);
             <span v-else class="muted-text">--</span>
           </template>
         </el-table-column>
-      </AdminDataTable>
+        </el-table>
+        <div v-if="logs.total > 0" class="obs-log-pagination">
+          <el-pagination
+            :current-page="page"
+            :page-size="pageSize"
+            :page-sizes="[10, 25, 50, 100]"
+            :total="logs.total"
+            layout="total, sizes, prev, pager, next, jumper"
+            small
+            background
+            @current-change="handlePageChange"
+            @size-change="handleSizeChange"
+          />
+        </div>
+      </div>
     </OpsInspectorDrawer>
 
     <el-drawer v-model="traceDrawerVisible" size="520px" title="Trace 明细" destroy-on-close>
@@ -326,22 +365,15 @@ onMounted(fetchObservability);
 .obs-chart-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 0;
-  border: 1px solid var(--line-soft);
-  border-radius: 28px;
-  background: var(--surface-1);
-  overflow: hidden;
+  gap: 16px;
 }
 
 .obs-chart-grid :deep(.admin-section-card) {
   min-height: 100%;
   padding: 24px 26px;
-  border-left: 1px solid var(--line-soft);
-  background: transparent;
-}
-
-.obs-chart-grid :deep(.admin-section-card:first-child) {
-  border-left: 0;
+  border: 1px solid var(--line-soft);
+  border-radius: 28px;
+  background: var(--surface-1);
 }
 
 .trace-panel {
@@ -374,18 +406,48 @@ onMounted(fetchObservability);
   margin: 8px 0 0;
 }
 
+.obs-log-table :deep(.el-table) {
+  --el-table-border-color: var(--line-soft);
+  --el-table-header-bg-color: transparent;
+  border: 1px solid var(--line-soft);
+  border-radius: 18px;
+  overflow: hidden;
+}
+
+.obs-log-table :deep(.el-table__inner-wrapper::before) {
+  display: none;
+}
+
+.obs-log-table :deep(.el-table th.el-table__cell) {
+  height: 44px;
+  padding-block: 6px;
+  color: var(--text-muted);
+  font-size: 0.6875rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  background: transparent;
+}
+
+.obs-log-table :deep(.el-table td.el-table__cell) {
+  padding-block: 10px;
+}
+
+.obs-log-table :deep(.el-table th.el-table__cell .cell),
+.obs-log-table :deep(.el-table td.el-table__cell .cell) {
+  padding-inline: 14px;
+}
+
+.obs-log-pagination {
+  display: flex;
+  justify-content: flex-end;
+  padding-top: 10px;
+  border-top: 1px solid var(--line-soft);
+}
+
 @media (max-width: 900px) {
   .obs-chart-grid {
     grid-template-columns: 1fr;
-  }
-
-  .obs-chart-grid :deep(.admin-section-card) {
-    border-left: 0;
-    border-top: 1px solid var(--line-soft);
-  }
-
-  .obs-chart-grid :deep(.admin-section-card:first-child) {
-    border-top: 0;
   }
 }
 </style>

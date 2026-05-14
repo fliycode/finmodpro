@@ -9,14 +9,13 @@ const componentPath = resolve(currentDir, '../LlmGatewayObservability.vue');
 
 const readComponent = () => readFileSync(componentPath, 'utf8');
 
-test('llm gateway observability removes latency distribution copy and uses refreshed icons', () => {
+test('llm gateway observability shows a second chart and uses call-record wording', () => {
   const source = readComponent();
 
   assert.match(source, /icon="data-usage"/);
-  assert.match(source, /icon="frame-inspect"/);
+  assert.match(source, /title="延迟区间"/);
+  assert.match(source, /title="调用记录"/);
+  assert.match(source, /icon="request-page"/);
   assert.match(source, /:eyebrow="''"/);
-  assert.doesNotMatch(source, /title="延迟分布"/);
-  assert.doesNotMatch(source, /当前窗口各延迟区间的请求数量/);
-  assert.doesNotMatch(source, /按模型聚合当前窗口的输入\/输出 Token 消耗/);
-  assert.doesNotMatch(source, /请求级别摘要，不暴露原始 prompt \/ response/);
+  assert.doesNotMatch(source, /title="请求摘要"/);
 });
