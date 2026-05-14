@@ -18,9 +18,9 @@ const MODELS = Object.freeze({
   risk: Object.freeze({
     mobileMode: 'chapter-tabs',
     regions: Object.freeze([
-      Object.freeze({ id: 'summary', label: '结论' }),
-      Object.freeze({ id: 'evidence', label: '证据' }),
-      Object.freeze({ id: 'actions', label: '导出' }),
+      Object.freeze({ id: 'document', label: '文档' }),
+      Object.freeze({ id: 'results', label: '结果' }),
+      Object.freeze({ id: 'review', label: '审核' }),
     ]),
   }),
   history: Object.freeze({

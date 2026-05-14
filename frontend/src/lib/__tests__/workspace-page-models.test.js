@@ -31,10 +31,10 @@ test('knowledge page keeps filters before ledger before inspector', () => {
   assert.deepEqual(model.regions.map((region) => region.id), ['filters', 'ledger', 'inspector']);
 });
 
-test('risk page leads with summary before evidence and actions', () => {
+test('risk page leads from document selection to results to review queue', () => {
   const model = getWorkspacePageModel('risk');
 
-  assert.deepEqual(model.regions.map((region) => region.id), ['summary', 'evidence', 'actions']);
+  assert.deepEqual(model.regions.map((region) => region.id), ['document', 'results', 'review']);
 });
 
 test('history page remains a support surface with filters and records only', () => {

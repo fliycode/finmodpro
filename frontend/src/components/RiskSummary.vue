@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
+import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue';
 import { ElMessageBox } from 'element-plus';
 
 import { kbApi } from '../api/knowledgebase.js';
@@ -27,19 +27,14 @@ const analyticsPayload = ref(null);
 const isEventsLoading = ref(false);
 const isAnalyticsLoading = ref(false);
 const isUploading = ref(false);
-const isReportLoading = ref(false);
-const isReportExporting = ref(false);
 const reviewingId = ref(null);
 
 const eventsErrorMsg = ref('');
 const analyticsErrorMsg = ref('');
-const reportErrorMsg = ref('');
 
 const fileInput = ref(null);
+const reviewQueueSection = ref(null);
 const eventsDrawerOpen = ref(false);
-const reportType = ref('company');
-const reportForm = ref({ company_name: '', period_start: '', period_end: '' });
-const generatedReport = ref(null);
 const activeDocument = ref(null);
 const createPipelineRunState = () => ({
   status: 'idle',
@@ -62,13 +57,11 @@ const knowledgebaseSearch = ref('');
 const knowledgebaseDocs = ref([]);
 const selectedKnowledgebaseId = ref('');
 const isKnowledgebaseLoading = ref(false);
-const showUtilities = ref(false);
 
 let workspaceAbort = null;
 
 const analytics = computed(() => normalizeRiskAnalytics(analyticsPayload.value));
 const riskTypeDist = computed(() => analytics.value.risk_type_distribution || []);
-const totalEvents = computed(() => analytics.value.summary.total_events || 0);
 const pendingReviews = computed(() => analytics.value.summary.pending_reviews || 0);
 const selectedKnowledgeDocument = computed(() => (
   knowledgebaseDocs.value.find((doc) => String(doc.id) === String(selectedKnowledgebaseId.value)) || null
@@ -109,7 +102,15 @@ const groupedRiskResults = computed(() => riskTypeDist.value.map((item) => {
   };
 }));
 
-const recentEvents = computed(() => events.value.slice(0, 8));
+const reviewQueueEvents = computed(() => events.value
+  .filter((event) => (event.review_status || 'pending').toLowerCase() === 'pending')
+  .slice(0, 8));
+
+const canReturnToReviewQueue = computed(() => (
+  pipelineRun.value.reviewReady
+  || pendingReviews.value > 0
+  || reviewQueueEvents.value.length > 0
+));
 
 const sourceDoc = computed(() => {
   const currentDocument = activeDocument.value;
@@ -139,27 +140,6 @@ const extractionQuality = computed(() => {
     totalChunks: firstEvent.extraction_metadata.total_chunks,
   };
 });
-
-const summaryCards = computed(() => ([
-  {
-    key: 'events',
-    label: '风险事件',
-    value: fmt.format(totalEvents.value),
-    note: '已提取结果',
-  },
-  {
-    key: 'types',
-    label: '风险类型',
-    value: fmt.format(riskTypeDist.value.length),
-    note: '按类型归并',
-  },
-  {
-    key: 'pending',
-    label: '待审核',
-    value: fmt.format(pendingReviews.value),
-    note: '需要人工确认',
-  },
-]));
 
 const pipelinePercent = computed(() => {
   if (pipelineRun.value.status === 'idle' && !pipelineRun.value.fileName) {
@@ -202,70 +182,10 @@ const pipelineTone = computed(() => ({
 
 const uploadButtonLabel = computed(() => {
   if (!isUploading.value) {
-    return '上传文档';
+    return '选择文档并开始';
   }
-  return `上传 ${Math.max(1, pipelineRun.value.uploadProgress)}%`;
+  return `处理中 ${Math.max(1, pipelinePercent.value)}%`;
 });
-
-const pipelineSteps = computed(() => ([
-  {
-    key: 'upload',
-    label: '上传',
-    progress: pipelineRun.value.uploadProgress,
-    note: pipelineRun.value.fileName || 'PDF / DOCX / TXT',
-    state: pipelineRun.value.uploadProgress >= 100 ? 'done' : (pipelineRun.value.status === 'uploading' ? 'active' : 'idle'),
-  },
-  {
-    key: 'ingest',
-    label: '入库',
-    progress: pipelineRun.value.ingestProgress,
-    note: pipelineRun.value.ingestLabel,
-    state: pipelineRun.value.status === 'failed'
-      ? 'failed'
-      : (pipelineRun.value.ingestProgress >= 100 ? 'done' : (['ingesting', 'extracting', 'succeeded'].includes(pipelineRun.value.status) ? 'active' : 'idle')),
-  },
-  {
-    key: 'extract',
-    label: '提取',
-    progress: pipelineRun.value.extractProgress,
-    note: pipelineRun.value.extractLabel,
-    state: pipelineRun.value.status === 'failed'
-      ? 'failed'
-      : (pipelineRun.value.extractProgress >= 100 ? 'done' : (pipelineRun.value.status === 'extracting' ? 'active' : 'idle')),
-  },
-  {
-    key: 'review',
-    label: '审核',
-    progress: pipelineRun.value.reviewReady ? 100 : 0,
-    note: pipelineRun.value.reviewReady ? `${pendingReviews.value} 待审核` : '等待结果',
-    state: pipelineRun.value.status === 'failed'
-      ? 'failed'
-      : (pipelineRun.value.reviewReady ? 'done' : 'idle'),
-  },
-]));
-
-const pipelineMetaCards = computed(() => ([
-  {
-    key: 'document',
-    label: '当前文档',
-    value: pipelineRun.value.fileName || sourceDoc.value.title,
-  },
-  {
-    key: 'stage',
-    label: '当前阶段',
-    value: pipelineRun.value.detail,
-  },
-  {
-    key: 'created',
-    label: '已提取',
-    value: `${fmt.format(pipelineRun.value.createdCount)} 条`,
-  },
-  {
-    key: 'pending',
-    label: '待审核',
-    value: `${fmt.format(pendingReviews.value)} 条`,
-  },
-]));
 
 const isAbortError = (error) => error?.name === 'AbortError';
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -421,6 +341,10 @@ const resetFilters = () => {
 };
 
 const triggerUpload = () => fileInput.value?.click();
+const scrollToReviewQueue = async () => {
+  await nextTick();
+  reviewQueueSection.value?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+};
 
 const syncActiveDocument = async (documentId) => {
   const document = await kbApi.getDocumentDetail(documentId);
@@ -569,6 +493,7 @@ const runRiskPipeline = async (documentId) => {
     refreshWorkspace(),
     fetchKnowledgebaseDocuments(),
   ]);
+  await scrollToReviewQueue();
 };
 
 const handleFileChange = async (event) => {
@@ -651,87 +576,6 @@ const handleFileChange = async (event) => {
   }
 };
 
-const generateReport = async () => {
-  reportErrorMsg.value = '';
-
-  if (reportType.value === 'company' && !reportForm.value.company_name) {
-    reportErrorMsg.value = '请输入公司名称';
-    return;
-  }
-
-  if (reportType.value === 'time_range' && (!reportForm.value.period_start || !reportForm.value.period_end)) {
-    reportErrorMsg.value = '请输入开始和结束日期';
-    return;
-  }
-
-  isReportLoading.value = true;
-  generatedReport.value = null;
-
-  try {
-    let data;
-    if (reportType.value === 'company') {
-      data = await riskApi.generateCompanyReport({
-        company_name: reportForm.value.company_name,
-        period_start: reportForm.value.period_start || undefined,
-        period_end: reportForm.value.period_end || undefined,
-      });
-    } else {
-      data = await riskApi.generateTimeRangeReport({
-        period_start: reportForm.value.period_start,
-        period_end: reportForm.value.period_end,
-      });
-    }
-
-    generatedReport.value = data.data?.report || data.report || data;
-    flash.success('风险报告生成成功');
-    await fetchAnalytics();
-  } catch (error) {
-    reportErrorMsg.value = error.message || '生成报告失败';
-  } finally {
-    isReportLoading.value = false;
-  }
-};
-
-const downloadGeneratedReport = async (format = 'markdown') => {
-  if (!generatedReport.value?.id) {
-    flash.error('请先生成报告后再导出');
-    return;
-  }
-
-  isReportExporting.value = true;
-  try {
-    const payload = await riskApi.exportReport(generatedReport.value.id, { format });
-    const blob = new Blob([payload.content], { type: payload.contentType });
-    const url = window.URL.createObjectURL(blob);
-    const anchor = document.createElement('a');
-    anchor.href = url;
-    anchor.download = payload.filename;
-    anchor.click();
-    window.URL.revokeObjectURL(url);
-    flash.success('报告已导出');
-  } catch (error) {
-    flash.error(error.message || '导出失败');
-  } finally {
-    isReportExporting.value = false;
-  }
-};
-
-const exportEventsAsJson = () => {
-  if (!events.value.length) {
-    flash.warning('暂无风险事件可导出');
-    return;
-  }
-
-  const blob = new Blob([JSON.stringify(events.value, null, 2)], { type: 'application/json' });
-  const url = URL.createObjectURL(blob);
-  const anchor = document.createElement('a');
-  anchor.href = url;
-  anchor.download = 'risk-events.json';
-  anchor.click();
-  URL.revokeObjectURL(url);
-  flash.success('已导出风险事件 JSON');
-};
-
 const formatDate = (value) => {
   try {
     return value ? new Date(value).toLocaleString() : '--';
@@ -801,10 +645,24 @@ onBeforeUnmount(() => {
       />
 
       <div class="risk-page__hero-copy">
-        <span class="risk-page__eyebrow">Risk Extraction</span>
         <h2>先选文档，再提取风险</h2>
         <p>主任务只有一件事，选一份文档，完成提取，然后回到审核队列。</p>
       </div>
+
+      <ol class="risk-page__task-flow" aria-label="风险提取任务流程">
+        <li>
+          <strong>选文档</strong>
+          <span>上传本地文件，或从知识库挑一份已入库文档。</span>
+        </li>
+        <li>
+          <strong>开始提取</strong>
+          <span>系统会自动完成入库、抽取和结果汇总。</span>
+        </li>
+        <li>
+          <strong>回到审核队列</strong>
+          <span>结果出来后，直接处理下方待审核事件。</span>
+        </li>
+      </ol>
 
       <div class="risk-page__runline">
         <span class="risk-page__run-badge" :data-tone="pipelineTone">{{ pipelineStatusText }}</span>
@@ -817,12 +675,18 @@ onBeforeUnmount(() => {
       </div>
 
       <div class="risk-page__launcher">
-        <div class="risk-page__source-switch">
-          <span>来源</span>
-          <el-radio-group v-model="sourceMode" size="small">
-            <el-radio-button label="upload">上传新文档</el-radio-button>
-            <el-radio-button label="knowledgebase">从知识库提取</el-radio-button>
-          </el-radio-group>
+        <div class="risk-page__launcher-head">
+          <div>
+            <h3>第一步，先确定文档来源</h3>
+            <p>{{ sourceMode === 'upload' ? '选择文件后会立即开始处理。' : '选中知识库文档后即可直接开始提取。' }}</p>
+          </div>
+          <div class="risk-page__source-switch">
+            <span>文档来源</span>
+            <el-radio-group v-model="sourceMode" size="small">
+              <el-radio-button label="upload">上传文档</el-radio-button>
+              <el-radio-button label="knowledgebase">知识库文档</el-radio-button>
+            </el-radio-group>
+          </div>
         </div>
 
         <div v-if="sourceMode === 'upload'" class="risk-page__launcher-body">
@@ -839,6 +703,13 @@ onBeforeUnmount(() => {
             <el-button type="primary" :loading="isUploading" @click="triggerUpload">
               <AppIcon name="upload" />
               {{ uploadButtonLabel }}
+            </el-button>
+            <el-button
+              v-if="canReturnToReviewQueue"
+              :disabled="!canReturnToReviewQueue"
+              @click="scrollToReviewQueue"
+            >
+              前往审核队列
             </el-button>
             <el-button :loading="isEventsLoading || isAnalyticsLoading" @click="refreshWorkspace">
               <AppIcon name="refresh" />
@@ -888,35 +759,22 @@ onBeforeUnmount(() => {
               :disabled="!selectedKnowledgebaseId"
               @click="handleKnowledgebaseExtract"
             >
-              开始提取
+              用这份文档提取
             </el-button>
-            <el-button @click="eventsDrawerOpen = true">
-              查看全部事件
+            <el-button
+              v-if="canReturnToReviewQueue"
+              :disabled="!canReturnToReviewQueue"
+              @click="scrollToReviewQueue"
+            >
+              前往审核队列
+            </el-button>
+            <el-button :loading="isEventsLoading || isAnalyticsLoading" @click="refreshWorkspace">
+              <AppIcon name="refresh" />
+              刷新结果
             </el-button>
           </div>
         </div>
       </div>
-
-      <div class="risk-page__step-grid">
-        <article
-          v-for="step in pipelineSteps"
-          :key="step.key"
-          class="risk-page__step-card"
-          :data-state="step.state"
-        >
-          <small>{{ step.label }}</small>
-          <strong>{{ step.progress }}%</strong>
-          <span>{{ step.note }}</span>
-        </article>
-      </div>
-    </section>
-
-    <section class="risk-page__summary">
-      <article v-for="item in summaryCards" :key="item.key" class="risk-page__summary-card">
-        <small>{{ item.label }}</small>
-        <strong>{{ item.value }}</strong>
-        <span>{{ item.note }}</span>
-      </article>
     </section>
 
     <div class="risk-page__main">
@@ -924,7 +782,7 @@ onBeforeUnmount(() => {
         <header class="risk-page__panel-head">
           <div>
             <h3>提取结果</h3>
-            <p>按风险类型归并结果，先看类型和证据，不再拆成多个复杂面板。</p>
+            <p>提取完成后先看风险类型和证据，再进入下方审核队列。</p>
           </div>
         </header>
 
@@ -955,20 +813,20 @@ onBeforeUnmount(() => {
         </div>
       </section>
 
-      <section class="risk-page__panel">
+      <section ref="reviewQueueSection" class="risk-page__panel">
         <header class="risk-page__panel-head">
           <div>
             <h3>审核队列</h3>
-            <p>只展示最近待处理事件，完整筛选和全量记录放到右侧抽屉。</p>
+            <p>这里只保留待审核事件，处理完当前队列就可以离开本页。</p>
           </div>
-          <el-button text @click="eventsDrawerOpen = true">查看全部</el-button>
+          <el-button text @click="eventsDrawerOpen = true">展开全量队列</el-button>
         </header>
 
         <el-table
-          :data="recentEvents"
+          :data="reviewQueueEvents"
           size="small"
           v-loading="isEventsLoading"
-          empty-text="暂无风险事件"
+          empty-text="暂无待审核事件"
         >
           <el-table-column prop="company_name" label="公司" min-width="120" show-overflow-tooltip />
           <el-table-column prop="risk_type" label="类型" min-width="110" show-overflow-tooltip />
@@ -1021,104 +879,6 @@ onBeforeUnmount(() => {
         </el-table>
       </section>
     </div>
-
-    <section class="risk-page__panel risk-page__utilities">
-      <header class="risk-page__panel-head">
-        <div>
-          <h3>更多工具</h3>
-          <p>把证据和导出收起来，需要时再展开。</p>
-        </div>
-        <el-button text @click="showUtilities = !showUtilities">
-          {{ showUtilities ? '收起' : '展开' }}
-        </el-button>
-      </header>
-
-      <div v-if="showUtilities" class="risk-page__secondary">
-        <section class="risk-page__utility-block">
-          <div class="risk-page__source-grid">
-            <div class="risk-page__source-field">
-              <span>文档</span>
-              <strong>{{ sourceDoc.title }}</strong>
-            </div>
-            <div class="risk-page__source-field">
-              <span>公司</span>
-              <strong>{{ sourceDoc.company }}</strong>
-            </div>
-            <div class="risk-page__source-field">
-              <span>大小</span>
-              <strong>{{ sourceDoc.size }}</strong>
-            </div>
-            <div class="risk-page__source-field">
-              <span>日期</span>
-              <strong>{{ sourceDoc.date }}</strong>
-            </div>
-          </div>
-
-          <div v-if="extractionQuality" class="risk-page__quality">
-            <span>{{ extractionQuality.rounds }} 轮提取</span>
-            <span>{{ extractionQuality.verified ? '验证通过' : '待人工确认' }}</span>
-            <span v-if="extractionQuality.totalChunks">筛选 {{ extractionQuality.filteredChunks }}/{{ extractionQuality.totalChunks }} 切块</span>
-          </div>
-
-          <div v-if="events.length" class="risk-page__evidence-list">
-            <article
-              v-for="event in events.slice(0, 3)"
-              :key="event.id || event.event_id"
-              class="risk-page__evidence-item"
-            >
-              <div class="risk-page__evidence-head">
-                <strong>{{ event.risk_type }}</strong>
-                <span>{{ event.company_name }}</span>
-              </div>
-              <p>{{ event.evidence_text || event.summary || '暂无证据文本。' }}</p>
-            </article>
-          </div>
-        </section>
-
-        <section class="risk-page__utility-block">
-          <div v-if="reportErrorMsg" class="risk-page__report-error">{{ reportErrorMsg }}</div>
-
-          <div class="risk-page__report-type">
-            <el-radio-group v-model="reportType" size="small">
-              <el-radio-button label="company">公司报告</el-radio-button>
-              <el-radio-button label="time_range">时间范围</el-radio-button>
-            </el-radio-group>
-          </div>
-
-          <div v-if="reportType === 'company'" class="risk-page__report-fields">
-            <el-input v-model="reportForm.company_name" placeholder="公司名称" clearable />
-          </div>
-          <div v-else class="risk-page__report-fields risk-page__report-fields--dates">
-            <el-date-picker
-              v-model="reportForm.period_start"
-              type="date"
-              placeholder="开始日期"
-              value-format="YYYY-MM-DD"
-              style="width: 100%"
-            />
-            <el-date-picker
-              v-model="reportForm.period_end"
-              type="date"
-              placeholder="结束日期"
-              value-format="YYYY-MM-DD"
-              style="width: 100%"
-            />
-          </div>
-
-          <div class="risk-page__report-actions">
-            <el-button type="primary" :loading="isReportLoading" @click="generateReport">
-              生成报告
-            </el-button>
-            <el-button :disabled="!generatedReport || isReportExporting" :loading="isReportExporting" @click="downloadGeneratedReport('markdown')">
-              导出 Markdown
-            </el-button>
-            <el-button @click="exportEventsAsJson">
-              导出事件 JSON
-            </el-button>
-          </div>
-        </section>
-      </div>
-    </section>
 
     <el-drawer
       v-model="eventsDrawerOpen"
@@ -1277,20 +1037,30 @@ onBeforeUnmount(() => {
   max-width: 720px;
 }
 
-.risk-page__eyebrow {
-  display: inline-flex;
-  margin-bottom: 8px;
-  color: var(--text-muted);
-  font-size: 0.6875rem;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-
 .risk-page__hero-copy h2,
+.risk-page__launcher-head h3,
 .risk-page__panel-head h3 {
   margin: 0;
   color: var(--text-primary);
+}
+
+.risk-page__task-flow {
+  margin: 0;
+  padding: 0 0 0 18px;
+  display: grid;
+  gap: 8px;
+  color: var(--text-secondary);
+}
+
+.risk-page__task-flow li {
+  display: grid;
+  gap: 2px;
+  padding-left: 4px;
+}
+
+.risk-page__task-flow strong {
+  color: var(--text-primary);
+  font-size: 0.9375rem;
 }
 
 .risk-page__runline {
@@ -1299,20 +1069,16 @@ onBeforeUnmount(() => {
   padding: 18px 20px;
   border: 1px solid var(--line-soft);
   border-radius: 20px;
-  background:
-    linear-gradient(135deg, rgba(36, 87, 197, 0.08), rgba(36, 87, 197, 0.02)),
-    var(--surface-2);
+  background: rgba(36, 87, 197, 0.04);
 }
 
 .risk-page__runline strong,
-.risk-page__step-card strong,
 .risk-page__dropzone strong,
 .risk-page__knowledge-item strong {
   color: var(--text-primary);
 }
 
 .risk-page__runline span:last-child,
-.risk-page__step-card span,
 .risk-page__dropzone span {
   color: var(--text-secondary);
 }
@@ -1364,14 +1130,11 @@ onBeforeUnmount(() => {
   transition: width 180ms ease;
 }
 
-.risk-page__step-grid,
 .risk-page__knowledge-list {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;
 }
 
-.risk-page__step-card,
 .risk-page__dropzone {
   display: grid;
   gap: 6px;
@@ -1381,25 +1144,9 @@ onBeforeUnmount(() => {
   background: var(--surface-2);
 }
 
-.risk-page__step-card[data-state='active'] {
-  border-color: rgba(36, 87, 197, 0.28);
-  box-shadow: inset 0 0 0 1px rgba(36, 87, 197, 0.08);
-}
-
-.risk-page__step-card[data-state='done'] {
-  border-color: rgba(33, 129, 92, 0.24);
-}
-
-.risk-page__step-card[data-state='failed'] {
-  border-color: rgba(196, 73, 61, 0.24);
-}
-
 .risk-page__dropzone {
   grid-template-columns: auto 1fr;
   align-items: center;
-  background:
-    radial-gradient(circle at top left, rgba(36, 87, 197, 0.1), transparent 55%),
-    var(--surface-2);
 }
 
 .risk-page__dropzone-mark {
@@ -1414,6 +1161,7 @@ onBeforeUnmount(() => {
 }
 
 .risk-page__hero-copy p,
+.risk-page__launcher-head p,
 .risk-page__panel-head p,
 .risk-page__result-head p,
 .risk-page__evidence,
@@ -1423,16 +1171,13 @@ onBeforeUnmount(() => {
   line-height: 1.6;
 }
 
-.risk-page__summary,
-.risk-page__report-actions,
 .risk-page__actions,
-.risk-page__quality {
+.risk-page__knowledge-item {
   display: flex;
   gap: 10px;
 }
 
 .risk-page__launcher-actions,
-.risk-page__quality,
 .risk-page__actions {
   flex-wrap: wrap;
 }
@@ -1445,43 +1190,19 @@ onBeforeUnmount(() => {
   pointer-events: none;
 }
 
-.risk-page__summary {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-}
-
-.risk-page__summary-card {
-  display: grid;
-  gap: 6px;
-  padding: 18px 20px;
-  border: 1px solid var(--line-soft);
-  border-radius: 20px;
-  background: var(--surface-1);
-}
-
-.risk-page__summary-card small,
-.risk-page__source-field span,
+.risk-page__source-switch > span,
 .risk-page__muted-text,
-.risk-page__quality,
 .risk-events-drawer__quality {
   color: var(--text-muted);
   font-size: 0.75rem;
 }
 
-.risk-page__summary-card strong {
-  color: var(--text-primary);
-  font-size: 1.625rem;
-  line-height: 1;
-}
-
-.risk-page__main,
-.risk-page__secondary {
+.risk-page__main {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
-.risk-page__launcher,
-.risk-page__utility-block {
+.risk-page__launcher {
   display: grid;
   gap: 14px;
   padding: 16px 18px;
@@ -1490,15 +1211,21 @@ onBeforeUnmount(() => {
   background: var(--surface-2);
 }
 
-.risk-page__source-switch {
+.risk-page__launcher-head {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
-  gap: 12px;
+  gap: 16px;
   flex-wrap: wrap;
 }
 
-.risk-page__source-switch > span,
+.risk-page__source-switch {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 12px;
+}
+
 .risk-page__knowledge-item span,
 .risk-page__knowledge-item small {
   color: var(--text-muted);
@@ -1524,7 +1251,6 @@ onBeforeUnmount(() => {
 .risk-page__knowledge-item {
   appearance: none;
   width: 100%;
-  display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
@@ -1547,10 +1273,6 @@ onBeforeUnmount(() => {
 .risk-page__knowledge-item > div {
   display: grid;
   gap: 4px;
-}
-
-.risk-page__utilities {
-  gap: 14px;
 }
 
 .risk-page__panel {
@@ -1595,7 +1317,7 @@ onBeforeUnmount(() => {
 
 .risk-page__result-head strong,
 .risk-page__evidence-head strong,
-.risk-page__source-field strong {
+.risk-page__task-flow strong {
   color: var(--text-primary);
 }
 
@@ -1615,42 +1337,9 @@ onBeforeUnmount(() => {
   background: var(--surface-3);
 }
 
-.risk-page__source-grid {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 12px;
-}
-
-.risk-page__source-field {
-  display: grid;
-  gap: 6px;
-  padding: 14px;
-  border: 1px solid var(--line-soft);
-  border-radius: 16px;
-  background: var(--surface-2);
-}
-
 .risk-page__evidence-head span {
   color: var(--text-muted);
   font-size: 0.75rem;
-}
-
-.risk-page__report-error {
-  padding: 12px 14px;
-  border: 1px solid rgba(196, 73, 61, 0.16);
-  border-radius: 14px;
-  background: rgba(196, 73, 61, 0.08);
-  color: var(--risk);
-  font-size: 0.875rem;
-}
-
-.risk-page__report-fields {
-  display: grid;
-  gap: 10px;
-}
-
-.risk-page__report-fields--dates {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
 .risk-page__empty {
@@ -1753,12 +1442,8 @@ onBeforeUnmount(() => {
 
 @media (max-width: 1200px) {
   .risk-page__hero,
-  .risk-page__summary,
   .risk-page__main,
-  .risk-page__secondary,
-  .risk-page__knowledge-list,
-  .risk-page__source-grid,
-  .risk-page__report-fields--dates {
+  .risk-page__knowledge-list {
     grid-template-columns: 1fr;
   }
 }
@@ -1766,7 +1451,7 @@ onBeforeUnmount(() => {
 @media (max-width: 900px) {
   .risk-page__hero,
   .risk-page__panel-head,
-  .risk-page__step-grid,
+  .risk-page__launcher-head,
   .risk-page__knowledge-search {
     grid-template-columns: 1fr;
   }
@@ -1779,7 +1464,6 @@ onBeforeUnmount(() => {
   .risk-page__source-switch,
   .risk-page__launcher-actions,
   .risk-page__knowledge-item {
-    flex-direction: column;
     align-items: flex-start;
   }
 }
