@@ -60,7 +60,7 @@ export const appRoutes = [
       {
         path: 'risk',
         component: () => import('../views/workspace/WorkspaceRiskView.vue'),
-        meta: { title: '风险提取', subtitle: '上传单份文档，追踪入库与提取链路，并导出可复核摘要。' },
+        meta: { title: '风险提取', subtitle: '单文档链路：上传、提取、复核、导出。' },
       },
     ],
   },
