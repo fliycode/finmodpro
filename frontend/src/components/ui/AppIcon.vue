@@ -57,6 +57,12 @@ const iconMap = {
   'tag': 'lucide:tag',
   'book-open': 'lucide:book-open',
   'file-text': 'lucide:file-text',
+  'request-page': 'material-symbols:request-page-outline-rounded',
+  'data-usage': 'material-symbols:data-usage-rounded',
+  'frame-inspect': 'material-symbols:frame-inspect-rounded',
+  'model-training': 'material-symbols:model-training-outline-rounded',
+  'timer': 'material-symbols:timer-outline-rounded',
+  'warning': 'material-symbols:warning-outline-rounded',
   // Logos
   'github': 'lucide:github',
   // QA / Chat

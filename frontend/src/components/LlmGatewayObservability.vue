@@ -68,28 +68,28 @@ const summaryItems = computed(() => {
       key: 'requests',
       label: '总请求',
       value: formatInteger(traffic.request_count),
-      icon: 'activity',
+      icon: 'request-page',
       tone: 'brand',
     },
     {
       key: 'error-rate',
       label: '错误率',
       value: `${errorRate.toFixed(1)}%`,
-      icon: 'alert-triangle',
+      icon: 'warning',
       tone: errorRate > 5 ? 'risk' : errorRate > 2 ? 'warning' : 'success',
     },
     {
       key: 'latency',
       label: '平均延迟',
       value: `${avgLatency.toFixed(0)} ms`,
-      icon: 'clock',
+      icon: 'timer',
       tone: avgLatency > 5000 ? 'risk' : avgLatency > 2000 ? 'warning' : 'success',
     },
     {
       key: 'models',
       label: '活跃模型',
       value: String(gateway.active_model_count || 0),
-      icon: 'brain-circuit',
+      icon: 'model-training',
       tone: 'accent',
     },
   ];
@@ -140,45 +140,6 @@ const tokenChartOption = computed(() => {
   };
 });
 
-const latencyChartOption = computed(() => {
-  const buckets = summary.value.latency_buckets;
-  if (buckets.length === 0) return {};
-  const c = chartColors();
-  const axis = buildBoardAxis();
-
-  return {
-    tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' }, ...buildBoardTooltip() },
-    grid: { left: 12, right: 16, top: 16, bottom: 8, containLabel: true },
-    xAxis: {
-      type: 'category',
-      data: buckets.map((b) => b.label),
-      axisLabel: { color: c.textSecondary, fontSize: 10 },
-      axisLine: axis.axisLine,
-    },
-    yAxis: {
-      type: 'value',
-      axisLabel: axis.axisLabel,
-      splitLine: { lineStyle: { color: c.gridLine } },
-    },
-    series: [
-      {
-        type: 'bar',
-        data: buckets.map((b) => b.count),
-        itemStyle: {
-          color: (params) => {
-            const ratio = params.dataIndex / Math.max(buckets.length - 1, 1);
-            return ratio < 0.5
-              ? interpolateColor(c.brand, c.warning, ratio * 2)
-              : interpolateColor(c.warning, c.risk, (ratio - 0.5) * 2);
-          },
-          borderRadius: [4, 4, 0, 0],
-        },
-        barMaxWidth: 40,
-      },
-    ],
-  };
-});
-
 const tokenUsageByModel = computed(() => {
   const map = new Map();
   for (const log of logs.value.logs) {
@@ -211,22 +172,6 @@ const formatTime = (iso) => {
   } catch {
     return iso;
   }
-};
-
-function hexToRgb(hex) {
-  const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
-  return result
-    ? { r: parseInt(result[1], 16), g: parseInt(result[2], 16), b: parseInt(result[3], 16) }
-    : { r: 0, g: 0, b: 0 };
-}
-
-function interpolateColor(hex1, hex2, t) {
-  const c1 = hexToRgb(hex1);
-  const c2 = hexToRgb(hex2);
-  const r = Math.round(c1.r + (c2.r - c1.r) * t);
-  const g = Math.round(c1.g + (c2.g - c1.g) * t);
-  const b = Math.round(c1.b + (c2.b - c1.b) * t);
-  return `rgba(${r},${g},${b},0.78)`;
 }
 
 /* ---------- Data fetching ---------- */
@@ -302,18 +247,13 @@ onMounted(fetchObservability);
     <OpsStatusBand :items="summaryItems" />
 
     <div class="obs-chart-grid">
-      <AppSectionCard title="Token 用量" desc="按模型聚合当前窗口的输入/输出 Token 消耗。" admin>
+      <AppSectionCard title="Token 用量" icon="data-usage" admin>
         <AdminChart v-if="tokenUsageByModel.length > 0" :option="tokenChartOption" height="260px" />
         <div v-else class="admin-empty-state">当前窗口暂无请求数据</div>
       </AppSectionCard>
-
-      <AppSectionCard title="延迟分布" desc="当前窗口各延迟区间的请求数量。" admin>
-        <AdminChart v-if="summary.latency_buckets.length > 0" :option="latencyChartOption" height="260px" />
-        <div v-else class="admin-empty-state">当前窗口暂无延迟数据</div>
-      </AppSectionCard>
     </div>
 
-    <OpsInspectorDrawer title="请求摘要" desc="请求级别摘要，不暴露原始 prompt / response。">
+    <OpsInspectorDrawer title="请求摘要" icon="frame-inspect" :eyebrow="''">
       <AdminDataTable
         :data="logs.logs"
         :loading="isLoading"
