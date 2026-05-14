@@ -31,6 +31,17 @@ const summary = computed(() => summarizeAlertEvents(normalizedEvents.value));
 const severitySummary = computed(() => summarizeAlertSeverities(normalizedEvents.value));
 const priorityQueue = computed(() => prioritizedEvents.value.filter((event) => event.status !== 'resolved').slice(0, 3));
 const leadEvent = computed(() => priorityQueue.value[0] || null);
+const severityCards = computed(() => ([
+  { key: 'critical', label: '严重', icon: 'shield-alert', value: severitySummary.value.critical, tone: 'critical' },
+  { key: 'warning', label: '警告', icon: 'triangle-alert', value: severitySummary.value.warning, tone: 'warning' },
+  { key: 'info', label: '提示', icon: 'circle-alert', value: severitySummary.value.info, tone: 'info' },
+]));
+const summaryCards = computed(() => ([
+  { key: 'firing', label: '触发中', icon: 'bell-dot', value: summary.value.firing, tone: 'firing' },
+  { key: 'acknowledged', label: '已确认', icon: 'check', value: summary.value.acknowledged, tone: 'acknowledged' },
+  { key: 'resolved', label: '已恢复', icon: 'shield', value: summary.value.resolved, tone: 'resolved' },
+  { key: 'all', label: '最近事件', icon: 'history', value: summary.value.all, tone: 'all' },
+]));
 const filteredEvents = computed(() => {
   let currentEvents = prioritizedEvents.value;
 
@@ -105,6 +116,22 @@ function getPriorityLabel(event) {
   return '已恢复';
 }
 
+function getLeadIcon(event) {
+  if (!event) {
+    return 'shield-check';
+  }
+
+  if (event.severity === 'critical') {
+    return 'shield-alert';
+  }
+
+  if (event.severity === 'warning') {
+    return 'triangle-alert';
+  }
+
+  return 'circle-alert';
+}
+
 onMounted(loadEvents);
 </script>
 
@@ -113,15 +140,19 @@ onMounted(loadEvents);
     <AppSectionCard
       admin
       title="告警中心"
-      desc="右上角铃铛与系统监控页共用同一批告警事件；这里适合集中查看、筛选和确认处理。"
     >
       <section class="alert-center__triage-grid">
         <article
           class="alert-center__focus-card"
           :class="leadEvent ? `tone-${SEVERITY_TONES[leadEvent.severity]}` : 'is-calm'"
         >
-          <span class="alert-center__eyebrow">当前处置焦点</span>
           <template v-if="leadEvent">
+            <div class="alert-center__focus-topline">
+              <span class="alert-center__focus-icon" :class="`tone-${SEVERITY_TONES[leadEvent.severity]}`">
+                <AppIcon :name="getLeadIcon(leadEvent)" />
+              </span>
+              <span class="alert-center__focus-kicker">{{ SEVERITY_LABELS[leadEvent.severity] || leadEvent.severity }}</span>
+            </div>
             <div class="alert-center__focus-head">
               <div>
                 <h4>{{ leadEvent.ruleName }}</h4>
@@ -162,8 +193,12 @@ onMounted(loadEvents);
             </div>
           </template>
           <template v-else>
-            <h4>当前没有需要立即处理的告警</h4>
-            <p>最近告警都已恢复或已完成确认，你可以继续在系统监控页调整阈值和规则覆盖范围。</p>
+            <div class="alert-center__focus-empty">
+              <span class="alert-center__focus-icon is-calm">
+                <AppIcon name="shield-check" />
+              </span>
+              <h4>当前无待处理告警</h4>
+            </div>
             <div class="alert-center__focus-actions">
               <el-button size="small" @click="handleOpenMonitoring">
                 查看规则配置
@@ -173,40 +208,37 @@ onMounted(loadEvents);
         </article>
 
         <div class="alert-center__severity-grid">
-          <article class="alert-center__severity-card is-critical">
-            <span>严重</span>
-            <strong>{{ severitySummary.critical }}</strong>
-            <small>优先排查系统可用性风险</small>
-          </article>
-          <article class="alert-center__severity-card is-warning">
-            <span>警告</span>
-            <strong>{{ severitySummary.warning }}</strong>
-            <small>需要在当前班次内完成确认</small>
-          </article>
-          <article class="alert-center__severity-card is-info">
-            <span>提示</span>
-            <strong>{{ severitySummary.info }}</strong>
-            <small>用于记录低风险波动与恢复趋势</small>
+          <article
+            v-for="card in severityCards"
+            :key="card.key"
+            class="alert-center__severity-card"
+            :class="`is-${card.tone}`"
+          >
+            <span class="alert-center__severity-icon">
+              <AppIcon :name="card.icon" />
+            </span>
+            <div class="alert-center__stat-copy">
+              <span>{{ card.label }}</span>
+              <strong>{{ card.value }}</strong>
+            </div>
           </article>
         </div>
       </section>
 
       <div class="alert-center__summary-grid">
-        <article class="alert-center__summary-card is-firing">
-          <span>触发中</span>
-          <strong>{{ summary.firing }}</strong>
-        </article>
-        <article class="alert-center__summary-card is-acknowledged">
-          <span>已确认</span>
-          <strong>{{ summary.acknowledged }}</strong>
-        </article>
-        <article class="alert-center__summary-card is-resolved">
-          <span>已恢复</span>
-          <strong>{{ summary.resolved }}</strong>
-        </article>
-        <article class="alert-center__summary-card">
-          <span>最近事件</span>
-          <strong>{{ summary.all }}</strong>
+        <article
+          v-for="card in summaryCards"
+          :key="card.key"
+          class="alert-center__summary-card"
+          :class="card.tone !== 'all' ? `is-${card.tone}` : ''"
+        >
+          <span class="alert-center__summary-icon">
+            <AppIcon :name="card.icon" />
+          </span>
+          <div class="alert-center__stat-copy">
+            <span>{{ card.label }}</span>
+            <strong>{{ card.value }}</strong>
+          </div>
         </article>
       </div>
 
@@ -317,13 +349,6 @@ onMounted(loadEvents);
   background: rgba(255, 255, 255, 0.03);
 }
 
-.alert-center__eyebrow {
-  font-size: 11px;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--text-secondary, #94a3b8);
-}
-
 .alert-center__focus-head {
   display: flex;
   align-items: flex-start;
@@ -344,6 +369,64 @@ onMounted(loadEvents);
   font-size: 13px;
   line-height: 1.6;
   color: var(--text-secondary, #94a3b8);
+}
+
+.alert-center__focus-topline,
+.alert-center__focus-empty {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.alert-center__focus-kicker {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: var(--text-secondary, #94a3b8);
+}
+
+.alert-center__focus-icon,
+.alert-center__severity-icon,
+.alert-center__summary-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 12px;
+  border: 1px solid rgba(157, 173, 196, 0.12);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-primary, #f8fafc);
+  flex-shrink: 0;
+}
+
+.alert-center__focus-icon.tone-risk,
+.alert-center__severity-card.is-critical .alert-center__severity-icon {
+  color: #fecaca;
+  background: rgba(239, 68, 68, 0.14);
+  border-color: rgba(239, 68, 68, 0.24);
+}
+
+.alert-center__focus-icon.tone-warning,
+.alert-center__severity-card.is-warning .alert-center__severity-icon {
+  color: #fcd34d;
+  background: rgba(245, 158, 11, 0.14);
+  border-color: rgba(245, 158, 11, 0.24);
+}
+
+.alert-center__focus-icon.tone-info,
+.alert-center__severity-card.is-info .alert-center__severity-icon,
+.alert-center__summary-card.is-acknowledged .alert-center__summary-icon {
+  color: #93c5fd;
+  background: rgba(36, 87, 197, 0.14);
+  border-color: rgba(36, 87, 197, 0.24);
+}
+
+.alert-center__focus-icon.is-calm,
+.alert-center__summary-card.is-resolved .alert-center__summary-icon {
+  color: #86efac;
+  background: rgba(34, 197, 94, 0.14);
+  border-color: rgba(34, 197, 94, 0.22);
 }
 
 .alert-center__focus-meta {
@@ -415,6 +498,10 @@ onMounted(loadEvents);
   justify-content: center;
 }
 
+.alert-center__focus-card.is-calm .alert-center__focus-actions {
+  margin-top: 4px;
+}
+
 .alert-center__severity-grid,
 .alert-center__summary-grid {
   display: grid;
@@ -426,17 +513,22 @@ onMounted(loadEvents);
   grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 
+.alert-center__severity-card,
+.alert-center__summary-card {
+  gap: 12px;
+}
+
+.alert-center__stat-copy {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
 .alert-center__severity-card strong,
 .alert-center__summary-card strong {
   font-size: 28px;
   line-height: 1;
   color: var(--text-primary, #f8fafc);
-}
-
-.alert-center__severity-card small {
-  font-size: 12px;
-  line-height: 1.5;
-  color: var(--text-secondary, #94a3b8);
 }
 
 .alert-center__severity-card.is-critical {
@@ -461,6 +553,12 @@ onMounted(loadEvents);
 
 .alert-center__summary-card.is-resolved {
   border-color: rgba(34, 197, 94, 0.24);
+}
+
+.alert-center__summary-card.is-firing .alert-center__summary-icon {
+  color: #fecaca;
+  background: rgba(239, 68, 68, 0.14);
+  border-color: rgba(239, 68, 68, 0.24);
 }
 
 .alert-center__toolbar {

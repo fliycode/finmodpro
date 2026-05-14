@@ -70,6 +70,7 @@ const normalizedNotificationEvents = computed(() => notificationEvents.value.map
 const prioritizedNotificationEvents = computed(() => sortAlertEventsByPriority(normalizedNotificationEvents.value));
 const notificationSummary = computed(() => summarizeAlertEvents(normalizedNotificationEvents.value));
 const notificationSeveritySummary = computed(() => summarizeAlertSeverities(normalizedNotificationEvents.value));
+const notificationHasUnread = computed(() => notificationSummary.value.firing > 0);
 const notificationBadge = computed(() => {
   const count = notificationSummary.value.firing;
   if (!count) {
@@ -284,12 +285,13 @@ onBeforeUnmount(() => {
           <button
             ref="notificationTriggerRef"
             type="button"
-            class="app-topbar__notification-trigger"
+            :class="['app-topbar__notification-trigger', { 'has-unread': notificationHasUnread }]"
             :aria-label="notificationBadge ? `告警通知：${notificationBadge} 条未处理` : '告警通知'"
             @click.stop="toggleNotifications"
           >
             <AppIcon name="bell" />
-            <span v-if="notificationBadge" class="app-topbar__notification-badge">
+            <span v-if="notificationHasUnread" class="app-topbar__notification-dot" aria-hidden="true"></span>
+            <span v-if="notificationBadge" class="sr-only">
               {{ notificationBadge }}
             </span>
           </button>

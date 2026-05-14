@@ -5,6 +5,7 @@ import { RouterLink } from 'vue-router';
 import AdminChart from '../AdminChart.vue';
 import ServiceStatusCard from './ServiceStatusCard.vue';
 import AlertRuleDialog from './AlertRuleDialog.vue';
+import AppIcon from '../../ui/AppIcon.vue';
 import { monitoringApi } from '../../../api/monitoring.js';
 import {
   normalizeMonitoringPayload,
@@ -51,6 +52,12 @@ const eventSummary = computed(() => summarizeAlertEvents(normalizedEvents.value)
 const severitySummary = computed(() => summarizeAlertSeverities(normalizedEvents.value));
 const priorityEvents = computed(() => prioritizedEvents.value.filter((event) => event.status !== 'resolved').slice(0, 3));
 const recommendedTemplates = ALERT_RULE_TEMPLATES;
+const alertSummaryCards = computed(() => ([
+  { key: 'firing', label: '待处理', icon: 'bell-dot', value: eventSummary.value.firing, tone: 'firing' },
+  { key: 'critical', label: '严重告警', icon: 'shield-alert', value: severitySummary.value.critical, tone: 'critical' },
+  { key: 'acknowledged', label: '已确认', icon: 'check', value: eventSummary.value.acknowledged, tone: 'acknowledged' },
+  { key: 'resolved', label: '已恢复', icon: 'shield', value: eventSummary.value.resolved, tone: 'resolved' },
+]));
 const chartOption = computed(() => {
   if (!timeSeries.value || !timeSeries.value.data_points?.length) return null;
   return buildMetricTimeSeriesOption(normalizeMetricTimeSeries(timeSeries.value));
@@ -169,6 +176,18 @@ async function handleAcknowledgeEvent(eventId) {
   }
 }
 
+function getPriorityEventIcon(event) {
+  if (event?.severity === 'critical') {
+    return 'shield-alert';
+  }
+
+  if (event?.severity === 'warning') {
+    return 'triangle-alert';
+  }
+
+  return 'circle-alert';
+}
+
 onMounted(loadAll);
 </script>
 
@@ -176,7 +195,14 @@ onMounted(loadAll);
   <div v-loading="loading" class="monitoring">
     <!-- Service Status -->
     <section class="monitoring__section">
-      <h3 class="monitoring__heading">服务状态</h3>
+      <div class="monitoring__section-header monitoring__section-header--compact">
+        <div class="monitoring__heading-wrap">
+          <span class="monitoring__heading-icon">
+            <AppIcon name="server" />
+          </span>
+          <h3 class="monitoring__heading">服务状态</h3>
+        </div>
+      </div>
       <div class="monitoring__service-grid">
         <ServiceStatusCard
           v-for="card in serviceCards"
@@ -199,7 +225,14 @@ onMounted(loadAll);
 
     <!-- Resource Gauges -->
     <section class="monitoring__section">
-      <h3 class="monitoring__heading">系统资源</h3>
+      <div class="monitoring__section-header monitoring__section-header--compact">
+        <div class="monitoring__heading-wrap">
+          <span class="monitoring__heading-icon">
+            <AppIcon name="gauge" />
+          </span>
+          <h3 class="monitoring__heading">系统资源</h3>
+        </div>
+      </div>
       <div class="monitoring__gauge-grid">
         <div v-for="gauge in resourceGauges" :key="gauge.key" class="gauge-card">
           <div class="gauge-card__header">
@@ -224,7 +257,12 @@ onMounted(loadAll);
     <!-- Metric Time Series -->
     <section class="monitoring__section">
       <div class="monitoring__section-header">
-        <h3 class="monitoring__heading">指标趋势</h3>
+        <div class="monitoring__heading-wrap">
+          <span class="monitoring__heading-icon">
+            <AppIcon name="activity" />
+          </span>
+          <h3 class="monitoring__heading">指标趋势</h3>
+        </div>
         <el-select
           v-model="selectedMetric"
           size="small"
@@ -247,27 +285,31 @@ onMounted(loadAll);
 
     <section class="monitoring__section">
       <div class="monitoring__section-header">
-        <h3 class="monitoring__heading">告警态势</h3>
+        <div class="monitoring__heading-wrap">
+          <span class="monitoring__heading-icon">
+            <AppIcon name="siren" />
+          </span>
+          <h3 class="monitoring__heading">告警态势</h3>
+        </div>
         <RouterLink to="/admin/notifications" class="monitoring__inline-link">
+          <AppIcon name="arrow-right" />
           进入告警中心
         </RouterLink>
       </div>
       <div class="monitoring__alert-summary-grid">
-        <article class="monitoring__alert-summary-card">
-          <span>待处理</span>
-          <strong>{{ eventSummary.firing }}</strong>
-        </article>
-        <article class="monitoring__alert-summary-card">
-          <span>严重告警</span>
-          <strong>{{ severitySummary.critical }}</strong>
-        </article>
-        <article class="monitoring__alert-summary-card">
-          <span>已确认</span>
-          <strong>{{ eventSummary.acknowledged }}</strong>
-        </article>
-        <article class="monitoring__alert-summary-card">
-          <span>已恢复</span>
-          <strong>{{ eventSummary.resolved }}</strong>
+        <article
+          v-for="card in alertSummaryCards"
+          :key="card.key"
+          class="monitoring__alert-summary-card"
+          :class="`is-${card.tone}`"
+        >
+          <span class="monitoring__alert-summary-icon">
+            <AppIcon :name="card.icon" />
+          </span>
+          <div class="monitoring__alert-summary-copy">
+            <span>{{ card.label }}</span>
+            <strong>{{ card.value }}</strong>
+          </div>
         </article>
       </div>
 
@@ -279,7 +321,12 @@ onMounted(loadAll);
           :class="`tone-${SEVERITY_TONES[event.severity]}`"
         >
           <div class="monitoring__priority-head">
-            <strong>{{ event.ruleName }}</strong>
+            <div class="monitoring__priority-title">
+              <span class="monitoring__priority-icon" :class="`tone-${SEVERITY_TONES[event.severity]}`">
+                <AppIcon :name="getPriorityEventIcon(event)" />
+              </span>
+              <strong>{{ event.ruleName }}</strong>
+            </div>
             <el-tag :type="SEVERITY_TONES[event.severity] === 'risk' ? 'danger' : SEVERITY_TONES[event.severity]" size="small">
               {{ SEVERITY_LABELS[event.severity] || event.severity }}
             </el-tag>
@@ -294,7 +341,12 @@ onMounted(loadAll);
     <!-- Alert Rules -->
     <section class="monitoring__section">
       <div class="monitoring__section-header">
-        <h3 class="monitoring__heading">告警规则</h3>
+        <div class="monitoring__heading-wrap">
+          <span class="monitoring__heading-icon">
+            <AppIcon name="settings-2" />
+          </span>
+          <h3 class="monitoring__heading">告警规则</h3>
+        </div>
         <div class="monitoring__header-actions">
           <el-button size="small" @click="handleSeedDefaultRules">初始化默认规则</el-button>
           <el-button size="small" type="primary" @click="handleCreateRule">新建规则</el-button>
@@ -393,7 +445,14 @@ onMounted(loadAll);
 
     <!-- Alert Events -->
     <section class="monitoring__section">
-      <h3 class="monitoring__heading">告警事件</h3>
+      <div class="monitoring__section-header monitoring__section-header--compact">
+        <div class="monitoring__heading-wrap">
+          <span class="monitoring__heading-icon">
+            <AppIcon name="bell-dot" />
+          </span>
+          <h3 class="monitoring__heading">告警事件</h3>
+        </div>
+      </div>
       <el-table :data="normalizedEvents" size="small" stripe>
         <el-table-column label="规则" min-width="140" prop="ruleName" />
         <el-table-column label="严重程度" width="90">
@@ -467,12 +526,38 @@ onMounted(loadAll);
   gap: 12px;
 }
 
+.monitoring__section-header--compact {
+  margin-bottom: 16px;
+}
+
 .monitoring__header-actions,
 .monitoring__setup-actions {
   display: flex;
   align-items: center;
   gap: 8px;
   flex-wrap: wrap;
+}
+
+.monitoring__heading-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.monitoring__heading-icon,
+.monitoring__alert-summary-icon,
+.monitoring__priority-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 10px;
+  border: 1px solid var(--line-soft, #e5e7eb);
+  background: var(--surface-0, #f9fafb);
+  color: var(--brand, #2457c5);
+  flex-shrink: 0;
 }
 
 .monitoring__heading {
@@ -538,6 +623,9 @@ onMounted(loadAll);
 }
 
 .monitoring__inline-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   font-size: 12px;
   font-weight: 600;
   color: var(--brand, #2457c5);
@@ -552,24 +640,63 @@ onMounted(loadAll);
 }
 
 .monitoring__alert-summary-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
   padding: 16px 18px;
   border-radius: 14px;
   border: 1px solid var(--line-soft, #e5e7eb);
   background: var(--surface-0, #f9fafb);
 }
 
-.monitoring__alert-summary-card span {
+.monitoring__alert-summary-copy {
+  display: grid;
+  gap: 6px;
+}
+
+.monitoring__alert-summary-copy span {
   display: block;
   font-size: 12px;
   color: var(--text-secondary, #6b7280);
 }
 
-.monitoring__alert-summary-card strong {
+.monitoring__alert-summary-copy strong {
   display: block;
-  margin-top: 6px;
   font-size: 26px;
   line-height: 1;
   color: var(--text-primary, #111827);
+}
+
+.monitoring__alert-summary-card.is-firing .monitoring__alert-summary-icon,
+.monitoring__priority-icon.tone-risk {
+  color: var(--risk, #ef4444);
+  border-color: rgba(239, 68, 68, 0.18);
+  background: rgba(239, 68, 68, 0.08);
+}
+
+.monitoring__alert-summary-card.is-critical .monitoring__alert-summary-icon {
+  color: var(--risk, #ef4444);
+  border-color: rgba(239, 68, 68, 0.18);
+  background: rgba(239, 68, 68, 0.08);
+}
+
+.monitoring__priority-icon.tone-warning {
+  color: var(--warning, #f59e0b);
+  border-color: rgba(245, 158, 11, 0.18);
+  background: rgba(245, 158, 11, 0.1);
+}
+
+.monitoring__alert-summary-card.is-acknowledged .monitoring__alert-summary-icon,
+.monitoring__priority-icon.tone-info {
+  color: var(--brand, #2457c5);
+  border-color: rgba(36, 87, 197, 0.18);
+  background: rgba(36, 87, 197, 0.08);
+}
+
+.monitoring__alert-summary-card.is-resolved .monitoring__alert-summary-icon {
+  color: var(--success, #22c55e);
+  border-color: rgba(34, 197, 94, 0.18);
+  background: rgba(34, 197, 94, 0.08);
 }
 
 .monitoring__priority-grid {
@@ -607,6 +734,13 @@ onMounted(loadAll);
   justify-content: space-between;
   gap: 8px;
   flex-wrap: wrap;
+}
+
+.monitoring__priority-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
 }
 
 .monitoring__priority-card strong,

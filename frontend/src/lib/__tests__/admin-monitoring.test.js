@@ -18,7 +18,7 @@ test('alert templates default to in-app notifications for admin bell delivery', 
 
 test('monitoring helpers expose readable metric and channel labels', () => {
   assert.equal(getMetricLabel('cpu_percent'), 'CPU 使用率');
-  assert.equal(getNotificationChannelLabel('in_app'), '站内通知（管理员铃铛）');
+  assert.equal(getNotificationChannelLabel('in_app'), '站内通知');
 });
 
 test('alert summaries count each status bucket from recent events', () => {

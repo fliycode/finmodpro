@@ -241,7 +241,7 @@ export const METRIC_OPTIONS = [
 export const DEFAULT_ALERT_NOTIFICATION_CHANNELS = Object.freeze(['in_app']);
 
 export const ALERT_NOTIFICATION_CHANNEL_OPTIONS = Object.freeze([
-  { value: 'in_app', label: '站内通知（管理员铃铛）' },
+  { value: 'in_app', label: '站内通知' },
 ]);
 
 export const ALERT_RULE_TEMPLATES = Object.freeze([
