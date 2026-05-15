@@ -14,13 +14,14 @@ test('risk summary exposes reference-style workbench actions and removes side an
 
   assert.match(source, /风险信息提取/);
   assert.match(source, /文档来源/);
+  assert.match(source, /从知识库选择/);
+  assert.match(source, /使用并提取/);
   assert.match(source, /文档判读/);
   assert.match(source, /提取结果/);
   assert.match(source, /导出结果/);
   assert.match(source, /生成风险报告/);
   assert.doesNotMatch(source, /前往审核队列/);
   assert.doesNotMatch(source, /审核队列/);
-  assert.doesNotMatch(source, /知识库文档/);
   assert.doesNotMatch(source, /复核留痕/);
   assert.doesNotMatch(source, /提取说明/);
 });

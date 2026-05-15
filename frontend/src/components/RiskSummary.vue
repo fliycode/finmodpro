@@ -1,5 +1,5 @@
 <script setup>
-import { computed, ref } from 'vue';
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 import { ElMessageBox } from 'element-plus';
 
 import { kbApi } from '../api/knowledgebase.js';
@@ -14,19 +14,26 @@ const fmt = new Intl.NumberFormat('zh-CN');
 const levelPriority = { critical: 4, high: 3, medium: 2, low: 1 };
 const riskTagTypeMap = { high: 'danger', critical: 'danger', medium: 'warning', low: 'success' };
 const riskLevelTextMap = { critical: '严重', high: '高', medium: '中', low: '低' };
+const KNOWLEDGE_DOCUMENT_PAGE_SIZE = 24;
 
 const fileInput = ref(null);
 const isUploading = ref(false);
 const isGeneratingReport = ref(false);
+const isLoadingKnowledgeDocuments = ref(false);
 const activeDocument = ref(null);
+const knowledgeDocuments = ref([]);
+const selectedKnowledgeDocumentId = ref(null);
+const knowledgeDocumentQuery = ref('');
 const resultEvents = ref([]);
 const resultErrorMsg = ref('');
+let knowledgeDocumentsRequestId = 0;
+let knowledgeDocumentSearchTimer = null;
 
 const createPipelineRunState = () => ({
   status: 'idle',
   fileName: '',
   documentId: null,
-  detail: '等待上传文档',
+  detail: '等待选择文档',
   uploadProgress: 0,
   ingestProgress: 0,
   extractProgress: 0,
@@ -35,6 +42,21 @@ const createPipelineRunState = () => ({
 });
 
 const pipelineRun = ref(createPipelineRunState());
+
+const sortDocumentsNewestFirst = (documents = []) => [...documents].sort(
+  (left, right) => Number(right?.id || 0) - Number(left?.id || 0),
+);
+
+const mergeKnowledgeDocuments = (documents = []) => {
+  const merged = new Map();
+  documents.forEach((document) => {
+    if (!document?.id) {
+      return;
+    }
+    merged.set(String(document.id), document);
+  });
+  return sortDocumentsNewestFirst(Array.from(merged.values()));
+};
 
 const groupedRiskResults = computed(() => {
   const groups = new Map();
@@ -136,7 +158,7 @@ const resultSubline = computed(() => {
   }
 
   if (!activeDocument.value && !pipelineRun.value.fileName) {
-    return '上传后仅展示当前文档结果';
+    return '上传或选择知识库文档后，仅展示当前文档结果';
   }
 
   if (isUploading.value || ['uploading', 'ingesting', 'extracting'].includes(pipelineRun.value.status)) {
@@ -153,7 +175,34 @@ const resultSubline = computed(() => {
 });
 
 const isProcessing = computed(() => ['uploading', 'ingesting', 'extracting'].includes(pipelineRun.value.status));
-const documentDisplayTitle = computed(() => activeDocument.value?.title || pipelineRun.value.fileName || '等待上传文档');
+const selectedKnowledgeDocument = computed(() => (
+  knowledgeDocuments.value.find(
+    (document) => String(document.id) === String(selectedKnowledgeDocumentId.value),
+  ) || null
+));
+const canUseKnowledgeDocument = computed(() => (
+  !isUploading.value
+  && !isProcessing.value
+  && Boolean(selectedKnowledgeDocumentId.value)
+));
+const knowledgeDocumentHint = computed(() => {
+  if (isLoadingKnowledgeDocuments.value) {
+    return '正在加载你可访问的知识库文档';
+  }
+
+  if (!knowledgeDocuments.value.length) {
+    return knowledgeDocumentQuery.value
+      ? '没有匹配的知识库文档'
+      : '暂无可直接用于提取的知识库文档';
+  }
+
+  if (knowledgeDocumentQuery.value) {
+    return `已匹配 ${fmt.format(knowledgeDocuments.value.length)} 份知识库文档`;
+  }
+
+  return `可直接复用最近 ${fmt.format(knowledgeDocuments.value.length)} 份知识库文档`;
+});
+const documentDisplayTitle = computed(() => activeDocument.value?.title || pipelineRun.value.fileName || '等待选择文档');
 const documentTitle = computed(() => activeDocument.value?.title || pipelineRun.value.fileName || '当前文档');
 const canExportResults = computed(() => (
   !isProcessing.value
@@ -293,8 +342,8 @@ const pipelineStages = computed(() => {
     {
       key: 'upload',
       icon: 'upload',
-      label: '1 上传文档',
-      note: pipelineRun.value.fileName || '支持 PDF / DOCX / TXT',
+      label: '1 选择文档',
+      note: pipelineRun.value.fileName || '支持上传文件或复用知识库文档',
       progress: pipelineRun.value.uploadProgress,
     },
     {
@@ -402,7 +451,7 @@ const documentPreviewText = computed(() => (
   activeDocument.value?.parsedTextPreview
   || activeDocument.value?.processResult
   || pipelineRun.value.detail
-  || '上传文档后在这里查看预览。'
+  || '上传或选择知识库文档后在这里查看预览。'
 ));
 
 const updatePipelineRun = (patch) => {
@@ -418,6 +467,78 @@ const resetPipelineRun = () => {
   resultEvents.value = [];
   resultErrorMsg.value = '';
 };
+
+const upsertKnowledgeDocument = (document) => {
+  if (!document?.id) {
+    return;
+  }
+
+  knowledgeDocuments.value = mergeKnowledgeDocuments([document, ...knowledgeDocuments.value]);
+};
+
+const fetchKnowledgeDocuments = async ({ searchKeyword = '' } = {}) => {
+  const requestId = ++knowledgeDocumentsRequestId;
+  isLoadingKnowledgeDocuments.value = true;
+
+  try {
+    const result = await kbApi.listDocuments({
+      searchKeyword,
+      page: 1,
+      pageSize: KNOWLEDGE_DOCUMENT_PAGE_SIZE,
+    });
+
+    if (requestId !== knowledgeDocumentsRequestId) {
+      return;
+    }
+
+    const nextDocuments = mergeKnowledgeDocuments([
+      ...result.documents,
+      ...(activeDocument.value ? [activeDocument.value] : []),
+      ...(selectedKnowledgeDocument.value ? [selectedKnowledgeDocument.value] : []),
+    ]);
+
+    knowledgeDocuments.value = nextDocuments;
+
+    if (
+      selectedKnowledgeDocumentId.value
+      && !nextDocuments.some(
+        (document) => String(document.id) === String(selectedKnowledgeDocumentId.value),
+      )
+    ) {
+      selectedKnowledgeDocumentId.value = null;
+    }
+  } catch (error) {
+    if (requestId !== knowledgeDocumentsRequestId) {
+      return;
+    }
+    flash.error(error.message || '加载知识库文档失败，请稍后重试');
+  } finally {
+    if (requestId === knowledgeDocumentsRequestId) {
+      isLoadingKnowledgeDocuments.value = false;
+    }
+  }
+};
+
+const queueKnowledgeDocumentSearch = (searchKeyword = '') => {
+  if (knowledgeDocumentSearchTimer) {
+    clearTimeout(knowledgeDocumentSearchTimer);
+  }
+
+  knowledgeDocumentSearchTimer = setTimeout(() => {
+    fetchKnowledgeDocuments({ searchKeyword });
+  }, 250);
+};
+
+const handleKnowledgeDocumentQuery = (query = '') => {
+  knowledgeDocumentQuery.value = query.trim();
+  queueKnowledgeDocumentSearch(knowledgeDocumentQuery.value);
+};
+
+const formatKnowledgeDocumentMeta = (document) => [
+  document.processStep?.label || '已上传',
+  document.datasetName || '未分组',
+  document.size || '大小待识别',
+].filter(Boolean).join(' · ');
 
 const triggerUpload = () => fileInput.value?.click();
 
@@ -436,6 +557,8 @@ const startPipelineRun = (file) => {
 const syncActiveDocument = async (documentId) => {
   const document = await kbApi.getDocumentDetail(documentId);
   activeDocument.value = document;
+  selectedKnowledgeDocumentId.value = document.id;
+  upsertKnowledgeDocument(document);
 
   updatePipelineRun({
     documentId,
@@ -550,6 +673,7 @@ const runRiskPipeline = async (documentId) => {
 
     if (ingestPayload.document) {
       activeDocument.value = ingestPayload.document;
+      upsertKnowledgeDocument(ingestPayload.document);
       updatePipelineRun({
         status: 'ingesting',
         documentId,
@@ -593,6 +717,8 @@ const useExistingDocument = async (documentInfo, fallbackName) => {
   isUploading.value = true;
   resultEvents.value = [];
   resultErrorMsg.value = '';
+  selectedKnowledgeDocumentId.value = documentInfo.id;
+  upsertKnowledgeDocument(documentInfo);
 
   updatePipelineRun({
     ...createPipelineRunState(),
@@ -638,6 +764,8 @@ const handleFileChange = async (event) => {
 
     if (documentId) {
       activeDocument.value = result.document;
+      selectedKnowledgeDocumentId.value = documentId;
+      upsertKnowledgeDocument(result.document);
       updatePipelineRun({
         uploadProgress: 100,
         status: 'ingesting',
@@ -680,6 +808,35 @@ const handleFileChange = async (event) => {
     }
   }
 };
+
+const handleUseKnowledgeDocument = async () => {
+  if (!selectedKnowledgeDocumentId.value) {
+    flash.warning('请先选择知识库文档');
+    return;
+  }
+
+  try {
+    const selectedDocument = selectedKnowledgeDocument.value
+      || await kbApi.getDocumentDetail(selectedKnowledgeDocumentId.value);
+
+    await useExistingDocument(
+      selectedDocument,
+      selectedDocument.filename || selectedDocument.title || '知识库文档',
+    );
+  } catch (error) {
+    flash.error(error.message || '加载知识库文档失败，请稍后重试');
+  }
+};
+
+onMounted(() => {
+  fetchKnowledgeDocuments();
+});
+
+onBeforeUnmount(() => {
+  if (knowledgeDocumentSearchTimer) {
+    clearTimeout(knowledgeDocumentSearchTimer);
+  }
+});
 
 const getRiskTagType = (level) => riskTagTypeMap[level] || 'info';
 const getRiskLevelText = (level) => riskLevelTextMap[level] || level;
@@ -780,6 +937,58 @@ const handleGenerateReport = async () => {
           <AppIcon name="upload" />
           {{ uploadActionLabel }}
         </el-button>
+      </div>
+
+      <div class="risk-page__source-selector">
+        <div class="risk-page__source-selector-copy">
+          <span class="risk-page__heading-note">从知识库选择</span>
+          <p>{{ knowledgeDocumentHint }}</p>
+        </div>
+
+        <div class="risk-page__source-selector-controls">
+          <el-select
+            v-model="selectedKnowledgeDocumentId"
+            class="risk-page__document-select"
+            clearable
+            filterable
+            remote
+            reserve-keyword
+            remote-show-suffix
+            placeholder="搜索标题、文件名或正文片段"
+            :loading="isLoadingKnowledgeDocuments"
+            :remote-method="handleKnowledgeDocumentQuery"
+            no-data-text="暂无可见文档"
+            no-match-text="没有匹配的文档"
+          >
+            <el-option
+              v-for="document in knowledgeDocuments"
+              :key="document.id"
+              :label="document.title"
+              :value="document.id"
+            >
+              <div class="risk-page__document-option">
+                <div class="risk-page__document-option-copy">
+                  <strong>{{ document.title }}</strong>
+                  <span>{{ document.filename }}</span>
+                </div>
+                <span class="risk-page__status" :data-tone="document.isSearchReady ? 'success' : 'muted'">
+                  {{ document.processStep?.label || '已上传' }}
+                </span>
+              </div>
+              <p class="risk-page__document-option-meta">{{ formatKnowledgeDocumentMeta(document) }}</p>
+            </el-option>
+          </el-select>
+
+          <el-button
+            type="primary"
+            :disabled="!canUseKnowledgeDocument"
+            :loading="isUploading"
+            @click="handleUseKnowledgeDocument"
+          >
+            <AppIcon name="database" />
+            使用并提取
+          </el-button>
+        </div>
       </div>
 
       <div v-if="activeDocument || pipelineRun.fileName" class="risk-page__source-body">
@@ -927,7 +1136,7 @@ const handleGenerateReport = async () => {
         </div>
 
         <div v-else-if="!activeDocument && !pipelineRun.fileName" class="risk-page__state" role="status" aria-live="polite">
-          <strong>等待上传</strong>
+          <strong>等待选择文档</strong>
           <p>{{ resultSubline }}</p>
         </div>
 
@@ -989,8 +1198,11 @@ const handleGenerateReport = async () => {
 .risk-page__hero,
 .risk-page__source-card,
 .risk-page__source-copy,
+.risk-page__source-selector,
+.risk-page__source-selector-copy,
 .risk-page__source-body,
 .risk-page__source-file,
+.risk-page__document-option-copy,
 .risk-page__spotlight,
 .risk-page__spotlight-main,
 .risk-page__result-body,
@@ -1075,6 +1287,21 @@ const handleGenerateReport = async () => {
   flex-wrap: wrap;
 }
 
+.risk-page__source-selector {
+  gap: 12px;
+  padding: 16px 18px;
+  border: 1px solid var(--line-soft);
+  border-radius: 18px;
+  background: var(--surface-2);
+}
+
+.risk-page__source-selector-controls {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+}
+
 .risk-page__source-body {
   grid-template-columns: minmax(0, 1.2fr) minmax(320px, 0.8fr);
   gap: 16px;
@@ -1086,6 +1313,14 @@ const handleGenerateReport = async () => {
   color: var(--text-primary);
   font-size: 1rem;
   line-height: 1.35;
+}
+
+.risk-page__source-selector-copy p,
+.risk-page__document-option-copy span,
+.risk-page__document-option-meta {
+  margin: 0;
+  color: var(--text-secondary);
+  line-height: 1.5;
 }
 
 .risk-page__source-file,
@@ -1182,6 +1417,47 @@ const handleGenerateReport = async () => {
   display: grid;
   gap: 4px;
   min-width: 0;
+}
+
+.risk-page__document-select {
+  width: 100%;
+}
+
+.risk-page__source-selector :deep(.el-select__wrapper) {
+  min-height: 46px;
+  border-radius: 14px;
+  box-shadow: none;
+}
+
+.risk-page__source-selector :deep(.el-select__placeholder) {
+  color: var(--text-muted);
+}
+
+.risk-page__document-option {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.risk-page__document-option-copy {
+  min-width: 0;
+}
+
+.risk-page__document-option-copy strong {
+  display: block;
+  color: var(--text-primary);
+  line-height: 1.4;
+}
+
+.risk-page__document-option-copy span {
+  display: block;
+  font-size: 0.8125rem;
+}
+
+.risk-page__document-option-meta {
+  margin-top: 6px;
+  font-size: 0.75rem;
 }
 
 .risk-page__source-facts {
@@ -1454,6 +1730,10 @@ const handleGenerateReport = async () => {
   .risk-page__spotlight-head {
     flex-direction: column;
     align-items: flex-start;
+  }
+
+  .risk-page__source-selector-controls {
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .risk-page__result-item,
