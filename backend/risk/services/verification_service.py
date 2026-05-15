@@ -196,10 +196,17 @@ def _merge_similar_events(deduplicated_events):
 
                 if should_merge:
                     used.add(j)
+                    # Combine evidence before potential swap
+                    evidence_b = event_b.get("evidence_text", "")
+                    evidence_best = best_match.get("evidence_text", "")
+                    if evidence_b and evidence_b not in evidence_best:
+                        combined_evidence = (evidence_best + " " + evidence_b).strip()
+                    else:
+                        combined_evidence = evidence_best
+
                     if event_b.get("confidence_score", 0) > best_match.get("confidence_score", 0):
-                        best_match, event_a = event_b, best_match
-                    if event_b.get("evidence_text") and event_b["evidence_text"] not in best_match.get("evidence_text", ""):
-                        best_match["evidence_text"] = best_match.get("evidence_text", "") + " " + event_b["evidence_text"]
+                        best_match = event_b
+                    best_match["evidence_text"] = combined_evidence
 
             merged.append(best_match)
 

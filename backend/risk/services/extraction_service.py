@@ -1,5 +1,5 @@
 from django.conf import settings
-from django.db import transaction
+from django.db import models, transaction
 
 from common.exceptions import UpstreamServiceError
 from common.observability import trace_span
@@ -11,6 +11,49 @@ from risk.serializers import RiskEventSummarySerializer
 from risk.services.adjudication_service import build_event_enrichment
 from risk.services.chunk_filter_service import select_risk_relevant_chunks
 from risk.services.verification_service import run_extraction_with_verification
+
+
+def _text_bigrams(text):
+    text = str(text or "").strip()
+    return set(text[i:i + 2] for i in range(len(text) - 1)) if len(text) >= 2 else {text}
+
+
+def _text_similarity(text_a, text_b):
+    if not text_a or not text_b:
+        return 0.0
+    bg_a = _text_bigrams(text_a)
+    bg_b = _text_bigrams(text_b)
+    if not bg_a or not bg_b:
+        return 0.0
+    intersection = len(bg_a & bg_b)
+    union = len(bg_a | bg_b)
+    return intersection / union if union > 0 else 0.0
+
+
+def _filter_against_existing(*, document, extracted_events):
+    existing_events = list(
+        RiskEvent.objects.filter(document=document).values(
+            "company_name", "risk_type", "summary", "evidence_text"
+        )
+    )
+    if not existing_events:
+        return extracted_events
+
+    threshold = getattr(settings, "RISK_EXTRACTION_MERGE_SIMILARITY_THRESHOLD", 0.35)
+    new_events = []
+    for event in extracted_events:
+        is_duplicate = False
+        new_text = str(event.get("summary", "")) + str(event.get("evidence_text", ""))
+        for existing in existing_events:
+            if event.get("risk_type") != existing.get("risk_type"):
+                continue
+            existing_text = str(existing.get("summary", "")) + str(existing.get("evidence_text", ""))
+            if _text_similarity(new_text, existing_text) >= threshold:
+                is_duplicate = True
+                break
+        if not is_duplicate:
+            new_events.append(event)
+    return new_events
 
 RISK_SIGNAL_KEYWORDS = (
     "风险",
@@ -154,6 +197,10 @@ def extract_risk_events_for_document(*, document, stage_callback=None):
                 message="正在写入风险事件结果。",
             )
         chunk_by_id = {chunk.id: chunk for chunk in chunks}
+        extracted_events = _filter_against_existing(
+            document=document,
+            extracted_events=extracted_events,
+        )
         created_events = []
         with transaction.atomic():
             for event_data in extracted_events:

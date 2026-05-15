@@ -82,7 +82,7 @@ export function buildRiskSummaryExportDownload({
     grouped.forEach((item, index) => {
       summaryRows.push([
         index + 1,
-        normalizeInlineText(item?.key, '未分类风险'),
+        normalizeInlineText(item?.key || item?.risk_type_label || item?.risk_type, '未分类风险'),
         formatRiskLevel(item?.dominantLevel),
         Number.isFinite(Number(item?.count)) ? Number(item.count) : 0,
         normalizeInlineText(item?.summary, '暂无摘要'),
@@ -104,7 +104,7 @@ export function buildRiskSummaryExportDownload({
       eventRows.push([
         index + 1,
         formatRiskLevel(item?.risk_level),
-        normalizeInlineText(item?.risk_type, '未分类风险'),
+        normalizeInlineText(item?.risk_type_label || item?.risk_type, '未分类风险'),
         normalizeInlineText(item?.company_name, ''),
         normalizeInlineText(item?.event_date, ''),
         normalizeInlineText(item?.summary, '暂无摘要'),

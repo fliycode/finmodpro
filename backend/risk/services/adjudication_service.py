@@ -9,13 +9,13 @@ LEVEL_BASE_MATERIALITY = {
 }
 
 IMPACT_SCOPE_MAP = {
-    "liquidity": ["cash_flow", "funding"],
-    "credit": ["counterparty", "repayment"],
-    "market": ["valuation", "earnings"],
-    "compliance": ["regulatory", "reputation"],
-    "operation": ["operations", "execution"],
-    "litigation": ["legal", "reputation"],
-    "governance": ["governance", "controls"],
+    "liquidity": ["现金流", "融资"],
+    "credit": ["交易对手", "回款"],
+    "market": ["估值", "收益"],
+    "compliance": ["监管", "声誉"],
+    "operation": ["运营", "执行"],
+    "litigation": ["法律", "声誉"],
+    "governance": ["治理", "内控"],
 }
 
 WATCHPOINT_MAP = {

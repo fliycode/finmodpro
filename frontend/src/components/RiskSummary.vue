@@ -68,7 +68,7 @@ const groupedRiskResults = computed(() => {
   const groups = new Map();
 
   resultEvents.value.forEach((event) => {
-    const key = event.risk_type || '未分类风险';
+    const key = event.risk_type_label || event.risk_type || '未分类风险';
     const current = groups.get(key);
 
     if (!current) {
@@ -264,7 +264,7 @@ const detailDialogTitle = computed(() => {
   if (detailDialogMode.value === 'group') {
     return activeDetailPayload.value?.key || '风险分类详情';
   }
-  return activeDetailPayload.value?.risk_type || '风险详情';
+  return activeDetailPayload.value?.risk_type_label || activeDetailPayload.value?.risk_type || '风险详情';
 });
 
 const summaryItems = computed(() => [
@@ -1098,7 +1098,7 @@ const handleGenerateReport = async () => {
                     <span class="risk-page__status" :data-tone="riskTagTypeMap[normalizeRiskLevel(event.risk_level)] || 'muted'">
                       {{ getRiskLevelText(normalizeRiskLevel(event.risk_level)) }}
                     </span>
-                    <strong>{{ event.risk_type || '未分类风险' }}</strong>
+                    <strong>{{ event.risk_type_label || event.risk_type || '未分类风险' }}</strong>
                     <span>{{ formatRiskEventTime(event.event_time) }}</span>
                   </div>
                   <span class="risk-page__insight-confidence">{{ formatConfidenceScore(event.confidence_score) }}</span>

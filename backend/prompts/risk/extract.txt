@@ -26,7 +26,7 @@
 - event_time (string|null): ISO 8601 时间。若原文无法判断，设为 null。
 - chunk_id (integer|null): 来源切块 ID，来自 [chunk_id=...] 标记。
 - why_it_matters (string): 该风险事件的实质影响分析，说明为什么需要关注。
-- impact_scope (array of string): 影响维度，如 ["cash_flow", "funding"]。
+- impact_scope (array of string): 影响维度，使用中文，如 ["现金流", "融资"]。可选维度：现金流、融资、估值、收益、监管、声誉、运营、执行、法律、交易对手、回款、治理、内控。
 - watchpoints (array of string): 后续需监控的关键指标，2-4 条。
 - citations (array): 引用列表，每项包含 chunk_id (integer) 和 quote (string)。
 
@@ -55,7 +55,7 @@
       "confidence_score": 0.92,
       "chunk_id": 101,
       "why_it_matters": "短债覆盖倍数跌破安全线，若不能快速改善将面临续作困难。",
-      "impact_scope": ["cash_flow", "funding"],
+      "impact_scope": ["现金流", "融资"],
       "watchpoints": ["未来三个月现金流覆盖率", "资产处置进展", "短期债务到期分布"],
       "citations": [
         {{"chunk_id": 101, "quote": "短债覆盖倍数从2.1x下降至1.3x，现金流紧张。"}}

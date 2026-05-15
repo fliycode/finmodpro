@@ -2066,12 +2066,11 @@ class ResponseFormatTests(TestCase):
         call_args_list = mocked_get_chat_provider.return_value.chat.call_args_list
         extraction_options = call_args_list[0].kwargs.get("options", {})
         self.assertIn("response_format", extraction_options)
-        self.assertEqual(extraction_options["response_format"]["type"], "json_schema")
-        self.assertIn("json_schema", extraction_options["response_format"])
+        self.assertEqual(extraction_options["response_format"]["type"], "json_object")
 
         verification_options = call_args_list[1].kwargs.get("options", {})
         self.assertIn("response_format", verification_options)
-        self.assertEqual(verification_options["response_format"]["type"], "json_schema")
+        self.assertEqual(verification_options["response_format"]["type"], "json_object")
 
 
 class StructuredVerificationFeedbackTests(TestCase):

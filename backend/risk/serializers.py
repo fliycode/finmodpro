@@ -4,6 +4,17 @@ from rest_framework import serializers
 
 from risk.models import RiskEvent, RiskReport
 
+RISK_TYPE_LABELS = {
+    "liquidity": "流动性风险",
+    "credit": "信用风险",
+    "market": "市场风险",
+    "compliance": "合规风险",
+    "operation": "操作风险",
+    "litigation": "法律风险",
+    "governance": "治理风险",
+    "other": "其他风险",
+}
+
 
 class RiskExtractionEventSerializer(serializers.Serializer):
     company_name = serializers.CharField(max_length=255)
@@ -93,6 +104,7 @@ class RiskEventSummarySerializer(serializers.ModelSerializer):
     document_file_size = serializers.IntegerField(source="document.file_size", read_only=True, allow_null=True, default=0)
     document_source_date = serializers.DateField(source="document.source_date", read_only=True, allow_null=True, default=None)
     document_title = serializers.CharField(source="document.title", read_only=True, allow_null=True, default=None)
+    risk_type_label = serializers.SerializerMethodField()
     extraction_metadata = serializers.SerializerMethodField()
     taxonomy_code = serializers.SerializerMethodField()
     citations = serializers.SerializerMethodField()
@@ -110,6 +122,7 @@ class RiskEventSummarySerializer(serializers.ModelSerializer):
             "id",
             "company_name",
             "risk_type",
+            "risk_type_label",
             "risk_level",
             "event_time",
             "summary",
@@ -138,6 +151,9 @@ class RiskEventSummarySerializer(serializers.ModelSerializer):
 
     def _get_meta(self, obj):
         return obj.metadata or {}
+
+    def get_risk_type_label(self, obj):
+        return RISK_TYPE_LABELS.get(obj.risk_type, obj.risk_type)
 
     def get_extraction_metadata(self, obj):
         meta = self._get_meta(obj)
