@@ -24,6 +24,10 @@ const activeDocument = ref(null);
 const knowledgeDocuments = ref([]);
 const selectedKnowledgeDocumentId = ref(null);
 const knowledgeDocumentQuery = ref('');
+const documentPickerVisible = ref(false);
+const detailDialogVisible = ref(false);
+const detailDialogMode = ref('event');
+const activeDetailPayload = ref(null);
 const resultEvents = ref([]);
 const resultErrorMsg = ref('');
 let knowledgeDocumentsRequestId = 0;
@@ -58,6 +62,8 @@ const mergeKnowledgeDocuments = (documents = []) => {
   return sortDocumentsNewestFirst(Array.from(merged.values()));
 };
 
+const normalizeRiskLevel = (level) => String(level || 'low').toLowerCase();
+
 const groupedRiskResults = computed(() => {
   const groups = new Map();
 
@@ -69,14 +75,16 @@ const groupedRiskResults = computed(() => {
       groups.set(key, {
         key,
         count: 1,
-        dominantLevel: event.risk_level || 'low',
+        dominantLevel: normalizeRiskLevel(event.risk_level),
         summary: event.summary || '暂无摘要',
         evidence: event.evidence_text || event.summary || '暂无证据文本。',
+        events: [event],
       });
       return;
     }
 
     current.count += 1;
+    current.events.push(event);
     if ((levelPriority[event.risk_level] || 0) > (levelPriority[current.dominantLevel] || 0)) {
       current.dominantLevel = event.risk_level || current.dominantLevel;
       current.summary = event.summary || current.summary;
@@ -92,6 +100,21 @@ const groupedRiskResults = computed(() => {
     return right.count - left.count;
   });
 });
+
+const sortedRiskEvents = computed(() => [...resultEvents.value].sort((left, right) => {
+  const levelGap = (levelPriority[normalizeRiskLevel(right.risk_level)] || 0)
+    - (levelPriority[normalizeRiskLevel(left.risk_level)] || 0);
+  if (levelGap !== 0) {
+    return levelGap;
+  }
+
+  const confidenceGap = Number(right.confidence_score || 0) - Number(left.confidence_score || 0);
+  if (confidenceGap !== 0) {
+    return confidenceGap;
+  }
+
+  return String(right.event_time || '').localeCompare(String(left.event_time || ''));
+}));
 
 const highestRiskGroup = computed(() => groupedRiskResults.value[0] || null);
 const severeEventCount = computed(() => resultEvents.value.filter(
@@ -180,6 +203,7 @@ const selectedKnowledgeDocument = computed(() => (
     (document) => String(document.id) === String(selectedKnowledgeDocumentId.value),
   ) || null
 ));
+const pickerDocuments = computed(() => knowledgeDocuments.value.slice(0, 12));
 const canUseKnowledgeDocument = computed(() => (
   !isUploading.value
   && !isProcessing.value
@@ -210,11 +234,28 @@ const canExportResults = computed(() => (
   && pipelineRun.value.status === 'succeeded'
   && Boolean(activeDocument.value?.id || pipelineRun.value.fileName)
 ));
-const exportHint = computed(() => (
-  canExportResults.value
-    ? '导出 Markdown 留痕摘要'
-    : '提取完成后导出当前文档'
+const exportHint = computed(() => (canExportResults.value ? '导出结果' : '提取完成后导出结果'));
+const classificationHint = computed(() => (
+  groupedRiskResults.value.length
+    ? `${fmt.format(groupedRiskResults.value.length)} 类风险`
+    : '按风险类别聚合'
 ));
+const documentContextItems = computed(() => {
+  const document = activeDocument.value;
+
+  return [
+    document?.filename || pipelineRun.value.fileName || '未选择文件',
+    document?.processStep?.label || pipelineStatusText.value,
+    document?.size || '大小待识别',
+    groupedRiskResults.value.length ? `${fmt.format(groupedRiskResults.value.length)} 类风险` : null,
+  ].filter(Boolean);
+});
+const detailDialogTitle = computed(() => {
+  if (detailDialogMode.value === 'group') {
+    return activeDetailPayload.value?.key || '风险分类详情';
+  }
+  return activeDetailPayload.value?.risk_type || '风险详情';
+});
 
 const summaryItems = computed(() => [
   {
@@ -540,6 +581,52 @@ const formatKnowledgeDocumentMeta = (document) => [
   document.size || '大小待识别',
 ].filter(Boolean).join(' · ');
 
+const formatRiskEventTime = (value) => {
+  if (!value) {
+    return '时间待补充';
+  }
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return '时间待补充';
+  }
+  return new Intl.DateTimeFormat('zh-CN', {
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).format(date).replace(/\//g, '-');
+};
+
+const formatConfidenceScore = (value) => {
+  const score = Number(value);
+  if (!Number.isFinite(score) || score <= 0) {
+    return '置信度待补充';
+  }
+  return `置信度 ${Math.round(score * 100)}%`;
+};
+
+const openRiskEventDetail = (event) => {
+  activeDetailPayload.value = event;
+  detailDialogMode.value = 'event';
+  detailDialogVisible.value = true;
+};
+
+const openRiskGroupDetail = (group) => {
+  activeDetailPayload.value = group;
+  detailDialogMode.value = 'group';
+  detailDialogVisible.value = true;
+};
+
+const handleUploadCommand = (command) => {
+  if (command === 'knowledge') {
+    documentPickerVisible.value = true;
+    fetchKnowledgeDocuments({ searchKeyword: knowledgeDocumentQuery.value });
+    return;
+  }
+  triggerUpload();
+};
+
 const triggerUpload = () => fileInput.value?.click();
 
 const startPipelineRun = (file) => {
@@ -819,6 +906,7 @@ const handleUseKnowledgeDocument = async () => {
     const selectedDocument = selectedKnowledgeDocument.value
       || await kbApi.getDocumentDetail(selectedKnowledgeDocumentId.value);
 
+    documentPickerVisible.value = false;
     await useExistingDocument(
       selectedDocument,
       selectedDocument.filename || selectedDocument.title || '知识库文档',
@@ -900,163 +988,44 @@ const handleGenerateReport = async () => {
       tabindex="-1"
     />
 
-    <section class="risk-page__hero">
-      <div class="risk-page__hero-copy">
-        <span class="risk-page__eyebrow">风险提取工作台</span>
-        <h2>风险信息提取</h2>
-        <p>围绕当前文档完成提取、判读、导出与报告生成。</p>
-      </div>
-
-      <div class="risk-page__hero-actions">
-        <span class="risk-page__status" :data-tone="pipelineTone">{{ pipelineStatusText }}</span>
-        <el-button plain :disabled="!canExportResults" @click="handleExport">
-          <AppIcon name="download" />
-          导出结果
-        </el-button>
-        <el-button
-          type="primary"
-          :loading="isGeneratingReport"
-          :disabled="!canGenerateReport && !isGeneratingReport"
-          @click="handleGenerateReport"
-        >
-          <AppIcon name="request-page" />
-          生成风险报告
-        </el-button>
-      </div>
-    </section>
-
-    <section class="risk-page__source-card">
-      <div class="risk-page__source-head">
-        <div class="risk-page__source-copy">
-          <span class="risk-page__eyebrow">文档来源</span>
-          <strong>{{ documentDisplayTitle }}</strong>
-          <p>{{ resultSubline }}</p>
-        </div>
-
-        <el-button :loading="isUploading" @click="triggerUpload">
+    <section class="risk-page__toolbar">
+      <el-dropdown trigger="click" @command="handleUploadCommand">
+        <el-button class="risk-page__toolbar-button" :loading="isUploading" aria-label="上传文档">
           <AppIcon name="upload" />
-          {{ uploadActionLabel }}
+          上传文档
+          <AppIcon name="chevron-down" />
         </el-button>
-      </div>
+        <template #dropdown>
+          <el-dropdown-menu>
+            <el-dropdown-item command="knowledge">从知识库选择</el-dropdown-item>
+            <el-dropdown-item command="direct">直接上传</el-dropdown-item>
+          </el-dropdown-menu>
+        </template>
+      </el-dropdown>
 
-      <div class="risk-page__source-selector">
-        <div class="risk-page__source-selector-copy">
-          <span class="risk-page__heading-note">从知识库选择</span>
-          <p>{{ knowledgeDocumentHint }}</p>
-        </div>
-
-        <div class="risk-page__source-selector-controls">
-          <el-select
-            v-model="selectedKnowledgeDocumentId"
-            class="risk-page__document-select"
-            clearable
-            filterable
-            remote
-            reserve-keyword
-            remote-show-suffix
-            placeholder="搜索标题、文件名或正文片段"
-            :loading="isLoadingKnowledgeDocuments"
-            :remote-method="handleKnowledgeDocumentQuery"
-            no-data-text="暂无可见文档"
-            no-match-text="没有匹配的文档"
-          >
-            <el-option
-              v-for="document in knowledgeDocuments"
-              :key="document.id"
-              :label="document.title"
-              :value="document.id"
-            >
-              <div class="risk-page__document-option">
-                <div class="risk-page__document-option-copy">
-                  <strong>{{ document.title }}</strong>
-                  <span>{{ document.filename }}</span>
-                </div>
-                <span class="risk-page__status" :data-tone="document.isSearchReady ? 'success' : 'muted'">
-                  {{ document.processStep?.label || '已上传' }}
-                </span>
-              </div>
-              <p class="risk-page__document-option-meta">{{ formatKnowledgeDocumentMeta(document) }}</p>
-            </el-option>
-          </el-select>
-
-          <el-button
-            type="primary"
-            :disabled="!canUseKnowledgeDocument"
-            :loading="isUploading"
-            @click="handleUseKnowledgeDocument"
-          >
-            <AppIcon name="database" />
-            使用并提取
-          </el-button>
-        </div>
-      </div>
-
-      <div v-if="activeDocument || pipelineRun.fileName" class="risk-page__source-body">
-        <div class="risk-page__source-file">
-          <span class="risk-page__file-type">{{ (activeDocument?.docType || pipelineRun.fileName?.split('.').pop() || 'doc').toUpperCase() }}</span>
-          <div class="risk-page__source-file-copy">
-            <strong>{{ documentTitle }}</strong>
-            <span>
-              {{ activeDocument?.size || '待识别' }}
-              <template v-if="activeDocument?.sourceDate && activeDocument.sourceDate !== 'N/A'">
-                · {{ activeDocument.sourceDate }}
-              </template>
-              <template v-if="activeDocument?.uploadTime">
-                · {{ activeDocument.uploadTime }}
-              </template>
-            </span>
-          </div>
-        </div>
-
-        <dl class="risk-page__source-facts">
-          <div
-            v-for="fact in documentSourceFacts"
-            :key="fact.label"
-            class="risk-page__source-fact"
-          >
-            <dt>{{ fact.label }}</dt>
-            <dd>{{ fact.value }}</dd>
-          </div>
-        </dl>
-      </div>
-
-      <div
-        class="risk-page__progress"
-        role="progressbar"
-        :aria-valuenow="pipelinePercent"
-        aria-valuemin="0"
-        aria-valuemax="100"
-        aria-label="风险提取总进度"
-      >
-        <span :style="{ width: `${pipelinePercent}%` }" />
-      </div>
+      <el-button plain class="risk-page__toolbar-button" :disabled="!canExportResults" @click="handleExport">
+        <AppIcon name="download" />
+        {{ exportHint }}
+      </el-button>
     </section>
-
-    <ol class="risk-page__stage-strip" aria-label="处理链路">
-      <li
-        v-for="stage in pipelineStages"
-        :key="stage.key"
-        class="risk-page__stage-item"
-        :data-tone="stage.tone"
-      >
-        <span class="risk-page__stage-index">{{ stage.label.split(' ')[0] }}</span>
-        <div class="risk-page__stage-copy">
-          <strong>{{ stage.label.replace(/^\d+\s*/, '') }}</strong>
-          <p>{{ stage.note }}</p>
-        </div>
-        <span class="risk-page__status" :data-tone="stage.tone">{{ stage.statusText }}</span>
-      </li>
-    </ol>
 
     <section class="risk-page__studio">
       <AppSectionCard
-        class="risk-page__viewer-card"
-        title="文档判读"
+        class="risk-page__info-card"
+        title="风险信息"
         :desc="documentDisplayTitle"
         icon="file-text"
       >
         <template #header>
-          <span class="risk-page__heading-note">{{ activeDocument?.datasetName || '当前文档' }}</span>
+          <div class="risk-page__context-bar">
+            <span
+              v-for="item in documentContextItems"
+              :key="item"
+              class="risk-page__context-pill"
+            >
+              {{ item }}
+            </span>
+          </div>
         </template>
 
         <div v-if="resultErrorMsg" class="risk-page__state risk-page__state--error" role="alert">
@@ -1065,7 +1034,7 @@ const handleGenerateReport = async () => {
         </div>
 
         <div v-else-if="!activeDocument && !pipelineRun.fileName" class="risk-page__state" role="status" aria-live="polite">
-          <strong>还没有文档</strong>
+          <strong>先选择一份文档</strong>
           <p>{{ resultSubline }}</p>
         </div>
 
@@ -1073,6 +1042,57 @@ const handleGenerateReport = async () => {
           <strong>{{ pipelineRun.fileName || activeDocument?.title || '正在处理文档' }}</strong>
           <p>{{ resultSubline }}</p>
         </div>
+
+        <template v-else-if="sortedRiskEvents.length">
+          <div class="risk-page__summary-strip" aria-label="风险摘要">
+            <div
+              v-for="item in summaryItems"
+              :key="item.label"
+              class="risk-page__summary-card"
+            >
+              <span class="risk-page__summary-label">{{ item.label }}</span>
+              <strong class="risk-page__summary-value">{{ item.value }}</strong>
+              <span class="risk-page__summary-note">{{ item.note }}</span>
+            </div>
+          </div>
+
+          <ol class="risk-page__insight-list">
+            <li
+              v-for="event in sortedRiskEvents"
+              :key="`${event.id || event.risk_type}-${event.event_time || event.summary}`"
+            >
+              <button
+                type="button"
+                class="risk-page__insight"
+                :data-tone="riskTagTypeMap[normalizeRiskLevel(event.risk_level)] || 'muted'"
+                @click="openRiskEventDetail(event)"
+              >
+                <div class="risk-page__insight-head">
+                  <div class="risk-page__insight-meta">
+                    <span class="risk-page__status" :data-tone="riskTagTypeMap[normalizeRiskLevel(event.risk_level)] || 'muted'">
+                      {{ getRiskLevelText(normalizeRiskLevel(event.risk_level)) }}
+                    </span>
+                    <strong>{{ event.risk_type || '未分类风险' }}</strong>
+                    <span>{{ formatRiskEventTime(event.event_time) }}</span>
+                  </div>
+                  <span class="risk-page__insight-confidence">{{ formatConfidenceScore(event.confidence_score) }}</span>
+                </div>
+
+                <p class="risk-page__insight-summary">{{ event.summary || '暂无摘要' }}</p>
+                <p class="risk-page__insight-evidence">
+                  <mark :data-tone="riskTagTypeMap[normalizeRiskLevel(event.risk_level)] || 'muted'">
+                    {{ event.evidence_text || event.summary || '暂无证据文本。' }}
+                  </mark>
+                </p>
+              </button>
+            </li>
+          </ol>
+
+          <div class="risk-page__document-note">
+            <span class="risk-page__heading-note">原文片段</span>
+            <p>{{ documentPreviewText }}</p>
+          </div>
+        </template>
 
         <iframe
           v-else-if="previewMode === 'pdf' && activeDocument?.previewUrl"
@@ -1088,102 +1108,184 @@ const handleGenerateReport = async () => {
       </AppSectionCard>
 
       <AppSectionCard
-        class="risk-page__results-card"
-        title="提取结果"
-        desc="按优先级查看当前文档的风险聚合"
+        class="risk-page__classification-card"
+        title="风险分类"
+        :desc="classificationHint"
         icon="shield"
       >
-        <template #header>
-          <span class="risk-page__heading-note">{{ resultListCaption }}</span>
-        </template>
-
-        <div class="risk-page__summary-rail" aria-label="结果摘要">
-          <div
-            v-for="item in summaryItems"
-            :key="item.label"
-            class="risk-page__summary-item"
-          >
-            <span class="risk-page__summary-label">{{ item.label }}</span>
-            <strong class="risk-page__summary-value">{{ item.value }}</strong>
-            <span class="risk-page__summary-note">{{ item.note }}</span>
-          </div>
-        </div>
-
-        <section
-          v-if="resultSpotlight && !isProcessing && !resultErrorMsg"
-          class="risk-page__spotlight"
-          :data-tone="riskTagTypeMap[resultSpotlight.levelKey] || 'muted'"
-        >
-          <div class="risk-page__spotlight-main">
-            <span class="risk-page__eyebrow">当前最高优先级</span>
-            <div class="risk-page__spotlight-head">
-              <h4>{{ resultSpotlight.title }}</h4>
-              <div class="risk-page__spotlight-meta">
-                <span class="risk-page__status" :data-tone="riskTagTypeMap[resultSpotlight.levelKey] || 'muted'">
-                  {{ resultSpotlight.levelText }}
-                </span>
-                <strong>{{ resultSpotlight.countText }}</strong>
-              </div>
-            </div>
-            <p>{{ resultSpotlight.summary }}</p>
-          </div>
-          <p class="risk-page__spotlight-evidence">{{ resultSpotlight.evidence }}</p>
-        </section>
-
         <div v-if="resultErrorMsg" class="risk-page__state risk-page__state--error" role="alert">
           <strong>提取失败</strong>
           <p>{{ resultSubline }}</p>
         </div>
 
         <div v-else-if="!activeDocument && !pipelineRun.fileName" class="risk-page__state" role="status" aria-live="polite">
-          <strong>等待选择文档</strong>
-          <p>{{ resultSubline }}</p>
+          <strong>等待分类结果</strong>
+          <p>选择文档后，这里会按风险类别聚合。</p>
         </div>
 
         <div v-else-if="isProcessing" class="risk-page__state" role="status" aria-live="polite">
-          <strong>正在提取</strong>
+          <strong>正在聚合分类</strong>
           <p>{{ resultSubline }}</p>
         </div>
 
-        <div v-else-if="!groupedRiskResults.length" class="risk-page__state" role="status" aria-live="polite">
+        <ol v-else-if="groupedRiskResults.length" class="risk-page__category-list">
+          <li v-for="group in groupedRiskResults" :key="group.key">
+            <button
+              type="button"
+              class="risk-page__category"
+              :data-tone="riskTagTypeMap[normalizeRiskLevel(group.dominantLevel)] || 'muted'"
+              @click="openRiskGroupDetail(group)"
+            >
+              <div class="risk-page__category-head">
+                <strong>{{ group.key }}</strong>
+                <span class="risk-page__status" :data-tone="riskTagTypeMap[normalizeRiskLevel(group.dominantLevel)] || 'muted'">
+                  {{ getRiskLevelText(normalizeRiskLevel(group.dominantLevel)) }}
+                </span>
+              </div>
+              <p>{{ group.summary }}</p>
+              <div class="risk-page__category-meta">
+                <span>{{ group.count }} 条事件</span>
+                <span>点击查看详情</span>
+              </div>
+            </button>
+          </li>
+        </ol>
+
+        <div v-else class="risk-page__state" role="status" aria-live="polite">
           <strong>{{ activeDocument?.title || '当前文档' }}</strong>
           <p>{{ resultSubline }}</p>
         </div>
-
-        <ol v-else class="risk-page__result-list">
-          <li
-            v-for="(item, index) in groupedRiskResults"
-            :key="item.key"
-            class="risk-page__result-item"
-            :data-tone="riskTagTypeMap[item.dominantLevel] || 'muted'"
-          >
-            <div class="risk-page__result-index">{{ String(index + 1).padStart(2, '0') }}</div>
-            <div class="risk-page__result-body">
-              <div class="risk-page__result-head">
-                <div class="risk-page__result-copy">
-                  <strong>{{ item.key }}</strong>
-                  <p>{{ item.summary }}</p>
-                </div>
-                <div class="risk-page__result-meta">
-                  <el-tag :type="getRiskTagType(item.dominantLevel)" size="small">
-                    {{ getRiskLevelText(item.dominantLevel) }}
-                  </el-tag>
-                  <span>{{ item.count }} 条事件</span>
-                </div>
-              </div>
-              <p class="risk-page__evidence">{{ item.evidence }}</p>
-            </div>
-          </li>
-        </ol>
       </AppSectionCard>
     </section>
+
+    <el-dialog
+      v-model="documentPickerVisible"
+      title="从知识库选择"
+      width="680px"
+      class="risk-page__dialog"
+      destroy-on-close
+    >
+      <div class="risk-page__picker">
+        <label class="risk-page__field">
+          <span class="risk-page__field-label">搜索知识库文档</span>
+          <el-input
+            v-model="knowledgeDocumentQuery"
+            clearable
+            placeholder="搜索标题、文件名或正文片段"
+            @input="handleKnowledgeDocumentQuery"
+          >
+            <template #prefix>
+              <AppIcon name="search" />
+            </template>
+          </el-input>
+        </label>
+
+        <p class="risk-page__picker-hint">{{ knowledgeDocumentHint }}</p>
+
+        <ol v-if="pickerDocuments.length" class="risk-page__picker-list">
+          <li v-for="document in pickerDocuments" :key="document.id">
+            <button
+              type="button"
+              class="risk-page__picker-item"
+              :data-selected="String(selectedKnowledgeDocumentId) === String(document.id)"
+              @click="selectedKnowledgeDocumentId = document.id"
+            >
+              <div class="risk-page__picker-item-head">
+                <strong>{{ document.title }}</strong>
+                <span class="risk-page__status" :data-tone="document.isSearchReady ? 'success' : 'muted'">
+                  {{ document.processStep?.label || '已上传' }}
+                </span>
+              </div>
+              <span>{{ document.filename }}</span>
+              <p>{{ formatKnowledgeDocumentMeta(document) }}</p>
+            </button>
+          </li>
+        </ol>
+
+        <div v-else class="risk-page__state" role="status" aria-live="polite">
+          <strong>没有匹配的文档</strong>
+          <p>可以换个关键词，或直接上传新文件。</p>
+        </div>
+      </div>
+
+      <template #footer>
+        <div class="risk-page__dialog-actions">
+          <el-button @click="documentPickerVisible = false">取消</el-button>
+          <el-button
+            type="primary"
+            :disabled="!canUseKnowledgeDocument"
+            :loading="isUploading"
+            @click="handleUseKnowledgeDocument"
+          >
+            使用并提取
+          </el-button>
+        </div>
+      </template>
+    </el-dialog>
+
+    <el-dialog
+      v-model="detailDialogVisible"
+      :title="detailDialogTitle"
+      width="720px"
+      class="risk-page__dialog"
+      destroy-on-close
+    >
+      <div v-if="detailDialogMode === 'event' && activeDetailPayload" class="risk-page__detail">
+        <div class="risk-page__detail-head">
+          <span class="risk-page__status" :data-tone="riskTagTypeMap[normalizeRiskLevel(activeDetailPayload.risk_level)] || 'muted'">
+            {{ getRiskLevelText(normalizeRiskLevel(activeDetailPayload.risk_level)) }}
+          </span>
+          <span>{{ formatRiskEventTime(activeDetailPayload.event_time) }}</span>
+          <span>{{ formatConfidenceScore(activeDetailPayload.confidence_score) }}</span>
+        </div>
+
+        <div class="risk-page__detail-section">
+          <span class="risk-page__field-label">摘要</span>
+          <p>{{ activeDetailPayload.summary || '暂无摘要' }}</p>
+        </div>
+
+        <div class="risk-page__detail-section">
+          <span class="risk-page__field-label">证据</span>
+          <p class="risk-page__detail-evidence">{{ activeDetailPayload.evidence_text || activeDetailPayload.summary || '暂无证据文本。' }}</p>
+        </div>
+      </div>
+
+      <div v-else-if="activeDetailPayload" class="risk-page__detail">
+        <div class="risk-page__detail-head">
+          <span class="risk-page__status" :data-tone="riskTagTypeMap[normalizeRiskLevel(activeDetailPayload.dominantLevel)] || 'muted'">
+            {{ getRiskLevelText(normalizeRiskLevel(activeDetailPayload.dominantLevel)) }}
+          </span>
+          <span>{{ activeDetailPayload.count }} 条事件</span>
+        </div>
+
+        <div class="risk-page__detail-section">
+          <span class="risk-page__field-label">分类摘要</span>
+          <p>{{ activeDetailPayload.summary || '暂无摘要' }}</p>
+        </div>
+
+        <ol class="risk-page__detail-list">
+          <li
+            v-for="event in activeDetailPayload.events || []"
+            :key="`${event.id || event.summary}-${event.event_time || ''}`"
+          >
+            <button type="button" class="risk-page__detail-item" @click="openRiskEventDetail(event)">
+              <div class="risk-page__detail-item-head">
+                <strong>{{ event.summary || event.risk_type || '风险事件' }}</strong>
+                <span>{{ formatRiskEventTime(event.event_time) }}</span>
+              </div>
+              <p>{{ event.evidence_text || '暂无证据文本。' }}</p>
+            </button>
+          </li>
+        </ol>
+      </div>
+    </el-dialog>
   </div>
 </template>
 
 <style scoped>
 .risk-page {
   display: grid;
-  gap: 18px;
+  gap: 16px;
   min-width: 0;
 }
 
@@ -1195,140 +1297,172 @@ const handleGenerateReport = async () => {
   pointer-events: none;
 }
 
-.risk-page__hero,
-.risk-page__source-card,
-.risk-page__source-copy,
-.risk-page__source-selector,
-.risk-page__source-selector-copy,
-.risk-page__source-body,
-.risk-page__source-file,
-.risk-page__document-option-copy,
-.risk-page__spotlight,
-.risk-page__spotlight-main,
-.risk-page__result-body,
-.risk-page__result-copy,
-.risk-page__state {
-  display: grid;
-  gap: 10px;
-  min-width: 0;
-}
-
-.risk-page__hero,
-.risk-page__source-card {
-  padding: 24px 28px;
-  border: 1px solid var(--line-soft);
-  border-radius: 24px;
-  background: var(--surface-1);
-  box-shadow: 0 18px 44px -32px rgba(16, 24, 40, 0.18);
-}
-
-.risk-page__hero,
-.risk-page__hero-actions,
-.risk-page__source-head,
-.risk-page__result-head,
-.risk-page__spotlight-head,
-.risk-page__spotlight-meta,
-.risk-page__stage-item {
+.risk-page__toolbar,
+.risk-page__context-bar,
+.risk-page__insight-head,
+.risk-page__insight-meta,
+.risk-page__category-head,
+.risk-page__category-meta,
+.risk-page__detail-head,
+.risk-page__detail-item-head,
+.risk-page__dialog-actions,
+.risk-page__picker-item-head {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  gap: 10px;
 }
 
-.risk-page__hero {
-  align-items: end;
+.risk-page__toolbar {
   flex-wrap: wrap;
 }
 
-.risk-page__eyebrow {
+.risk-page__toolbar-button {
+  min-height: 44px;
+}
+
+.risk-page__studio {
+  display: grid;
+  grid-template-columns: minmax(0, 2.2fr) minmax(280px, 1fr);
+  gap: 18px;
+  align-items: start;
+}
+
+.risk-page__info-card :deep(.el-card__body),
+.risk-page__classification-card :deep(.el-card__body) {
+  display: grid;
+  gap: 16px;
+}
+
+.risk-page__context-bar {
+  flex-wrap: wrap;
+  justify-content: flex-start;
+}
+
+.risk-page__context-pill,
+.risk-page__heading-note,
+.risk-page__picker-hint,
+.risk-page__field-label {
   color: var(--text-muted);
   font-size: 0.75rem;
   font-weight: 600;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
+  letter-spacing: 0.05em;
 }
 
-.risk-page__hero-copy h2,
-.risk-page__spotlight-head h4 {
-  margin: 0;
-  color: var(--text-primary);
+.risk-page__context-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: var(--surface-2);
+  border: 1px solid var(--line-soft);
 }
 
-.risk-page__hero-copy h2 {
-  font-size: clamp(1.6rem, 2.6vw, 2rem);
-  line-height: 1.2;
+.risk-page__summary-strip {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
 }
 
-.risk-page__hero-copy p,
-.risk-page__heading-note,
+.risk-page__summary-card,
+.risk-page__document-note,
+.risk-page__state,
+.risk-page__detail-section,
+.risk-page__picker-item,
+.risk-page__detail-item {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.risk-page__summary-card {
+  padding: 14px 16px;
+  border: 1px solid var(--line-soft);
+  border-radius: 16px;
+  background: var(--surface-2);
+}
+
+.risk-page__summary-label,
 .risk-page__summary-note,
+.risk-page__document-note p,
 .risk-page__state p,
-.risk-page__result-head p,
-.risk-page__evidence,
-.risk-page__stage-copy p,
-.risk-page__source-copy p,
-.risk-page__spotlight p,
-.risk-page__source-file-copy span {
+.risk-page__category p,
+.risk-page__picker-item span,
+.risk-page__picker-item p,
+.risk-page__detail-section p,
+.risk-page__detail-item p {
   margin: 0;
   color: var(--text-secondary);
   line-height: 1.6;
 }
 
-.risk-page__hero-actions {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 10px;
-  flex-wrap: wrap;
+.risk-page__summary-value,
+.risk-page__insight strong,
+.risk-page__category strong,
+.risk-page__state strong,
+.risk-page__picker-item strong,
+.risk-page__detail-section,
+.risk-page__detail-item strong {
+  color: var(--text-primary);
 }
 
-.risk-page__source-head {
-  align-items: center;
-  flex-wrap: wrap;
-}
-
-.risk-page__source-selector {
+.risk-page__insight-list,
+.risk-page__category-list,
+.risk-page__picker-list,
+.risk-page__detail-list {
+  display: grid;
   gap: 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.risk-page__insight,
+.risk-page__category,
+.risk-page__picker-item,
+.risk-page__detail-item {
+  width: 100%;
   padding: 16px 18px;
   border: 1px solid var(--line-soft);
   border-radius: 18px;
   background: var(--surface-2);
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 180ms ease, transform 180ms ease, background 180ms ease;
 }
 
-.risk-page__source-selector-controls {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 12px;
-  align-items: center;
+.risk-page__insight:hover,
+.risk-page__category:hover,
+.risk-page__picker-item:hover,
+.risk-page__detail-item:hover {
+  border-color: color-mix(in oklab, var(--brand) 32%, var(--line-soft));
+  transform: translateY(-1px);
 }
 
-.risk-page__source-body {
-  grid-template-columns: minmax(0, 1.2fr) minmax(320px, 0.8fr);
-  gap: 16px;
-  align-items: stretch;
+.risk-page__insight:focus-visible,
+.risk-page__category:focus-visible,
+.risk-page__picker-item:focus-visible,
+.risk-page__detail-item:focus-visible {
+  outline: 2px solid color-mix(in oklab, var(--brand) 64%, white);
+  outline-offset: 2px;
 }
 
-.risk-page__source-copy strong,
-.risk-page__source-file-copy strong {
-  color: var(--text-primary);
-  font-size: 1rem;
-  line-height: 1.35;
+.risk-page__insight[data-tone='danger'],
+.risk-page__category[data-tone='danger'] {
+  border-color: rgba(196, 73, 61, 0.18);
+  background: rgba(196, 73, 61, 0.04);
 }
 
-.risk-page__source-selector-copy p,
-.risk-page__document-option-copy span,
-.risk-page__document-option-meta {
-  margin: 0;
-  color: var(--text-secondary);
-  line-height: 1.5;
+.risk-page__insight[data-tone='warning'],
+.risk-page__category[data-tone='warning'] {
+  border-color: rgba(186, 128, 40, 0.2);
+  background: rgba(186, 128, 40, 0.05);
 }
 
-.risk-page__source-file,
-.risk-page__source-fact {
-  padding: 18px;
-  border: 1px solid var(--line-soft);
-  border-radius: 18px;
-  background: var(--surface-2);
+.risk-page__insight[data-tone='success'],
+.risk-page__category[data-tone='success'] {
+  border-color: rgba(33, 129, 92, 0.18);
+  background: rgba(33, 129, 92, 0.04);
 }
 
 .risk-page__status {
@@ -1369,400 +1503,144 @@ const handleGenerateReport = async () => {
   color: var(--risk);
 }
 
-.risk-page__progress {
-  position: relative;
-  overflow: hidden;
-  height: 8px;
-  border-radius: 999px;
-  background: var(--surface-3);
-}
-
-.risk-page__progress > span {
-  display: block;
-  height: 100%;
-  border-radius: inherit;
-  background: var(--brand);
-  transition: width 180ms ease;
-}
-
-.risk-page__file-type,
-.risk-page__stage-index,
-.risk-page__result-index {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-}
-
-.risk-page__file-type,
-.risk-page__stage-index {
-  min-width: 40px;
-  height: 40px;
-  padding: 0 12px;
-  border-radius: 14px;
-  background: rgba(36, 87, 197, 0.12);
-  color: var(--brand);
-  font-size: 0.75rem;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-}
-
-.risk-page__source-file {
-  grid-template-columns: auto minmax(0, 1fr);
-  align-items: center;
-  gap: 14px;
-}
-
-.risk-page__source-file-copy {
-  display: grid;
-  gap: 4px;
-  min-width: 0;
-}
-
-.risk-page__document-select {
-  width: 100%;
-}
-
-.risk-page__source-selector :deep(.el-select__wrapper) {
-  min-height: 46px;
-  border-radius: 14px;
-  box-shadow: none;
-}
-
-.risk-page__source-selector :deep(.el-select__placeholder) {
-  color: var(--text-muted);
-}
-
-.risk-page__document-option {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 12px;
-}
-
-.risk-page__document-option-copy {
-  min-width: 0;
-}
-
-.risk-page__document-option-copy strong {
-  display: block;
-  color: var(--text-primary);
-  line-height: 1.4;
-}
-
-.risk-page__document-option-copy span {
-  display: block;
-  font-size: 0.8125rem;
-}
-
-.risk-page__document-option-meta {
-  margin-top: 6px;
-  font-size: 0.75rem;
-}
-
-.risk-page__source-facts {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
-  margin: 0;
-}
-
-.risk-page__source-fact {
-  display: grid;
-  gap: 6px;
-  min-width: 0;
-}
-
-.risk-page__source-fact dt,
-.risk-page__summary-label,
-.risk-page__heading-note {
+.risk-page__insight-meta,
+.risk-page__category-meta,
+.risk-page__detail-head,
+.risk-page__insight-confidence {
+  flex-wrap: wrap;
   color: var(--text-muted);
   font-size: 0.75rem;
-  font-weight: 600;
-  letter-spacing: 0.06em;
 }
 
-.risk-page__source-fact dt,
-.risk-page__summary-label {
-  text-transform: uppercase;
-}
-
-.risk-page__source-fact dd,
-.risk-page__summary-value {
+.risk-page__insight-summary,
+.risk-page__insight-evidence {
   margin: 0;
   color: var(--text-primary);
-  font-size: 1rem;
+  line-height: 1.7;
 }
 
-.risk-page__stage-strip {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 12px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
+.risk-page__insight-evidence mark,
+.risk-page__detail-evidence {
+  display: inline-block;
+  padding: 6px 8px;
+  border-radius: 8px;
+  color: var(--text-primary);
+  background: rgba(36, 87, 197, 0.08);
 }
 
-.risk-page__stage-item {
-  align-items: center;
-  padding: 16px 18px;
+.risk-page__insight-evidence mark[data-tone='danger'] {
+  background: rgba(196, 73, 61, 0.12);
+}
+
+.risk-page__insight-evidence mark[data-tone='warning'] {
+  background: rgba(186, 128, 40, 0.14);
+}
+
+.risk-page__insight-evidence mark[data-tone='success'] {
+  background: rgba(33, 129, 92, 0.12);
+}
+
+.risk-page__document-note,
+.risk-page__text-preview,
+.risk-page__preview-frame {
+  padding: 18px;
   border: 1px solid var(--line-soft);
   border-radius: 18px;
   background: var(--surface-2);
 }
 
-.risk-page__stage-item[data-tone='active'] {
-  border-color: rgba(36, 87, 197, 0.22);
-  background: rgba(36, 87, 197, 0.05);
-}
-
-.risk-page__stage-item[data-tone='success'] {
-  border-color: rgba(33, 129, 92, 0.22);
-  background: rgba(33, 129, 92, 0.05);
-}
-
-.risk-page__stage-item[data-tone='warning'] {
-  border-color: rgba(186, 128, 40, 0.24);
-  background: rgba(186, 128, 40, 0.07);
-}
-
-.risk-page__stage-item[data-tone='danger'] {
-  border-color: rgba(196, 73, 61, 0.24);
-  background: rgba(196, 73, 61, 0.06);
-}
-
-.risk-page__stage-copy {
-  display: grid;
-  gap: 4px;
-  min-width: 0;
-}
-
-.risk-page__stage-copy strong,
-.risk-page__result-head strong,
-.risk-page__spotlight-meta strong,
-.risk-page__state strong {
+.risk-page__text-preview pre {
+  margin: 0;
+  white-space: pre-wrap;
+  line-height: 1.8;
   color: var(--text-primary);
-}
-
-.risk-page__studio {
-  display: grid;
-  grid-template-columns: minmax(0, 1.2fr) minmax(360px, 0.88fr);
-  gap: 18px;
-  min-width: 0;
-}
-
-.risk-page__viewer-card,
-.risk-page__results-card {
-  min-width: 0;
-}
-
-.risk-page__viewer-card :deep(.el-card__body),
-.risk-page__results-card :deep(.el-card__body) {
-  display: grid;
-  gap: 18px;
 }
 
 .risk-page__preview-frame {
   width: 100%;
-  min-height: 720px;
-  border: 1px solid var(--line-soft);
-  border-radius: 20px;
-  background: var(--surface-2);
-}
-
-.risk-page__text-preview {
-  min-height: 720px;
-  padding: 20px;
-  border: 1px solid var(--line-soft);
-  border-radius: 20px;
-  background: var(--surface-2);
-}
-
-.risk-page__text-preview pre {
-  margin: 0;
-  color: var(--text-primary);
-  font-family: var(--font-body);
-  font-size: 0.95rem;
-  line-height: 1.8;
-  white-space: pre-wrap;
-}
-
-.risk-page__summary-rail {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 1px;
-  padding: 1px;
-  border-radius: 20px;
-  background: var(--line-soft);
-}
-
-.risk-page__summary-item {
-  display: grid;
-  gap: 6px;
-  min-width: 0;
-  padding: 16px 18px;
-  background: var(--surface-2);
-}
-
-.risk-page__spotlight {
-  grid-template-columns: minmax(0, 1.08fr) minmax(0, 0.92fr);
-  gap: 14px;
-  padding: 18px 20px;
-  border: 1px solid var(--line-soft);
-  border-radius: 22px;
-  background: var(--surface-2);
-}
-
-.risk-page__spotlight[data-tone='danger'] {
-  border-color: rgba(196, 73, 61, 0.22);
-  background: rgba(196, 73, 61, 0.05);
-}
-
-.risk-page__spotlight[data-tone='warning'] {
-  border-color: rgba(186, 128, 40, 0.22);
-  background: rgba(186, 128, 40, 0.06);
-}
-
-.risk-page__spotlight[data-tone='success'] {
-  border-color: rgba(33, 129, 92, 0.18);
-  background: rgba(33, 129, 92, 0.05);
-}
-
-.risk-page__spotlight-meta {
-  flex-wrap: wrap;
-}
-
-.risk-page__spotlight-evidence,
-.risk-page__evidence {
-  padding: 14px 16px;
-  border: 1px solid var(--line-soft);
-  border-radius: 16px;
-  background: var(--surface-3);
+  min-height: 620px;
 }
 
 .risk-page__state {
   align-content: center;
   min-height: 220px;
-  padding: 22px 24px;
-  border-radius: 20px;
+  padding: 24px;
+  border-radius: 18px;
   background: var(--surface-2);
 }
 
 .risk-page__state--error {
-  color: var(--risk);
   background: rgba(196, 73, 61, 0.06);
 }
 
-.risk-page__result-list {
+.risk-page__picker {
   display: grid;
-  gap: 12px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
+  gap: 14px;
 }
 
-.risk-page__result-item {
+.risk-page__field {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  gap: 16px;
-  padding: 18px;
-  border: 1px solid var(--line-soft);
-  border-radius: 20px;
-  background: var(--surface-2);
-}
-
-.risk-page__result-index {
-  width: 40px;
-  height: 40px;
-  border-radius: 12px;
-  background: var(--surface-3);
-  color: var(--text-muted);
-  font-size: 0.8125rem;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-}
-
-.risk-page__result-item[data-tone='danger'] {
-  border-color: rgba(196, 73, 61, 0.22);
-  background: rgba(196, 73, 61, 0.04);
-}
-
-.risk-page__result-item[data-tone='warning'] {
-  border-color: rgba(186, 128, 40, 0.22);
-  background: rgba(186, 128, 40, 0.05);
-}
-
-.risk-page__result-item[data-tone='success'] {
-  border-color: rgba(33, 129, 92, 0.18);
-  background: rgba(33, 129, 92, 0.04);
-}
-
-.risk-page__result-meta {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
   gap: 8px;
-  color: var(--text-muted);
-  font-size: 0.75rem;
+}
+
+.risk-page__picker-item[data-selected='true'] {
+  border-color: color-mix(in oklab, var(--brand) 48%, var(--line-soft));
+  background: color-mix(in oklab, var(--brand) 6%, var(--surface-2));
+}
+
+.risk-page__detail {
+  display: grid;
+  gap: 16px;
+}
+
+.risk-page__detail-head {
+  justify-content: flex-start;
+}
+
+.risk-page__detail-item-head {
+  align-items: flex-start;
+}
+
+.risk-page__dialog :deep(.el-dialog__body) {
+  padding-top: 10px;
 }
 
 @media (max-width: 1200px) {
-  .risk-page__source-body,
   .risk-page__studio {
     grid-template-columns: minmax(0, 1fr);
   }
 }
 
 @media (max-width: 900px) {
-  .risk-page__stage-strip,
-  .risk-page__summary-rail,
-  .risk-page__source-facts,
-  .risk-page__spotlight {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
-  .risk-page__hero,
-  .risk-page__hero-actions,
-  .risk-page__source-head,
-  .risk-page__stage-item,
-  .risk-page__source-file,
-  .risk-page__result-head,
-  .risk-page__spotlight-head {
-    flex-direction: column;
-    align-items: flex-start;
-  }
-
-  .risk-page__source-selector-controls {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
-  .risk-page__result-item,
-  .risk-page__result-head {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
-  .risk-page__result-index {
-    width: 36px;
-    height: 36px;
+  .risk-page__summary-strip {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 
 @media (max-width: 720px) {
-  .risk-page__hero,
-  .risk-page__source-card,
-  .risk-page__state,
-  .risk-page__text-preview {
-    padding: 20px;
+  .risk-page__summary-strip {
+    grid-template-columns: minmax(0, 1fr);
   }
 
-  .risk-page__preview-frame,
-  .risk-page__text-preview {
-    min-height: 520px;
+  .risk-page__toolbar,
+  .risk-page__insight-head,
+  .risk-page__category-head,
+  .risk-page__category-meta,
+  .risk-page__picker-item-head {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .risk-page__preview-frame {
+    min-height: 460px;
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .risk-page__progress > span {
+  .risk-page__insight,
+  .risk-page__category,
+  .risk-page__picker-item,
+  .risk-page__detail-item {
     transition: none;
   }
 }

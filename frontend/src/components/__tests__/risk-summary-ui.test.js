@@ -12,14 +12,18 @@ const readComponent = () => readFileSync(componentPath, 'utf8');
 test('risk summary exposes reference-style workbench actions and removes side analytics surfaces', () => {
   const source = readComponent();
 
-  assert.match(source, /风险信息提取/);
-  assert.match(source, /文档来源/);
+  assert.match(source, /上传文档/);
   assert.match(source, /从知识库选择/);
-  assert.match(source, /使用并提取/);
-  assert.match(source, /文档判读/);
-  assert.match(source, /提取结果/);
+  assert.match(source, /直接上传/);
   assert.match(source, /导出结果/);
-  assert.match(source, /生成风险报告/);
+  assert.match(source, /风险信息/);
+  assert.match(source, /风险分类/);
+  assert.match(source, /选择一份文档/);
+  assert.match(source, /el-dialog/);
+  assert.match(source, /openRiskEventDetail/);
+  assert.match(source, /openRiskGroupDetail/);
+  assert.doesNotMatch(source, /风险提取工作台/);
+  assert.doesNotMatch(source, /围绕当前文档完成提取、判读、导出与报告生成/);
   assert.doesNotMatch(source, /前往审核队列/);
   assert.doesNotMatch(source, /审核队列/);
   assert.doesNotMatch(source, /复核留痕/);
