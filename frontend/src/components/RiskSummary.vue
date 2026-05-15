@@ -76,7 +76,7 @@ const groupedRiskResults = computed(() => {
         key,
         count: 1,
         dominantLevel: normalizeRiskLevel(event.risk_level),
-        summary: event.summary || '暂无摘要',
+        summary: event.why_it_matters || event.summary || '暂无摘要',
         evidence: event.evidence_text || event.summary || '暂无证据文本。',
         events: [event],
       });
@@ -87,7 +87,7 @@ const groupedRiskResults = computed(() => {
     current.events.push(event);
     if ((levelPriority[event.risk_level] || 0) > (levelPriority[current.dominantLevel] || 0)) {
       current.dominantLevel = event.risk_level || current.dominantLevel;
-      current.summary = event.summary || current.summary;
+      current.summary = event.why_it_matters || event.summary || current.summary;
       current.evidence = event.evidence_text || event.summary || current.evidence;
     }
   });
@@ -102,6 +102,16 @@ const groupedRiskResults = computed(() => {
 });
 
 const sortedRiskEvents = computed(() => [...resultEvents.value].sort((left, right) => {
+  const priorityGap = Number(right.review_priority || 0) - Number(left.review_priority || 0);
+  if (priorityGap !== 0) {
+    return priorityGap;
+  }
+
+  const materialityGap = Number(right.materiality_score || 0) - Number(left.materiality_score || 0);
+  if (materialityGap !== 0) {
+    return materialityGap;
+  }
+
   const levelGap = (levelPriority[normalizeRiskLevel(right.risk_level)] || 0)
     - (levelPriority[normalizeRiskLevel(left.risk_level)] || 0);
   if (levelGap !== 0) {
@@ -606,6 +616,22 @@ const formatConfidenceScore = (value) => {
   return `置信度 ${Math.round(score * 100)}%`;
 };
 
+const formatReviewPriority = (value) => {
+  const score = Number(value);
+  if (!Number.isFinite(score) || score <= 0) {
+    return '优先级待评估';
+  }
+  return `复核优先级 ${score}`;
+};
+
+const formatMaterialityScore = (value) => {
+  const score = Number(value);
+  if (!Number.isFinite(score) || score <= 0) {
+    return '重要性待评估';
+  }
+  return `重要性 ${Math.round(score * 100)}%`;
+};
+
 const openRiskEventDetail = (event) => {
   activeDetailPayload.value = event;
   detailDialogMode.value = 'event';
@@ -1079,6 +1105,7 @@ const handleGenerateReport = async () => {
                 </div>
 
                 <p class="risk-page__insight-summary">{{ event.summary || '暂无摘要' }}</p>
+                <p v-if="event.why_it_matters" class="risk-page__insight-reason">{{ event.why_it_matters }}</p>
                 <p class="risk-page__insight-evidence">
                   <mark :data-tone="riskTagTypeMap[normalizeRiskLevel(event.risk_level)] || 'muted'">
                     {{ event.evidence_text || event.summary || '暂无证据文本。' }}
@@ -1230,25 +1257,64 @@ const handleGenerateReport = async () => {
       class="risk-page__dialog"
       destroy-on-close
     >
-      <div v-if="detailDialogMode === 'event' && activeDetailPayload" class="risk-page__detail">
-        <div class="risk-page__detail-head">
-          <span class="risk-page__status" :data-tone="riskTagTypeMap[normalizeRiskLevel(activeDetailPayload.risk_level)] || 'muted'">
-            {{ getRiskLevelText(normalizeRiskLevel(activeDetailPayload.risk_level)) }}
-          </span>
-          <span>{{ formatRiskEventTime(activeDetailPayload.event_time) }}</span>
-          <span>{{ formatConfidenceScore(activeDetailPayload.confidence_score) }}</span>
+        <div v-if="detailDialogMode === 'event' && activeDetailPayload" class="risk-page__detail">
+          <div class="risk-page__detail-head">
+            <span class="risk-page__status" :data-tone="riskTagTypeMap[normalizeRiskLevel(activeDetailPayload.risk_level)] || 'muted'">
+              {{ getRiskLevelText(normalizeRiskLevel(activeDetailPayload.risk_level)) }}
+            </span>
+            <span>{{ formatRiskEventTime(activeDetailPayload.event_time) }}</span>
+            <span>{{ formatConfidenceScore(activeDetailPayload.confidence_score) }}</span>
+            <span>{{ formatMaterialityScore(activeDetailPayload.materiality_score) }}</span>
+            <span>{{ formatReviewPriority(activeDetailPayload.review_priority) }}</span>
+          </div>
+
+          <div class="risk-page__detail-section">
+            <span class="risk-page__field-label">摘要</span>
+            <p>{{ activeDetailPayload.summary || '暂无摘要' }}</p>
         </div>
 
-        <div class="risk-page__detail-section">
-          <span class="risk-page__field-label">摘要</span>
-          <p>{{ activeDetailPayload.summary || '暂无摘要' }}</p>
-        </div>
+          <div class="risk-page__detail-section">
+            <span class="risk-page__field-label">证据</span>
+            <p class="risk-page__detail-evidence">{{ activeDetailPayload.evidence_text || activeDetailPayload.summary || '暂无证据文本。' }}</p>
+          </div>
 
-        <div class="risk-page__detail-section">
-          <span class="risk-page__field-label">证据</span>
-          <p class="risk-page__detail-evidence">{{ activeDetailPayload.evidence_text || activeDetailPayload.summary || '暂无证据文本。' }}</p>
+          <div v-if="activeDetailPayload.why_it_matters" class="risk-page__detail-section">
+            <span class="risk-page__field-label">风险判断</span>
+            <p>{{ activeDetailPayload.why_it_matters }}</p>
+          </div>
+
+          <div
+            v-if="Array.isArray(activeDetailPayload.watchpoints) && activeDetailPayload.watchpoints.length"
+            class="risk-page__detail-section"
+          >
+            <span class="risk-page__field-label">后续监控点</span>
+            <ul class="risk-page__detail-bullets">
+              <li v-for="item in activeDetailPayload.watchpoints" :key="item">{{ item }}</li>
+            </ul>
+          </div>
+
+          <div v-if="Array.isArray(activeDetailPayload.impact_scope) && activeDetailPayload.impact_scope.length" class="risk-page__detail-section">
+            <span class="risk-page__field-label">影响范围</span>
+            <p>{{ activeDetailPayload.impact_scope.join(' · ') }}</p>
+          </div>
+
+          <div v-if="Array.isArray(activeDetailPayload.citations) && activeDetailPayload.citations.length" class="risk-page__detail-section">
+            <span class="risk-page__field-label">引用定位</span>
+            <ul class="risk-page__detail-bullets">
+              <li
+                v-for="(citation, index) in activeDetailPayload.citations"
+                :key="`${citation.chunk_id || 'citation'}-${index}`"
+              >
+                {{ citation.page_label || citation.section_label || `chunk ${citation.chunk_id || index + 1}` }}
+              </li>
+            </ul>
+          </div>
+
+          <div class="risk-page__detail-section">
+            <span class="risk-page__field-label">复核状态</span>
+            <p>{{ activeDetailPayload.requires_human_review ? '建议人工复核' : '可直接进入报告' }}</p>
+          </div>
         </div>
-      </div>
 
       <div v-else-if="activeDetailPayload" class="risk-page__detail">
         <div class="risk-page__detail-head">
@@ -1554,10 +1620,15 @@ const handleGenerateReport = async () => {
 }
 
 .risk-page__insight-summary,
+.risk-page__insight-reason,
 .risk-page__insight-evidence {
   margin: 0;
   color: var(--text-primary);
   line-height: 1.7;
+}
+
+.risk-page__insight-reason {
+  color: var(--text-secondary);
 }
 
 .risk-page__insight-evidence mark,
@@ -1640,6 +1711,14 @@ const handleGenerateReport = async () => {
 
 .risk-page__detail-item-head {
   align-items: flex-start;
+}
+
+.risk-page__detail-bullets {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding-left: 18px;
+  color: var(--text-secondary);
 }
 
 .risk-page__dialog :deep(.el-dialog__body) {

@@ -256,6 +256,8 @@ class OpenAICompatibleChatProvider(OpenAICompatibleApiMixin, BaseChatProvider):
             payload["temperature"] = merged_options["temperature"]
         if merged_options.get("max_tokens") is not None:
             payload["max_tokens"] = merged_options["max_tokens"]
+        if merged_options.get("response_format") is not None:
+            payload["response_format"] = merged_options["response_format"]
         started_at = time.monotonic()
         try:
             response_payload = self._post_json(
@@ -322,6 +324,8 @@ class OpenAICompatibleChatProvider(OpenAICompatibleApiMixin, BaseChatProvider):
             payload["temperature"] = merged_options["temperature"]
         if merged_options.get("max_tokens") is not None:
             payload["max_tokens"] = merged_options["max_tokens"]
+        if merged_options.get("response_format") is not None:
+            payload["response_format"] = merged_options["response_format"]
         body = json.dumps(payload).encode("utf-8")
         url = self._build_url("/chat/completions")
         try:

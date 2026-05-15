@@ -120,6 +120,9 @@ class RiskExtractionTask(models.Model):
 
     STEP_QUEUED = "queued"
     STEP_RETRIEVING = "retrieving"
+    STEP_EXTRACTING_SIGNALS = "extracting_signals"
+    STEP_ADJUDICATING = "adjudicating"
+    STEP_ROUTING_REVIEW = "routing_review"
     STEP_EXTRACTING = "extracting"
     STEP_VERIFYING = "verifying"
     STEP_PERSISTING = "persisting"
@@ -128,6 +131,9 @@ class RiskExtractionTask(models.Model):
     STEP_CHOICES = (
         (STEP_QUEUED, "Queued"),
         (STEP_RETRIEVING, "Retrieving"),
+        (STEP_EXTRACTING_SIGNALS, "Extracting signals"),
+        (STEP_ADJUDICATING, "Adjudicating"),
+        (STEP_ROUTING_REVIEW, "Routing review"),
         (STEP_EXTRACTING, "Extracting"),
         (STEP_VERIFYING, "Verifying"),
         (STEP_PERSISTING, "Persisting"),

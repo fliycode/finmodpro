@@ -14,6 +14,16 @@ class RiskExtractionEventSerializer(serializers.Serializer):
     evidence_text = serializers.CharField()
     confidence_score = serializers.DecimalField(max_digits=4, decimal_places=3)
     chunk_id = serializers.IntegerField(required=False, allow_null=True)
+    why_it_matters = serializers.CharField(required=False, allow_blank=True, default="")
+    impact_scope = serializers.ListField(
+        child=serializers.CharField(), required=False, default=list
+    )
+    watchpoints = serializers.ListField(
+        child=serializers.CharField(), required=False, default=list
+    )
+    citations = serializers.ListField(
+        child=serializers.DictField(), required=False, default=list
+    )
 
 
 class RiskExtractionSchemaSerializer(serializers.Serializer):
@@ -84,6 +94,15 @@ class RiskEventSummarySerializer(serializers.ModelSerializer):
     document_source_date = serializers.DateField(source="document.source_date", read_only=True, allow_null=True, default=None)
     document_title = serializers.CharField(source="document.title", read_only=True, allow_null=True, default=None)
     extraction_metadata = serializers.SerializerMethodField()
+    taxonomy_code = serializers.SerializerMethodField()
+    citations = serializers.SerializerMethodField()
+    materiality_score = serializers.SerializerMethodField()
+    likelihood_score = serializers.SerializerMethodField()
+    impact_scope = serializers.SerializerMethodField()
+    why_it_matters = serializers.SerializerMethodField()
+    watchpoints = serializers.SerializerMethodField()
+    requires_human_review = serializers.SerializerMethodField()
+    review_priority = serializers.SerializerMethodField()
 
     class Meta:
         model = RiskEvent
@@ -103,13 +122,25 @@ class RiskEventSummarySerializer(serializers.ModelSerializer):
             "document_file_size",
             "document_source_date",
             "document_title",
+            "taxonomy_code",
+            "citations",
+            "materiality_score",
+            "likelihood_score",
+            "impact_scope",
+            "why_it_matters",
+            "watchpoints",
+            "requires_human_review",
+            "review_priority",
             "extraction_metadata",
             "created_at",
             "updated_at",
         ]
 
+    def _get_meta(self, obj):
+        return obj.metadata or {}
+
     def get_extraction_metadata(self, obj):
-        meta = obj.metadata or {}
+        meta = self._get_meta(obj)
         pipeline = meta.get("extraction_pipeline")
         if not pipeline:
             return None
@@ -117,9 +148,41 @@ class RiskEventSummarySerializer(serializers.ModelSerializer):
             "rounds_completed": pipeline.get("rounds_completed", 1),
             "verification_passed": pipeline.get("verification_passed", True),
             "total_llm_calls": pipeline.get("total_llm_calls", 1),
+            "human_review_count": pipeline.get("human_review_count", 0),
             "filtered_chunks": pipeline.get("chunk_filter", {}).get("filtered_chunks"),
             "total_chunks": pipeline.get("chunk_filter", {}).get("total_chunks"),
+            "version": pipeline.get("schema_version") or meta.get("extraction_version", "v1"),
         }
+
+    def get_taxonomy_code(self, obj):
+        return self._get_meta(obj).get("taxonomy_code") or obj.risk_type
+
+    def get_citations(self, obj):
+        citations = self._get_meta(obj).get("citations")
+        return citations if isinstance(citations, list) else []
+
+    def get_materiality_score(self, obj):
+        return self._get_meta(obj).get("materiality_score")
+
+    def get_likelihood_score(self, obj):
+        return self._get_meta(obj).get("likelihood_score")
+
+    def get_impact_scope(self, obj):
+        impact_scope = self._get_meta(obj).get("impact_scope")
+        return impact_scope if isinstance(impact_scope, list) else []
+
+    def get_why_it_matters(self, obj):
+        return self._get_meta(obj).get("why_it_matters") or ""
+
+    def get_watchpoints(self, obj):
+        watchpoints = self._get_meta(obj).get("watchpoints")
+        return watchpoints if isinstance(watchpoints, list) else []
+
+    def get_requires_human_review(self, obj):
+        return bool(self._get_meta(obj).get("requires_human_review", False))
+
+    def get_review_priority(self, obj):
+        return self._get_meta(obj).get("review_priority")
 
 
 class RiskReportSerializer(serializers.ModelSerializer):

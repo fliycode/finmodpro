@@ -9,7 +9,9 @@ from common.exceptions import UpstreamServiceError
 from common.observability import trace_span
 from llm.services.prompt_service import render_prompt
 from llm.services.runtime_service import get_chat_provider
+from risk.schemas import get_extraction_response_format, get_verification_response_format
 from risk.serializers import parse_risk_extraction_payload
+from risk.services.adjudication_service import build_event_enrichment
 
 logger = logging.getLogger(__name__)
 
@@ -44,6 +46,7 @@ def _call_extraction_llm(*, document, chunk_context, additional_guidance=None):
         ],
         options={
             "temperature": 0,
+            "response_format": get_extraction_response_format(),
             "timeout_seconds": getattr(settings, "RISK_EXTRACTION_LLM_TIMEOUT_SECONDS", 25),
             "transport_retry_attempts": 1,
         },
@@ -70,6 +73,7 @@ def _call_verification_llm(*, document, chunk_context, extracted_events):
         ],
         options={
             "temperature": 0,
+            "response_format": get_verification_response_format(),
             "timeout_seconds": getattr(settings, "RISK_EXTRACTION_LLM_TIMEOUT_SECONDS", 25),
             "transport_retry_attempts": 1,
         },
@@ -105,17 +109,98 @@ def _parse_verification_output(raw_content):
         logger.warning("验证 LLM 输出非法 JSON，视为验证通过")
         return {"is_complete": True, "missing_aspects": [], "suggestions": [], "issues_found": []}
 
+    raw_missing = payload.get("missing_aspects", [])
+    structured_missing = []
+    for item in raw_missing:
+        if isinstance(item, dict):
+            structured_missing.append({
+                "field": str(item.get("field", "unknown")),
+                "chunk_id": item.get("chunk_id"),
+                "hint": str(item.get("hint", "")),
+            })
+        elif isinstance(item, str):
+            structured_missing.append({
+                "field": "unknown",
+                "chunk_id": None,
+                "hint": item,
+            })
+
     return {
         "is_complete": bool(payload.get("is_complete", True)),
-        "missing_aspects": list(payload.get("missing_aspects", [])),
+        "missing_aspects": structured_missing,
         "suggestions": list(payload.get("suggestions", [])),
         "issues_found": list(payload.get("issues_found", [])),
     }
 
 
+def _text_similarity(text_a, text_b):
+    if not text_a or not text_b:
+        return 0.0
+
+    def bigrams(text):
+        text = str(text).strip()
+        return set(text[i:i + 2] for i in range(len(text) - 1)) if len(text) >= 2 else {text}
+
+    bg_a = bigrams(text_a)
+    bg_b = bigrams(text_b)
+    if not bg_a or not bg_b:
+        return 0.0
+    intersection = len(bg_a & bg_b)
+    union = len(bg_a | bg_b)
+    return intersection / union if union > 0 else 0.0
+
+
+def _merge_similar_events(deduplicated_events):
+    threshold = getattr(settings, "RISK_EXTRACTION_MERGE_SIMILARITY_THRESHOLD", 0.5)
+
+    groups = {}
+    for event in deduplicated_events:
+        key = (
+            event.get("company_name", "").strip(),
+            event.get("risk_type", "").strip().lower(),
+        )
+        groups.setdefault(key, []).append(event)
+
+    merged = []
+    for group_events in groups.values():
+        if len(group_events) <= 1:
+            merged.extend(group_events)
+            continue
+
+        used = set()
+        for i, event_a in enumerate(group_events):
+            if i in used:
+                continue
+            best_match = event_a
+            for j in range(i + 1, len(group_events)):
+                if j in used:
+                    continue
+                event_b = group_events[j]
+
+                time_a = str(event_a.get("event_time", ""))
+                time_b = str(event_b.get("event_time", ""))
+                if time_a and time_b and time_a[:7] != time_b[:7]:
+                    continue
+
+                sim = _text_similarity(
+                    event_a.get("summary", "") + event_a.get("evidence_text", ""),
+                    event_b.get("summary", "") + event_b.get("evidence_text", ""),
+                )
+                if sim >= threshold:
+                    used.add(j)
+                    if event_b.get("confidence_score", 0) > best_match.get("confidence_score", 0):
+                        best_match, event_a = event_b, best_match
+                    if event_b.get("evidence_text") and event_b["evidence_text"] not in best_match.get("evidence_text", ""):
+                        best_match["evidence_text"] = best_match.get("evidence_text", "") + " " + event_b["evidence_text"]
+
+            merged.append(best_match)
+
+    return merged
+
+
 def _deduplicate_events(events_list):
     seen = set()
-    deduplicated = []
+    exact_deduplicated = []
     for event in events_list:
         key = (
             event.get("company_name"),
@@ -125,8 +210,19 @@ def _deduplicate_events(events_list):
         )
         if key not in seen:
             seen.add(key)
-            deduplicated.append(event)
-    return deduplicated
+            exact_deduplicated.append(event)
+
+    return _merge_similar_events(exact_deduplicated)
+
+
+def _adjudicate_events(events):
+    return [
+        {
+            **event,
+            **build_event_enrichment(event_data=event),
+        }
+        for event in events
+    ]
 
 
 def run_extraction_with_verification(*, document, chunks, max_rounds=None, on_stage_update=None):
@@ -148,17 +244,29 @@ def run_extraction_with_verification(*, document, chunks, max_rounds=None, on_st
         for round_num in range(1, max_rounds + 1):
             if callable(on_stage_update):
                 on_stage_update(
-                    step="extracting",
+                    step="extracting_signals",
                     progress=min(78, 62 + (round_num - 1) * 8),
-                    message=f"正在执行第 {round_num} 轮风险抽取。",
+                    message=f"正在执行第 {round_num} 轮证据抽取。",
                 )
             additional_guidance = None
             if round_num > 1 and not verification_passed:
                 missing = last_verification.get("missing_aspects", [])
                 suggestions = last_verification.get("suggestions", [])
+                issues = last_verification.get("issues_found", [])
                 parts = []
                 if missing:
-                    parts.append("遗漏方面：" + "；".join(missing))
+                    missing_descriptions = []
+                    for item in missing:
+                        if isinstance(item, dict):
+                            hint = item.get("hint", "")
+                            field = item.get("field", "")
+                            chunk_ref = f" (chunk_id={item['chunk_id']})" if item.get("chunk_id") else ""
+                            missing_descriptions.append(f"[{field}]{chunk_ref}: {hint}")
+                        else:
+                            missing_descriptions.append(str(item))
+                    parts.append("遗漏方面：\n" + "\n".join(f"- {m}" for m in missing_descriptions))
+                if issues:
+                    parts.append("发现问题：" + "；".join(issues))
                 if suggestions:
                     parts.append("建议：" + "；".join(suggestions))
                 additional_guidance = "\n".join(parts) if parts else None
@@ -169,9 +277,20 @@ def run_extraction_with_verification(*, document, chunks, max_rounds=None, on_st
                 additional_guidance=additional_guidance,
             )
             total_llm_calls += 1
-            all_events.extend(events)
+            if callable(on_stage_update):
+                on_stage_update(
+                    step="adjudicating",
+                    progress=min(84, 70 + (round_num - 1) * 6),
+                    message=f"正在执行第 {round_num} 轮风险判读。",
+                )
+            adjudicated_events = _adjudicate_events(events)
+            all_events.extend(adjudicated_events)
 
-            round_info = {"round": round_num, "events_count": len(events)}
+            round_info = {
+                "round": round_num,
+                "events_count": len(events),
+                "human_review_count": sum(1 for item in adjudicated_events if item.get("requires_human_review")),
+            }
             round_details.append(round_info)
 
             if round_num >= max_rounds:
@@ -182,7 +301,7 @@ def run_extraction_with_verification(*, document, chunks, max_rounds=None, on_st
                     on_stage_update(
                         step="verifying",
                         progress=min(86, 74 + (round_num - 1) * 6),
-                        message=f"正在校验第 {round_num} 轮抽取结果。",
+                        message=f"正在校验第 {round_num} 轮判读结果。",
                     )
                 verification, raw_verify = _call_verification_llm(
                     document=document,
@@ -209,12 +328,20 @@ def run_extraction_with_verification(*, document, chunks, max_rounds=None, on_st
             verification_passed = True
 
         all_events = _deduplicate_events(all_events)
+        if callable(on_stage_update):
+            on_stage_update(
+                step="routing_review",
+                progress=88,
+                message="正在整理需人工复核的风险事件。",
+            )
 
         pipeline_metadata = {
             "rounds_completed": round_num,
             "verification_passed": verification_passed,
             "total_llm_calls": total_llm_calls,
             "round_details": round_details,
+            "human_review_count": sum(1 for item in all_events if item.get("requires_human_review")),
+            "schema_version": "v2-foundation",
         }
 
         observation.update(output={

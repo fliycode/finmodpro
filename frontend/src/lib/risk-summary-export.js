@@ -111,7 +111,15 @@ export function buildRiskSummaryExportDownload({
         `${index + 1}. ${meta.join(' / ')}`,
         `   - 摘要：${normalizeInlineText(item?.summary, '暂无摘要')}`,
         `   - 证据：${normalizeInlineText(item?.evidence_text || item?.summary, '暂无证据文本。')}`,
+        `   - 风险判断：${normalizeInlineText(item?.why_it_matters, '待补充')}`,
+        `   - 复核状态：${item?.requires_human_review ? '建议人工复核' : '可直接进入报告'}`,
       );
+      if (Array.isArray(item?.watchpoints) && item.watchpoints.length) {
+        lines.push(`   - 监控点：${item.watchpoints.map((entry) => normalizeInlineText(entry)).join('；')}`);
+      }
+      if (Array.isArray(item?.citations) && item.citations.length) {
+        lines.push(`   - 引用：${item.citations.map((entry) => normalizeInlineText(entry?.page_label || entry?.section_label || `chunk ${entry?.chunk_id || ''}`)).join('；')}`);
+      }
     });
   }
 

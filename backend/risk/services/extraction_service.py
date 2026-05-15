@@ -8,6 +8,7 @@ from knowledgebase.models import DocumentChunk
 from risk.models import RiskEvent
 from risk.models import RiskExtractionTask
 from risk.serializers import RiskEventSummarySerializer
+from risk.services.adjudication_service import build_event_enrichment
 from risk.services.chunk_filter_service import select_risk_relevant_chunks
 from risk.services.verification_service import run_extraction_with_verification
 
@@ -142,8 +143,14 @@ def extract_risk_events_for_document(*, document, stage_callback=None):
 
         if callable(stage_callback):
             stage_callback(
+                step=RiskExtractionTask.STEP_ROUTING_REVIEW,
+                progress=90,
+                message="正在分流需人工复核的风险事件。",
+            )
+        if callable(stage_callback):
+            stage_callback(
                 step=RiskExtractionTask.STEP_PERSISTING,
-                progress=88,
+                progress=94,
                 message="正在写入风险事件结果。",
             )
         chunk_by_id = {chunk.id: chunk for chunk in chunks}
@@ -169,10 +176,13 @@ def extract_risk_events_for_document(*, document, stage_callback=None):
                         metadata={
                             "source_document_id": document.id,
                             "source_chunk_id": event_data.get("chunk_id"),
+                            **build_event_enrichment(event_data=event_data, chunk=chunk),
                             "extraction_pipeline": {
                                 "rounds_completed": pipeline_meta["rounds_completed"],
                                 "verification_passed": pipeline_meta["verification_passed"],
                                 "total_llm_calls": pipeline_meta["total_llm_calls"],
+                                "human_review_count": pipeline_meta.get("human_review_count", 0),
+                                "schema_version": pipeline_meta.get("schema_version", "v2-foundation"),
                                 "chunk_filter": {
                                     "total_chunks": len(chunks),
                                     "filtered_chunks": len(filtered_chunks),

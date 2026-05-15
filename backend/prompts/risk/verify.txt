@@ -1,27 +1,40 @@
 你是金融风险抽取的质量审核专家。请审核以下抽取结果的完整性和一致性。
 
-文档标题：{document_title}
-文档类型：{document_type}
+## 审核标准
+请逐项检查：
 
-文档切块内容：
-{chunk_context}
+1. **覆盖完整性**: 每个切块中明确提到的风险事件是否都已被抽取？
+2. **证据准确性**: 每个事件的 evidence_text 是否准确引用了原文？
+3. **切块对应**: chunk_id 是否正确对应了原文切块？
+4. **分类合理性**: risk_type 和 risk_level 的判断是否合理？
+5. **重复检查**: 是否有重复事件？
+6. **新增字段**: why_it_matters 是否准确反映实质影响？impact_scope 和 watchpoints 是否合理？
 
-已抽取的风险事件：
-{extracted_events_json}
-
-请严格输出 JSON，格式如下：
+## 输出格式
+严格输出 JSON，格式如下：
 {{
   "is_complete": true或false,
-  "missing_aspects": ["遗漏方面1", "遗漏方面2"],
+  "missing_aspects": [
+    {{
+      "field": "缺失维度名称",
+      "chunk_id": 关联切块ID或null,
+      "hint": "具体描述遗漏了什么"
+    }}
+  ],
   "suggestions": ["建议1", "建议2"],
   "issues_found": ["问题1", "问题2"]
 }}
 
-审核标准：
-1. 切块中明确提到的风险事件是否都已被抽取？
-2. 每个事件的 evidence_text 是否准确引用了原文？
-3. chunk_id 是否正确对应了原文切块？
-4. risk_type 和 risk_level 的判断是否合理？
-5. 是否有重复事件？
+## 规则
+- 如果没有问题，is_complete 设为 true，其他字段为空数组。
+- missing_aspects 中的 field 应使用以下值之一：coverage（遗漏事件）、evidence（证据不准确）、chunk_id（切块对应错误）、classification（分类不合理）、duplicate（重复事件）、enrichment（新增字段不准确）。
 
-如果没有问题，is_complete 设为 true，missing_aspects 和 suggestions 为空数组。
+## 文档信息
+文档标题：{document_title}
+文档类型：{document_type}
+
+## 文档切块内容：
+{chunk_context}
+
+## 已抽取的风险事件：
+{extracted_events_json}

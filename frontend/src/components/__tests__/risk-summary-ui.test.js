@@ -18,6 +18,8 @@ test('risk summary exposes reference-style workbench actions and removes side an
   assert.match(source, /导出结果/);
   assert.match(source, /风险信息/);
   assert.match(source, /风险分类/);
+  assert.match(source, /风险判断/);
+  assert.match(source, /后续监控点/);
   assert.match(source, /选择一份文档/);
   assert.match(source, /el-dialog/);
   assert.match(source, /openRiskEventDetail/);

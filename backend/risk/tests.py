@@ -1118,6 +1118,8 @@ class CompanyRiskReportApiTests(TestCase):
         self.assertIn("已审核通过风险事件", report_payload["summary"])
         self.assertIn("流动性风险上升", report_payload["content"])
         self.assertIn("信用风险增加", report_payload["content"])
+        self.assertIn("重点判断", report_payload["content"])
+        self.assertIn("监控清单", report_payload["content"])
         self.assertEqual(
             report_payload["source_metadata"]["event_ids"],
             [approved_event.id, second_approved_event.id],
@@ -1300,6 +1302,7 @@ class TimeRangeRiskReportApiTests(TestCase):
         self.assertIn("已审核通过风险事件", report_payload["summary"])
         self.assertIn("区间内事件 A", report_payload["content"])
         self.assertIn("区间内事件 B", report_payload["content"])
+        self.assertIn("重点判断", report_payload["content"])
         self.assertEqual(
             report_payload["source_metadata"]["event_ids"],
             [in_range_event.id, second_in_range_event.id],
@@ -1432,6 +1435,7 @@ class DocumentRiskReportApiTests(TestCase):
         self.assertIn("共识别 2 条风险事件", report_payload["summary"])
         self.assertIn("流动性风险上升", report_payload["content"])
         self.assertIn("信用风险增加", report_payload["content"])
+        self.assertIn("监控清单", report_payload["content"])
         self.assertEqual(
             report_payload["source_metadata"]["event_ids"],
             [included_event.id, second_event.id],
@@ -2006,3 +2010,276 @@ class ExtractionMetadataTests(TestCase):
         self.assertIsNotNone(event_data["extraction_metadata"])
         self.assertEqual(event_data["extraction_metadata"]["rounds_completed"], 1)
         self.assertTrue(event_data["extraction_metadata"]["verification_passed"])
+        self.assertEqual(event_data["extraction_metadata"]["version"], "v2-foundation")
+        self.assertEqual(event_data["taxonomy_code"], "liquidity")
+        self.assertGreater(event_data["materiality_score"], 0.0)
+        self.assertGreater(event_data["likelihood_score"], 0.0)
+        self.assertEqual(event_data["impact_scope"], ["cash_flow", "funding"])
+        self.assertTrue(event_data["why_it_matters"])
+        self.assertEqual(event_data["watchpoints"], ["未来三个月现金流覆盖率", "短期债务续作进展"])
+        self.assertTrue(event_data["requires_human_review"])
+        self.assertGreaterEqual(event_data["review_priority"], 1)
+        self.assertEqual(len(event_data["citations"]), 1)
+        self.assertEqual(event_data["citations"][0]["chunk_id"], chunk.id)
+
+
+class ResponseFormatTests(TestCase):
+    def setUp(self):
+        self.document = Document.objects.create(
+            title="格式测试文档",
+            file=SimpleUploadedFile("fmt-test.pdf", b"content", content_type="application/pdf"),
+            filename="fmt-test.pdf",
+            doc_type="pdf",
+        )
+        self.chunk = DocumentChunk.objects.create(
+            document=self.document,
+            chunk_index=0,
+            content="Test Corp 流动性风险上升。",
+            metadata={},
+        )
+
+    @patch("risk.services.verification_service.get_chat_provider")
+    def test_extraction_passes_response_format_to_provider(self, mocked_get_chat_provider):
+        from risk.services.verification_service import run_extraction_with_verification
+
+        mocked_get_chat_provider.return_value.chat.side_effect = [
+            _make_extraction_response([
+                {
+                    "company_name": "Test Corp",
+                    "risk_type": "liquidity",
+                    "risk_level": "high",
+                    "event_time": None,
+                    "summary": "流动性风险上升。",
+                    "evidence_text": "Test Corp 流动性风险上升。",
+                    "confidence_score": "0.900",
+                    "chunk_id": self.chunk.id,
+                }
+            ]),
+            _make_verification_response(is_complete=True),
+        ]
+
+        run_extraction_with_verification(
+            document=self.document,
+            chunks=[self.chunk],
+        )
+
+        call_args_list = mocked_get_chat_provider.return_value.chat.call_args_list
+        extraction_options = call_args_list[0].kwargs.get("options", {})
+        self.assertIn("response_format", extraction_options)
+        self.assertEqual(extraction_options["response_format"]["type"], "json_schema")
+        self.assertIn("json_schema", extraction_options["response_format"])
+
+        verification_options = call_args_list[1].kwargs.get("options", {})
+        self.assertIn("response_format", verification_options)
+        self.assertEqual(verification_options["response_format"]["type"], "json_schema")
+
+
+class StructuredVerificationFeedbackTests(TestCase):
+    def setUp(self):
+        self.document = Document.objects.create(
+            title="反馈测试文档",
+            file=SimpleUploadedFile("fb-test.pdf", b"content", content_type="application/pdf"),
+            filename="fb-test.pdf",
+            doc_type="pdf",
+        )
+        self.chunk = DocumentChunk.objects.create(
+            document=self.document,
+            chunk_index=0,
+            content="公司流动性风险上升，信用评级下调。",
+            metadata={},
+        )
+
+    @patch("risk.services.verification_service.get_chat_provider")
+    def test_structured_feedback_used_in_re_extraction(self, mocked_get_chat_provider):
+        from risk.services.verification_service import run_extraction_with_verification
+
+        mocked_get_chat_provider.return_value.chat.side_effect = [
+            _make_extraction_response([
+                {
+                    "company_name": "Test Corp",
+                    "risk_type": "liquidity",
+                    "risk_level": "high",
+                    "event_time": None,
+                    "summary": "流动性风险上升。",
+                    "evidence_text": "公司流动性风险上升。",
+                    "confidence_score": "0.900",
+                    "chunk_id": self.chunk.id,
+                }
+            ]),
+            _make_llm_response({
+                "is_complete": False,
+                "missing_aspects": [
+                    {"field": "coverage", "chunk_id": self.chunk.id, "hint": "信用评级下调未覆盖"},
+                    {"field": "evidence", "chunk_id": None, "hint": "部分证据引用不完整"},
+                ],
+                "suggestions": ["请检查信用风险相关描述"],
+                "issues_found": ["缺少信用风险事件"],
+            }),
+            _make_extraction_response([
+                {
+                    "company_name": "Test Corp",
+                    "risk_type": "credit",
+                    "risk_level": "medium",
+                    "event_time": None,
+                    "summary": "信用评级下调。",
+                    "evidence_text": "信用评级下调。",
+                    "confidence_score": "0.850",
+                    "chunk_id": self.chunk.id,
+                }
+            ]),
+        ]
+
+        events, meta = run_extraction_with_verification(
+            document=self.document,
+            chunks=[self.chunk],
+        )
+
+        self.assertEqual(meta["rounds_completed"], 2)
+        self.assertEqual(meta["total_llm_calls"], 3)
+        self.assertEqual(len(events), 2)
+
+        re_extraction_messages = mocked_get_chat_provider.return_value.chat.call_args_list[2].kwargs.get("messages", [])
+        user_message = re_extraction_messages[1]["content"]
+        self.assertIn("[coverage]", user_message)
+        self.assertIn("信用评级下调未覆盖", user_message)
+
+    @patch("risk.services.verification_service.get_chat_provider")
+    def test_backward_compat_string_missing_aspects(self, mocked_get_chat_provider):
+        from risk.services.verification_service import run_extraction_with_verification
+
+        mocked_get_chat_provider.return_value.chat.side_effect = [
+            _make_extraction_response([
+                {
+                    "company_name": "Test Corp",
+                    "risk_type": "liquidity",
+                    "risk_level": "high",
+                    "event_time": None,
+                    "summary": "流动性风险上升。",
+                    "evidence_text": "公司流动性风险上升。",
+                    "confidence_score": "0.900",
+                    "chunk_id": self.chunk.id,
+                }
+            ]),
+            _make_llm_response({
+                "is_complete": False,
+                "missing_aspects": ["信用评级下调未覆盖"],
+                "suggestions": ["请检查信用风险"],
+                "issues_found": [],
+            }),
+            _make_extraction_response([
+                {
+                    "company_name": "Test Corp",
+                    "risk_type": "credit",
+                    "risk_level": "medium",
+                    "event_time": None,
+                    "summary": "信用评级下调。",
+                    "evidence_text": "信用评级下调。",
+                    "confidence_score": "0.850",
+                    "chunk_id": self.chunk.id,
+                }
+            ]),
+        ]
+
+        events, meta = run_extraction_with_verification(
+            document=self.document,
+            chunks=[self.chunk],
+        )
+
+        self.assertEqual(meta["rounds_completed"], 2)
+        self.assertEqual(len(events), 2)
+
+
+class CrossChunkMergeTests(TestCase):
+    def test_exact_duplicates_removed(self):
+        from risk.services.verification_service import _deduplicate_events
+
+        events = [
+            {"company_name": "A", "risk_type": "liquidity", "event_time": "2025-01-01", "chunk_id": 1, "summary": "X", "evidence_text": "X"},
+            {"company_name": "A", "risk_type": "liquidity", "event_time": "2025-01-01", "chunk_id": 1, "summary": "X", "evidence_text": "X"},
+        ]
+        result = _deduplicate_events(events)
+        self.assertEqual(len(result), 1)
+
+    def test_similar_events_from_different_chunks_merged(self):
+        from risk.services.verification_service import _deduplicate_events
+
+        events = [
+            {"company_name": "A Corp", "risk_type": "liquidity", "event_time": "2025-03-01T00:00:00", "chunk_id": 1, "summary": "流动性风险上升，短债覆盖倍数下降", "evidence_text": "短债覆盖倍数下降", "confidence_score": 0.8},
+            {"company_name": "A Corp", "risk_type": "liquidity", "event_time": "2025-03-01T00:00:00", "chunk_id": 2, "summary": "流动性风险上升，短债覆盖下降", "evidence_text": "短债覆盖下降", "confidence_score": 0.9},
+        ]
+        result = _deduplicate_events(events)
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0]["confidence_score"], 0.9)
+
+    def test_different_risk_types_not_merged(self):
+        from risk.services.verification_service import _deduplicate_events
+
+        events = [
+            {"company_name": "A Corp", "risk_type": "liquidity", "event_time": "2025-03-01", "chunk_id": 1, "summary": "流动性风险", "evidence_text": "X"},
+            {"company_name": "A Corp", "risk_type": "credit", "event_time": "2025-03-01", "chunk_id": 2, "summary": "流动性风险", "evidence_text": "X"},
+        ]
+        result = _deduplicate_events(events)
+        self.assertEqual(len(result), 2)
+
+    def test_different_companies_not_merged(self):
+        from risk.services.verification_service import _deduplicate_events
+
+        events = [
+            {"company_name": "A Corp", "risk_type": "liquidity", "event_time": "2025-03-01", "chunk_id": 1, "summary": "流动性风险上升", "evidence_text": "X"},
+            {"company_name": "B Corp", "risk_type": "liquidity", "event_time": "2025-03-01", "chunk_id": 2, "summary": "流动性风险上升", "evidence_text": "X"},
+        ]
+        result = _deduplicate_events(events)
+        self.assertEqual(len(result), 2)
+
+    def test_different_months_not_merged(self):
+        from risk.services.verification_service import _deduplicate_events
+
+        events = [
+            {"company_name": "A Corp", "risk_type": "liquidity", "event_time": "2025-01-01T00:00:00", "chunk_id": 1, "summary": "流动性风险上升", "evidence_text": "X", "confidence_score": 0.8},
+            {"company_name": "A Corp", "risk_type": "liquidity", "event_time": "2025-06-01T00:00:00", "chunk_id": 2, "summary": "流动性风险上升", "evidence_text": "X", "confidence_score": 0.9},
+        ]
+        result = _deduplicate_events(events)
+        self.assertEqual(len(result), 2)
+
+    def test_evidence_combined_on_merge(self):
+        from risk.services.verification_service import _deduplicate_events
+
+        events = [
+            {"company_name": "A Corp", "risk_type": "liquidity", "event_time": "2025-03-01T00:00:00", "chunk_id": 1, "summary": "流动性风险上升，短债覆盖倍数下降", "evidence_text": "证据A", "confidence_score": 0.8},
+            {"company_name": "A Corp", "risk_type": "liquidity", "event_time": "2025-03-01T00:00:00", "chunk_id": 2, "summary": "流动性风险上升，短债覆盖下降", "evidence_text": "证据B", "confidence_score": 0.9},
+        ]
+        result = _deduplicate_events(events)
+        self.assertEqual(len(result), 1)
+        self.assertIn("证据A", result[0]["evidence_text"])
+        self.assertIn("证据B", result[0]["evidence_text"])
+
+
+class ToFloatDefensiveHandlingTests(TestCase):
+    def test_returns_default_for_non_numeric_string(self):
+        from risk.services.adjudication_service import _to_float
+
+        self.assertEqual(_to_float("high"), 0.0)
+        self.assertEqual(_to_float("N/A"), 0.0)
+        self.assertEqual(_to_float("not_a_number"), 0.0)
+
+    def test_returns_default_for_none_and_empty(self):
+        from risk.services.adjudication_service import _to_float
+
+        self.assertEqual(_to_float(None), 0.0)
+        self.assertEqual(_to_float(""), 0.0)
+
+    def test_handles_numeric_strings(self):
+        from risk.services.adjudication_service import _to_float
+
+        self.assertAlmostEqual(_to_float("0.910"), 0.910)
+        self.assertAlmostEqual(_to_float("1"), 1.0)
+
+    def test_handles_decimal(self):
+        from risk.services.adjudication_service import _to_float
+
+        self.assertAlmostEqual(_to_float(Decimal("0.750")), 0.750)
+
+    def test_handles_custom_default(self):
+        from risk.services.adjudication_service import _to_float
+
+        self.assertEqual(_to_float("bad", default=-1.0), -1.0)

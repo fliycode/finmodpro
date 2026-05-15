@@ -28,12 +28,29 @@ def _build_risk_level_counts(*, event_ids):
 
 def _collect_source_metadata(*, events):
     event_ids = [event.id for event in events]
+    citations = []
+    taxonomy_counts = {}
+    human_review_count = 0
+    for event in events:
+        meta = event.metadata or {}
+        taxonomy_code = meta.get("taxonomy_code") or event.risk_type
+        taxonomy_counts[taxonomy_code] = taxonomy_counts.get(taxonomy_code, 0) + 1
+        citations.extend(meta.get("citations") or [])
+        if meta.get("requires_human_review"):
+            human_review_count += 1
     return {
         "event_ids": event_ids,
         "document_ids": sorted({event.document_id for event in events if event.document_id is not None}),
         "risk_type_counts": _build_risk_type_counts(event_ids=event_ids),
         "risk_level_counts": _build_risk_level_counts(event_ids=event_ids),
         "event_count": len(events),
+        "taxonomy_counts": taxonomy_counts,
+        "citation_count": len(citations),
+        "human_review_count": human_review_count,
+        "top_review_priorities": sorted(
+            [int((event.metadata or {}).get("review_priority", 0) or 0) for event in events],
+            reverse=True,
+        )[:5],
     }
 
 
@@ -52,7 +69,36 @@ def _build_company_report_summary(*, company_name, event_count, risk_type_counts
     )
 
 
+def _get_event_meta(event):
+    return event.metadata or {}
+
+
+def _build_watchlist(events):
+    seen = []
+    for event in events:
+        for item in _get_event_meta(event).get("watchpoints") or []:
+            if item not in seen:
+                seen.append(item)
+    return seen
+
+
+def _render_event_brief(event):
+    meta = _get_event_meta(event)
+    watchpoints = "；".join(meta.get("watchpoints") or [])
+    why_it_matters = meta.get("why_it_matters") or event.summary
+    citation = (meta.get("citations") or [{}])[0]
+    citation_label = citation.get("page_label") or citation.get("section_label") or f"chunk-{event.chunk_id or '-'}"
+    return [
+        f"- [{event.company_name}][{event.risk_type}/{event.risk_level}] {event.summary}（event_id={event.id}）",
+        f"  - 风险判断：{why_it_matters}",
+        f"  - 证据定位：{citation_label}",
+        f"  - 复核优先级：{meta.get('review_priority', '未评估')}",
+        f"  - 后续监控：{watchpoints or '暂无'}",
+    ]
+
+
 def _build_company_report_content(*, company_name, title, events, risk_type_counts, risk_level_counts):
+    watchlist = _build_watchlist(events)
     lines = [
         title,
         "",
@@ -60,13 +106,15 @@ def _build_company_report_content(*, company_name, title, events, risk_type_coun
         f"已审核通过事件数：{len(events)}",
         f"风险类型分布：{risk_type_counts}",
         f"风险等级分布：{risk_level_counts}",
+        f"需人工复核：{sum(1 for event in events if _get_event_meta(event).get('requires_human_review'))} 条",
         "",
-        "风险事件明细：",
+        "重点判断：",
     ]
     for event in events:
-        lines.append(
-            f"- [{event.risk_type}/{event.risk_level}] {event.summary}（event_id={event.id}）"
-        )
+        lines.extend(_render_event_brief(event))
+    lines.extend(["", "监控清单："])
+    for item in watchlist or ["暂无额外监控点。"]:
+        lines.append(f"- {item}")
     return "\n".join(lines)
 
 
@@ -92,6 +140,7 @@ def _build_document_report_summary(*, document, event_count, risk_type_counts):
 
 
 def _build_document_report_content(*, document, title, events, risk_type_counts, risk_level_counts):
+    watchlist = _build_watchlist(events)
     lines = [
         title,
         "",
@@ -101,13 +150,15 @@ def _build_document_report_content(*, document, title, events, risk_type_counts,
         f"风险事件数：{len(events)}",
         f"风险类型分布：{risk_type_counts}",
         f"风险等级分布：{risk_level_counts}",
+        f"需人工复核：{sum(1 for event in events if _get_event_meta(event).get('requires_human_review'))} 条",
         "",
-        "风险事件明细：",
+        "重点判断：",
     ]
     for event in events:
-        lines.append(
-            f"- [{event.company_name}][{event.risk_type}/{event.risk_level}] {event.summary}（event_id={event.id}）"
-        )
+        lines.extend(_render_event_brief(event))
+    lines.extend(["", "监控清单："])
+    for item in watchlist or ["暂无额外监控点。"]:
+        lines.append(f"- {item}")
     return "\n".join(lines)
 
 
@@ -121,6 +172,7 @@ def _build_time_range_report_summary(*, period_start, period_end, event_count, r
 
 
 def _build_time_range_report_content(*, title, period_start, period_end, events, risk_type_counts, risk_level_counts):
+    watchlist = _build_watchlist(events)
     lines = [
         title,
         "",
@@ -128,13 +180,15 @@ def _build_time_range_report_content(*, title, period_start, period_end, events,
         f"已审核通过事件数：{len(events)}",
         f"风险类型分布：{risk_type_counts}",
         f"风险等级分布：{risk_level_counts}",
+        f"需人工复核：{sum(1 for event in events if _get_event_meta(event).get('requires_human_review'))} 条",
         "",
-        "风险事件明细：",
+        "重点判断：",
     ]
     for event in events:
-        lines.append(
-            f"- [{event.company_name}][{event.risk_type}/{event.risk_level}] {event.summary}（event_id={event.id}）"
-        )
+        lines.extend(_render_event_brief(event))
+    lines.extend(["", "监控清单："])
+    for item in watchlist or ["暂无额外监控点。"]:
+        lines.append(f"- {item}")
     return "\n".join(lines)
 
 

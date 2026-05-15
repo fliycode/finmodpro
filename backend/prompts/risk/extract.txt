@@ -1,28 +1,76 @@
 你将收到一篇金融文档的切块内容。请识别其中明确提到的风险事件，并严格输出 JSON。
 
-输出要求：
-1. 只返回一个 JSON 对象，不要返回 markdown 或额外说明。
-2. JSON 结构必须是：
+## 输出格式
+只返回一个 JSON 对象，结构如下：
+{{"events": [...]}}
+
+每个事件必须包含以下字段：
+
+### 必填字段
+- company_name (string): 涉及风险事件的公司全称。必须来自原文，不要编造。如果没有明确公司名，跳过该事件。
+- risk_type (string): 风险分类。必须是以下之一：
+  - liquidity: 流动性风险（资金周转、短期偿付、续作压力）
+  - credit: 信用风险（交易对手违约、回款困难、评级下调）
+  - market: 市场风险（资产价格波动、利率汇率暴露、估值下跌）
+  - compliance: 合规风险（监管处罚、政策变化、合规整改）
+  - operation: 操作风险（供应链中断、系统故障、执行失误）
+  - litigation: 法律风险（诉讼、仲裁、法律争议）
+  - governance: 治理风险（管理层变动、内控缺陷、信息披露问题）
+  - other: 其他无法归类的风险
+- risk_level (string): 严重程度。必须是 low/medium/high/critical 之一。
+- summary (string): 一句话中文摘要，不超过 50 字。
+- evidence_text (string): 从原文直接引用的证据文本，保持原文措辞。
+- confidence_score (number): 抽取置信度，0.000 到 1.000。
+
+### 可选字段
+- event_time (string|null): ISO 8601 时间。若原文无法判断，设为 null。
+- chunk_id (integer|null): 来源切块 ID，来自 [chunk_id=...] 标记。
+- why_it_matters (string): 该风险事件的实质影响分析，说明为什么需要关注。
+- impact_scope (array of string): 影响维度，如 ["cash_flow", "funding"]。
+- watchpoints (array of string): 后续需监控的关键指标，2-4 条。
+- citations (array): 引用列表，每项包含 chunk_id (integer) 和 quote (string)。
+
+## 抽取规则
+1. 只抽取原文中明确提到的风险事件，不要推断或概括。
+2. 如果没有识别到风险事件，返回 {{"events": []}}。
+3. 一个切块可能包含多个风险事件。
+4. 不要将一般性市场评论当作具体风险事件。
+5. 如果原文提到多个公司，每个公司的风险事件单独列出。
+
+## 示例
+
+### 输入切块：
+[chunk_id=101][chunk_index=0] 2025年3月，FinModPro Holdings 短债覆盖倍数从2.1x下降至1.3x，现金流紧张。公司已启动资产处置计划以缓解流动性压力。此外，行业整体面临利率上行压力。
+
+### 正确输出：
 {{
   "events": [
     {{
-      "company_name": "公司名",
-      "risk_type": "风险类型，建议使用英文短词如 liquidity/credit/market/compliance/operation",
-      "risk_level": "low|medium|high|critical",
-      "event_time": "ISO 8601 时间字符串；若无法判断则为 null",
-      "summary": "一句话摘要",
-      "evidence_text": "直接证据原文",
-      "confidence_score": 0.000,
-      "chunk_id": 123
+      "company_name": "FinModPro Holdings",
+      "risk_type": "liquidity",
+      "risk_level": "high",
+      "event_time": "2025-03-01T00:00:00+08:00",
+      "summary": "短债覆盖倍数大幅下降，流动性压力显著上升。",
+      "evidence_text": "FinModPro Holdings 短债覆盖倍数从2.1x下降至1.3x，现金流紧张。",
+      "confidence_score": 0.92,
+      "chunk_id": 101,
+      "why_it_matters": "短债覆盖倍数跌破安全线，若不能快速改善将面临续作困难。",
+      "impact_scope": ["cash_flow", "funding"],
+      "watchpoints": ["未来三个月现金流覆盖率", "资产处置进展", "短期债务到期分布"],
+      "citations": [
+        {{"chunk_id": 101, "quote": "短债覆盖倍数从2.1x下降至1.3x，现金流紧张。"}}
+      ]
     }}
   ]
 }}
-3. 如果没有识别到风险事件，返回 {{"events": []}}。
-4. `chunk_id` 必须来自输入文本中的 `[chunk_id=...]` 标记。
-5. `confidence_score` 取值范围 0 到 1，保留三位小数。
 
+### 错误示例（不要这样做）：
+- 不要将 "行业整体面临利率上行压力" 单独作为风险事件（没有具体公司）。
+- 不要将 confidence_score 设为字符串 "0.920"（必须是数字）。
+
+## 文档信息
 文档标题：{document_title}
 文档类型：{document_type}
 
-文档切块：
+## 文档切块
 {chunk_context}

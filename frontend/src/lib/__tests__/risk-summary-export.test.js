@@ -26,6 +26,10 @@ test('buildRiskSummaryExportDownload renders markdown with grouped and raw risk 
         event_date: '2026-05-14',
         summary: '短期偿债压力上升',
         evidence_text: '一年内到期债务显著增加。',
+        why_it_matters: '短期债务续作存在不确定性，可能直接影响现金流稳定。',
+        requires_human_review: true,
+        watchpoints: ['短债续作结果', '现金流覆盖率'],
+        citations: [{ chunk_id: 12, page_label: '第 3 页' }],
       },
     ],
     exportedAt: '2026-05-14T06:36:00.000Z',
@@ -37,6 +41,10 @@ test('buildRiskSummaryExportDownload renders markdown with grouped and raw risk 
   assert.match(payload.content, /风险等级：高/);
   assert.match(payload.content, /FinModPro Holdings/);
   assert.match(payload.content, /本次新增：3 条/);
+  assert.match(payload.content, /风险判断：短期债务续作存在不确定性/);
+  assert.match(payload.content, /复核状态：建议人工复核/);
+  assert.match(payload.content, /监控点：短债续作结果；现金流覆盖率/);
+  assert.match(payload.content, /引用：第 3 页/);
 });
 
 test('buildRiskSummaryExportDownload records empty-state exports', () => {
