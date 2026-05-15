@@ -1289,6 +1289,15 @@ const handleGenerateReport = async () => {
   min-width: 0;
 }
 
+.risk-page :deep(.section-heading__main) {
+  min-width: 0;
+}
+
+.risk-page :deep(.section-heading__desc) {
+  max-width: 68ch;
+  overflow-wrap: anywhere;
+}
+
 .risk-page__file-input {
   position: absolute;
   width: 0;
@@ -1323,20 +1332,32 @@ const handleGenerateReport = async () => {
 
 .risk-page__studio {
   display: grid;
-  grid-template-columns: minmax(0, 2.2fr) minmax(280px, 1fr);
-  gap: 18px;
+  grid-template-columns: minmax(0, 1.9fr) minmax(320px, 0.95fr);
+  gap: 20px;
   align-items: start;
 }
 
 .risk-page__info-card :deep(.el-card__body),
 .risk-page__classification-card :deep(.el-card__body) {
   display: grid;
-  gap: 16px;
+  gap: 20px;
+}
+
+.risk-page__info-card :deep(.section-heading--card) {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+}
+
+.risk-page__info-card :deep(.section-heading__meta) {
+  margin-left: 0;
+  min-width: 0;
 }
 
 .risk-page__context-bar {
   flex-wrap: wrap;
   justify-content: flex-start;
+  row-gap: 8px;
 }
 
 .risk-page__context-pill,
@@ -1361,7 +1382,11 @@ const handleGenerateReport = async () => {
 .risk-page__summary-strip {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 12px;
+  gap: 0;
+  border: 1px solid var(--line-soft);
+  border-radius: 18px;
+  overflow: hidden;
+  background: color-mix(in oklab, var(--surface-2) 90%, var(--surface-3));
 }
 
 .risk-page__summary-card,
@@ -1376,10 +1401,12 @@ const handleGenerateReport = async () => {
 }
 
 .risk-page__summary-card {
-  padding: 14px 16px;
-  border: 1px solid var(--line-soft);
-  border-radius: 16px;
-  background: var(--surface-2);
+  padding: 16px 18px;
+  background: transparent;
+}
+
+.risk-page__summary-card + .risk-page__summary-card {
+  border-inline-start: 1px solid var(--line-soft);
 }
 
 .risk-page__summary-label,
@@ -1411,10 +1438,28 @@ const handleGenerateReport = async () => {
 .risk-page__picker-list,
 .risk-page__detail-list {
   display: grid;
-  gap: 12px;
+  gap: 0;
   margin: 0;
   padding: 0;
   list-style: none;
+  border: 1px solid var(--line-soft);
+  border-radius: 18px;
+  overflow: hidden;
+  background: color-mix(in oklab, var(--surface-2) 92%, var(--surface-3));
+}
+
+.risk-page__insight-list > li,
+.risk-page__category-list > li,
+.risk-page__picker-list > li,
+.risk-page__detail-list > li {
+  min-width: 0;
+}
+
+.risk-page__insight-list > li + li,
+.risk-page__category-list > li + li,
+.risk-page__picker-list > li + li,
+.risk-page__detail-list > li + li {
+  border-top: 1px solid var(--line-soft);
 }
 
 .risk-page__insight,
@@ -1422,21 +1467,20 @@ const handleGenerateReport = async () => {
 .risk-page__picker-item,
 .risk-page__detail-item {
   width: 100%;
-  padding: 16px 18px;
-  border: 1px solid var(--line-soft);
-  border-radius: 18px;
-  background: var(--surface-2);
+  padding: 18px 20px;
+  border: none;
+  border-radius: 0;
+  background: transparent;
   text-align: left;
   cursor: pointer;
-  transition: border-color 180ms ease, transform 180ms ease, background 180ms ease;
+  transition: background 180ms ease, color 180ms ease;
 }
 
 .risk-page__insight:hover,
 .risk-page__category:hover,
 .risk-page__picker-item:hover,
 .risk-page__detail-item:hover {
-  border-color: color-mix(in oklab, var(--brand) 32%, var(--line-soft));
-  transform: translateY(-1px);
+  background: color-mix(in oklab, var(--brand-soft) 36%, var(--surface-hover));
 }
 
 .risk-page__insight:focus-visible,
@@ -1444,24 +1488,21 @@ const handleGenerateReport = async () => {
 .risk-page__picker-item:focus-visible,
 .risk-page__detail-item:focus-visible {
   outline: 2px solid color-mix(in oklab, var(--brand) 64%, white);
-  outline-offset: 2px;
+  outline-offset: -2px;
 }
 
 .risk-page__insight[data-tone='danger'],
 .risk-page__category[data-tone='danger'] {
-  border-color: rgba(196, 73, 61, 0.18);
   background: rgba(196, 73, 61, 0.04);
 }
 
 .risk-page__insight[data-tone='warning'],
 .risk-page__category[data-tone='warning'] {
-  border-color: rgba(186, 128, 40, 0.2);
   background: rgba(186, 128, 40, 0.05);
 }
 
 .risk-page__insight[data-tone='success'],
 .risk-page__category[data-tone='success'] {
-  border-color: rgba(33, 129, 92, 0.18);
   background: rgba(33, 129, 92, 0.04);
 }
 
@@ -1546,7 +1587,7 @@ const handleGenerateReport = async () => {
   padding: 18px;
   border: 1px solid var(--line-soft);
   border-radius: 18px;
-  background: var(--surface-2);
+  background: color-mix(in oklab, var(--surface-2) 90%, var(--surface-3));
 }
 
 .risk-page__text-preview pre {
@@ -1566,7 +1607,8 @@ const handleGenerateReport = async () => {
   min-height: 220px;
   padding: 24px;
   border-radius: 18px;
-  background: var(--surface-2);
+  border: 1px solid var(--line-soft);
+  background: color-mix(in oklab, var(--surface-2) 90%, var(--surface-3));
 }
 
 .risk-page__state--error {
@@ -1584,7 +1626,6 @@ const handleGenerateReport = async () => {
 }
 
 .risk-page__picker-item[data-selected='true'] {
-  border-color: color-mix(in oklab, var(--brand) 48%, var(--line-soft));
   background: color-mix(in oklab, var(--brand) 6%, var(--surface-2));
 }
 
@@ -1607,6 +1648,10 @@ const handleGenerateReport = async () => {
 
 @media (max-width: 1200px) {
   .risk-page__studio {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .risk-page__info-card :deep(.section-heading--card) {
     grid-template-columns: minmax(0, 1fr);
   }
 }
