@@ -151,7 +151,7 @@ def _text_similarity(text_a, text_b):
 
 
 def _merge_similar_events(deduplicated_events):
-    threshold = getattr(settings, "RISK_EXTRACTION_MERGE_SIMILARITY_THRESHOLD", 0.5)
+    threshold = getattr(settings, "RISK_EXTRACTION_MERGE_SIMILARITY_THRESHOLD", 0.35)
 
     groups = {}
     for event in deduplicated_events:
@@ -182,11 +182,19 @@ def _merge_similar_events(deduplicated_events):
                 if time_a and time_b and time_a[:7] != time_b[:7]:
                     continue
 
-                sim = _text_similarity(
-                    event_a.get("summary", "") + event_a.get("evidence_text", ""),
-                    event_b.get("summary", "") + event_b.get("evidence_text", ""),
-                )
-                if sim >= threshold:
+                should_merge = False
+
+                if time_a and time_b and time_a == time_b:
+                    should_merge = True
+                else:
+                    sim = _text_similarity(
+                        event_a.get("summary", "") + event_a.get("evidence_text", ""),
+                        event_b.get("summary", "") + event_b.get("evidence_text", ""),
+                    )
+                    if sim >= threshold:
+                        should_merge = True
+
+                if should_merge:
                     used.add(j)
                     if event_b.get("confidence_score", 0) > best_match.get("confidence_score", 0):
                         best_match, event_a = event_b, best_match

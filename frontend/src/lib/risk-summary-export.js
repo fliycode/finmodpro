@@ -1,3 +1,5 @@
+import * as XLSX from 'xlsx';
+
 const riskLevelLabels = {
   critical: '严重',
   high: '高',
@@ -56,77 +58,82 @@ export function buildRiskSummaryExportDownload({
     ? Math.max(0, Number(createdCount))
     : eventCount;
 
-  const lines = [
-    '# 风险提取结果',
-    '',
-    `- 文档：${title}`,
-    `- 导出时间：${timestamp || '未记录'}`,
-    `- 提取状态：${normalizeInlineText(statusText, '已完成')}`,
-    `- 风险类别：${grouped.length} 类`,
-    `- 风险事件：${eventCount} 条`,
-    `- 本次新增：${resolvedCreatedCount} 条`,
+  const summaryRows = [
+    ['风险提取结果'],
+    [],
+    ['文档', title],
+    ['导出时间', timestamp || '未记录'],
+    ['提取状态', normalizeInlineText(statusText, '已完成')],
+    ['风险类别', `${grouped.length} 类`],
+    ['风险事件', `${eventCount} 条`],
+    ['本次新增', `${resolvedCreatedCount} 条`],
   ];
 
   if (String(detail || '').trim()) {
-    lines.push(`- 备注：${normalizeInlineText(detail)}`);
+    summaryRows.push(['备注', normalizeInlineText(detail)]);
   }
 
-  lines.push('', '## 风险摘要', '');
+  summaryRows.push([], ['风险摘要']);
 
   if (!grouped.length) {
-    lines.push('当前文档未识别到风险事件。', '');
+    summaryRows.push(['当前文档未识别到风险事件。']);
   } else {
+    summaryRows.push(['序号', '风险分类', '风险等级', '事件数量', '摘要', '证据']);
     grouped.forEach((item, index) => {
-      lines.push(
-        `### ${index + 1}. ${normalizeInlineText(item?.key, '未分类风险')}`,
-        `- 风险等级：${formatRiskLevel(item?.dominantLevel)}`,
-        `- 事件数量：${Number.isFinite(Number(item?.count)) ? Number(item.count) : 0} 条`,
-        `- 摘要：${normalizeInlineText(item?.summary, '暂无摘要')}`,
-        `- 证据：${normalizeInlineText(item?.evidence, '暂无证据文本。')}`,
-        '',
-      );
+      summaryRows.push([
+        index + 1,
+        normalizeInlineText(item?.key, '未分类风险'),
+        formatRiskLevel(item?.dominantLevel),
+        Number.isFinite(Number(item?.count)) ? Number(item.count) : 0,
+        normalizeInlineText(item?.summary, '暂无摘要'),
+        normalizeInlineText(item?.evidence, '暂无证据文本。'),
+      ]);
     });
   }
 
-  lines.push('## 原始事件', '');
-
+  const eventRows = [['原始事件']];
   if (!events.length) {
-    lines.push('无原始事件记录。');
+    eventRows.push(['无原始事件记录。']);
   } else {
+    eventRows.push(['序号', '风险等级', '风险类型', '公司', '日期', '摘要', '证据', '风险判断', '复核状态', '监控点', '引用']);
     events.forEach((item, index) => {
-      const meta = [
+      const watchpoints = Array.isArray(item?.watchpoints) ? item.watchpoints.join('；') : '';
+      const citations = Array.isArray(item?.citations)
+        ? item.citations.map((e) => normalizeInlineText(e?.page_label || e?.section_label || `chunk ${e?.chunk_id || ''}`)).join('；')
+        : '';
+      eventRows.push([
+        index + 1,
         formatRiskLevel(item?.risk_level),
         normalizeInlineText(item?.risk_type, '未分类风险'),
-      ];
-
-      if (String(item?.company_name || '').trim()) {
-        meta.push(normalizeInlineText(item.company_name));
-      }
-
-      if (String(item?.event_date || '').trim()) {
-        meta.push(normalizeInlineText(item.event_date));
-      }
-
-      lines.push(
-        `${index + 1}. ${meta.join(' / ')}`,
-        `   - 摘要：${normalizeInlineText(item?.summary, '暂无摘要')}`,
-        `   - 证据：${normalizeInlineText(item?.evidence_text || item?.summary, '暂无证据文本。')}`,
-        `   - 风险判断：${normalizeInlineText(item?.why_it_matters, '待补充')}`,
-        `   - 复核状态：${item?.requires_human_review ? '建议人工复核' : '可直接进入报告'}`,
-      );
-      if (Array.isArray(item?.watchpoints) && item.watchpoints.length) {
-        lines.push(`   - 监控点：${item.watchpoints.map((entry) => normalizeInlineText(entry)).join('；')}`);
-      }
-      if (Array.isArray(item?.citations) && item.citations.length) {
-        lines.push(`   - 引用：${item.citations.map((entry) => normalizeInlineText(entry?.page_label || entry?.section_label || `chunk ${entry?.chunk_id || ''}`)).join('；')}`);
-      }
+        normalizeInlineText(item?.company_name, ''),
+        normalizeInlineText(item?.event_date, ''),
+        normalizeInlineText(item?.summary, '暂无摘要'),
+        normalizeInlineText(item?.evidence_text || item?.summary, '暂无证据文本。'),
+        normalizeInlineText(item?.why_it_matters, '待补充'),
+        item?.requires_human_review ? '建议人工复核' : '可直接进入报告',
+        watchpoints,
+        citations,
+      ]);
     });
   }
 
+  const workbook = XLSX.utils.book_new();
+
+  const wsData = [...summaryRows, [], ...eventRows];
+  const worksheet = XLSX.utils.aoa_to_sheet(wsData);
+  worksheet['!cols'] = [
+    { wch: 6 }, { wch: 18 }, { wch: 10 }, { wch: 10 }, { wch: 6 }, { wch: 40 }, { wch: 50 },
+    { wch: 40 }, { wch: 14 }, { wch: 30 }, { wch: 20 },
+  ];
+  XLSX.utils.book_append_sheet(workbook, worksheet, '风险提取');
+
+  const xlsxBuffer = XLSX.write(workbook, { bookType: 'xlsx', type: 'array' });
+  const uint8Array = new Uint8Array(xlsxBuffer);
+
   return {
-    filename: `${sanitizeFilenameSegment(title)}-risk-summary.md`,
-    contentType: 'text/markdown;charset=utf-8',
-    content: lines.join('\n'),
+    filename: `${sanitizeFilenameSegment(title)}-risk-summary.xlsx`,
+    contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    content: uint8Array,
   };
 }
 
