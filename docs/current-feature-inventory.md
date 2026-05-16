@@ -10,7 +10,7 @@
 
 - 前端：Vue 3 + Vite，提供登录页、工作区和管理台。
 - 后端：Django 5 + DRF，已挂载认证、RBAC、知识库、RAG、聊天、风险分析、模型配置、评测、运维监控和系统概览接口。
-- LLM 网关：LiteLLM（端口 4000）+ Langfuse 可观测性
+- 可观测性：Langfuse（可选）
 - 向量存储：Milvus（通过 LlamaIndex 抽象层）
 - 嵌入模型：DashScope（通过 LlamaIndex 适配器）
 - 生产部署：Docker Compose（10 个服务）
@@ -317,10 +317,9 @@
 
 当前模型运行时：
 
-- chat provider：DeepSeek、Ollama、OpenAI 兼容（通过 LiteLLM）
+- chat provider：DeepSeek、Ollama、OpenAI 兼容
 - embedding provider：DashScope、Ollama
-- LLM 网关：LiteLLM（端口 4000）
-- 可观测性：Langfuse
+- 可观测性：Langfuse（可选）
 
 对应代码：
 

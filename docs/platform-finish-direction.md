@@ -354,8 +354,8 @@
 
 - ✅ LlamaIndex-over-Milvus 统一架构迁移
 - ✅ LightRAG/Neo4j 完全移除
-- ✅ LiteLLM 网关集成
-- ✅ Langfuse 可观测性集成
+- ✅ LiteLLM 移除，改用 OpenAI 兼容 provider
+- ✅ Langfuse 可观测性集成（可选）
 - ✅ DashScope 嵌入/重排序集成
 - ✅ 嵌入缓存（Redis 24h TTL）
 
