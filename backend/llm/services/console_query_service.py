@@ -1,7 +1,6 @@
 from collections import Counter
 from datetime import timedelta
 
-from django.conf import settings
 from django.db.models import Avg
 from django.utils import timezone
 
@@ -19,16 +18,6 @@ _PROVIDER_LABELS = {
 }
 
 
-def _langfuse_config():
-    host = getattr(settings, "LANGFUSE_HOST", "")
-    public_key = getattr(settings, "LANGFUSE_PUBLIC_KEY", "")
-    secret_key = getattr(settings, "LANGFUSE_SECRET_KEY", "")
-    return {
-        "configured": all([host, public_key, secret_key]),
-        "host": host,
-        "has_public_key": bool(public_key),
-        "has_secret_key": bool(secret_key),
-    }
 
 
 def _build_provider_status():
@@ -38,7 +27,6 @@ def _build_provider_status():
     active_by_provider = Counter(config.provider for config in active_configs)
     running_fine_tunes = FineTuneRun.objects.filter(status=FineTuneRun.STATUS_RUNNING).count()
     has_fine_tune_runs = FineTuneRun.objects.exists()
-    langfuse = _langfuse_config()
 
     providers = [
         {
@@ -57,13 +45,6 @@ def _build_provider_status():
     ]
     providers.extend(
         [
-            {
-                "key": "langfuse",
-                "label": "Langfuse",
-                "status": "configured" if langfuse["configured"] else "missing",
-                "active_count": 0,
-            },
-            {
                 "key": "pymupdf4llm",
                 "label": "pymupdf4llm",
                 "status": "configured",
@@ -164,7 +145,6 @@ def build_llm_observability_summary():
         created_at__gte=window_start,
     )
     recent_failures = _recent_failed_ingestions()
-    langfuse = _langfuse_config()
 
     return {
         "overview": {
@@ -179,7 +159,6 @@ def build_llm_observability_summary():
             ).count(),
         },
         "recent_failures": [_serialize_failed_ingestion(task) for task in recent_failures],
-        "langfuse": langfuse,
     }
 
 

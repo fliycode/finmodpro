@@ -1,8 +1,9 @@
 # FinModPro PyMuPDF PDF 解析接入设计
 
 日期：2026-04-30
+实现备注：最终实现采用 `pymupdf4llm` 直接在 Django 进程中处理 PDF，不再使用 `unstructured-light` 独立服务。`parser_service.py` 中 `_parse_pdf_via_pymupdf4llm` 为 PDF 主路径，`_parse_pdf_via_pypdf` 为 fallback。原 `deploy/unstructured-light/` 已移除。
 
-更新口径：项目文档按“PyMuPDF 已作为 PDF 主解析与 fallback 引擎接入”后的形态描述；`unstructured-api` 仅作为轻量解析服务名称和兼容 elements 输出边界保留，不再代表官方重版 Unstructured PDF 解析能力。
+原始描述：项目文档按”PyMuPDF 已作为 PDF 主解析与 fallback 引擎接入”后的形态描述；`unstructured-api` 仅作为轻量解析服务名称和兼容 elements 输出边界保留，不再代表官方重版 Unstructured PDF 解析能力。
 
 ## 1. Context
 

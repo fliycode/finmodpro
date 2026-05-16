@@ -1,6 +1,8 @@
-# FinModPro LightRAG（含 Neo4j 可选增强）接入设计
+# ~~FinModPro LightRAG（含 Neo4j 可选增强）接入设计~~（已废弃）
 
-日期：2026-04-30
+> **注意：此设计文档对应的功能已于 2026-05-10 完全移除。** LightRAG 和 Neo4j 不再使用。请参考 `finmodpro-model-reference.md` 了解当前架构。
+
+日期：2026-04-30（废弃日期：2026-05-10）
 
 ## 1. Context
 

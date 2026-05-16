@@ -139,7 +139,7 @@
 - ✅ 历史会话补全（已完成）
 - ✅ 操作日志与审计（已完成）
 - ✅ 系统监控与告警（已完成）
-- ✅ LLM 网关可观测性（LiteLLM + Langfuse）
+- ✅ LLM 调用日志与成本统计
 - ⚠️ 模型评测体系增强（待完善）
 - ⚠️ LoRA/微调最小闭环（部分完成）
 
@@ -355,7 +355,7 @@
 - ✅ LlamaIndex-over-Milvus 统一架构迁移
 - ✅ LightRAG/Neo4j 完全移除
 - ✅ LiteLLM 移除，改用 OpenAI 兼容 provider
-- ✅ Langfuse 可观测性集成（可选）
+- ✅ Langfuse 可观测性集成（已移除，不再使用）
 - ✅ DashScope 嵌入/重排序集成
 - ✅ 嵌入缓存（Redis 24h TTL）
 

@@ -1,14 +1,13 @@
 # FinModPro 数据库设计
 
-本文档按当前 Django 模型与完整接入 LightRAG 后的系统形态整理。MySQL 保存 FinModPro 业务数据，Milvus 保存向量索引，Neo4j 保存 LightRAG 生成的实体关系图谱。
+本文档按当前 Django 模型系统形态整理。MySQL 保存 FinModPro 业务数据，Milvus 保存向量索引。
 
 ## 1. 数据存储划分
 
 | 存储 | 作用 |
 |---|---|
 | MySQL | 用户、权限、知识库文档、chunk、问答会话、风险事件、模型配置、审计日志 |
-| Milvus | 文档 chunk、section chunk、实体、关系等向量索引 |
-| Neo4j | LightRAG 生成的实体节点、关系边、图谱查询数据 |
+| Milvus | 文档 chunk、section chunk 等向量索引 |
 | Redis | 缓存、Celery broker、Celery result backend |
 | 文件存储 | 上传原始文件、媒体文件、导出文件 |
 
@@ -76,12 +75,8 @@
 | `document_id` | ForeignKey | - | 否 | FK | 目标文档 |
 | `celery_task_id` | CharField | 255 | 是 | 索引 | Celery 任务 ID |
 | `status` | CharField | 32 | 否 | 默认值 | 任务状态，`queued/running/succeeded/failed` |
-| `current_step` | CharField | 32 | 否 | 默认值 | 当前步骤，含 `parsing/chunking/indexing/graph_sync` |
+| `current_step` | CharField | 32 | 否 | 默认值 | 当前步骤，含 `parsing/cleaning/chunking/indexing` |
 | `strategy` | CharField | 32 | 否 | 默认值 | 入库策略，`flat/hierarchical` |
-| `graph_sync_status` | CharField | 32 | 否 | 默认值 | 图谱同步状态 |
-| `graph_sync_error_message` | TextField | - | 是 | - | 图谱同步失败原因 |
-| `graph_document_id` | CharField | 255 | 是 | 索引 | 图谱侧文档 ID |
-| `graph_track_id` | CharField | 255 | 是 | 索引 | 图谱处理跟踪 ID |
 | `total_section_count` | PositiveIntegerField | - | 否 | 默认 `0` | section 总数 |
 | `indexed_section_count` | PositiveIntegerField | - | 否 | 默认 `0` | 已索引数量 |
 | `failed_section_count` | PositiveIntegerField | - | 否 | 默认 `0` | 失败数量 |
@@ -184,7 +179,7 @@
 | `id` | BigAutoField | - | 否 | 主键 | 模型配置唯一标识 |
 | `name` | CharField | 255 | 否 | 联合唯一 | 配置名称 |
 | `capability` | CharField | 32 | 否 | 联合唯一 | 能力类型，`chat/embedding/rerank` |
-| `provider` | CharField | 32 | 否 | - | 提供方，如 `deepseek/litellm/dashscope` |
+| `provider` | CharField | 32 | 否 | - | 提供方，如 `deepseek/dashscope/ollama/openai_compatible` |
 | `model_name` | CharField | 255 | 否 | - | 上游模型名称 |
 | `endpoint` | URLField | 500 | 否 | - | 模型服务地址 |
 | `options` | JSONField | - | 是 | 默认空对象 | 模型参数配置 |
@@ -233,7 +228,7 @@
 
 - 一个用户可以属于多个角色。
 - 一个角色可以绑定多个权限。
-- 管理端通过用户角色和权限判断是否允许访问后台、知识库、模型中台和 LightRAG 管理入口。
+- 管理端通过用户角色和权限判断是否允许访问后台、知识库、模型中台和运维管理入口。
 
 ## 4. 知识库表
 
@@ -523,7 +518,7 @@
 | `id` | BigAutoField | 主键 |
 | `name` | CharField | 配置名称 |
 | `capability` | CharField | `chat/embedding/rerank` |
-| `provider` | CharField | `ollama/deepseek/litellm/dashscope` |
+| `provider` | CharField | `ollama/deepseek/dashscope/openai_compatible` |
 | `model_name` | CharField | 上游模型名 |
 | `endpoint` | URLField | 模型 API 地址 |
 | `options` | JSONField | 模型参数 |
@@ -612,19 +607,6 @@
 | `created_at` | DateTimeField | 创建时间 |
 | `updated_at` | DateTimeField | 更新时间 |
 
-### `llm_litellmsyncevent`
-
-LiteLLM 配置同步事件表。
-
-| 字段 | 类型 | 说明 |
-|---|---|---|
-| `id` | BigAutoField | 主键 |
-| `status` | CharField | `success/failed` |
-| `triggered_by_id` | FK -> `auth_user` | 触发人 |
-| `message` | TextField | 同步信息 |
-| `checksum` | CharField | 配置校验值 |
-| `created_at` | DateTimeField | 创建时间 |
-
 ### `llm_modelinvocationlog`
 
 模型调用日志表。
@@ -672,65 +654,7 @@ LiteLLM 配置同步事件表。
 | `detail_payload` | JSONField | 操作详情 |
 | `created_at` | DateTimeField | 创建时间 |
 
-## 9. LightRAG / Neo4j 图谱设计
-
-LightRAG 图谱数据不进入 Django ORM 表，而是由 LightRAG 自身维护 KV、Vector、Graph、Doc Status 四类存储。
-
-### 图节点
-
-常见节点类型：
-
-- `Document`：文档
-- `Chunk`：文本片段
-- `Entity`：公司、人物、机构、指标、项目、风险事件等实体
-- `Concept`：业务概念、风险类别、财务指标类别
-
-常见属性：
-
-- `id`
-- `name`
-- `type`
-- `description`
-- `source_document_id`
-- `source_chunk_id`
-- `dataset_id`
-- `created_at`
-- `updated_at`
-
-### 图关系
-
-常见关系类型：
-
-- `MENTIONS`：文档或 chunk 提及实体
-- `RELATED_TO`：实体之间存在一般关系
-- `OWNS`：股权或所有权关系
-- `GUARANTEES`：担保关系
-- `HAS_RISK`：主体存在风险事件
-- `LOCATED_IN`：地域关系
-- `DERIVED_FROM`：图节点来源于某个文档或 chunk
-
-常见属性：
-
-- `weight`
-- `confidence`
-- `evidence`
-- `source_document_id`
-- `source_chunk_id`
-- `created_at`
-
-### 与业务表的映射
-
-| 图谱字段 | 业务来源 |
-|---|---|
-| `source_document_id` | `knowledgebase_document.id` |
-| `source_chunk_id` | `knowledgebase_documentchunk.id` 或 `knowledgebase_documentsectionchunk.id` |
-| `dataset_id` | `knowledgebase_dataset.id` |
-| `document_title` | `knowledgebase_document.title` |
-| `page_label` | chunk metadata |
-
-这种设计让 FinModPro 可以在 MySQL 中保持清晰业务边界，在 Neo4j 中执行图谱探索和多跳关系查询，在 Milvus 中执行语义向量召回。
-
-## 10. 核心关系概览
+## 9. 核心关系概览
 
 ```text
 auth_user
@@ -739,7 +663,6 @@ auth_user
   ├─ chat_chatsession.user
   ├─ chat_memoryitem.user
   ├─ chat_memoryactionlog.actor_user
-  ├─ llm_litellmsyncevent.triggered_by
   └─ systemcheck_auditrecord.actor
 
 knowledgebase_dataset
@@ -749,7 +672,7 @@ knowledgebase_dataset
       ├─ knowledgebase_documentsectionchunk
       │   └─ knowledgebase_documentchunk
       ├─ risk_riskevent
-      └─ Milvus / LightRAG / Neo4j indexes
+      └─ Milvus vector indexes
 
 chat_chatsession
   ├─ chat_chatmessage
@@ -764,4 +687,10 @@ llm_modelconfig
   ├─ llm_finetunerun.base_model
   ├─ llm_finetunerun.registered_model_config
   └─ llm_modelinvocationlog
+
+ops_systemmetric
+ops_alertrule
+  └─ ops_alertevent
+
+systemcheck_auditrecord
 ```

@@ -171,7 +171,6 @@ class LlmConsoleApiTests(TestCase):
         self.assertEqual(payload["overview"]["chat_request_count_24h"], 1)
         self.assertEqual(payload["overview"]["retrieval_hit_count_24h"], 1)
         self.assertEqual(payload["overview"]["avg_duration_ms_24h"], 180)
-        self.assertIn("langfuse", payload)
 
     def test_summary_marks_pymupdf4llm_configured(self):
         Document.objects.create(
