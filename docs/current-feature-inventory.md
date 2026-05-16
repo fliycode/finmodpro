@@ -380,9 +380,10 @@
 - 任务管理
   - 抽取任务列表查询
   - 任务状态跟踪
-- 情感分析
-  - 文本情感倾向分析
+- 情感分析（后端 API）
+  - 文档级情感倾向分析
   - 风险倾向识别
+  - 数据集级批量分析
 
 对应代码：
 
@@ -395,6 +396,7 @@
 - `backend/risk/services/sentiment_service.py`
 - `backend/risk/controllers/report_controller.py`
 - `backend/risk/controllers/extract_controller.py`
+- `backend/risk/controllers/sentiment_controller.py`
 
 ### 3.6 模型配置与评测
 
@@ -439,12 +441,13 @@
   - 成本汇总
   - 成本时间序列
   - 按模型成本分布
-- **微调管理**
+- **微调管理**（集成在模型配置页面）
   - 微调运行服务器配置
   - 微调任务记录
   - 微调数据导出
   - 微调回调处理
   - 微调调度
+  - 微调状态监控
 
 评测当前实现特点：
 
