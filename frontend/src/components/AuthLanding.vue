@@ -964,6 +964,7 @@ watch(() => props.activeTab, () => {
   font-size: 0.92rem;
   line-height: 1.6;
   font-weight: 400;
+  white-space: nowrap;
 }
 
 .checkbox-label input {
