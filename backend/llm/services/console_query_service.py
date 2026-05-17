@@ -45,6 +45,7 @@ def _build_provider_status():
     ]
     providers.extend(
         [
+            {
                 "key": "pymupdf4llm",
                 "label": "pymupdf4llm",
                 "status": "configured",
