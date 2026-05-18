@@ -32,6 +32,7 @@
   border-radius: 16px;
   background: var(--surface-2);
   box-shadow: 0 2px 12px rgba(0, 0, 0, 0.06);
+  overflow: hidden;
 }
 
 html[data-theme='dark'] .profile-identity-sheet__hero,

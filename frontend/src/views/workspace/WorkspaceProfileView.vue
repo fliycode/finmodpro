@@ -423,6 +423,7 @@ html[data-theme='dark'] .profile-panel__identity span {
   background: var(--surface-2);
   padding: 18px 20px;
   text-align: center;
+  overflow: hidden;
 }
 
 html[data-theme='dark'] .stat-card {
