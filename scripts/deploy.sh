@@ -93,6 +93,7 @@ git checkout main
 git pull --ff-only origin main
 
 ensure_disk_headroom
+docker compose -f "$COMPOSE_FILE" down --remove-orphans
 docker compose -f "$COMPOSE_FILE" up -d --build --remove-orphans
 docker compose -f "$COMPOSE_FILE" exec -T backend python3 manage.py migrate
 docker compose -f "$COMPOSE_FILE" exec -T backend python3 manage.py seed_periodic_tasks
