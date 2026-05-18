@@ -288,6 +288,12 @@ services:
       - etcd_data:/etcd
     restart: unless-stopped
     logging: *default-logging
+    healthcheck:
+      test: ["CMD", "etcdctl", "endpoint", "health", "--endpoints=http://127.0.0.1:2379"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
 
   minio:
     image: minio/minio:RELEASE.2025-02-03T21-03-04Z
@@ -316,7 +322,7 @@ services:
       - milvus_data:/var/lib/milvus
     depends_on:
       etcd:
-        condition: service_started
+        condition: service_healthy
       minio:
         condition: service_started
     restart: unless-stopped
