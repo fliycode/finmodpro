@@ -959,7 +959,7 @@ watch(() => props.activeTab, () => {
 .checkbox-label {
   display: flex;
   align-items: flex-start;
-  gap: 12px;
+  gap: 6px;
   color: var(--entry-muted);
   font-size: 0.92rem;
   line-height: 1.6;

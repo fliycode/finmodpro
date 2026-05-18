@@ -2985,10 +2985,8 @@ code {
   [class*='__composer']
 ) {
   border-color: var(--line-soft) !important;
-  background: var(--surface-2) !important;
   background-image: none !important;
   color: var(--text-secondary) !important;
-  box-shadow: var(--shadow-sm) !important;
 }
 
 :root[data-theme='light'] .app-shell :where(
