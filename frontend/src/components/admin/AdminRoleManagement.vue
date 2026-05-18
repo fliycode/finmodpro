@@ -773,6 +773,7 @@ onMounted(loadData);
   border: 1px solid var(--line-strong);
   border-radius: 24px;
   background: var(--surface-1);
+  overflow: hidden;
 }
 
 .roles-page :deep(.el-input__wrapper),
@@ -817,6 +818,7 @@ onMounted(loadData);
   --el-table-header-bg-color: transparent;
   border: 1px solid var(--line-soft);
   border-radius: 18px;
+  overflow: hidden;
 }
 
 .roles-page :deep(.el-table__inner-wrapper::before) {

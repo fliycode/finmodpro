@@ -317,6 +317,7 @@ textarea {
   border-color: var(--line-soft);
   box-shadow: var(--shadow-md);
   background: var(--surface-2);
+  overflow: hidden;
   transition: box-shadow 0.25s ease, border-color 0.25s ease;
 }
 
@@ -1639,6 +1640,7 @@ html[data-theme='dark'] body {
   background: var(--surface-1);
   border: 1px solid var(--line-soft);
   box-shadow: var(--shadow-soft);
+  overflow: hidden;
 }
 
 .page-hero__eyebrow {
@@ -1674,6 +1676,7 @@ html[data-theme='dark'] body {
   border: 1px solid var(--line-soft);
   border-radius: var(--radius-card);
   box-shadow: var(--shadow-md);
+  overflow: hidden;
   transition: box-shadow 0.25s ease;
 }
 
@@ -1690,6 +1693,7 @@ html[data-theme='dark'] body {
   border: 1px solid var(--line-soft);
   border-radius: var(--radius-card);
   padding: 12px;
+  overflow: hidden;
 }
 
 .app-shell--admin .el-card__body {

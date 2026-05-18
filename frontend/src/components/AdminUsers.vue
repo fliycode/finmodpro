@@ -929,6 +929,7 @@ onMounted(fetchData);
   border: 1px solid var(--line-strong);
   border-radius: 24px;
   background: var(--surface-1);
+  overflow: hidden;
 }
 
 .users-page :deep(.el-input__wrapper),
@@ -944,6 +945,7 @@ onMounted(fetchData);
   --el-table-header-bg-color: transparent;
   border: 1px solid var(--line-soft);
   border-radius: 18px;
+  overflow: hidden;
 }
 
 .users-page :deep(.el-table__inner-wrapper::before) {

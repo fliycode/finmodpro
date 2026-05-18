@@ -714,6 +714,7 @@ onUnmounted(() => {
   border-radius: 16px;
   background: var(--surface-2);
   box-shadow: var(--shadow-md);
+  overflow: hidden;
 }
 
 .kb-dataset-composer__form {
@@ -830,6 +831,7 @@ onUnmounted(() => {
   border-radius: 18px;
   background: var(--surface-2);
   box-shadow: var(--shadow-lg);
+  overflow: hidden;
 }
 
 .kb-dialog h3 {

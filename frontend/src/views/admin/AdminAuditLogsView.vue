@@ -616,6 +616,7 @@ onMounted(() => {
   border: 1px solid var(--line-strong);
   border-radius: 24px;
   background: var(--surface-1);
+  overflow: hidden;
 }
 
 .audit-table-card :deep(.el-input__wrapper),
@@ -631,6 +632,7 @@ onMounted(() => {
   --el-table-header-bg-color: transparent;
   border: 1px solid var(--line-soft);
   border-radius: 18px;
+  overflow: hidden;
 }
 
 .audit-table-card :deep(.el-table__inner-wrapper::before) {

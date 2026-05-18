@@ -206,6 +206,7 @@ const tokenHighlights = computed(() => {
   border: 1px solid var(--line-soft);
   border-radius: var(--radius-card);
   background: var(--surface-1);
+  overflow: hidden;
   transition: border-color 0.2s ease, box-shadow 0.2s ease;
 }
 
@@ -318,6 +319,7 @@ const tokenHighlights = computed(() => {
   border: 1px solid var(--line-soft);
   border-radius: var(--radius-card);
   background: var(--surface-1);
+  overflow: hidden;
   transition: border-color 0.2s ease;
 }
 
@@ -500,6 +502,7 @@ const tokenHighlights = computed(() => {
   border-radius: var(--radius-lg);
   background: var(--surface-2);
   border: 1px solid transparent;
+  overflow: hidden;
   transition: border-color 0.2s ease;
 }
 

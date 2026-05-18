@@ -504,6 +504,7 @@ onMounted(async () => {
   border: 1px solid var(--line-soft);
   border-radius: 28px;
   background: var(--surface-1);
+  overflow: hidden;
 }
 
 .cost-empty {
