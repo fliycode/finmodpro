@@ -427,9 +427,7 @@ html[data-theme='dark'] .profile-panel__identity span {
 }
 
 html[data-theme='dark'] .stat-card {
-  background:
-    linear-gradient(180deg, rgba(13, 22, 38, 0.9), rgba(10, 17, 31, 0.92)),
-    radial-gradient(circle at top right, rgba(90, 106, 255, 0.12), transparent 38%);
+  background: #0d1626;
   border-color: rgba(96, 126, 255, 0.16);
 }
 

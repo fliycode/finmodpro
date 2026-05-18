@@ -38,9 +38,7 @@
 html[data-theme='dark'] .profile-identity-sheet__hero,
 html[data-theme='dark'] .profile-identity-sheet__access,
 html[data-theme='dark'] .profile-identity-sheet__security {
-  background:
-    linear-gradient(180deg, rgba(13, 22, 38, 0.9), rgba(10, 17, 31, 0.92)),
-    radial-gradient(circle at top right, rgba(90, 106, 255, 0.12), transparent 38%);
+  background: #0d1626;
   box-shadow: 0 24px 58px -42px rgba(4, 10, 22, 0.96);
   border-color: rgba(96, 126, 255, 0.16);
 }
