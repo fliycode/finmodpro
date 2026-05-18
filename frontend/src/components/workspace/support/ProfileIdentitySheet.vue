@@ -30,17 +30,7 @@
 .profile-identity-sheet__security {
   border: 1px solid var(--border, rgba(96, 126, 255, 0.16));
   border-radius: 16px;
-  background: var(--surface-2);
-  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.06);
   overflow: hidden;
-}
-
-html[data-theme='dark'] .profile-identity-sheet__hero,
-html[data-theme='dark'] .profile-identity-sheet__access,
-html[data-theme='dark'] .profile-identity-sheet__security {
-  background: #0d1626;
-  box-shadow: 0 24px 58px -42px rgba(4, 10, 22, 0.96);
-  border-color: rgba(96, 126, 255, 0.16);
 }
 
 .profile-identity-sheet__hero {

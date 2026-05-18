@@ -420,15 +420,9 @@ html[data-theme='dark'] .profile-panel__identity span {
 .stat-card {
   border: 1px solid var(--border, rgba(96, 126, 255, 0.16));
   border-radius: 16px;
-  background: var(--surface-2);
   padding: 18px 20px;
   text-align: center;
   overflow: hidden;
-}
-
-html[data-theme='dark'] .stat-card {
-  background: #0d1626;
-  border-color: rgba(96, 126, 255, 0.16);
 }
 
 .stat-card__value {
