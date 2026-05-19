@@ -222,16 +222,7 @@ watch(() => props.activeTab, () => {
                   </div>
 
                   <div class="form-group">
-                    <div class="label-row">
-                      <label for="password">密码</label>
-                      <button
-                        v-if="activeTab === 'login'"
-                        type="button"
-                        class="inline-link inline-link--muted"
-                        :disabled="isLoading"
-                        @click="emit('toggle-tab', 'forgot')"
-                      >忘记密码？</button>
-                    </div>
+                    <label for="password">密码</label>
                     <div class="password-input-wrapper">
                       <input
                         id="password"
@@ -259,6 +250,19 @@ watch(() => props.activeTab, () => {
                     <span v-if="errors.password" id="password-error" class="error-msg" role="alert">{{ errors.password }}</span>
                   </div>
 
+                  <div v-if="activeTab === 'login'" class="form-group form-group--login-row">
+                    <label class="checkbox-label" for="rememberMe">
+                      <input id="rememberMe" v-model="formData.rememberMe" type="checkbox" :disabled="isLoading" />
+                      <span>7 天内免登录</span>
+                    </label>
+                    <button
+                      type="button"
+                      class="inline-link inline-link--muted"
+                      :disabled="isLoading"
+                      @click="emit('toggle-tab', 'forgot')"
+                    >忘记密码？</button>
+                  </div>
+
                   <div v-if="activeTab === 'register'" class="form-group">
                     <label for="confirmPassword">确认密码</label>
                     <input
@@ -282,13 +286,6 @@ watch(() => props.activeTab, () => {
                       <span>我同意 <span class="inline-link inline-link--muted">服务条款</span> 与 <span class="inline-link inline-link--muted">隐私政策</span></span>
                     </label>
                     <span v-if="errors.agreeTerms" class="error-msg" role="alert">{{ errors.agreeTerms }}</span>
-                  </div>
-
-                  <div v-if="activeTab === 'login'" class="form-group checkbox-group checkbox-group--compact">
-                    <label class="checkbox-label" for="rememberMe">
-                      <input id="rememberMe" v-model="formData.rememberMe" type="checkbox" :disabled="isLoading" />
-                      <span>7 天内免登录</span>
-                    </label>
                   </div>
                 </template>
 
@@ -952,8 +949,15 @@ watch(() => props.activeTab, () => {
   gap: 8px;
 }
 
-.checkbox-group--compact {
-  margin-top: -4px;
+.form-group--login-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.form-group--login-row .inline-link {
+  flex-shrink: 0;
 }
 
 .checkbox-label {
