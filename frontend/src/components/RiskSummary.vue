@@ -1351,6 +1351,8 @@ const handleGenerateReport = async () => {
   display: grid;
   gap: 16px;
   min-width: 0;
+  flex: 1;
+  min-height: 0;
 }
 
 .risk-page :deep(.section-heading__main) {
@@ -1398,7 +1400,7 @@ const handleGenerateReport = async () => {
   display: grid;
   grid-template-columns: minmax(0, 1.9fr) minmax(320px, 0.95fr);
   gap: 20px;
-  align-items: start;
+  align-items: stretch;
 }
 
 .risk-page__studio :deep(.admin-section-card + .admin-section-card) {
@@ -1409,6 +1411,7 @@ const handleGenerateReport = async () => {
 .risk-page__classification-card :deep(.el-card__body) {
   display: grid;
   gap: 20px;
+  flex: 1;
 }
 
 .risk-page__context-bar {

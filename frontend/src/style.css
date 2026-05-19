@@ -2565,6 +2565,10 @@ code {
 
 .workspace-frame__body,
 .admin-frame__body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
   max-width: 1720px;
   padding: 16px 16px 24px;
 }

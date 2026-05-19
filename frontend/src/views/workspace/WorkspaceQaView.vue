@@ -19,5 +19,6 @@ const sessionId = computed(() => route.query.session ?? null);
   display: flex;
   flex-direction: column;
   min-height: 0;
+  flex: 1;
 }
 </style>

@@ -37,13 +37,10 @@ defineProps({
   display: flex;
   flex-direction: column;
   min-height: 0;
-  border: 1px solid rgba(95, 123, 255, 0.16);
+  border: 1px solid var(--line-soft);
   border-radius: 16px;
-  background:
-    linear-gradient(180deg, rgba(12, 20, 36, 0.92), rgba(9, 15, 29, 0.92)),
-    radial-gradient(circle at top right, rgba(104, 83, 255, 0.12), transparent 42%);
-  box-shadow: 0 22px 58px -40px rgba(3, 9, 22, 0.92);
-  backdrop-filter: blur(18px);
+  background: var(--surface-2);
+  box-shadow: var(--shadow-md);
   overflow: hidden;
 }
 
@@ -53,7 +50,7 @@ defineProps({
   justify-content: space-between;
   gap: 12px;
   padding: 22px 22px 18px;
-  border-bottom: 1px solid rgba(95, 123, 255, 0.12);
+  border-bottom: 1px solid var(--line-soft);
 }
 
 .answer-dossier__eyebrow {
@@ -62,14 +59,14 @@ defineProps({
   font-weight: 700;
   letter-spacing: 0.16em;
   text-transform: uppercase;
-  color: #7c93bb;
+  color: var(--text-muted);
 }
 
 .answer-dossier h2 {
   margin: 0;
   font-size: 24px;
   line-height: 1.15;
-  color: #eef4ff;
+  color: var(--text-primary);
 }
 
 .answer-dossier__meta {
@@ -78,9 +75,9 @@ defineProps({
   min-height: 32px;
   padding: 0 11px;
   border-radius: 999px;
-  border: 1px solid rgba(93, 130, 255, 0.2);
-  background: rgba(49, 68, 130, 0.24);
-  color: #a9beff;
+  border: 1px solid var(--line-soft);
+  background: var(--brand-soft);
+  color: var(--brand);
   font-size: 12px;
   font-weight: 700;
 }

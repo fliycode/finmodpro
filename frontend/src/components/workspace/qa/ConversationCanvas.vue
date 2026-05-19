@@ -34,13 +34,10 @@ defineProps({
   display: flex;
   flex-direction: column;
   min-height: 0;
-  border: 1px solid rgba(95, 123, 255, 0.18);
+  border: 1px solid var(--line-soft);
   border-radius: 16px;
-  background:
-    linear-gradient(180deg, rgba(12, 20, 36, 0.9), rgba(9, 15, 28, 0.9)),
-    radial-gradient(circle at top, rgba(84, 99, 255, 0.14), transparent 42%);
-  box-shadow: 0 22px 56px -36px rgba(3, 9, 22, 0.88);
-  backdrop-filter: blur(18px);
+  background: var(--surface-2);
+  box-shadow: var(--shadow-md);
   overflow: hidden;
 }
 
@@ -55,7 +52,7 @@ defineProps({
 
 .conversation-canvas__header {
   padding-bottom: 14px;
-  border-bottom: 1px solid rgba(95, 123, 255, 0.12);
+  border-bottom: 1px solid var(--line-soft);
 }
 
 .conversation-canvas__eyebrow {
@@ -64,14 +61,14 @@ defineProps({
   font-weight: 700;
   letter-spacing: 0.16em;
   text-transform: uppercase;
-  color: #7c93bb;
+  color: var(--text-muted);
 }
 
 .conversation-canvas h2 {
   margin: 0;
   font-size: 22px;
   line-height: 1.2;
-  color: #eef4ff;
+  color: var(--text-primary);
 }
 
 .conversation-canvas__meta {
@@ -80,9 +77,9 @@ defineProps({
   min-height: 30px;
   padding: 0 10px;
   border-radius: 999px;
-  border: 1px solid rgba(93, 130, 255, 0.2);
-  background: rgba(49, 68, 130, 0.24);
-  color: #a9beff;
+  border: 1px solid var(--line-soft);
+  background: var(--brand-soft);
+  color: var(--brand);
   font-size: 12px;
   font-weight: 700;
 }

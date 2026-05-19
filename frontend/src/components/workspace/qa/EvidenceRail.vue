@@ -38,13 +38,10 @@ defineProps({
   display: flex;
   flex-direction: column;
   min-height: 0;
-  border: 1px solid rgba(95, 123, 255, 0.16);
+  border: 1px solid var(--line-soft);
   border-radius: 16px;
-  background:
-    linear-gradient(180deg, rgba(10, 18, 31, 0.92), rgba(8, 14, 26, 0.92)),
-    radial-gradient(circle at top right, rgba(89, 100, 255, 0.1), transparent 40%);
-  box-shadow: 0 22px 56px -42px rgba(3, 9, 22, 0.94);
-  backdrop-filter: blur(18px);
+  background: var(--surface-2);
+  box-shadow: var(--shadow-md);
   overflow: hidden;
 }
 
@@ -53,7 +50,7 @@ defineProps({
   flex-direction: column;
   gap: 12px;
   padding: 18px 18px 16px;
-  border-bottom: 1px solid rgba(95, 123, 255, 0.12);
+  border-bottom: 1px solid var(--line-soft);
 }
 
 .evidence-rail__eyebrow {
@@ -62,14 +59,14 @@ defineProps({
   font-weight: 700;
   letter-spacing: 0.16em;
   text-transform: uppercase;
-  color: #7c93bb;
+  color: var(--text-muted);
 }
 
 .evidence-rail h2 {
   margin: 0;
   font-size: 20px;
   line-height: 1.2;
-  color: #eef4ff;
+  color: var(--text-primary);
 }
 
 .evidence-rail__meta {
@@ -84,9 +81,9 @@ defineProps({
   min-height: 28px;
   padding: 0 10px;
   border-radius: 999px;
-  border: 1px solid rgba(93, 130, 255, 0.2);
-  background: rgba(49, 68, 130, 0.22);
-  color: #a9beff;
+  border: 1px solid var(--line-soft);
+  background: var(--brand-soft);
+  color: var(--brand);
   font-size: 12px;
   font-weight: 700;
 }

@@ -834,10 +834,10 @@ const handleAsk = async () => {
   height: 34px;
   display: grid;
   place-items: center;
-  border: 1px solid rgba(102, 132, 255, 0.14);
+  border: 1px solid var(--line-soft);
   border-radius: 8px;
-  background: rgba(15, 24, 44, 0.78);
-  color: #95aacd;
+  background: var(--surface-3);
+  color: var(--text-muted);
   cursor: pointer;
   transition:
     border-color 0.2s ease,
@@ -846,15 +846,15 @@ const handleAsk = async () => {
 }
 
 .qa-toolbar__action:hover {
-  border-color: rgba(102, 132, 255, 0.28);
-  background: rgba(20, 32, 56, 0.92);
-  color: #eef4ff;
+  border-color: var(--brand);
+  background: var(--brand-soft);
+  color: var(--brand);
 }
 
 .qa-toolbar__action--primary {
-  border-color: rgba(100, 140, 255, 0.28);
-  background: linear-gradient(135deg, rgba(44, 99, 255, 0.32), rgba(86, 75, 255, 0.26));
-  color: #c5d4ff;
+  border-color: var(--brand);
+  background: var(--brand-soft);
+  color: var(--brand);
 }
 
 /* ---- Layout ---- */
@@ -879,12 +879,10 @@ const handleAsk = async () => {
   flex-direction: column;
   height: 100%;
   min-height: 0;
-  border: 1px solid rgba(66, 108, 255, 0.14);
+  border: 1px solid var(--line-soft);
   border-radius: 14px;
-  background:
-    linear-gradient(180deg, rgba(10, 19, 38, 0.88), rgba(7, 14, 28, 0.88)),
-    radial-gradient(circle at top, rgba(71, 94, 255, 0.1), transparent 42%);
-  box-shadow: 0 24px 56px -36px rgba(4, 10, 22, 0.86);
+  background: var(--surface-2);
+  box-shadow: var(--shadow-md);
   overflow: hidden;
 }
 
@@ -932,14 +930,14 @@ const handleAsk = async () => {
   margin: 0 0 8px;
   font-size: 22px;
   font-weight: 700;
-  color: #eef4ff;
+  color: var(--text-primary);
 }
 
 .qa-empty__text {
   margin: 0;
   font-size: 13px;
   line-height: 1.7;
-  color: #8597bb;
+  color: var(--text-secondary);
 }
 
 /* Notice */
@@ -963,9 +961,9 @@ const handleAsk = async () => {
   align-self: center;
   padding: 6px 16px;
   border-radius: 999px;
-  border: 1px solid rgba(102, 132, 255, 0.12);
-  background: rgba(15, 24, 42, 0.72);
-  color: #8fa1c2;
+  border: 1px solid var(--line-soft);
+  background: var(--surface-3);
+  color: var(--text-secondary);
   font-size: 12px;
   max-width: 90%;
   text-align: center;
@@ -1012,8 +1010,8 @@ const handleAsk = async () => {
 }
 
 .qa-msg__avatar--user {
-  background: linear-gradient(135deg, rgba(41, 74, 153, 0.92), rgba(70, 42, 133, 0.92));
-  color: #eff5ff;
+  background: var(--brand);
+  color: var(--text-inverse);
   overflow: hidden;
 }
 
@@ -1021,7 +1019,7 @@ const handleAsk = async () => {
   overflow: hidden;
   background: transparent;
   border: none;
-  color: #b8ccff;
+  color: var(--text-muted);
 }
 
 /* Message Body */
@@ -1045,16 +1043,16 @@ const handleAsk = async () => {
 }
 
 .qa-msg__bubble--ai {
-  background: rgba(12, 20, 35, 0.9);
-  color: #d8e5ff;
-  border: 1px solid rgba(72, 108, 255, 0.12);
-  box-shadow: 0 16px 36px -28px rgba(3, 8, 20, 0.9);
+  background: var(--surface-3);
+  color: var(--text-primary);
+  border: 1px solid var(--line-soft);
+  box-shadow: var(--shadow-sm);
 }
 
 .qa-msg__bubble--user {
-  background: linear-gradient(135deg, rgba(39, 70, 152, 0.9), rgba(68, 48, 144, 0.9));
-  color: #eff5ff;
-  border: 1px solid rgba(113, 142, 255, 0.24);
+  background: var(--brand-soft);
+  color: var(--brand);
+  border: 1px solid var(--brand);
 }
 
 .qa-msg__bubble--error {
@@ -1074,7 +1072,7 @@ const handleAsk = async () => {
 .qa-msg__bubble--loading p {
   margin: 0;
   font-size: 13px;
-  color: #92a6cb;
+  color: var(--text-secondary);
 }
 
 /* Answer Meta Badges */
@@ -1085,7 +1083,7 @@ const handleAsk = async () => {
   flex-wrap: wrap;
   margin-bottom: 12px;
   padding-bottom: 12px;
-  border-bottom: 1px solid rgba(72, 108, 255, 0.1);
+  border-bottom: 1px solid var(--line-soft);
 }
 
 .qa-badge {
@@ -1122,7 +1120,7 @@ const handleAsk = async () => {
 }
 
 .qa-answer__content--streaming {
-  color: #c8d8f8;
+  color: var(--text-primary);
 }
 
 /* 流式输出时，让光标紧跟最后一个段落 */
@@ -1135,7 +1133,7 @@ const handleAsk = async () => {
   display: inline-block;
   width: 2px;
   height: 1.1em;
-  background: #7b9fff;
+  background: var(--brand);
   vertical-align: text-bottom;
   margin-left: 1px;
   animation: cursorBlink 0.9s step-end infinite;
@@ -1183,7 +1181,7 @@ const handleAsk = async () => {
   align-items: center;
   gap: 6px;
   font-size: 12px;
-  color: rgba(162, 180, 216, 0.8);
+  color: var(--text-secondary);
   animation: stepFadeIn 0.25s ease-out;
 }
 
@@ -1209,9 +1207,9 @@ const handleAsk = async () => {
 .qa-answer__notice {
   margin-top: 12px;
   padding-top: 10px;
-  border-top: 1px solid rgba(72, 108, 255, 0.1);
+  border-top: 1px solid var(--line-soft);
   font-size: 12px;
-  color: #a2b4d8;
+  color: var(--text-secondary);
   line-height: 1.6;
 }
 
@@ -1225,7 +1223,7 @@ const handleAsk = async () => {
   padding: 0;
   border: 0;
   background: transparent;
-  color: #7b9fff;
+  color: var(--brand);
   font-size: 12px;
   font-weight: 700;
   cursor: pointer;
@@ -1238,9 +1236,9 @@ const handleAsk = async () => {
 /* ---- Input Area ---- */
 
 .qa-input-area {
-  border-top: 1px solid rgba(72, 108, 255, 0.12);
+  border-top: 1px solid var(--line-soft);
   padding: 14px 20px 16px;
-  background: rgba(8, 15, 28, 0.7);
+  background: var(--surface-2);
 }
 
 .qa-input__row {
@@ -1250,11 +1248,8 @@ const handleAsk = async () => {
   align-items: center;
   padding: 10px 10px 10px 18px;
   border-radius: 12px;
-  border: 1px solid rgba(72, 108, 255, 0.16);
-  background:
-    linear-gradient(180deg, rgba(12, 20, 34, 0.94), rgba(9, 15, 28, 0.94)),
-    radial-gradient(circle at 88% 100%, rgba(71, 94, 255, 0.14), transparent 24%);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.02);
+  border: 1px solid var(--line-soft);
+  background: var(--surface-3);
 }
 
 .qa-input__textarea {
@@ -1268,13 +1263,13 @@ const handleAsk = async () => {
   padding: 0;
   font: inherit;
   font-size: 13.5px;
-  color: #ecf4ff;
+  color: var(--text-primary);
   line-height: 26px;
   outline: none;
 }
 
 .qa-input__textarea::placeholder {
-  color: #637394;
+  color: var(--text-muted);
 }
 
 .qa-input__send {
@@ -1323,10 +1318,10 @@ const handleAsk = async () => {
 .qa-toggle {
   min-height: 30px;
   padding: 0 12px;
-  border: 1px solid rgba(72, 108, 255, 0.16);
+  border: 1px solid var(--line-soft);
   border-radius: 7px;
-  background: rgba(15, 24, 44, 0.7);
-  color: #99accb;
+  background: var(--surface-3);
+  color: var(--text-secondary);
   font-size: 12px;
   font-weight: 600;
   cursor: pointer;
@@ -1337,15 +1332,15 @@ const handleAsk = async () => {
 }
 
 .qa-toggle:hover {
-  border-color: rgba(102, 138, 255, 0.26);
-  background: rgba(20, 32, 56, 0.9);
-  color: #d0dcff;
+  border-color: var(--brand);
+  background: var(--brand-soft);
+  color: var(--brand);
 }
 
 .qa-toggle:first-child {
-  border-color: rgba(80, 130, 255, 0.28);
-  background: rgba(30, 70, 200, 0.18);
-  color: #a0bfff;
+  border-color: var(--brand);
+  background: var(--brand-soft);
+  color: var(--brand);
 }
 
 .qa-input__clear {
@@ -1355,7 +1350,7 @@ const handleAsk = async () => {
   padding: 0;
   border: 0;
   background: transparent;
-  color: #7485a8;
+  color: var(--text-muted);
   font-size: 12px;
   cursor: pointer;
   flex-shrink: 0;
@@ -1363,7 +1358,7 @@ const handleAsk = async () => {
 }
 
 .qa-input__clear:hover {
-  color: #b0c0e4;
+  color: var(--text-primary);
 }
 
 /* ---- Right Sidebar ---- */
@@ -1377,12 +1372,10 @@ const handleAsk = async () => {
 }
 
 .qa-rail__card {
-  border: 1px solid rgba(66, 108, 255, 0.14);
+  border: 1px solid var(--line-soft);
   border-radius: 14px;
-  background:
-    linear-gradient(180deg, rgba(10, 19, 38, 0.9), rgba(7, 14, 28, 0.9)),
-    radial-gradient(circle at top right, rgba(71, 94, 255, 0.08), transparent 36%);
-  box-shadow: 0 20px 48px -36px rgba(4, 10, 22, 0.84);
+  background: var(--surface-2);
+  box-shadow: var(--shadow-md);
   overflow: hidden;
 }
 
@@ -1392,7 +1385,7 @@ const handleAsk = async () => {
   justify-content: space-between;
   gap: 10px;
   padding: 14px 16px;
-  border-bottom: 1px solid rgba(72, 108, 255, 0.1);
+  border-bottom: 1px solid var(--line-soft);
 }
 
 .qa-rail__header h3 {
@@ -1402,7 +1395,7 @@ const handleAsk = async () => {
   gap: 8px;
   font-size: 14px;
   font-weight: 700;
-  color: #eef4ff;
+  color: var(--text-primary);
 }
 
 .qa-rail__count {
@@ -1413,9 +1406,9 @@ const handleAsk = async () => {
   height: 24px;
   padding: 0 7px;
   border-radius: 999px;
-  border: 1px solid rgba(93, 130, 255, 0.22);
-  background: rgba(49, 68, 130, 0.24);
-  color: #a9beff;
+  border: 1px solid var(--line-soft);
+  background: var(--brand-soft);
+  color: var(--brand);
   font-size: 11px;
   font-weight: 700;
 }
@@ -1425,29 +1418,29 @@ const handleAsk = async () => {
   place-items: center;
   width: 28px;
   height: 28px;
-  border: 1px solid rgba(102, 132, 255, 0.14);
+  border: 1px solid var(--line-soft);
   border-radius: 7px;
-  background: rgba(15, 24, 44, 0.6);
-  color: #8597bb;
+  background: var(--surface-3);
+  color: var(--text-muted);
   cursor: pointer;
   transition: color 0.2s ease;
 }
 
 .qa-rail__refresh:hover {
-  color: #c5d4ff;
+  color: var(--text-primary);
 }
 
 .qa-rail__action-text {
   border: 0;
   background: transparent;
-  color: #7180a0;
+  color: var(--text-muted);
   font-size: 12px;
   cursor: pointer;
   transition: color 0.2s ease;
 }
 
 .qa-rail__action-text:hover {
-  color: #b0c0e4;
+  color: var(--text-primary);
 }
 
 .qa-rail__list {
@@ -1463,7 +1456,7 @@ const handleAsk = async () => {
 .qa-rail__empty p {
   margin: 0;
   font-size: 13px;
-  color: #6f7e9c;
+  color: var(--text-muted);
   line-height: 1.6;
 }
 
@@ -1474,7 +1467,7 @@ const handleAsk = async () => {
   grid-template-columns: 22px 1fr;
   gap: 10px;
   padding: 14px 16px;
-  border-bottom: 1px solid rgba(72, 108, 255, 0.06);
+  border-bottom: 1px solid var(--line-soft);
   transition: background-color 0.2s ease;
 }
 
@@ -1488,8 +1481,8 @@ const handleAsk = async () => {
   display: grid;
   place-items: center;
   border-radius: 50%;
-  border: 1px solid rgba(80, 96, 125, 0.5);
-  color: #8796b5;
+  border: 1px solid var(--line-soft);
+  color: var(--text-muted);
   font-size: 12px;
   font-weight: 700;
 }
@@ -1497,26 +1490,26 @@ const handleAsk = async () => {
 .qa-cite-card__index--active {
   border-color: rgba(66, 120, 255, 0.5);
   background: rgba(66, 120, 255, 0.2);
-  color: #a0bfff;
+  color: var(--brand);
 }
 
 .qa-cite-card__title {
   font-size: 13px;
   font-weight: 600;
-  color: #dce5ff;
+  color: var(--text-primary);
   line-height: 1.4;
   margin-bottom: 4px;
 }
 
 .qa-cite-card__meta {
   font-size: 11px;
-  color: #6f7e9c;
+  color: var(--text-muted);
   margin-bottom: 6px;
 }
 
 .qa-cite-card__snippet {
   font-size: 12px;
-  color: #97a8cc;
+  color: var(--text-secondary);
   line-height: 1.55;
   display: -webkit-box;
   -webkit-line-clamp: 2;
@@ -1527,7 +1520,7 @@ const handleAsk = async () => {
 .qa-cite-card__score {
   margin-top: 6px;
   font-size: 11px;
-  color: #8896b6;
+  color: var(--text-muted);
   font-weight: 600;
 }
 
@@ -1544,10 +1537,10 @@ const handleAsk = async () => {
   width: 100%;
   text-align: left;
   padding: 11px 14px;
-  border: 1px solid rgba(72, 108, 255, 0.14);
+  border: 1px solid var(--line-soft);
   border-radius: 10px;
-  background: rgba(15, 24, 44, 0.7);
-  color: #c7d3ee;
+  background: var(--surface-3);
+  color: var(--text-secondary);
   font-size: 13px;
   line-height: 1.55;
   cursor: pointer;
@@ -1613,7 +1606,7 @@ const handleAsk = async () => {
 
 :deep(.qa-history-drawer .el-drawer__body) {
   padding: 18px;
-  background: linear-gradient(180deg, #0a1220, #0e1729);
+  background: var(--surface-2);
 }
 
 /* ---- Responsive ---- */
