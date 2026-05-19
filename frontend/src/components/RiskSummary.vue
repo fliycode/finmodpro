@@ -1401,6 +1401,10 @@ const handleGenerateReport = async () => {
   align-items: start;
 }
 
+.risk-page__studio :deep(.admin-section-card + .admin-section-card) {
+  margin-top: 0;
+}
+
 .risk-page__info-card :deep(.el-card__body),
 .risk-page__classification-card :deep(.el-card__body) {
   display: grid;
