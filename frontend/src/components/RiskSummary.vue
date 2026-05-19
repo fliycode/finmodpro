@@ -1374,8 +1374,6 @@ const handleGenerateReport = async () => {
 
 .risk-page__toolbar,
 .risk-page__context-bar,
-.risk-page__insight-head,
-.risk-page__insight-meta,
 .risk-page__category-head,
 .risk-page__category-meta,
 .risk-page__detail-head,
@@ -1384,6 +1382,14 @@ const handleGenerateReport = async () => {
 .risk-page__picker-item-head {
   display: flex;
   align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.risk-page__insight-head,
+.risk-page__insight-meta {
+  display: flex;
+  align-items: flex-start;
   justify-content: space-between;
   gap: 10px;
 }
@@ -1461,7 +1467,7 @@ const handleGenerateReport = async () => {
 }
 
 .risk-page__summary-card {
-  padding: 16px 18px;
+  padding: 18px 20px;
   background: transparent;
 }
 
@@ -1483,12 +1489,18 @@ const handleGenerateReport = async () => {
   line-height: 1.6;
 }
 
-.risk-page__summary-value,
+.risk-page__summary-value {
+  color: var(--text-primary);
+  font-size: 1.25rem;
+  font-weight: 700;
+  font-family: var(--font-display);
+  letter-spacing: -0.01em;
+}
+
 .risk-page__insight strong,
 .risk-page__category strong,
 .risk-page__state strong,
 .risk-page__picker-item strong,
-.risk-page__detail-section,
 .risk-page__detail-item strong {
   color: var(--text-primary);
 }
@@ -1526,6 +1538,8 @@ const handleGenerateReport = async () => {
 .risk-page__category,
 .risk-page__picker-item,
 .risk-page__detail-item {
+  display: grid;
+  gap: 12px;
   width: 100%;
   padding: 18px 20px;
   border: none;
@@ -1572,10 +1586,9 @@ const handleGenerateReport = async () => {
   justify-content: center;
   padding: 4px 10px;
   border-radius: 999px;
-  font-size: 0.6875rem;
+  font-size: 0.75rem;
   font-weight: 700;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
+  letter-spacing: 0.04em;
   white-space: nowrap;
 }
 
@@ -1606,11 +1619,19 @@ const handleGenerateReport = async () => {
 
 .risk-page__insight-meta,
 .risk-page__category-meta,
-.risk-page__detail-head,
-.risk-page__insight-confidence {
+.risk-page__detail-head {
   flex-wrap: wrap;
+  align-items: baseline;
+  gap: 10px;
   color: var(--text-muted);
   font-size: 0.75rem;
+}
+
+.risk-page__insight-confidence {
+  color: var(--text-muted);
+  font-size: 0.75rem;
+  flex-shrink: 0;
+  margin-left: auto;
 }
 
 .risk-page__insight-summary,
@@ -1668,7 +1689,11 @@ const handleGenerateReport = async () => {
 }
 
 .risk-page__state {
-  align-content: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
   min-height: 220px;
   padding: 24px;
   border-radius: 18px;
