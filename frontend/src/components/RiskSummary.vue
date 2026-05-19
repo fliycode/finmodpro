@@ -1042,17 +1042,15 @@ const handleGenerateReport = async () => {
         :desc="documentDisplayTitle"
         icon="file-text"
       >
-        <template #header>
-          <div class="risk-page__context-bar">
-            <span
-              v-for="item in documentContextItems"
-              :key="item"
-              class="risk-page__context-pill"
-            >
-              {{ item }}
-            </span>
-          </div>
-        </template>
+        <div class="risk-page__context-bar">
+          <span
+            v-for="item in documentContextItems"
+            :key="item"
+            class="risk-page__context-pill"
+          >
+            {{ item }}
+          </span>
+        </div>
 
         <div v-if="resultErrorMsg" class="risk-page__state risk-page__state--error" role="alert">
           <strong>提取失败</strong>
@@ -1409,17 +1407,6 @@ const handleGenerateReport = async () => {
   gap: 20px;
 }
 
-.risk-page__info-card :deep(.section-heading--card) {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: start;
-}
-
-.risk-page__info-card :deep(.section-heading__meta) {
-  margin-left: 0;
-  min-width: 0;
-}
-
 .risk-page__context-bar {
   flex-wrap: wrap;
   justify-content: flex-start;
@@ -1727,10 +1714,6 @@ const handleGenerateReport = async () => {
 
 @media (max-width: 1200px) {
   .risk-page__studio {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
-  .risk-page__info-card :deep(.section-heading--card) {
     grid-template-columns: minmax(0, 1fr);
   }
 }
