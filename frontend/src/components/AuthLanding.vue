@@ -951,6 +951,7 @@ watch(() => props.activeTab, () => {
 
 .form-group--login-row {
   display: flex;
+  flex-direction: row;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
