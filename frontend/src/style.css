@@ -2738,6 +2738,146 @@ code {
   color: var(--brand);
 }
 
+/* ── Sidebar Fold / Expand ── */
+
+.app-shell--workspace {
+  --sidebar-w: var(--workspace-sidebar-width);
+  grid-template-columns: var(--sidebar-w) minmax(0, 1fr);
+  transition: grid-template-columns 0.28s cubic-bezier(0.25, 1, 0.5, 1);
+}
+
+.app-sidebar {
+  width: var(--workspace-sidebar-width);
+  transition:
+    width 0.28s cubic-bezier(0.25, 1, 0.5, 1),
+    padding 0.28s cubic-bezier(0.25, 1, 0.5, 1);
+}
+
+.app-sidebar--folded:not(.app-sidebar--pinned) {
+  width: 52px;
+  padding-inline: 8px;
+  align-items: center;
+}
+
+.app-sidebar--folded:not(.app-sidebar--pinned) .app-sidebar__brand {
+  justify-content: center;
+  padding: 2px 0 8px;
+}
+
+.app-sidebar--folded:not(.app-sidebar--pinned) .app-sidebar__brand-copy,
+.app-sidebar--folded:not(.app-sidebar--pinned) .app-sidebar__item-label,
+.app-sidebar--folded:not(.app-sidebar--pinned) .app-sidebar__item-chevron,
+.app-sidebar--folded:not(.app-sidebar--pinned) .app-sidebar__group-label,
+.app-sidebar--folded:not(.app-sidebar--pinned) .app-sidebar__subnav,
+.app-sidebar--folded:not(.app-sidebar--pinned) .app-sidebar__profile-copy,
+.app-sidebar--folded:not(.app-sidebar--pinned) .app-sidebar__profile-menu {
+  display: none;
+}
+
+.app-sidebar--folded:not(.app-sidebar--pinned) .app-sidebar__item {
+  justify-content: center;
+  padding: 8px;
+}
+
+.app-sidebar--folded:not(.app-sidebar--pinned) .app-sidebar__item.router-link-active {
+  box-shadow: none;
+  transform: none;
+}
+
+.app-sidebar--folded:not(.app-sidebar--pinned) .app-sidebar__profile-trigger {
+  justify-content: center;
+  padding: 4px;
+}
+
+.app-sidebar--folded:not(.app-sidebar--pinned) .app-sidebar__nav {
+  align-items: center;
+}
+
+.app-sidebar--folded:not(.app-sidebar--pinned) .app-sidebar__group {
+  align-items: center;
+}
+
+.app-sidebar--folded:not(.app-sidebar--pinned) .app-sidebar__group + .app-sidebar__group {
+  padding-top: 8px;
+}
+
+/* Expand on hover */
+.app-sidebar--folded:not(.app-sidebar--pinned):hover {
+  width: var(--workspace-sidebar-width);
+  padding-inline: var(--shell-sidebar-padding-inline);
+  align-items: stretch;
+}
+
+.app-sidebar--folded:not(.app-sidebar--pinned):hover .app-sidebar__brand {
+  justify-content: flex-start;
+  padding: 2px 0 10px;
+}
+
+.app-sidebar--folded:not(.app-sidebar--pinned):hover .app-sidebar__brand-copy,
+.app-sidebar--folded:not(.app-sidebar--pinned):hover .app-sidebar__item-label,
+.app-sidebar--folded:not(.app-sidebar--pinned):hover .app-sidebar__item-chevron,
+.app-sidebar--folded:not(.app-sidebar--pinned):hover .app-sidebar__group-label,
+.app-sidebar--folded:not(.app-sidebar--pinned):hover .app-sidebar__profile-copy {
+  display: flex;
+}
+
+.app-sidebar--folded:not(.app-sidebar--pinned):hover .app-sidebar__subnav {
+  display: block;
+}
+
+.app-sidebar--folded:not(.app-sidebar--pinned):hover .app-sidebar__item {
+  justify-content: flex-start;
+  padding: 8px 10px;
+}
+
+.app-sidebar--folded:not(.app-sidebar--pinned):hover .app-sidebar__item.router-link-active {
+  box-shadow:
+    var(--shadow-sm),
+    inset 3px 0 0 var(--brand);
+  transform: translateX(1px);
+}
+
+.app-sidebar--folded:not(.app-sidebar--pinned):hover .app-sidebar__profile-trigger {
+  justify-content: flex-start;
+}
+
+.app-sidebar--folded:not(.app-sidebar--pinned):hover .app-sidebar__nav,
+.app-sidebar--folded:not(.app-sidebar--pinned):hover .app-sidebar__group {
+  align-items: stretch;
+}
+
+/* Pin button */
+.app-sidebar__pin {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  margin: 4px auto 0;
+  border: 1px solid var(--line-soft);
+  border-radius: 7px;
+  background: var(--surface-2);
+  color: var(--text-muted);
+  cursor: pointer;
+  flex-shrink: 0;
+  transition:
+    color 0.18s ease,
+    background 0.18s ease,
+    transform 0.28s ease;
+}
+
+.app-sidebar__pin:hover {
+  color: var(--text-primary);
+  background: var(--surface-hover);
+}
+
+.app-sidebar--pinned .app-sidebar__pin {
+  color: var(--brand);
+  border-color: rgba(36, 87, 197, 0.18);
+  background: var(--brand-soft);
+  transform: rotate(90deg);
+}
+
 .app-topbar {
   background: var(--surface-1);
   border-bottom: 1px solid var(--line-soft);

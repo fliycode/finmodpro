@@ -45,7 +45,12 @@ const historyDrawerOpen = ref(false);
 const memoryDrawerOpen = ref(false);
 const activeSessionFilters = ref({});
 const ragSteps = ref([]);
+const railVisible = ref(false);
 let sessionOptionsPromise = null;
+
+const hasConversation = computed(() =>
+  messages.value.some((m) => m.role === 'user'),
+);
 
 const scheduleNonCriticalWork = (work) => {
   const runner = () => Promise.resolve().then(work);
@@ -160,9 +165,9 @@ const recommendedQuestions = computed(() => {
   }
 
   return [
-    '先给我一个适合当前问题的分析框架',
-    '把这个问题拆成结论、证据、待验证三部分',
-    '给我三个更专业的追问方向',
+    '近期的市场风险主要集中在哪些领域',
+    '分析一下美联储政策对新兴市场的影响',
+    '帮我梳理一下当前的信用风险敞口',
   ];
 });
 
@@ -199,6 +204,7 @@ const scrollToBottom = async () => {
 
 const resetConversation = () => {
   messages.value = [{ role: 'system', content: DEFAULT_SYSTEM_MESSAGE, tone: 'info' }];
+  railVisible.value = false;
 };
 
 const refreshSessionOptions = async () => {
@@ -454,6 +460,7 @@ const handleAsk = async () => {
       isStreaming: false,
       content: finalState.answer || messages.value[assistantMessageIndex]?.content || '未获取到回答，请稍后重试。',
     });
+    railVisible.value = true;
     await refreshSessionOptions();
   } catch (error) {
     const lastMessage = messages.value[messages.value.length - 1];
@@ -482,7 +489,7 @@ const handleAsk = async () => {
 <template>
   <div class="qa-shell">
     <!-- QA Toolbar -->
-    <div v-if="qaChromeState.actions.length > 0" class="qa-toolbar">
+    <div class="qa-toolbar">
       <button
         type="button"
         class="qa-toolbar__action"
@@ -500,6 +507,16 @@ const handleAsk = async () => {
         <AppIcon name="brain-circuit" :size="18" />
       </button>
       <button
+        v-if="hasConversation"
+        type="button"
+        class="qa-toolbar__action"
+        :class="{ 'qa-toolbar__action--active': railVisible }"
+        title="引用面板"
+        @click="railVisible = !railVisible"
+      >
+        <AppIcon name="file" :size="18" />
+      </button>
+      <button
         type="button"
         class="qa-toolbar__action qa-toolbar__action--primary"
         title="新对话"
@@ -509,8 +526,8 @@ const handleAsk = async () => {
       </button>
     </div>
 
-    <!-- 2-Column Layout -->
-    <div class="qa-layout">
+    <!-- Layout: centered when empty, grid when has conversation -->
+    <div class="qa-layout" :class="{ 'qa-layout--centered': showEmptyState }">
       <!-- Main Chat Column -->
       <main class="qa-main">
         <div class="qa-main__card">
@@ -527,11 +544,18 @@ const handleAsk = async () => {
             <!-- Empty State -->
             <div v-if="showEmptyState" class="qa-empty">
               <div class="qa-empty__orb" />
-              <h2 class="qa-empty__title">开始新的分析</h2>
-              <p class="qa-empty__text">
-                输入您关心的金融问题，AI 将基于知识库与实时数据进行深度分析，
-                并标注引用来源与推理证据。
-              </p>
+              <h2 class="qa-empty__title">今天想了解什么？</h2>
+              <div class="qa-empty__suggestions">
+                <button
+                  v-for="q in recommendedQuestions"
+                  :key="q"
+                  type="button"
+                  class="qa-empty__suggestion"
+                  @click="applySuggestedQuestion(q)"
+                >
+                  {{ q }}
+                </button>
+              </div>
             </div>
 
             <TransitionGroup name="qa-msg">
@@ -698,11 +722,15 @@ const handleAsk = async () => {
       </main>
 
       <!-- Right Sidebar -->
-      <aside class="qa-rail">
-        <!-- Citations -->
-        <section class="qa-rail__card">
-          <header class="qa-rail__header">
-            <h3><AppIcon name="file" :size="16" /> 引用来源</h3>
+      <Transition name="rail-slide">
+        <aside v-if="!showEmptyState && railVisible" class="qa-rail">
+          <!-- Citations -->
+          <section class="qa-rail__card">
+            <header class="qa-rail__header">
+              <h3><AppIcon name="file" :size="16" /> 引用来源</h3>
+              <button type="button" class="qa-rail__close" title="关闭面板" @click="railVisible = false">
+                <AppIcon name="x" :size="14" />
+              </button>
             <span class="qa-rail__count">{{ latestCitations.length }}</span>
           </header>
           <div v-if="latestCitations.length > 0" class="qa-rail__list">
@@ -775,6 +803,7 @@ const handleAsk = async () => {
           </div>
         </section>
       </aside>
+      </Transition>
     </div>
 
     <!-- History Drawer -->
@@ -853,6 +882,12 @@ const handleAsk = async () => {
   color: var(--brand);
 }
 
+.qa-toolbar__action--active {
+  border-color: var(--brand);
+  background: var(--brand-soft);
+  color: var(--brand);
+}
+
 /* ---- Layout ---- */
 
 .qa-layout {
@@ -861,6 +896,14 @@ const handleAsk = async () => {
   gap: 14px;
   min-height: 0;
   flex: 1;
+  transition: grid-template-columns 0.28s cubic-bezier(0.25, 1, 0.5, 1);
+}
+
+.qa-layout--centered {
+  grid-template-columns: minmax(0, 1fr);
+  max-width: 660px;
+  margin: 0 auto;
+  width: 100%;
 }
 
 /* ---- Main Chat Panel ---- */
@@ -929,11 +972,34 @@ const handleAsk = async () => {
   color: var(--text-primary);
 }
 
-.qa-empty__text {
-  margin: 0;
-  font-size: 13px;
-  line-height: 1.7;
+.qa-empty__suggestions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+  max-width: 420px;
+}
+
+.qa-empty__suggestion {
+  width: 100%;
+  text-align: left;
+  padding: 11px 16px;
+  border: 1px solid var(--line-soft);
+  border-radius: 10px;
+  background: var(--surface-3);
   color: var(--text-secondary);
+  font-size: 13px;
+  line-height: 1.5;
+  cursor: pointer;
+  transition:
+    border-color 0.2s ease,
+    background 0.2s ease;
+}
+
+.qa-empty__suggestion:hover {
+  border-color: rgba(36, 87, 197, 0.22);
+  background: var(--brand-soft);
+  color: var(--brand);
 }
 
 /* Notice */
@@ -1374,6 +1440,23 @@ const handleAsk = async () => {
   font-weight: 700;
 }
 
+.qa-rail__close {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--line-soft);
+  border-radius: 7px;
+  background: var(--surface-3);
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: color 0.2s ease;
+}
+
+.qa-rail__close:hover {
+  color: var(--text-primary);
+}
+
 .qa-rail__refresh {
   display: grid;
   place-items: center;
@@ -1561,6 +1644,25 @@ const handleAsk = async () => {
   font-size: 11px;
   color: #6f7e9c;
   flex-shrink: 0;
+}
+
+/* Rail slide transition */
+.rail-slide-enter-active {
+  transition: all 0.28s cubic-bezier(0.25, 1, 0.5, 1);
+}
+
+.rail-slide-leave-active {
+  transition: all 0.2s ease-in;
+}
+
+.rail-slide-enter-from {
+  opacity: 0;
+  transform: translateX(24px);
+}
+
+.rail-slide-leave-to {
+  opacity: 0;
+  transform: translateX(16px);
 }
 
 /* History Drawer Override */

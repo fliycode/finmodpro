@@ -1,5 +1,5 @@
 <script setup>
-import { computed, ref } from 'vue';
+import { computed, ref, watch } from 'vue';
 import { RouterLink, useRoute, useRouter } from 'vue-router';
 
 import AppAvatar from './AppAvatar.vue';
@@ -23,6 +23,16 @@ const router = useRouter();
 const mobileOpen = ref(false);
 const toggleMobile = () => { mobileOpen.value = !mobileOpen.value; };
 const closeMobile = () => { mobileOpen.value = false; };
+
+const folded = ref(props.area === 'workspace');
+const pinned = ref(false);
+
+const isExpanded = computed(() => !folded.value || pinned.value);
+
+watch(() => props.area, (val) => {
+  folded.value = val === 'workspace';
+  pinned.value = false;
+});
 
 defineExpose({ toggleMobile });
 const profile = computed(() => authStorage.getProfile());
@@ -102,8 +112,14 @@ const isItemActive = (item) => {
       'app-sidebar',
       `app-sidebar--${props.area}`,
       `app-sidebar--${sidebarPresentation.mode}`,
-      { 'app-sidebar--open': mobileOpen },
+      {
+        'app-sidebar--open': mobileOpen,
+        'app-sidebar--folded': folded,
+        'app-sidebar--pinned': pinned,
+      },
     ]"
+    @mouseenter="folded && !pinned ? folded = false : null"
+    @mouseleave="folded === false && !pinned ? folded = true : null"
   >
     <div
       class="app-sidebar__brand"
@@ -200,6 +216,17 @@ const isItemActive = (item) => {
         </template>
       </div>
     </div>
+
+    <button
+      v-if="props.area === 'workspace'"
+      type="button"
+      class="app-sidebar__pin"
+      :title="pinned ? '收起侧栏' : '固定侧栏'"
+      :aria-label="pinned ? '收起侧栏' : '固定侧栏'"
+      @click.stop="pinned = !pinned; if (!pinned) folded = true"
+    >
+      <AppIcon :name="pinned ? 'chevron-down' : 'chevron-right'" />
+    </button>
 
   </aside>
 </template>
