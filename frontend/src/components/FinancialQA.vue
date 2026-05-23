@@ -486,42 +486,43 @@ const handleAsk = async () => {
 
 <template>
   <div class="qa-shell">
-    <!-- QA Toolbar -->
-    <div class="qa-toolbar">
-      <button
-        type="button"
-        class="qa-toolbar__action"
-        title="历史会话"
-        @click="historyDrawerOpen = true"
-      >
-        <AppIcon name="history" :size="18" />
-      </button>
-<button
-        v-if="hasConversation"
-        type="button"
-        class="qa-toolbar__action"
-        :class="{ 'qa-toolbar__action--active': railVisible }"
-        title="引用面板"
-        @click="railVisible = !railVisible"
-      >
-        <AppIcon name="file" :size="18" />
-      </button>
-      <button
-        type="button"
-        class="qa-toolbar__action qa-toolbar__action--primary"
-        title="新对话"
-        @click="startNewConversation"
-      >
-        <AppIcon name="plus" :size="18" />
-      </button>
-    </div>
-
-    <!-- Layout: centered when empty, grid when has conversation -->
-    <div class="qa-layout" :class="{ 'qa-layout--centered': showEmptyState }">
-      <!-- Main Chat Column -->
+    <div
+      class="qa-layout"
+      :class="{
+        'qa-layout--centered': showEmptyState,
+        'qa-layout--full': !showEmptyState && !railVisible,
+      }"
+    >
       <main class="qa-main">
         <div class="qa-main__card">
-          <!-- Messages -->
+          <div class="qa-toolbar">
+            <button
+              type="button"
+              class="qa-toolbar__action"
+              title="历史会话"
+              @click="historyDrawerOpen = true"
+            >
+              <AppIcon name="history" :size="16" />
+            </button>
+            <button
+              v-if="hasConversation"
+              type="button"
+              class="qa-toolbar__action"
+              :class="{ 'qa-toolbar__action--active': railVisible }"
+              title="引用面板"
+              @click="railVisible = !railVisible"
+            >
+              <AppIcon name="file" :size="16" />
+            </button>
+            <button
+              type="button"
+              class="qa-toolbar__action"
+              title="新对话"
+              @click="startNewConversation"
+            >
+              <AppIcon name="plus" :size="16" />
+            </button>
+          </div>
           <div
             ref="messagesContainer"
             class="qa-messages"
@@ -835,18 +836,19 @@ const handleAsk = async () => {
 
 .qa-toolbar {
   display: flex;
-  gap: 8px;
-  padding: 0 0 4px;
+  gap: 6px;
+  padding: 8px 12px 0;
+  flex-shrink: 0;
 }
 
 .qa-toolbar__action {
-  width: 34px;
-  height: 34px;
+  width: 30px;
+  height: 30px;
   display: grid;
   place-items: center;
   border: 1px solid var(--line-soft);
-  border-radius: 8px;
-  background: var(--surface-3);
+  border-radius: 7px;
+  background: transparent;
   color: var(--text-muted);
   cursor: pointer;
   transition:
@@ -856,12 +858,6 @@ const handleAsk = async () => {
 }
 
 .qa-toolbar__action:hover {
-  border-color: var(--brand);
-  background: var(--brand-soft);
-  color: var(--brand);
-}
-
-.qa-toolbar__action--primary {
   border-color: var(--brand);
   background: var(--brand-soft);
   color: var(--brand);
@@ -889,6 +885,10 @@ const handleAsk = async () => {
   max-width: 660px;
   margin: 0 auto;
   width: 100%;
+}
+
+.qa-layout--full {
+  grid-template-columns: minmax(0, 1fr);
 }
 
 /* ---- Main Chat Panel ---- */
