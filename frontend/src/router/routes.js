@@ -178,6 +178,16 @@ export const appRoutes = [
         },
       },
       {
+        path: 'llm/prompts',
+        component: () => import('../views/admin/AdminPromptsView.vue'),
+        meta: {
+          title: 'Prompt 模板',
+          subtitle: '管理 LLM 提示词模板。',
+          breadcrumb: [{ label: 'Gateway Ops' }, { label: '模型管理' }, { label: 'Prompt 模板' }],
+          requiredPermissions: ['manage_model_config'],
+        },
+      },
+      {
         path: 'graph',
         redirect: '/admin/knowledge',
       },

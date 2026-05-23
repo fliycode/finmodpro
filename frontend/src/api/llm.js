@@ -299,6 +299,21 @@ export const createLlmApi = (overrides = {}) => {
         fine_tune_run: normalizeFineTuneRun(data.fine_tune_run || {}),
       };
     },
+
+    async getPromptConfigs() {
+      return unwrap(await fetchJson('/api/ops/prompt-configs/', {
+        method: 'GET',
+        auth: true,
+      }));
+    },
+
+    async updatePromptConfig(key, template) {
+      return unwrap(await fetchJson(`/api/ops/prompt-configs/${encodeURIComponent(key)}/`, {
+        method: 'PATCH',
+        auth: true,
+        body: JSON.stringify({ template }),
+      }));
+    },
   };
 };
 

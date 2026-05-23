@@ -68,6 +68,7 @@ export const navigationMap = {
         { id: 'admin-llm-model-overview', label: '模型总览', to: '/admin/llm/models', requiredPermissions: ['manage_model_config'] },
         { id: 'admin-llm-logs', label: '模型日志', to: '/admin/llm/logs', requiredPermissions: ['manage_model_config'] },
         { id: 'admin-llm-usage', label: '用量统计', to: '/admin/llm/usage', requiredPermissions: ['manage_model_config'] },
+        { id: 'admin-llm-prompts', label: 'Prompt 模板', to: '/admin/llm/prompts', requiredPermissions: ['manage_model_config'] },
       ],
     },
     {
