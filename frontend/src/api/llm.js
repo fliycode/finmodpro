@@ -301,10 +301,12 @@ export const createLlmApi = (overrides = {}) => {
     },
 
     async getPromptConfigs() {
-      return unwrap(await fetchJson('/api/ops/prompt-configs/', {
+      const data = await fetchJson('/api/ops/prompt-configs/', {
         method: 'GET',
         auth: true,
-      }));
+      });
+      const payload = unwrap(data);
+      return Array.isArray(payload?.prompt_configs) ? payload.prompt_configs : [];
     },
 
     async updatePromptConfig(key, template) {

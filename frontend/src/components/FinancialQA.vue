@@ -18,7 +18,6 @@ import {
 import AppIcon from './ui/AppIcon.vue';
 
 const ChatHistory = defineAsyncComponent(() => import('./ChatHistory.vue'));
-const ChatMemoryDrawer = defineAsyncComponent(() => import('./ChatMemoryDrawer.vue'));
 const MarkdownRenderer = defineAsyncComponent(() => import('./MarkdownRenderer.vue'));
 
 const props = defineProps({
@@ -42,7 +41,6 @@ const isLoadingSessions = ref(false);
 const isHydratingSession = ref(false);
 const activeSessionLoadFailed = ref(false);
 const historyDrawerOpen = ref(false);
-const memoryDrawerOpen = ref(false);
 const activeSessionFilters = ref({});
 const ragSteps = ref([]);
 const railVisible = ref(false);
@@ -498,15 +496,7 @@ const handleAsk = async () => {
       >
         <AppIcon name="history" :size="18" />
       </button>
-      <button
-        type="button"
-        class="qa-toolbar__action"
-        title="记忆管理"
-        @click="memoryDrawerOpen = true"
-      >
-        <AppIcon name="brain-circuit" :size="18" />
-      </button>
-      <button
+<button
         v-if="hasConversation"
         type="button"
         class="qa-toolbar__action"
@@ -825,11 +815,6 @@ const handleAsk = async () => {
       />
     </el-drawer>
 
-    <!-- Memory Drawer -->
-    <ChatMemoryDrawer
-      v-model:open="memoryDrawerOpen"
-      :dataset-id="activeDatasetId"
-    />
   </div>
 </template>
 
@@ -911,12 +896,14 @@ const handleAsk = async () => {
 .qa-main {
   min-width: 0;
   min-height: 0;
+  display: flex;
+  flex-direction: column;
 }
 
 .qa-main__card {
   display: flex;
   flex-direction: column;
-  height: 100%;
+  flex: 1;
   min-height: 0;
   border: 1px solid var(--line-soft);
   border-radius: 14px;

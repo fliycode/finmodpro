@@ -1,5 +1,5 @@
 <script setup>
-import { computed, ref, watch } from 'vue';
+import { computed, nextTick, onMounted, ref, watch } from 'vue';
 import { RouterLink, useRoute, useRouter } from 'vue-router';
 
 import AppAvatar from './AppAvatar.vue';
@@ -25,13 +25,27 @@ const toggleMobile = () => { mobileOpen.value = !mobileOpen.value; };
 const closeMobile = () => { mobileOpen.value = false; };
 
 const folded = ref(props.area === 'workspace');
-const pinned = ref(false);
+const pinned = ref(props.area === 'admin');
 
 const isExpanded = computed(() => !folded.value || pinned.value);
 
-watch(() => props.area, (val) => {
-  folded.value = val === 'workspace';
-  pinned.value = false;
+const collapsedW = 52;
+
+function updateShellGrid() {
+  nextTick(() => {
+    const shell = document.querySelector('.app-shell--workspace, .app-shell--admin');
+    if (!shell) return;
+    const expandedW = props.area === 'admin' ? 176 : 188;
+    shell.style.setProperty('--sidebar-w', `${isExpanded.value ? expandedW : collapsedW}px`);
+  });
+}
+
+onMounted(updateShellGrid);
+watch(isExpanded, updateShellGrid);
+watch(() => props.area, () => {
+  folded.value = props.area === 'workspace';
+  pinned.value = props.area === 'admin';
+  updateShellGrid();
 });
 
 defineExpose({ toggleMobile });
@@ -218,7 +232,6 @@ const isItemActive = (item) => {
     </div>
 
     <button
-      v-if="props.area === 'workspace'"
       type="button"
       class="app-sidebar__pin"
       :title="pinned ? '收起侧栏' : '固定侧栏'"

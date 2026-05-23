@@ -2740,10 +2740,19 @@ code {
 
 /* ── Sidebar Fold / Expand ── */
 
+.app-shell--workspace,
+.app-shell--admin {
+  transition: grid-template-columns 0.28s cubic-bezier(0.25, 1, 0.5, 1);
+}
+
 .app-shell--workspace {
   --sidebar-w: var(--workspace-sidebar-width);
   grid-template-columns: var(--sidebar-w) minmax(0, 1fr);
-  transition: grid-template-columns 0.28s cubic-bezier(0.25, 1, 0.5, 1);
+}
+
+.app-shell--admin {
+  --sidebar-w: var(--shell-sidebar-width);
+  grid-template-columns: var(--sidebar-w) minmax(0, 1fr);
 }
 
 .app-sidebar {
@@ -2751,6 +2760,10 @@ code {
   transition:
     width 0.28s cubic-bezier(0.25, 1, 0.5, 1),
     padding 0.28s cubic-bezier(0.25, 1, 0.5, 1);
+}
+
+.app-shell--admin .app-sidebar {
+  width: var(--shell-sidebar-width);
 }
 
 .app-sidebar--folded:not(.app-sidebar--pinned) {
