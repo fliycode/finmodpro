@@ -632,6 +632,7 @@ html[data-theme='dark'] body {
 .app-sidebar {
   position: sticky;
   top: 0;
+  z-index: 1;
   height: 100svh;
   display: flex;
   flex-direction: column;
@@ -2764,6 +2765,8 @@ code {
 
 .app-shell--admin .app-sidebar {
   width: var(--shell-sidebar-width);
+  border-right: 1px solid rgba(157, 173, 196, 0.10);
+  box-shadow: none;
 }
 
 .app-sidebar--folded:not(.app-sidebar--pinned) {
