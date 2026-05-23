@@ -814,6 +814,7 @@ const handleAsk = async () => {
   flex-direction: column;
   gap: 16px;
   min-height: 0;
+  flex: 1;
 }
 
 /* ---- Toolbar ---- */
