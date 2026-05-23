@@ -684,11 +684,6 @@ const handleAsk = async () => {
               </button>
             </div>
             <div class="qa-input__footer">
-              <div class="qa-input__toggles">
-                <button type="button" class="qa-toggle">深度思考</button>
-                <button type="button" class="qa-toggle">联网搜索</button>
-                <button type="button" class="qa-toggle">引用溯源</button>
-              </div>
               <button
                 type="button"
                 class="qa-input__clear"
@@ -1304,43 +1299,8 @@ const handleAsk = async () => {
 .qa-input__footer {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 12px;
+  justify-content: flex-end;
   margin-top: 10px;
-}
-
-.qa-input__toggles {
-  display: flex;
-  gap: 6px;
-  flex-wrap: wrap;
-}
-
-.qa-toggle {
-  min-height: 30px;
-  padding: 0 12px;
-  border: 1px solid var(--line-soft);
-  border-radius: 7px;
-  background: var(--surface-3);
-  color: var(--text-secondary);
-  font-size: 12px;
-  font-weight: 600;
-  cursor: pointer;
-  transition:
-    border-color 0.2s ease,
-    background-color 0.2s ease,
-    color 0.2s ease;
-}
-
-.qa-toggle:hover {
-  border-color: var(--brand);
-  background: var(--brand-soft);
-  color: var(--brand);
-}
-
-.qa-toggle:first-child {
-  border-color: var(--brand);
-  background: var(--brand-soft);
-  color: var(--brand);
 }
 
 .qa-input__clear {
@@ -1630,13 +1590,5 @@ const handleAsk = async () => {
     padding: 12px 14px 14px;
   }
 
-  .qa-input__toggles {
-    gap: 4px;
-  }
-
-  .qa-toggle {
-    padding: 0 9px;
-    font-size: 11px;
-  }
 }
 </style>
