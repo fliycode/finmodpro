@@ -3,7 +3,6 @@ import { computed, onMounted, ref } from 'vue';
 
 import { llmApi } from '../../api/llm.js';
 import { useFlash } from '../../lib/flash.js';
-import AppSectionCard from '../../components/ui/AppSectionCard.vue';
 
 const flash = useFlash();
 
@@ -76,35 +75,35 @@ onMounted(load);
 
 <template>
   <div class="prompts-page">
-    <AppSectionCard title="Prompt 模板" admin>
-      <div v-if="isLoading" class="prompts-skeleton">
-        <div v-for="i in 3" :key="i" class="skeleton-row" />
-      </div>
+    <h2 class="prompts-page__title">Prompt 模板</h2>
 
-      <div v-else-if="errorMsg" class="prompts-error">
-        <span>{{ errorMsg }}</span>
-        <button class="btn-retry" @click="load">重试</button>
-      </div>
+    <div v-if="isLoading" class="prompts-skeleton">
+      <div v-for="i in 3" :key="i" class="skeleton-row" />
+    </div>
 
-      <template v-else>
-        <div v-for="[category, items] in categoryGroups" :key="category" class="prompts-group">
-          <div class="prompts-group__label">{{ category }}</div>
-          <div v-for="item in items" :key="item.key" class="prompts-row">
-            <div class="prompts-row__main">
-              <span class="prompts-row__name">{{ item.name || item.key }}</span>
-              <span class="prompts-row__key">{{ item.key }}</span>
-              <span v-if="item.variables?.length" class="prompts-row__vars">
-                <span v-for="v in item.variables" :key="v" class="var-tag">{{ v }}</span>
-              </span>
-            </div>
-            <div class="prompts-row__meta">
-              <span class="prompts-row__time">{{ formatTime(item.updated_at) }}</span>
-              <button class="btn-edit" @click="openEdit(item)">编辑</button>
-            </div>
+    <div v-else-if="errorMsg" class="prompts-error">
+      <span>{{ errorMsg }}</span>
+      <button class="btn-retry" @click="load">重试</button>
+    </div>
+
+    <template v-else>
+      <div v-for="[category, items] in categoryGroups" :key="category" class="prompts-group">
+        <div class="prompts-group__label">{{ category }}</div>
+        <div v-for="item in items" :key="item.key" class="prompts-row">
+          <div class="prompts-row__main">
+            <span class="prompts-row__name">{{ item.name || item.key }}</span>
+            <span class="prompts-row__key">{{ item.key }}</span>
+            <span v-if="item.variables?.length" class="prompts-row__vars">
+              <span v-for="v in item.variables" :key="v" class="var-tag">{{ v }}</span>
+            </span>
+          </div>
+          <div class="prompts-row__meta">
+            <span class="prompts-row__time">{{ formatTime(item.updated_at) }}</span>
+            <button class="btn-edit" @click="openEdit(item)">编辑</button>
           </div>
         </div>
-      </template>
-    </AppSectionCard>
+      </div>
+    </template>
 
     <Teleport to="body">
       <div v-if="dialogVisible" class="dialog-overlay" @click.self="closeEdit">
@@ -137,14 +136,21 @@ onMounted(load);
 .prompts-page {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 28px;
+}
+
+.prompts-page__title {
+  margin: 0;
+  font-size: 1.05rem;
+  font-weight: 600;
+  color: var(--text-primary);
 }
 
 /* ── Skeleton ── */
 .prompts-skeleton {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 8px;
 }
 .skeleton-row {
   height: 40px;
@@ -183,15 +189,21 @@ onMounted(load);
 .prompts-group {
   display: flex;
   flex-direction: column;
-  gap: 1px;
+  gap: 0;
+  padding-top: 14px;
+  border-top: 1px solid var(--line-soft);
+}
+.prompts-group:first-child {
+  padding-top: 0;
+  border-top: 0;
 }
 .prompts-group__label {
   font-size: var(--fs-2xs);
-  font-weight: 500;
-  letter-spacing: 0.06em;
+  font-weight: 600;
+  letter-spacing: 0.08em;
   color: var(--text-muted);
   text-transform: uppercase;
-  padding: 6px 4px 8px;
+  padding: 0 4px 10px;
 }
 
 /* ── Row ── */
@@ -200,9 +212,12 @@ onMounted(load);
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding: 8px 4px;
+  padding: 7px 10px;
   border-radius: 6px;
   transition: background 0.15s;
+}
+.prompts-row + .prompts-row {
+  margin-top: 2px;
 }
 .prompts-row:hover {
   background: var(--surface-hover);
