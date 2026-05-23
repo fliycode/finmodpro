@@ -882,7 +882,7 @@ const handleAsk = async () => {
 
 .qa-layout--centered {
   grid-template-columns: minmax(0, 1fr);
-  max-width: 660px;
+  max-width: 760px;
   margin: 0 auto;
   width: 100%;
 }
@@ -905,11 +905,6 @@ const handleAsk = async () => {
   flex-direction: column;
   flex: 1;
   min-height: 0;
-  border: 1px solid var(--line-soft);
-  border-radius: 14px;
-  background: var(--surface-2);
-  box-shadow: var(--shadow-md);
-  overflow: hidden;
 }
 
 /* ---- Messages ---- */
@@ -1285,9 +1280,7 @@ const handleAsk = async () => {
 /* ---- Input Area ---- */
 
 .qa-input-area {
-  border-top: 1px solid var(--line-soft);
   padding: 14px 20px 16px;
-  background: var(--surface-2);
 }
 
 .qa-input__row {
