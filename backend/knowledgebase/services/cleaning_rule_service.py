@@ -1,3 +1,20 @@
+"""
+清洗规则管理服务 —— 对应 SpringBoot 中的 @Service 组件，管理 CleaningRule 实体的 CRUD。
+
+提供清洗规则的完整生命周期管理：
+- 查询/列表：按启用状态过滤
+- 创建/更新/删除：完整的 CRUD 操作
+- 默认规则引导（bootstrap）：系统初始化时自动创建预定义的清洗规则集
+- 清洗概览：汇总所有清洗规则状态和最近的清洗结果
+
+SpringBoot 类比：
+- Django CleaningRule model              →  SpringBoot @Entity CleaningRule
+- Django list_cleaning_rules()           →  SpringBoot cleaningRuleRepository.findAll()
+- Django create_cleaning_rule()          →  SpringBoot cleaningRuleRepository.save()
+- Django bootstrap_default_cleaning_rules() →  SpringBoot @PostConstruct / CommandLineRunner
+- Django get_cleaning_summary()          →  SpringBoot @Service 的聚合统计方法
+"""
+
 from django.db.models import Avg
 
 from knowledgebase.models import CleaningRule, DocumentCleaningResult
@@ -6,6 +23,7 @@ from knowledgebase.services.cleaning_quality_service import (
     get_quality_gate_settings,
 )
 
+# 系统预定义的默认清洗规则集，按优先级排序
 DEFAULT_CLEANING_RULE_DEFINITIONS = (
     {
         "name": "默认：空白清理",
@@ -60,6 +78,15 @@ DEFAULT_CLEANING_RULE_DEFINITIONS = (
 
 
 def list_cleaning_rules(*, enabled_only=False):
+    """
+    查询清洗规则列表（类似 SpringBoot repository.findAll()）。
+
+    参数：
+        enabled_only (bool): 是否仅返回启用的规则，默认 False 返回全部。
+
+    返回：
+        list[dict]: 序列化后的清洗规则列表。
+    """
     qs = CleaningRule.objects.all()
     if enabled_only:
         qs = qs.filter(enabled=True)
@@ -67,10 +94,33 @@ def list_cleaning_rules(*, enabled_only=False):
 
 
 def get_cleaning_rule(*, rule_id):
+    """
+    按主键ID获取单条清洗规则（类似 SpringBoot repository.findById()）。
+
+    参数：
+        rule_id (int): 清洗规则主键ID。
+
+    返回：
+        CleaningRule: 清洗规则模型实例。
+    """
     return CleaningRule.objects.get(id=rule_id)
 
 
 def create_cleaning_rule(*, name, rule_type, config=None, enabled=True, priority=100, created_by=None):
+    """
+    创建新的清洗规则（类似 SpringBoot repository.save(new CleaningRule(...))）。
+
+    参数：
+        name (str): 规则名称。
+        rule_type (str): 规则类型（对应 _RULE_HANDLERS 中的处理器键）。
+        config (dict, optional): 规则配置参数。
+        enabled (bool): 是否启用，默认 True。
+        priority (int): 优先级（数值越小越先执行），默认 100。
+        created_by (User | None): 创建者用户。
+
+    返回：
+        CleaningRule: 新创建的清洗规则实例。
+    """
     return CleaningRule.objects.create(
         name=name,
         rule_type=rule_type,
@@ -82,6 +132,16 @@ def create_cleaning_rule(*, name, rule_type, config=None, enabled=True, priority
 
 
 def update_cleaning_rule(*, rule, **kwargs):
+    """
+    更新清洗规则的部分字段（类似 SpringBoot repository.save() 的更新操作）。
+
+    参数：
+        rule (CleaningRule): 待更新的清洗规则实例。
+        **kwargs: 可选更新的字段，支持 name, rule_type, config, enabled, priority。
+
+    返回：
+        CleaningRule: 更新后的清洗规则实例。
+    """
     for field in ("name", "rule_type", "config", "enabled", "priority"):
         if field in kwargs:
             setattr(rule, field, kwargs[field])
@@ -90,14 +150,39 @@ def update_cleaning_rule(*, rule, **kwargs):
 
 
 def delete_cleaning_rule(*, rule):
+    """
+    删除清洗规则（类似 SpringBoot repository.delete(rule)）。
+
+    参数：
+        rule (CleaningRule): 待删除的清洗规则实例。
+    """
     rule.delete()
 
 
 def get_default_cleaning_rule_names():
+    """
+    获取系统预定义默认规则名称列表。
+
+    返回：
+        list[str]: 默认规则名称列表。
+    """
     return [definition["name"] for definition in DEFAULT_CLEANING_RULE_DEFINITIONS]
 
 
 def bootstrap_default_cleaning_rules(*, created_by=None):
+    """
+    引导初始化默认清洗规则集。
+
+    检查当前数据库中是否已存在各默认规则，仅创建缺失的规则。
+    类似 SpringBoot 中的 @PostConstruct 初始化方法或 Flyway 种子数据。
+
+    参数：
+        created_by (User | None): 创建者用户，用于新创建规则的 created_by 字段。
+
+    返回：
+        dict: {"created_count": int, "existing_count": int, "rules": list[dict]}
+            包含新创建数量、已存在数量以及当前数据库中所有默认规则的序列化列表。
+    """
     existing_by_name = {
         rule.name: rule
         for rule in CleaningRule.objects.filter(name__in=get_default_cleaning_rule_names())
@@ -126,6 +211,29 @@ def bootstrap_default_cleaning_rules(*, created_by=None):
 
 
 def get_cleaning_summary(*, recent_limit=5):
+    """
+    获取清洗系统概览统计，包括规则状态和最近的清洗结果。
+
+    类似 SpringBoot @Service 中聚合多个 Repository 查询的仪表盘统计方法。
+
+    参数：
+        recent_limit (int): 最近清洗结果的数量限制，默认 5。
+
+    返回：
+        dict: 包含以下字段的概览统计：
+            - total_rules: 规则总数
+            - enabled_rule_count: 已启用规则数
+            - default_rule_total: 预定义默认规则总数
+            - default_rule_count: 已初始化的默认规则数
+            - enabled_default_rule_count: 已启用的默认规则数
+            - default_rules_initialized: 是否所有默认规则都已初始化
+            - missing_default_rule_names: 缺失的默认规则名称列表
+            - quality_gate: 质量门槛配置
+            - recent_result_count: 最近清洗结果数量
+            - average_quality_score: 平均质量评分
+            - last_cleaned_at: 最近一次清洗时间
+            - recent_results: 最近的清洗结果列表
+    """
     default_rule_names = get_default_cleaning_rule_names()
     rules = list(CleaningRule.objects.order_by("priority", "id"))
     rules_by_name = {rule.name: rule for rule in rules}
@@ -175,6 +283,15 @@ def get_cleaning_summary(*, recent_limit=5):
 
 
 def _serialize_rule(rule):
+    """
+    将 CleaningRule 实体序列化为字典（类似 SpringBoot Entity → DTO 转换）。
+
+    参数：
+        rule (CleaningRule): 清洗规则模型实例。
+
+    返回：
+        dict: 包含所有规则字段的序列化字典。
+    """
     return {
         "id": rule.id,
         "name": rule.name,

@@ -1,3 +1,30 @@
+"""
+文档管理服务 —— 对应 SpringBoot 中的核心 @Service 组件，管理文档的完整生命周期。
+
+本模块是知识库应用的业务逻辑中枢，类似于 SpringBoot 中聚合多个 Repository 和外部
+服务的 @Service 核心类。提供以下核心功能：
+
+1. 文档 CRUD：创建、查询、序列化、删除
+2. 文档摄取管道：解析 -> 清洗 -> 分块 -> 向量化
+3. 批量操作：批量摄取、批量删除
+4. 访问控制：基于用户角色和可见性的权限过滤
+5. 摄取任务管理：排队、执行、重试
+
+SpringBoot 类比对照表：
+- Django Document model                       →  SpringBoot @Entity Document
+- Django objects.create() / save()            →  SpringBoot repository.save()
+- Django objects.filter() / get()             →  SpringBoot repository.findAll(spec) / findById()
+- Django select_related()                     →  SpringBoot @EntityGraph / JOIN FETCH
+- Django transaction.atomic()                 →  SpringBoot @Transactional
+- Django bulk_create / bulk_update            →  SpringBoot repository.saveAll()
+- Django Q objects                             →  SpringBoot Specification / Criteria API
+- Django signal / post-save                   →  SpringBoot @TransactionalEventListener
+- Django select_for_update()                  →  SpringBoot @Lock(PESSIMISTIC_WRITE)
+- Django run_background_job                   →  SpringBoot @Async / TaskExecutor
+- Django Celery task .delay()                 →  SpringBoot @Async + RabbitMQ/Kafka
+- Django settings                             →  SpringBoot @Value / application.yml
+"""
+
 import hashlib
 import logging
 import time
@@ -38,12 +65,37 @@ from knowledgebase.services.vector_service import VectorService, index_document_
 logger = logging.getLogger(__name__)
 
 
+# ────────────────────────────────────────────────────────────────────────
+# 内部辅助函数（类似 SpringBoot private 方法或 @Component 工具类）
+# ────────────────────────────────────────────────────────────────────────
+
 def _detect_doc_type(filename):
+    """
+    根据文件名后缀检测文档类型。
+
+    参数：
+        filename (str): 文档文件名。
+
+    返回：
+        str: 文档类型（如 "pdf"、"docx"、"txt"、"unknown"）。
+    """
     extension = Path(filename).suffix.lower().lstrip(".")
     return extension or "unknown"
 
 
 def _parse_source_date(raw_value):
+    """
+    解析来源日期字符串为 date 对象。
+
+    参数：
+        raw_value (str | None): YYYY-MM-DD 格式的日期字符串。
+
+    返回：
+        date | None: 解析后的日期对象，输入为空时返回 None。
+
+    异常：
+        ValueError: 日期格式不符合 YYYY-MM-DD。
+    """
     if not raw_value:
         return None
     try:
@@ -53,6 +105,18 @@ def _parse_source_date(raw_value):
 
 
 def _parse_owner_id(raw_value):
+    """
+    解析 owner_id 为整数。
+
+    参数：
+        raw_value (str | int | None): 原始 owner_id 值。
+
+    返回：
+        int | None: 解析后的整数值，输入为空时返回 None。
+
+    异常：
+        ValueError: 输入不是整数。
+    """
     if raw_value in (None, ""):
         return None
     try:
@@ -62,6 +126,18 @@ def _parse_owner_id(raw_value):
 
 
 def _parse_dataset_id(raw_value):
+    """
+    解析 dataset_id 为整数，特殊值 "all" 或空返回 None 表示不过滤。
+
+    参数：
+        raw_value (str | int | None): 原始 dataset_id 值。
+
+    返回：
+        int | None: 解析后的整数或 None。
+
+    异常：
+        ValueError: 输入不是整数。
+    """
     if raw_value in (None, "", "all"):
         return None
     try:
@@ -71,6 +147,18 @@ def _parse_dataset_id(raw_value):
 
 
 def _parse_visibility(raw_value):
+    """
+    解析并校验文档可见性字段。
+
+    参数：
+        raw_value (str | None): 原始可见性值。
+
+    返回：
+        str: 标准化后的可见性值（private / internal / public），默认 internal。
+
+    异常：
+        ValueError: 输入值不在允许的范围内。
+    """
     if not raw_value:
         return Document.VISIBILITY_INTERNAL
     normalized = str(raw_value).strip().lower()
@@ -85,6 +173,15 @@ def _parse_visibility(raw_value):
 
 
 def _serialize_user(user):
+    """
+    将用户实体序列化为简要字典（类似 SpringBoot User Entity → UserDTO 转换）。
+
+    参数：
+        user (User | None): 用户模型实例。
+
+    返回：
+        dict | None: {"id": int, "username": str, "email": str} 或 None。
+    """
     if user is None:
         return None
     return {
@@ -95,6 +192,15 @@ def _serialize_user(user):
 
 
 def _serialize_dataset_summary(dataset):
+    """
+    将数据集实体序列化为简要摘要字典。
+
+    参数：
+        dataset (Dataset | None): 数据集模型实例。
+
+    返回：
+        dict | None: {"id": int, "name": str} 或 None。
+    """
     if dataset is None:
         return None
     return {
@@ -104,6 +210,15 @@ def _serialize_dataset_summary(dataset):
 
 
 def _get_version_record(document):
+    """
+    获取文档的版本记录（类似 SpringBoot @OneToOne 关联查询）。
+
+    参数：
+        document (Document | None): 文档模型实例。
+
+    返回：
+        DocumentVersion | None: 版本记录实例，若无则返回 None。
+    """
     if document is None:
         return None
 
@@ -114,6 +229,15 @@ def _get_version_record(document):
 
 
 def _serialize_provenance(version_record):
+    """
+    从版本记录中提取来源溯源信息（类似 SpringBoot DTO 组装）。
+
+    参数：
+        version_record (DocumentVersion | None): 版本记录实例。
+
+    返回：
+        dict: {"source_type": str, "source_label": str, "source_metadata": dict, "processing_notes": str}
+    """
     if version_record is None:
         return {
             "source_type": "upload",
@@ -131,18 +255,48 @@ def _serialize_provenance(version_record):
 
 
 def _get_root_document_id(document, version_record):
+    """
+    获取文档的根文档ID（版本链表头部）。
+
+    参数：
+        document (Document): 文档模型实例。
+        version_record (DocumentVersion | None): 版本记录实例。
+
+    返回：
+        int: 根文档ID（无版本记录时返回文档自身ID）。
+    """
     if version_record is None:
         return document.id
     return version_record.root_document_id
 
 
 def _get_current_version_number(document, version_record):
+    """
+    获取文档的当前版本号。
+
+    参数：
+        document (Document): 文档模型实例。
+        version_record (DocumentVersion | None): 版本记录实例。
+
+    返回：
+        int: 当前版本号（无版本记录时为 1）。
+    """
     if version_record is None:
         return 1
     return version_record.version_number
 
 
 def _get_version_count(document, version_record):
+    """
+    获取文档的版本总数。
+
+    参数：
+        document (Document): 文档模型实例。
+        version_record (DocumentVersion | None): 版本记录实例。
+
+    返回：
+        int: 版本链中的总版本数。
+    """
     if version_record is None:
         return 1
 
@@ -154,6 +308,17 @@ def _get_version_count(document, version_record):
 
 
 def _is_document_admin(user):
+    """
+    判断用户是否为文档管理员（类似 SpringBoot @PreAuthorize("hasRole('ADMIN')")）。
+
+    管理员权限来源：superuser、staff 或 属于 admin/super_admin 组。
+
+    参数：
+        user (User | None): 用户模型实例。
+
+    返回：
+        bool: 是否为文档管理员。
+    """
     if user is None:
         return False
     if getattr(user, "is_superuser", False) or getattr(user, "is_staff", False):
@@ -162,6 +327,20 @@ def _is_document_admin(user):
 
 
 def _document_access_q(user):
+    """
+    构建文档访问权限过滤的 Q 对象（类似 SpringBoot JPA Specification 的动态查询条件）。
+
+    权限规则：
+    - 未登录用户：无权限（返回空集条件 Q(pk__in=[])）
+    - 管理员：无限制（返回空 Q()，即不过滤）
+    - 普通用户：可查看 internal/public 文档，以及自己上传/拥有的文档
+
+    参数：
+        user (User | None): 当前用户。
+
+    返回：
+        Q: Django Q 查询条件对象，用于 QuerySet.filter()。
+    """
     if user is None:
         return Q(pk__in=[])
     if _is_document_admin(user):
@@ -173,7 +352,23 @@ def _document_access_q(user):
     )
 
 
+# ────────────────────────────────────────────────────────────────────────
+# 文档查询器（类似 SpringBoot Repository + Specification）
+# ────────────────────────────────────────────────────────────────────────
+
 def get_visible_documents_queryset(user):
+    """
+    获取对指定用户可见的文档查询集（类似 SpringBoot @Repository 中带权限过滤的 findAll）。
+
+    预加载关联：uploaded_by, owner, dataset, version_record, version_record__root_document,
+               ingestion_tasks（通过 prefetch_related）。
+
+    参数：
+        user (User): 当前用户。
+
+    返回：
+        QuerySet: 已过滤权限并优化关联查询的 QuerySet（类似 SpringBoot Pageable 查询）。
+    """
     return (
         Document.objects.select_related(
             "uploaded_by",
@@ -189,10 +384,36 @@ def get_visible_documents_queryset(user):
 
 
 def get_document_for_user(user, document_id):
+    """
+    为指定用户获取单个文档（包含权限校验）。
+
+    参数：
+        user (User): 当前用户。
+        document_id (int): 文档主键ID。
+
+    返回：
+        Document: 文档模型实例。
+
+    异常：
+        Document.DoesNotExist: 文档不存在或用户无权访问。
+    """
     return get_visible_documents_queryset(user).get(id=document_id)
 
 
+# ────────────────────────────────────────────────────────────────────────
+# 文档序列化（类似 SpringBoot DTO 转换 / Jackson ObjectMapper）
+# ────────────────────────────────────────────────────────────────────────
+
 def _build_file_url(document):
+    """
+    构建文档文件的访问 URL。
+
+    参数：
+        document (Document): 文档模型实例。
+
+    返回：
+        str: 文件 URL 或文件路径名。
+    """
     try:
         return document.file.url
     except ValueError:
@@ -200,6 +421,15 @@ def _build_file_url(document):
 
 
 def _serialize_ingestion_task(ingestion_task):
+    """
+    将摄取任务实体序列化为字典（类似 SpringBoot IngestionTaskEntity → IngestionTaskDTO）。
+
+    参数：
+        ingestion_task (IngestionTask | None): 摄取任务模型实例。
+
+    返回：
+        dict | None: 包含任务所有字段的序列化字典。
+    """
     if ingestion_task is None:
         return None
     return {
@@ -231,6 +461,15 @@ def _serialize_ingestion_task(ingestion_task):
 
 
 def _get_latest_ingestion_task(document):
+    """
+    获取文档最近的摄取任务（优先使用 prefetch 缓存，避免 N+1 查询）。
+
+    参数：
+        document (Document): 文档模型实例。
+
+    返回：
+        IngestionTask | None: 最近的摄取任务实例。
+    """
     if (
         hasattr(document, "_prefetched_objects_cache")
         and "ingestion_tasks" in document._prefetched_objects_cache
@@ -241,6 +480,19 @@ def _get_latest_ingestion_task(document):
 
 
 def _build_process_result(document, ingestion_task):
+    """
+    构建文档处理状态的用户可读描述。
+
+    根据文档当前状态和摄取任务步骤生成中文状态描述消息。
+    类似 SpringBoot 中枚举映射为 i18n 消息的方法。
+
+    参数：
+        document (Document): 文档模型实例。
+        ingestion_task (IngestionTask | None): 摄取任务实例。
+
+    返回：
+        str: 人类可读的文档处理状态描述。
+    """
     if document.status == Document.STATUS_FAILED:
         return document.error_message or "文档处理失败。"
     if document.status == Document.STATUS_INDEXED:
@@ -261,6 +513,20 @@ def _build_process_result(document, ingestion_task):
 
 
 def serialize_document(document, include_content_preview=False, include_content=False):
+    """
+    将 Document 实体完整序列化为字典（类似 SpringBoot Entity → 完整 DTO 转换）。
+
+    序列化内容包括：ID、标题、文件名、状态、可见性、文件大小、数据集、上传者、
+    所有者、来源日期、版本信息、出处溯源、分块/向量统计、处理状态和最新摄取任务。
+
+    参数：
+        document (Document): 文档模型实例。
+        include_content_preview (bool): 是否包含 200 字符的内容预览。
+        include_content (bool): 是否包含完整解析文本。
+
+    返回：
+        dict: 文档的完整序列化字典。
+    """
     ingestion_task = _get_latest_ingestion_task(document)
     original_url = _build_file_url(document)
     version_record = _get_version_record(document)
@@ -322,6 +588,17 @@ def serialize_document(document, include_content_preview=False, include_content=
 
 
 def build_document_response(document, *, include_content_preview=False, message=None):
+    """
+    构建标准的文档 API 响应格式（类似 SpringBoot ResponseEntity 包装）。
+
+    参数：
+        document (Document): 文档模型实例。
+        include_content_preview (bool): 是否包含内容预览。
+        message (str, optional): 可选的消息文本。
+
+    返回：
+        dict: {"document": dict, "message": str (可选)} 格式的响应。
+    """
     payload = {
         "document": serialize_document(
             document,
@@ -334,7 +611,21 @@ def build_document_response(document, *, include_content_preview=False, message=
     return payload
 
 
+# ────────────────────────────────────────────────────────────────────────
+# 分页和过滤（类似 SpringBoot Pageable / Specification）
+# ────────────────────────────────────────────────────────────────────────
+
 def _normalize_page(value, default=1):
+    """
+    标准化页码参数（最小为 1）。
+
+    参数：
+        value (any): 原始页码值。
+        default (int): 默认值，当解析失败时返回。
+
+    返回：
+        int: 标准化后的页码。
+    """
     try:
         return max(int(value), 1)
     except (TypeError, ValueError):
@@ -342,6 +633,17 @@ def _normalize_page(value, default=1):
 
 
 def _normalize_page_size(value, default=10, max_page_size=50):
+    """
+    标准化每页大小参数（1 ~ max_page_size 之间）。
+
+    参数：
+        value (any): 原始每页大小值。
+        default (int): 默认每页大小。
+        max_page_size (int): 最大允许的每页大小。
+
+    返回：
+        int: 标准化后的每页大小。
+    """
     try:
         return min(max(int(value), 1), max_page_size)
     except (TypeError, ValueError):
@@ -349,6 +651,25 @@ def _normalize_page_size(value, default=10, max_page_size=50):
 
 
 def _filter_documents(queryset, *, q="", status="all", time_range="all", dataset_id=None):
+    """
+    对文档查询集应用搜索关键词、状态、时间范围和数据集过滤。
+
+    过滤维度（类似 SpringBoot Specification / Criteria API）：
+    - 关键词搜索：匹配标题、文件名、上传者用户名/邮箱、解析文本
+    - 状态过滤：indexed（已索引）、failed（失败）、processing（处理中）
+    - 时间范围：7d（最近7天）、30d（最近30天）
+    - 数据集过滤：按 dataset_id 精确过滤
+
+    参数：
+        queryset (QuerySet): 基础文档查询集。
+        q (str): 搜索关键词。
+        status (str): 状态过滤（"all"/"indexed"/"failed"/"processing"）。
+        time_range (str): 时间范围（"all"/"7d"/"30d"）。
+        dataset_id (int | None): 数据集ID过滤。
+
+    返回：
+        QuerySet: 过滤后的查询集。
+    """
     keyword = (q or "").strip()
     if keyword:
         queryset = queryset.filter(
@@ -391,6 +712,24 @@ def _filter_documents(queryset, *, q="", status="all", time_range="all", dataset
 def build_document_list_response(
     user, *, q="", status="all", time_range="all", dataset_id=None, page=None, page_size=None
 ):
+    """
+    构建分页的文档列表响应（类似 SpringBoot Page<DocumentDTO> 返回）。
+
+    仅返回当前版本的文档（is_current=True 或无版本记录）。
+
+    参数：
+        user (User): 当前用户。
+        q (str): 搜索关键词。
+        status (str): 状态过滤。
+        time_range (str): 时间范围。
+        dataset_id (int | None): 数据集ID。
+        page (int | None): 页码（从1开始），为 None 时不分页返回全部。
+        page_size (int | None): 每页大小。
+
+    返回：
+        dict: {"documents": list[dict], "total": int, "page": int (可选),
+               "page_size": int (可选), "total_pages": int (可选)}
+    """
     queryset = _filter_documents(
         get_visible_documents_queryset(user),
         q=q,
@@ -424,6 +763,17 @@ def build_document_list_response(
 
 
 def build_stats_response(user):
+    """
+    构建知识库仪表盘统计数据（类似 SpringBoot 中的统计聚合方法）。
+
+    统计维度：文档总数、已索引数、失败数、总存储量、总向量数、数据集数、就绪率。
+
+    参数：
+        user (User): 当前用户。
+
+    返回：
+        dict: 包含所有统计指标的字典。
+    """
     queryset = get_visible_documents_queryset(user).filter(
         Q(version_record__is_current=True) | Q(version_record__isnull=True)
     )
@@ -451,6 +801,15 @@ def build_stats_response(user):
 
 
 def _format_bytes(value):
+    """
+    格式化字节数为人类可读的字符串（B / KB / MB / GB）。
+
+    参数：
+        value (int): 字节数。
+
+    返回：
+        str: 人类可读的格式字符串。
+    """
     if not value or value <= 0:
         return "0 B"
     if value >= 1024 ** 3:
@@ -462,7 +821,20 @@ def _format_bytes(value):
     return f"{value} B"
 
 
+# ────────────────────────────────────────────────────────────────────────
+# 分块管理
+# ────────────────────────────────────────────────────────────────────────
+
 def serialize_chunk(chunk):
+    """
+    将 DocumentChunk 实体序列化为字典。
+
+    参数：
+        chunk (DocumentChunk): 分块模型实例。
+
+    返回：
+        dict: 包含 id, chunk_index, content, vector_id, page_label, metadata, created_at 的序列化字典。
+    """
     metadata = chunk.metadata or {}
     return {
         "id": chunk.id,
@@ -476,13 +848,35 @@ def serialize_chunk(chunk):
 
 
 def build_document_chunks_response(document):
+    """
+    构建文档的全部 chunk 列表响应。
+
+    参数：
+        document (Document): 文档模型实例。
+
+    返回：
+        dict: {"document_id": int, "chunks": list[dict]}
+    """
     return {
         "document_id": document.id,
         "chunks": [serialize_chunk(chunk) for chunk in document.chunks.order_by("chunk_index")],
     }
 
 
+# ────────────────────────────────────────────────────────────────────────
+# 文档创建（类似 SpringBoot @Transactional 的创建方法）
+# ────────────────────────────────────────────────────────────────────────
+
 def _compute_file_hash(uploaded_file):
+    """
+    计算上传文件的 SHA-256 哈希值（用于去重检测）。
+
+    参数：
+        uploaded_file (UploadedFile): Django 上传文件对象。
+
+    返回：
+        str: 文件的 SHA-256 十六进制哈希字符串。
+    """
     sha256 = hashlib.sha256()
     for chunk in uploaded_file.chunks(chunk_size=8192):
         sha256.update(chunk)
@@ -504,6 +898,32 @@ def create_document_from_upload(
     skip_initial_version=False,
     allow_duplicate_hash=False,
 ):
+    """
+    从上传文件创建文档实体（类似 SpringBoot @Transactional 的创建方法）。
+
+    包含文件类型校验、SHA-256 哈希去重、所有者和数据集的解析，以及可选的初始版本记录。
+    类似 SpringBoot 中调用多个 repository.save() 和级联关联的操作。
+
+    参数：
+        uploaded_file (UploadedFile): Django 上传的文件对象。
+        title (str): 文档标题（为空时使用文件名不含扩展名）。
+        source_date (str): 来源日期（YYYY-MM-DD）。
+        uploaded_by (User | None): 上传者用户。
+        owner (User | None): 所有者用户（默认与 uploaded_by 相同）。
+        owner_id (int | None): 所有者ID（可覆盖 owner 参数）。
+        visibility (str | None): 可见性（private/internal/public）。
+        dataset (Dataset | None): 数据集对象。
+        dataset_id (int | None): 数据集ID（可覆盖 dataset 参数）。
+        skip_initial_version (bool): 是否跳过创建初始版本记录（版本管理场景中用于延迟创建）。
+        allow_duplicate_hash (bool): 是否允许相同哈希的重复文件上传。
+
+    返回：
+        Document: 新创建的文档模型实例。
+
+    异常：
+        ValueError: 文件类型不支持、owner_id/dataset_id 对应的记录不存在。
+        DuplicateDocumentError: 文件已存在且不允许重复。
+    """
     filename = uploaded_file.name
     doc_type = _detect_doc_type(filename)
     if doc_type not in {"txt", "pdf", "docx"}:
@@ -571,14 +991,43 @@ def create_document_from_upload(
     return document
 
 
+# ────────────────────────────────────────────────────────────────────────
+# 文档列表（简单无分页）
+# ────────────────────────────────────────────────────────────────────────
+
 def list_documents(user):
+    """
+    获取用户可见的文档列表（仅当前版本）。
+
+    参数：
+        user (User): 当前用户。
+
+    返回：
+        list[dict]: 序列化后的文档列表。
+    """
     queryset = get_visible_documents_queryset(user).filter(
         Q(version_record__is_current=True) | Q(version_record__isnull=True)
     )
     return [serialize_document(document) for document in queryset]
 
 
+# ────────────────────────────────────────────────────────────────────────
+# 文档摄取管道（类似 SpringBoot 编排的 Step-by-Step 流程）
+# ────────────────────────────────────────────────────────────────────────
+
 def _parse_document_ids(raw_ids):
+    """
+    解析并校验文档ID列表。
+
+    参数：
+        raw_ids (list): 原始的ID值列表。
+
+    返回：
+        list[int]: 校验后的整数ID列表。
+
+    异常：
+        ValueError: 输入不是整数数组。
+    """
     if not isinstance(raw_ids, (list, tuple)):
         raise ValueError("document_ids 必须是整数数组。")
 
@@ -591,6 +1040,14 @@ def _parse_document_ids(raw_ids):
 
 
 def _update_document_status(document, *, status, error_message=None):
+    """
+    更新文档状态和可选的错误消息。
+
+    参数：
+        document (Document): 文档模型实例。
+        status (str): 新状态值。
+        error_message (str, optional): 错误消息。
+    """
     document.status = status
     update_fields = ["status", "updated_at"]
     if error_message is not None:
@@ -600,11 +1057,25 @@ def _update_document_status(document, *, status, error_message=None):
 
 
 def _update_ingestion_task_step(ingestion_task, *, current_step):
+    """
+    更新摄取任务的当前步骤。
+
+    参数：
+        ingestion_task (IngestionTask): 摄取任务实例。
+        current_step (str): 当前步骤标识。
+    """
     ingestion_task.current_step = current_step
     ingestion_task.save(update_fields=["current_step", "updated_at"])
 
 
 def _update_version_record_from_parser(document, parser_result):
+    """
+    将解析器返回的文档元数据合并到版本记录的 source_metadata 中。
+
+    参数：
+        document (Document): 文档模型实例。
+        parser_result (dict): parser 返回的解析结果。
+    """
     version_record = _get_version_record(document)
     if version_record is None:
         return
@@ -620,6 +1091,17 @@ def _update_version_record_from_parser(document, parser_result):
 
 
 def _build_chunk_metadata(document, index, parser_defaults=None):
+    """
+    构建分块的元数据字典，包含文档ID、标题、类型、来源日期、数据集、版本等信息。
+
+    参数：
+        document (Document): 文档模型实例。
+        index (int): 分块索引。
+        parser_defaults (dict, optional): 解析器提供的默认元数据。
+
+    返回：
+        dict: 合并后的分块元数据字典。
+    """
     version_record = _get_version_record(document)
     metadata = {
         "document_id": document.id,
@@ -640,6 +1122,17 @@ def _build_chunk_metadata(document, index, parser_defaults=None):
 
 
 def _build_section_chunk_metadata(document, index, parser_defaults=None):
+    """
+    构建层级分块中 Section 级的元数据字典。
+
+    参数：
+        document (Document): 文档模型实例。
+        index (int): Section 索引。
+        parser_defaults (dict, optional): 解析器默认元数据。
+
+    返回：
+        dict: Section 级元数据字典，额外包含 section_index。
+    """
     metadata = _build_chunk_metadata(document, index, parser_defaults)
     return {
         **metadata,
@@ -649,6 +1142,16 @@ def _build_section_chunk_metadata(document, index, parser_defaults=None):
 
 
 def _enrich_child_chunk_metadata(child_metadata, section):
+    """
+    用所属 Section 的信息丰富子块的元数据。
+
+    参数：
+        child_metadata (dict): 子块的原始元数据。
+        section (DocumentSectionChunk): 所属 Section 实体。
+
+    返回：
+        dict: 丰富后的子块元数据，包含 section_label, section_page_label, section_path。
+    """
     metadata = {
         **(child_metadata or {}),
         "section_label": section.section_label or section.metadata.get("page_label", ""),
@@ -659,12 +1162,32 @@ def _enrich_child_chunk_metadata(child_metadata, section):
 
 
 def _count_chunk_result_items(chunks):
+    """
+    统计分块结果中的子块数量（兼容层级分块和普通分块两种格式）。
+
+    参数：
+        chunks (dict | list): 分块结果，层级分块时为 {"child_chunks": [...]}，普通为 list。
+
+    返回：
+        int: 子块数量。
+    """
     if isinstance(chunks, dict):
         return len(chunks.get("child_chunks") or [])
     return len(chunks)
 
 
 def parse_document(document):
+    """
+    解析文档：调用 ParserService 提取文本和元数据，更新文档状态为 PARSED。
+
+    类似 SpringBoot 摄取管道中的第一步。
+
+    参数：
+        document (Document): 文档模型实例。
+
+    返回：
+        dict: ParserService 返回的解析结果。
+    """
     parser_result = parse_document_file(document)
     document.parsed_text = parser_result["parsed_text"]
     document.error_message = ""
@@ -675,6 +1198,26 @@ def parse_document(document):
 
 
 def chunk_document(document, parser_result):
+    """
+    对文档进行文本分块：根据策略选择分块方法并持久化。
+
+    分块策略选择流程：
+    1. 计算固定长度分块的预估数量
+    2. 调用 choose_chunking_strategy 决策
+    3. 层级分块（hierarchical）：先生成 Section 大块，再在每个 Section 内生成 child 小块
+    4. 基于元素分块：当有 Unstructured 元素时使用
+    5. 句子窗口分块：若 KB_SENTENCE_WINDOW_ENABLED
+    6. 固定长度分块：默认回退方案
+
+    类似 SpringBoot 摄取管道中的第二步。
+
+    参数：
+        document (Document): 文档模型实例。
+        parser_result (dict): 上一步解析器返回的结果。
+
+    返回：
+        dict | list: 分块结果（层级模式为 {"sections": ..., "child_chunks": ...}，普通模式为 list）。
+    """
     parser_result = parser_result or {}
     parser_defaults = parser_result.get("chunk_metadata_defaults") or {}
     elements = parser_result.get("elements")
@@ -780,12 +1323,33 @@ def chunk_document(document, parser_result):
 
 
 def vectorize_document(document):
+    """
+    对文档的分块进行向量化并索引到 Milvus。
+
+    类似 SpringBoot 摄取管道中的第三步。
+
+    参数：
+        document (Document): 文档模型实例。
+
+    返回：
+        Document: 更新后的文档模型实例。
+    """
     index_document_chunks(document)
     _update_document_status(document, status=Document.STATUS_INDEXED)
     return document
 
 
+# ────────────────────────────────────────────────────────────────────────
+# 摄取任务管理（类似 SpringBoot 异步任务管理）
+# ────────────────────────────────────────────────────────────────────────
+
 def _mark_ingestion_task_running(ingestion_task):
+    """
+    标记摄取任务为运行中状态。
+
+    参数：
+        ingestion_task (IngestionTask): 摄取任务实例。
+    """
     ingestion_task.status = IngestionTask.STATUS_RUNNING
     ingestion_task.current_step = IngestionTask.STEP_PARSING
     ingestion_task.error_message = ""
@@ -804,6 +1368,14 @@ def _mark_ingestion_task_running(ingestion_task):
 
 
 def _mark_ingestion_task_finished(ingestion_task, *, status, error_message=""):
+    """
+    标记摄取任务为完成或失败状态。
+
+    参数：
+        ingestion_task (IngestionTask): 摄取任务实例。
+        status (str): 最终状态（STATUS_SUCCEEDED 或 STATUS_FAILED）。
+        error_message (str): 失败时的错误消息。
+    """
     ingestion_task.status = status
     ingestion_task.current_step = (
         IngestionTask.STEP_COMPLETED
@@ -824,6 +1396,30 @@ def _mark_ingestion_task_finished(ingestion_task, *, status, error_message=""):
 
 
 def ingest_document(document, ingestion_task=None):
+    """
+    执行文档的完整摄取管道：解析 -> 清洗 -> 分块 -> 向量化。
+
+    管道步骤（类似 SpringBoot @Transactional 的编排方法）：
+    1. 解析（parse）：提取文本和文档元素
+    2. 清洗（clean）：应用清洗规则，质量门控检查
+    3. 分块（chunk）：按策略切分文本
+    4. 向量化（vectorize）：生成 embedding 并写入 Milvus
+
+    每步都会更新文档状态和摄取任务步骤，支持限流（tracing span）和结构化日志。
+    失败时自动清理已分块的数据和向量。
+
+    参数：
+        document (Document): 文档模型实例。
+        ingestion_task (IngestionTask | None): 关联的摄取任务实例。
+
+    返回：
+        Document: 摄取完成后的文档模型实例。
+
+    异常：
+        ValueError: 文档清洗失败。
+        DocumentQualityGateError: 清洗质量不达标，阻止入库。
+        Exception: 其他摄取失败，文档状态标记为 FAILED。
+    """
     started_at = time.monotonic()
     log_base = build_log_extra(
         document_id=document.id,
@@ -975,6 +1571,22 @@ def ingest_document(document, ingestion_task=None):
 
 
 def enqueue_document_ingestion(document):
+    """
+    将文档的摄取任务加入异步队列（Celery / 进程内后台线程 / 同步内联）。
+
+    分派策略（类似 SpringBoot 中根据配置选择 @Async / 同步执行的策略）：
+    - CELERY_TASK_ALWAYS_EAGER: 同步内联执行
+    - memory:// broker: 进程内后台线程执行
+    - 其他: 通过 Celery 异步 worker 执行
+
+    包含乐观锁保护：检查是否已有进行中的摄取任务，防止重复提交。
+
+    参数：
+        document (Document): 文档模型实例。
+
+    返回：
+        tuple[IngestionTask, bool]: (摄取任务实例, 是否为新创建)。
+    """
     from knowledgebase.tasks import ingest_document_task
 
     broker_url = str(getattr(settings, "CELERY_BROKER_URL", "") or "")
@@ -1040,6 +1652,18 @@ def _cleanup_failed_ingestion_dispatch(
     previous_status,
     previous_error_message,
 ):
+    """
+    清理失败的任务分派：当 Celery/后台任务提交失败时，在事务中删除已排队的
+    IngestionTask 并恢复文档到先前状态。
+
+    类似 SpringBoot @Transactional 的回滚补偿操作。
+
+    参数：
+        document_id (int): 文档ID。
+        ingestion_task_id (int): 摄取任务ID。
+        previous_status (str): 文档先前状态。
+        previous_error_message (str): 文档先前错误消息。
+    """
     with transaction.atomic():
         task = (
             IngestionTask.objects.select_for_update()
@@ -1064,6 +1688,18 @@ def _cleanup_failed_ingestion_dispatch(
 
 
 def batch_enqueue_document_ingestion(user, document_ids):
+    """
+    批量提交文档摄取任务。
+
+    遍历文档ID列表，对每个文档调用 enqueue_document_ingestion，统计接受/跳过/失败数量。
+
+    参数：
+        user (User): 当前用户。
+        document_ids (list[int]): 文档ID列表。
+
+    返回：
+        dict: {"accepted_count": int, "skipped_count": int, "failed_count": int, "results": list[dict]}
+    """
     parsed_document_ids = _parse_document_ids(document_ids)
     accepted_count = 0
     skipped_count = 0
@@ -1138,7 +1774,24 @@ def batch_enqueue_document_ingestion(user, document_ids):
     }
 
 
+# ────────────────────────────────────────────────────────────────────────
+# 文档删除（级联清理向量、文件、图谱索引）
+# ────────────────────────────────────────────────────────────────────────
+
 def delete_document_with_vectors(document):
+    """
+    删除文档及其关联的所有向量数据和物理文件。
+
+    删除流程：
+    1. 记录文件存储位置和 chunk ID 列表
+    2. 删除 Document 实体（级联删除关联的 DocumentChunk 等）
+    3. 事务提交后异步清理 Milvus 向量、LlamaIndex 节点和物理文件
+
+    类似 SpringBoot @Transactional 中的级联删除和 @TransactionalEventListener 异步清理。
+
+    参数：
+        document (Document): 文档模型实例。
+    """
     file_field = document.file
     storage = file_field.storage
     file_name = file_field.name
@@ -1158,6 +1811,18 @@ def delete_document_with_vectors(document):
 
 
 def _cleanup_deleted_document_artifacts(*, document_id, storage, file_name, chunk_ids):
+    """
+    事务提交后的回调：清理已删除文档的外部资源。
+
+    包括：Milvus 向量数据、LlamaIndex 图谱节点、物理文件。
+    每个清理步骤独立 try-except，一个失败不影响其他步骤。
+
+    参数：
+        document_id (int): 已删除的文档ID。
+        storage: Django 文件存储后端。
+        file_name (str): 文件在存储中的路径名。
+        chunk_ids (list[int]): 文档的 chunk ID 列表。
+    """
     from rag.services.llamaindex_store_service import delete_document
 
     try:
@@ -1199,6 +1864,18 @@ def _cleanup_deleted_document_artifacts(*, document_id, storage, file_name, chun
 
 
 def batch_delete_documents(user, document_ids):
+    """
+    批量删除文档，每个文档在独立事务中执行（类似 SpringBoot @Transactional 的逐条操作）。
+
+    对每个文档执行权限检查和进行中任务检查，无法删除的标记为 busy/missing/failed。
+
+    参数：
+        user (User): 当前用户。
+        document_ids (list[int]): 待删除的文档ID列表。
+
+    返回：
+        dict: {"deleted_count": int, "failed_count": int, "results": list[dict]}
+    """
     parsed_document_ids = _parse_document_ids(document_ids)
     deleted_count = 0
     failed_count = 0
@@ -1265,6 +1942,17 @@ def batch_delete_documents(user, document_ids):
 
 
 def start_ingestion_task(ingestion_task):
+    """
+    开始执行摄取任务：将任务状态从 QUEUED 切换为 RUNNING。
+
+    若任务之前为 FAILED 状态（重试场景），递增 retry_count。
+
+    参数：
+        ingestion_task (IngestionTask): 摄取任务实例。
+
+    返回：
+        IngestionTask: 更新后的摄取任务实例。
+    """
     if ingestion_task.status == IngestionTask.STATUS_FAILED:
         ingestion_task.retry_count += 1
     _mark_ingestion_task_running(ingestion_task)
