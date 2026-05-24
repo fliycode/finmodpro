@@ -204,7 +204,7 @@ def _get_recent_activity(limit=8):
                 "tone": tone,
                 "status": "hit" if log.result_count > 0 else "miss",
                 "timestamp": log.created_at.isoformat(),
-                "message": f"检索问题"{log.query}"返回 {log.result_count} 条结果。",
+                "message": f"检索问题「{log.query}」返回 {log.result_count} 条结果。",
             }
         )
 
