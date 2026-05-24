@@ -236,9 +236,13 @@ onMounted(load);
 /* ── 页面标题栏 ── */
 .prompts-page__header {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
   gap: 16px;
+  padding: 14px 20px;
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius-card);
+  background: var(--surface-2);
 }
 
 .prompts-page__title-row {
