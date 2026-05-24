@@ -1,3 +1,13 @@
+"""
+知识库控制器 (Controllers) 包的公共导出模块。
+
+类比 SpringBoot: 相当于一个模块的公开 API 门面 (Facade)，通过 __all__ 列表
+显式声明哪些视图函数可以被外部导入使用。所有 controller 视图函数在此汇聚，
+由 urls.py 统一导入并挂载到 URL 路由上。
+
+这是 Django 惯用的做法：将分散在各 controller 模块中的视图函数统一收集，
+提供一个干净的导入入口。
+"""
 from knowledgebase.controllers.document_controller import (
     document_detail_view,
     document_list_create_view,

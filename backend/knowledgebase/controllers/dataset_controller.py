@@ -1,3 +1,9 @@
+"""
+数据集管理控制器。
+
+类比 SpringBoot: 相当于 @RestController 中处理数据集 CRUD 的端点。
+提供数据集的列表查询和详情查看功能。
+"""
 import json
 
 from django.db import DatabaseError, OperationalError, ProgrammingError
@@ -21,6 +27,17 @@ from systemcheck.models import AuditRecord
 
 
 def _build_schema_not_ready_response(exc):
+    """
+    构建"数据库未就绪"的统一错误响应。
+
+    类比 SpringBoot: 相当于 @ControllerAdvice 中针对数据库异常的全局处理逻辑。
+
+    参数:
+        exc: 捕获到的数据库异常对象
+
+    返回:
+        JsonResponse: 状态码 503，包含中文错误提示。
+    """
     return JsonResponse(
         {
             "message": "知识库数据表尚未初始化，请先执行后端迁移与 RBAC 初始化。",
@@ -34,6 +51,27 @@ def _build_schema_not_ready_response(exc):
 @require_http_methods(["GET", "POST"])
 @permission_required("auth.view_document")
 def dataset_list_create_view(request):
+    """
+    数据集列表/创建端点 —— GET/POST datasets。
+
+    类比 SpringBoot: 相当于
+        @RequestMapping(value="/datasets", method={GET, POST})
+        @PreAuthorize("hasAuthority('auth.view_document')")
+        public ResponseEntity<?> listOrCreate()
+
+    GET:  返回所有数据集列表。
+    POST: 创建新数据集（需额外拥有 auth.upload_document 权限）。
+
+    参数:
+        request: Django HttpRequest 对象，POST 时 body 需包含 name 和 description。
+
+    返回:
+        GET  -> 200: {"datasets": [...], "total": N}
+        POST -> 201: {"dataset": {...}}  (创建成功)
+        POST -> 400: {"message": str(exc)}  (参数校验失败)
+        无权限 -> 403
+        数据库未就绪 -> 503
+    """
     if request.method == "GET":
         try:
             datasets = list_datasets()
@@ -81,6 +119,24 @@ def dataset_list_create_view(request):
 @require_GET
 @permission_required("auth.view_document")
 def dataset_detail_view(request, dataset_id):
+    """
+    数据集详情端点 —— GET datasets/{dataset_id}。
+
+    类比 SpringBoot: 相当于
+        @GetMapping("/datasets/{datasetId}")
+        @PreAuthorize("hasAuthority('auth.view_document')")
+
+    返回单个数据集的详细信息，包括其包含的文档统计。
+
+    参数:
+        request:    Django HttpRequest 对象
+        dataset_id: URL 路径中的数据集 ID
+
+    返回:
+        200: {"dataset": {...}}  包含数据集详情及文档统计
+        404: {"message": "数据集不存在。"}
+        503: 数据库未就绪
+    """
     try:
         dataset = get_dataset(dataset_id)
     except Dataset.DoesNotExist:

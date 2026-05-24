@@ -1,3 +1,13 @@
+"""
+文档摄取控制器 —— 触发文档进入处理管线。
+
+类比 SpringBoot: 相当于 @RestController 中触发异步处理作业的端点。
+类比 Spring 的 @Async 或 Spring Batch 的 JobLauncher：
+POST 请求将文档提交到 Celery 异步任务队列，由后台 Worker 依次执行
+解析 -> 清洗 -> 分块 -> 索引 -> 图谱同步 的完整管线。
+
+支持重试机制：当文档处于 failed 状态时重新提交。
+"""
 from django.db import DatabaseError, OperationalError, ProgrammingError
 from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
@@ -15,6 +25,17 @@ from systemcheck.services.audit_service import record_audit_event
 
 
 def _build_schema_not_ready_response(exc):
+    """
+    构建"数据库未就绪"的统一错误响应。
+
+    类比 SpringBoot: 相当于 @ControllerAdvice 中针对数据库异常的全局处理逻辑。
+
+    参数:
+        exc: 捕获到的数据库异常对象
+
+    返回:
+        JsonResponse: 状态码 503。
+    """
     return JsonResponse(
         {
             "message": "知识库数据表尚未初始化，请先执行后端迁移与 RBAC 初始化。",
@@ -25,6 +46,18 @@ def _build_schema_not_ready_response(exc):
 
 
 def _safe_record_audit_event(**kwargs):
+    """
+    安全地记录审计事件 —— 数据库异常时静默失败。
+
+    类比 SpringBoot: 相当于带 try-catch 容错的 @EventListener，
+    确保审计日志写入失败不会中断主业务流程。
+
+    参数:
+        **kwargs: 传递给 record_audit_event() 的所有参数。
+
+    返回:
+        无显式返回值，异常时 return 跳过。
+    """
     try:
         record_audit_event(**kwargs)
     except (OperationalError, ProgrammingError, DatabaseError):
@@ -35,6 +68,32 @@ def _safe_record_audit_event(**kwargs):
 @require_POST
 @permission_required("auth.trigger_ingest")
 def document_ingest_view(request, document_id):
+    """
+    文档摄取端点 —— POST documents/{document_id}/ingest。
+
+    类比 SpringBoot: 相当于
+        @PostMapping("/documents/{documentId}/ingest")
+        @PreAuthorize("hasAuthority('auth.trigger_ingest')")
+        public ResponseEntity<?> triggerIngest(@PathVariable Long documentId)
+
+    将文档提交到后台异步处理管线（Celery Worker）。
+    如果文档已有一个进行中的摄取任务，返回提示信息（不重复创建）。
+    如果文档此前失败，此次为"重试"。
+
+    摄取管线步骤：解析 -> 清洗 -> 分块 -> 索引 -> 图谱同步
+
+    参数:
+        request:     Django HttpRequest 对象
+        document_id: URL 路径中的文档 ID
+
+    返回:
+        200: {"document": {...}, "message": "已有进行中的摄取任务。"}  (任务已存在)
+        200: {"document": {...}, "message": "摄取任务已提交。"}  (任务创建成功)
+        404: {"message": "文档不存在。"}
+        422: {"message": "..."}  (质量门禁未通过，quality_gate_blocked)
+        500: {"message": "..."}  (摄取过程异常)
+        503: 数据库未就绪
+    """
     try:
         document = get_document_for_user(request.user, document_id)
     except Document.DoesNotExist:

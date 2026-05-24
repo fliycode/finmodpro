@@ -1,3 +1,11 @@
+"""
+文档清洗控制器。
+
+类比 SpringBoot: 相当于 @RestController 中处理文档清洗操作的端点。
+支持两种请求方法：
+- GET:  查询文档的历史清洗结果记录
+- POST: 对文档执行一次新的清洗操作
+"""
 import json
 import logging
 import time
@@ -24,6 +32,28 @@ logger = logging.getLogger(__name__)
 @require_http_methods(["GET", "POST"])
 @permission_required("auth.view_document")
 def document_cleaning_view(request, document_id):
+    """
+    文档清洗端点 —— GET/POST documents/{document_id}/cleaning。
+
+    类比 SpringBoot: 相当于
+        @RequestMapping(value="/documents/{documentId}/cleaning", method={GET, POST})
+        @PreAuthorize("hasAuthority('auth.view_document')")
+        public ResponseEntity<?> handleCleaning(@PathVariable Long documentId)
+
+    GET:  返回该文档的所有历史清洗结果（DocumentCleaningResult 列表）。
+    POST: 对该文档执行一次清洗流程（需额外拥有 auth.trigger_cleaning 权限），
+          执行完成后返回清洗结果。
+
+    参数:
+        request:     Django HttpRequest 对象
+        document_id: URL 路径中的文档 ID
+
+    返回:
+        GET  -> 200: {"results": [...], "total": N}
+        POST -> 201: {"result": {...}}  (清洗成功)
+        POST -> 500: {"message": "清洗失败: ..."}  (清洗异常)
+        文档不存在 -> 404
+    """
     try:
         document = Document.objects.get(id=document_id)
     except Document.DoesNotExist:

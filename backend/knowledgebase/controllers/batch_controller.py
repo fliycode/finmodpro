@@ -1,3 +1,13 @@
+"""
+批量文档操作控制器。
+
+类比 SpringBoot: 相当于 @RestController 中处理批量操作的端点方法。
+每个视图函数对应一个 HTTP 端点，处理 JSON 请求并返回 JSON 响应。
+
+提供两个批量操作端点：
+- POST documents/batch/ingest: 批量提交文档进入摄取管线
+- POST documents/batch/delete: 批量删除文档及其向量数据
+"""
 import json
 
 from django.db import DatabaseError, OperationalError, ProgrammingError
@@ -20,6 +30,18 @@ from systemcheck.models import AuditRecord
 
 
 def _build_schema_not_ready_response(exc):
+    """
+    构建"数据库未就绪"的统一错误响应。
+
+    类比 SpringBoot: 相当于全局异常处理器 (@ControllerAdvice) 中针对
+    DatabaseError 的统一处理逻辑。当数据库表尚未迁移初始化时返回 503。
+
+    参数:
+        exc: 捕获到的数据库异常对象
+
+    返回:
+        JsonResponse: 状态码 503，消息体为中文提示信息。
+    """
     return JsonResponse(
         {
             "message": "知识库数据表尚未初始化，请先执行后端迁移与 RBAC 初始化。",
@@ -30,6 +52,21 @@ def _build_schema_not_ready_response(exc):
 
 
 def _parse_request_payload(request):
+    """
+    从 HTTP 请求体中解析 JSON 负载。
+
+    类比 SpringBoot: 相当于 @RequestBody 注解 + Jackson 反序列化的组合，
+    同时包含输入校验（必须是合法 JSON 对象）。
+
+    参数:
+        request: Django HttpRequest 对象
+
+    返回:
+        dict: 解析出的 JSON 字典对象。
+
+    抛出:
+        ValueError: 当请求体不是合法 JSON 或不是 JSON 对象时抛出。
+    """
     try:
         payload = json.loads(request.body.decode("utf-8") or "{}")
     except (UnicodeDecodeError, json.JSONDecodeError):
@@ -43,6 +80,23 @@ def _parse_request_payload(request):
 @require_POST
 @permission_required("auth.trigger_ingest")
 def document_batch_ingest_view(request):
+    """
+    批量文档摄取端点 —— POST documents/batch/ingest。
+
+    类比 SpringBoot: 相当于
+        @PostMapping("/documents/batch/ingest")
+        @PreAuthorize("hasAuthority('auth.trigger_ingest')")
+        public ResponseEntity<?> batchIngest(@RequestBody Map payload)
+
+    从 JSON 请求体中获取 document_ids 列表，批量将其加入摄取队列。
+
+    参数:
+        request: Django HttpRequest 对象，body 中需包含 {"document_ids": [1, 2, 3]}
+
+    返回:
+        JsonResponse: 包含 accepted_count、skipped_count、failed_count 的结果字典。
+                      参数校验失败返回 400，数据库未就绪返回 503。
+    """
     try:
         payload = _parse_request_payload(request)
     except ValueError as exc:
@@ -99,6 +153,23 @@ def document_batch_ingest_view(request):
 @require_POST
 @permission_required("auth.delete_document")
 def document_batch_delete_view(request):
+    """
+    批量文档删除端点 —— POST documents/batch/delete。
+
+    类比 SpringBoot: 相当于
+        @PostMapping("/documents/batch/delete")
+        @PreAuthorize("hasAuthority('auth.delete_document')")
+        public ResponseEntity<?> batchDelete(@RequestBody Map payload)
+
+    从 JSON 请求体中获取 document_ids 列表，批量删除文档及其关联的向量数据。
+
+    参数:
+        request: Django HttpRequest 对象，body 中需包含 {"document_ids": [1, 2, 3]}
+
+    返回:
+        JsonResponse: 包含 deleted_count、failed_count 的结果字典。
+                      参数校验失败返回 400，数据库未就绪返回 503。
+    """
     try:
         payload = _parse_request_payload(request)
     except ValueError as exc:
