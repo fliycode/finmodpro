@@ -3,6 +3,8 @@ import { computed, onMounted, ref } from 'vue';
 
 import { llmApi } from '../../api/llm.js';
 import { useFlash } from '../../lib/flash.js';
+import AppIcon from '../../components/ui/AppIcon.vue';
+import AppSectionCard from '../../components/ui/AppSectionCard.vue';
 
 const flash = useFlash();
 
@@ -17,7 +19,7 @@ const dialogVisible = ref(false);
 const categoryGroups = computed(() => {
   const map = new Map();
   for (const item of configs.value) {
-    const cat = item.category || '';
+    const cat = item.category || '未分类';
     if (!map.has(cat)) map.set(cat, []);
     map.get(cat).push(item);
   }
@@ -63,6 +65,14 @@ async function save() {
   }
 }
 
+function displayVar(varName) {
+  return '{{' + varName + '}}';
+}
+
+function insertVar(varName) {
+  editingTemplate.value += displayVar(varName);
+}
+
 function formatTime(iso) {
   if (!iso) return '--';
   const d = new Date(iso);
@@ -74,69 +84,167 @@ onMounted(load);
 </script>
 
 <template>
-  <div class="prompts-page">
-    <h2 class="prompts-page__title">Prompt 模板</h2>
-
-    <div v-if="isLoading" class="prompts-skeleton">
-      <div v-for="i in 3" :key="i" class="skeleton-row" />
+  <div class="page-stack prompts-page">
+    <!-- 页面标题栏 -->
+    <div class="prompts-page__header">
+      <div class="prompts-page__title-row">
+        <h2 class="prompts-page__title">Prompt 模板</h2>
+        <span class="prompts-page__count">{{ configs.length }} 个配置</span>
+      </div>
+      <div class="prompts-page__header-actions">
+        <el-button :loading="isLoading" @click="load">
+          <AppIcon name="refresh" />
+          刷新
+        </el-button>
+      </div>
     </div>
 
-    <div v-else-if="errorMsg" class="prompts-error">
-      <span>{{ errorMsg }}</span>
-      <button class="btn-retry" @click="load">重试</button>
+    <!-- 错误提示 -->
+    <el-alert
+      v-if="errorMsg"
+      :title="errorMsg"
+      type="error"
+      show-icon
+      :closable="false"
+    />
+
+    <!-- 空状态 -->
+    <div v-if="!isLoading && !errorMsg && configs.length === 0" class="admin-empty-state">
+      暂无 Prompt 配置
     </div>
 
-    <template v-else>
-      <div v-for="[category, items] in categoryGroups" :key="category" class="prompts-group">
-        <div class="prompts-group__label">{{ category }}</div>
-        <div v-for="item in items" :key="item.key" class="prompts-row">
-          <div class="prompts-row__main">
-            <span class="prompts-row__name">{{ item.name || item.key }}</span>
-            <span class="prompts-row__key">{{ item.key }}</span>
-            <span v-if="item.variables?.length" class="prompts-row__vars">
-              <span v-for="v in item.variables" :key="v" class="var-tag">{{ v }}</span>
-            </span>
-          </div>
-          <div class="prompts-row__meta">
-            <span class="prompts-row__time">{{ formatTime(item.updated_at) }}</span>
-            <button class="btn-edit" @click="openEdit(item)">编辑</button>
-          </div>
-        </div>
-      </div>
-    </template>
+    <!-- 按分类展示的卡片 -->
+    <AppSectionCard
+      v-for="[category, items] in categoryGroups"
+      :key="category"
+      :title="category"
+      admin
+    >
+      <el-table
+        :data="items"
+        row-key="key"
+        size="small"
+        v-loading="isLoading"
+        element-loading-text="加载中..."
+      >
+        <el-table-column label="名称" min-width="160" show-overflow-tooltip>
+          <template #default="{ row }">
+            <div class="prompts-page__name-cell">
+              <strong>{{ row.name || row.key }}</strong>
+              <small>{{ row.key }}</small>
+            </div>
+          </template>
+        </el-table-column>
 
-    <Teleport to="body">
-      <div v-if="dialogVisible" class="dialog-overlay" @click.self="closeEdit">
-        <div class="dialog-panel">
-          <div class="dialog-panel__header">
-            <span class="dialog-panel__title">编辑 {{ editingItem?.key }}</span>
-            <button class="dialog-panel__close" @click="closeEdit" aria-label="关闭">&times;</button>
-          </div>
-          <div class="dialog-panel__body">
-            <textarea
-              v-model="editingTemplate"
-              class="dialog-panel__textarea"
-              rows="14"
-              spellcheck="false"
-            />
-          </div>
-          <div class="dialog-panel__footer">
-            <button class="btn-cancel" @click="closeEdit">取消</button>
-            <button class="btn-save" :disabled="isSaving" @click="save">
-              {{ isSaving ? '保存中...' : '保存' }}
-            </button>
+        <el-table-column label="变量" min-width="200">
+          <template #default="{ row }">
+            <div class="prompts-page__var-list">
+              <el-tag
+                v-for="v in row.variables"
+                :key="v"
+                size="small"
+                type="info"
+                class="prompts-page__var-tag"
+              >
+                {{ v }}
+              </el-tag>
+              <span v-if="!row.variables?.length" class="prompts-page__muted">--</span>
+            </div>
+          </template>
+        </el-table-column>
+
+        <el-table-column label="更新时间" width="172">
+          <template #default="{ row }">
+            <span class="prompts-page__time">{{ formatTime(row.updated_at) }}</span>
+          </template>
+        </el-table-column>
+
+        <el-table-column label="操作" width="92" fixed="right" align="right" header-align="right">
+          <template #default="{ row }">
+            <el-tooltip content="编辑模板" placement="top">
+              <button
+                type="button"
+                class="prompts-page__icon-button"
+                @click="openEdit(row)"
+              >
+                <AppIcon name="pencil" />
+              </button>
+            </el-tooltip>
+          </template>
+        </el-table-column>
+
+        <template #empty>
+          <div class="admin-empty-state">暂无 Prompt 配置</div>
+        </template>
+      </el-table>
+    </AppSectionCard>
+
+    <!-- 编辑对话框 -->
+    <el-dialog
+      v-model="dialogVisible"
+      :title="`编辑模板 · ${editingItem?.key || ''}`"
+      width="680px"
+      class="prompts-page__dialog-modal"
+      destroy-on-close
+    >
+      <div class="prompts-page__dialog-body">
+        <div v-if="editingItem?.variables?.length" class="prompts-page__dialog-vars">
+          <span class="prompts-page__dialog-label">可用变量</span>
+          <div class="prompts-page__dialog-var-list">
+            <el-tag
+              v-for="v in editingItem.variables"
+              :key="v"
+              size="small"
+              class="prompts-page__dialog-var-tag"
+              @click="insertVar(v)"
+            >
+              {{ displayVar(v) }}
+            </el-tag>
           </div>
         </div>
+
+        <label class="prompts-page__field">
+          <span class="prompts-page__field-label">模板内容</span>
+          <el-input
+            v-model="editingTemplate"
+            type="textarea"
+            :rows="16"
+            class="prompts-page__template-textarea"
+          />
+        </label>
       </div>
-    </Teleport>
+
+      <template #footer>
+        <div class="prompts-page__dialog-actions">
+          <el-button @click="closeEdit" :disabled="isSaving">取消</el-button>
+          <el-button type="primary" :loading="isSaving" @click="save">
+            保存
+          </el-button>
+        </div>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <style scoped>
 .prompts-page {
+  --prompts-radius-card: 18px;
+  --prompts-radius-dialog: 24px;
+  --prompts-radius-input: 12px;
+}
+
+/* ── 页面标题栏 ── */
+.prompts-page__header {
   display: flex;
-  flex-direction: column;
-  gap: 28px;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.prompts-page__title-row {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
 }
 
 .prompts-page__title {
@@ -146,244 +254,223 @@ onMounted(load);
   color: var(--text-primary);
 }
 
-/* ── Skeleton ── */
-.prompts-skeleton {
+.prompts-page__count {
+  font-size: var(--fs-2xs);
+  color: var(--text-muted);
+}
+
+/* ── 表格内名称单元格 ── */
+.prompts-page__name-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.prompts-page__name-cell strong {
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  color: var(--text-primary);
+  line-height: 1.4;
+}
+
+.prompts-page__name-cell small {
+  font-size: var(--fs-2xs);
+  font-family: var(--mono);
+  color: var(--text-muted);
+}
+
+.prompts-page__muted {
+  font-size: var(--fs-2xs);
+  color: var(--text-muted);
+}
+
+.prompts-page__time {
+  font-size: var(--fs-2xs);
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+/* ── 变量标签 ── */
+.prompts-page__var-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  align-items: center;
+}
+
+.prompts-page__var-tag {
+  font-family: var(--mono);
+  font-size: var(--fs-2xs);
+}
+
+/* ── 操作图标按钮 ── */
+.prompts-page__icon-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: color 0.15s, background 0.15s;
+}
+
+.prompts-page__icon-button:hover {
+  color: var(--text-primary);
+  background: var(--surface-3);
+}
+
+/* ── 编辑对话框 ── */
+.prompts-page__dialog-body {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.prompts-page__dialog-vars {
   display: flex;
   flex-direction: column;
   gap: 8px;
 }
-.skeleton-row {
-  height: 40px;
-  border-radius: 6px;
-  background: var(--surface-3);
-  animation: shimmer 1.4s infinite;
-}
-@keyframes shimmer {
-  0%, 100% { opacity: 0.4; }
-  50% { opacity: 0.7; }
-}
 
-/* ── Error ── */
-.prompts-error {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  color: var(--text-muted);
-  font-size: var(--fs-xs);
-}
-.btn-retry {
-  background: none;
-  border: 1px solid var(--line-strong);
-  border-radius: 6px;
-  color: var(--text-secondary);
-  cursor: pointer;
-  font-size: var(--fs-xs);
-  padding: 3px 10px;
-  transition: background 0.15s;
-}
-.btn-retry:hover {
-  background: var(--surface-hover);
-}
-
-/* ── Groups ── */
-.prompts-group {
-  display: flex;
-  flex-direction: column;
-  gap: 0;
-  padding-top: 14px;
-  border-top: 1px solid var(--line-soft);
-}
-.prompts-group:first-child {
-  padding-top: 0;
-  border-top: 0;
-}
-.prompts-group__label {
+.prompts-page__dialog-label {
   font-size: var(--fs-2xs);
   font-weight: 600;
-  letter-spacing: 0.08em;
   color: var(--text-muted);
   text-transform: uppercase;
-  padding: 0 4px 10px;
+  letter-spacing: 0.06em;
 }
 
-/* ── Row ── */
-.prompts-row {
+.prompts-page__dialog-var-list {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 7px 10px;
-  border-radius: 6px;
-  transition: background 0.15s;
-}
-.prompts-row + .prompts-row {
-  margin-top: 2px;
-}
-.prompts-row:hover {
-  background: var(--surface-hover);
-}
-.prompts-row__main {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  min-width: 0;
-  flex: 1;
-}
-.prompts-row__name {
-  font-size: var(--fs-sm);
-  font-weight: 500;
-  color: var(--text-primary);
-  white-space: nowrap;
-}
-.prompts-row__key {
-  font-size: var(--fs-2xs);
-  font-family: var(--mono);
-  color: var(--text-muted);
-  white-space: nowrap;
-}
-.prompts-row__vars {
-  display: flex;
-  gap: 4px;
   flex-wrap: wrap;
-}
-.var-tag {
-  font-size: var(--fs-2xs);
-  font-family: var(--mono);
-  color: var(--brand-400);
-  background: var(--brand-soft);
-  border-radius: 4px;
-  padding: 1px 6px;
-}
-.prompts-row__meta {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  flex-shrink: 0;
-}
-.prompts-row__time {
-  font-size: var(--fs-2xs);
-  color: var(--text-muted);
-  white-space: nowrap;
-}
-.btn-edit {
-  background: none;
-  border: none;
-  color: var(--text-muted);
-  cursor: pointer;
-  font-size: var(--fs-xs);
-  padding: 2px 8px;
-  border-radius: 4px;
-  transition: color 0.15s, background 0.15s;
-}
-.prompts-row:hover .btn-edit {
-  color: var(--text-secondary);
-}
-.btn-edit:hover {
-  color: var(--text-primary);
-  background: var(--surface-3);
+  gap: 6px;
 }
 
-/* ── Dialog ── */
-.dialog-overlay {
-  position: fixed;
-  inset: 0;
-  z-index: 1000;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: rgba(0, 0, 0, 0.48);
-}
-.dialog-panel {
-  width: 620px;
-  max-width: calc(100vw - 48px);
-  background: var(--surface-2);
-  border: 1px solid var(--line-soft);
-  border-radius: 12px;
-  overflow: hidden;
-}
-.dialog-panel__header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 14px 18px;
-  border-bottom: 1px solid var(--line-soft);
-}
-.dialog-panel__title {
-  font-size: var(--fs-sm);
-  font-weight: 600;
-  color: var(--text-primary);
-}
-.dialog-panel__close {
-  background: none;
-  border: none;
-  color: var(--text-muted);
-  cursor: pointer;
-  font-size: 18px;
-  line-height: 1;
-  padding: 2px;
-  border-radius: 4px;
-  transition: color 0.15s;
-}
-.dialog-panel__close:hover {
-  color: var(--text-primary);
-}
-.dialog-panel__body {
-  padding: 16px 18px;
-}
-.dialog-panel__textarea {
-  width: 100%;
-  resize: vertical;
-  background: var(--surface-1);
-  border: 1px solid var(--line-strong);
-  border-radius: 6px;
-  color: var(--text-primary);
+.prompts-page__dialog-var-tag {
   font-family: var(--mono);
-  font-size: var(--fs-xs);
-  line-height: 1.6;
-  padding: 12px;
-  outline: none;
-  transition: border-color 0.15s;
+  font-size: var(--fs-2xs);
+  cursor: pointer;
+  transition: opacity 0.15s;
 }
-.dialog-panel__textarea:focus {
-  border-color: var(--brand-500);
-  box-shadow: 0 0 0 2px var(--brand-soft);
+
+.prompts-page__dialog-var-tag:hover {
+  opacity: 0.75;
 }
-.dialog-panel__footer {
+
+.prompts-page__field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.prompts-page__field-label {
+  font-size: var(--fs-2xs);
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.prompts-page__dialog-actions {
   display: flex;
   justify-content: flex-end;
   gap: 8px;
-  padding: 12px 18px;
+}
+
+/* ── Element Plus 深度覆写 ── */
+
+/* 表格 */
+.prompts-page :deep(.el-table) {
+  --el-table-border-color: var(--line-soft);
+  border: 1px solid var(--line-soft);
+  border-radius: var(--prompts-radius-card);
+  overflow: hidden;
+}
+
+.prompts-page :deep(.el-table__inner-wrapper::before) {
+  display: none;
+}
+
+.prompts-page :deep(.el-table th.el-table__cell) {
+  color: var(--text-muted);
+  font-size: 0.6875rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  background: var(--surface-3);
+}
+
+.prompts-page :deep(.el-table .cell) {
+  font-size: var(--fs-xs);
+}
+
+/* 输入框 */
+.prompts-page :deep(.el-input__wrapper) {
+  min-height: 36px;
+  background: var(--surface-2);
+  box-shadow: inset 0 0 0 1px var(--line-strong);
+  border-radius: var(--prompts-radius-input);
+}
+
+/* 文本域 */
+.prompts-page__template-textarea :deep(.el-textarea__inner) {
+  min-height: 360px;
+  background: var(--surface-1);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--prompts-radius-input);
+  color: var(--text-primary);
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+  line-height: 1.7;
+  resize: vertical;
+  padding: 14px;
+}
+
+.prompts-page__template-textarea :deep(.el-textarea__inner):focus {
+  border-color: var(--brand-500);
+  box-shadow: 0 0 0 2px var(--brand-soft);
+}
+
+/* 对话框 */
+.prompts-page :deep(.el-dialog) {
+  border: 1px solid var(--line-strong);
+  border-radius: var(--prompts-radius-dialog);
+  background: var(--surface-1);
+}
+
+.prompts-page :deep(.el-dialog__header) {
+  padding: 18px 22px 14px;
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.prompts-page :deep(.el-dialog__title) {
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.prompts-page :deep(.el-dialog__body) {
+  padding: 20px 22px;
+}
+
+.prompts-page :deep(.el-dialog__footer) {
+  padding: 14px 22px 18px;
   border-top: 1px solid var(--line-soft);
 }
-.btn-cancel {
-  background: none;
-  border: 1px solid var(--line-strong);
+
+/* 标签 */
+.prompts-page :deep(.el-tag--small) {
   border-radius: 6px;
-  color: var(--text-secondary);
-  cursor: pointer;
-  font-size: var(--fs-xs);
-  padding: 5px 16px;
-  transition: background 0.15s;
+  height: 22px;
+  padding: 0 8px;
 }
-.btn-cancel:hover {
-  background: var(--surface-hover);
-}
-.btn-save {
-  background: var(--brand-500);
-  border: none;
-  border-radius: 6px;
-  color: #fff;
-  cursor: pointer;
-  font-size: var(--fs-xs);
-  font-weight: 500;
-  padding: 5px 16px;
-  transition: background 0.15s;
-}
-.btn-save:hover {
-  background: var(--brand-600);
-}
-.btn-save:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
+
+/* 加载遮罩 */
+.prompts-page :deep(.el-loading-mask) {
+  border-radius: var(--prompts-radius-card);
 }
 </style>
