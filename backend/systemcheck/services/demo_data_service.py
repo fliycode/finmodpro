@@ -1,3 +1,11 @@
+"""
+演示数据播种服务 —— 为开发/演示环境创建预置的示例数据。
+类比 SpringBoot: 相当于 DataInitializer 或 CommandLineRunner，
+在系统初始化时创建演示用户、文档、风险事件、聊天记录和检索日志等。
+
+注意: 此服务仅在开发/演示环境中使用，通过 Django management command 调用。
+"""
+
 from datetime import date
 from decimal import Decimal
 
@@ -17,9 +25,13 @@ from risk.models import RiskEvent, RiskReport
 
 User = get_user_model()
 
+# 演示账户配置
 DEMO_ADMIN_USERNAME = "demo-admin"
 DEMO_ANALYST_USERNAME = "demo-analyst"
 DEMO_PASSWORD = "DemoPass123!"
+
+# 演示文档规格定义
+# 每个 spec 包含 title, filename, source_date, parsed_text 和 chunks
 DEMO_DOCUMENT_SPECS = (
     {
         "title": "2025Q1 流动性风险简报",
@@ -51,6 +63,9 @@ DEMO_DOCUMENT_SPECS = (
 
 
 def _delete_demo_files():
+    """
+    删除演示文档的物理文件（存储在 default_storage 中）。
+    """
     for spec in DEMO_DOCUMENT_SPECS:
         storage_path = f"knowledgebase/documents/{spec['filename']}"
         if default_storage.exists(storage_path):
@@ -58,6 +73,17 @@ def _delete_demo_files():
 
 
 def _create_demo_user(*, username, email, group_name):
+    """
+    创建演示用户并分配到指定 RBAC 组。
+
+    参数:
+        username (str): 用户名。
+        email (str): 邮箱地址。
+        group_name (str): 目标 RBAC 组名（ROLE_ADMIN 或 ROLE_MEMBER）。
+
+    返回:
+        User: 新创建的用户实例。
+    """
     user = User.objects.create_user(
         username=username,
         password=DEMO_PASSWORD,
@@ -68,6 +94,12 @@ def _create_demo_user(*, username, email, group_name):
 
 
 def _create_demo_documents():
+    """
+    创建演示文档及其 chunk 和入库任务记录。
+
+    返回:
+        list[tuple]: [(document, chunks), ...] 每个文档和其 chunk 列表的元组。
+    """
     documents = []
 
     for spec in DEMO_DOCUMENT_SPECS:
@@ -119,6 +151,16 @@ def _create_demo_documents():
 
 
 def _create_demo_chat(analyst_user, primary_document):
+    """
+    创建演示聊天会话和消息。
+
+    参数:
+        analyst_user (User): 分析师用户。
+        primary_document (Document): 关联的演示文档。
+
+    返回:
+        ChatSession: 创建的聊天会话实例。
+    """
     session = ChatSession.objects.create(
         user=analyst_user,
         title="流动性风险演示问答",
@@ -141,6 +183,16 @@ def _create_demo_chat(analyst_user, primary_document):
 
 
 def _create_demo_retrieval_log(primary_document, primary_chunk):
+    """
+    创建演示检索日志记录。
+
+    参数:
+        primary_document (Document): 关联文档。
+        primary_chunk (DocumentChunk): 关联的文档块。
+
+    返回:
+        RetrievalLog: 创建的检索日志实例。
+    """
     return RetrievalLog.objects.create(
         query="2025Q1 主要风险点",
         top_k=3,
@@ -157,6 +209,15 @@ def _create_demo_retrieval_log(primary_document, primary_chunk):
 
 
 def _create_demo_risk_data(documents):
+    """
+    创建演示风险事件和报告数据。
+
+    参数:
+        documents (list[tuple]): [({document}, {chunks}), ...] 列表。
+
+    返回:
+        tuple: (approved_event, pending_event, company_report)。
+    """
     first_document, first_chunks = documents[0]
     second_document, second_chunks = documents[1]
 
@@ -208,6 +269,24 @@ def _create_demo_risk_data(documents):
 
 @transaction.atomic
 def seed_demo_data():
+    """
+    播种完整的演示数据集。
+
+    类比 SpringBoot: 相当于 @PostConstruct 或 CommandLineRunner 的数据初始化方法。
+    该函数是幂等的 —— 先清理所有旧数据再重新创建。
+
+    流程:
+    1. 播种 RBAC 角色和权限
+    2. 清理旧的演示数据（用户、文档、风险事件、聊天记录等）
+    3. 创建演示用户（admin + analyst）
+    4. 创建演示文档及其 chunk
+    5. 创建演示聊天会话
+    6. 创建演示检索日志
+    7. 创建演示风险事件和报告
+
+    返回:
+        dict: 包含所有创建实体的 ID 汇总及默认密码。
+    """
     seed_roles_and_permissions()
 
     ChatSession.objects.filter(user__username__in=[DEMO_ADMIN_USERNAME, DEMO_ANALYST_USERNAME]).delete()

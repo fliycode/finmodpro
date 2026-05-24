@@ -1,3 +1,13 @@
+"""
+Ops services 包，汇集所有运维监控相关的业务逻辑服务。
+类比 SpringBoot: 相当于 @Service 层的包目录，导出所有公共服务接口。
+
+模块分为三类:
+- metrics_collector_service: 系统指标采集（CPU、内存、磁盘、服务健康检测）
+- alert_engine_service:      告警引擎（规则评估、事件确认）
+- monitoring_query_service:  监控查询（状态概览、时序数据、规则/事件的 CRUD）
+"""
+
 from ops.services.metrics_collector_service import (
     collect_system_metrics,
     store_metrics,

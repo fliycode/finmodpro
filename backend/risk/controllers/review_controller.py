@@ -1,3 +1,9 @@
+"""
+风险事件审核控制器 —— POST /api/risk/events/{event_id}/review
+类比 SpringBoot: 相当于 @RestController 中的 @PostMapping 方法，
+允许有权限的用户将风险事件标记为"已通过"或"已驳回"。
+"""
+
 from rest_framework.views import APIView
 
 from common.api_response import error_response, success_response
@@ -8,10 +14,26 @@ from risk.services.review_service import review_risk_event
 
 
 class RiskEventReviewView(APIView):
+    """
+    风险事件审核视图 —— 对风险事件进行通过或驳回操作。
+
+    类比 SpringBoot: 相当于 @PostMapping("/events/{eventId}/review")。
+    """
     authentication_classes = []
     permission_classes = []
 
     def post(self, request, event_id):
+        """
+        审核指定的风险事件。
+
+        参数:
+            request: Django HttpRequest，body 包含:
+                     - review_status (str, 必填): "approved" 或 "rejected"
+            event_id (int): 路径参数，风险事件 ID。
+
+        返回:
+            JsonResponse: 审核后的事件数据。
+        """
         user = get_authenticated_user(request)
         if user is None:
             return error_response(code=401, message="未认证。", status_code=401)

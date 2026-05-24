@@ -1,6 +1,20 @@
+"""
+风险判读服务 —— 对 LLM 提取的原始风险事件进行增强和补充。
+类比 SpringBoot: 相当于 @Service 中的后处理层，
+从风险类型和级别出发，自动填充:
+- materiality_score (实质性评分)
+- likelihood_score (可能性评分)
+- impact_scope (影响范围)
+- watchpoints (监控点)
+- why_it_matters (风险判断说明)
+- requires_human_review (是否需要人工复核)
+- review_priority (复核优先级)
+"""
+
 from decimal import Decimal
 
 
+# 各风险级别对应的基础实质性评分
 LEVEL_BASE_MATERIALITY = {
     "critical": 0.92,
     "high": 0.78,
@@ -8,6 +22,7 @@ LEVEL_BASE_MATERIALITY = {
     "low": 0.34,
 }
 
+# 各风险类型对应的默认影响范围
 IMPACT_SCOPE_MAP = {
     "liquidity": ["现金流", "融资"],
     "credit": ["交易对手", "回款"],
@@ -18,6 +33,7 @@ IMPACT_SCOPE_MAP = {
     "governance": ["治理", "内控"],
 }
 
+# 各风险类型对应的默认监控清单
 WATCHPOINT_MAP = {
     "liquidity": ["未来三个月现金流覆盖率", "短期债务续作进展"],
     "credit": ["主要债务人履约变化", "应收账款回款周期"],
@@ -28,6 +44,7 @@ WATCHPOINT_MAP = {
     "governance": ["管理层稳定性", "内控缺陷整改结果"],
 }
 
+# 各风险类型对应的"为何重要"说明文本
 WHY_IT_MATTERS_MAP = {
     "liquidity": "该信号指向资金周转与短期偿付压力，需要重点跟踪现金流与续作能力。",
     "credit": "该信号指向交易对手或债务履约能力恶化，可能进一步放大回款与减值压力。",
@@ -40,16 +57,44 @@ WHY_IT_MATTERS_MAP = {
 
 
 def _normalize_risk_type(raw_risk_type):
+    """
+    规范化风险类型字符串。
+
+    参数:
+        raw_risk_type: 原始风险类型。
+
+    返回:
+        str: 规范化后的小写风险类型，无效时返回 "other"。
+    """
     normalized = str(raw_risk_type or "").strip().lower()
     return normalized or "other"
 
 
 def _normalize_risk_level(raw_risk_level):
+    """
+    规范化风险级别字符串。
+
+    参数:
+        raw_risk_level: 原始风险级别。
+
+    返回:
+        str: 规范化后的小写风险级别，无效时返回 "medium"。
+    """
     normalized = str(raw_risk_level or "").strip().lower()
     return normalized or "medium"
 
 
 def _to_float(value, default=0.0):
+    """
+    将值安全转换为 float 类型。
+
+    参数:
+        value: 任意类型的值。
+        default (float): 转换失败时的默认值。
+
+    返回:
+        float: 转换后的浮点数。
+    """
     if value in (None, ""):
         return default
     if isinstance(value, Decimal):
@@ -61,6 +106,21 @@ def _to_float(value, default=0.0):
 
 
 def build_event_enrichment(*, event_data, chunk=None):
+    """
+    对原始风险事件进行增强处理，生成完整的元数据字典。
+
+    类比 SpringBoot: 相当于 @Service 方法中的增强/装饰逻辑，
+    从 LLM 输出的基础字段出发，计算出所有衍生指标和辅助信息。
+
+    参数:
+        event_data (dict): LLM 输出的原始事件数据。
+        chunk (DocumentChunk, 可选): 事件来源的文档块实例。
+
+    返回:
+        dict: 包含 taxonomy_code, citations, materiality_score, likelihood_score,
+              impact_scope, why_it_matters, watchpoints, requires_human_review,
+              review_priority, extraction_version 等增强字段。
+    """
     risk_type = _normalize_risk_type(event_data.get("risk_type"))
     risk_level = _normalize_risk_level(event_data.get("risk_level"))
     confidence_score = max(0.0, min(1.0, _to_float(event_data.get("confidence_score"), default=0.0)))

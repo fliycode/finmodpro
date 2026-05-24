@@ -1,9 +1,23 @@
+"""
+Risk 序列化器 —— 定义 API 请求校验和响应序列化规则。
+类比 SpringBoot: 相当于 @Valid + Jackson ObjectMapper 的组合，
+负责 JSON 请求反序列化、字段校验和模型到 JSON 的序列化输出。
+
+包含:
+- 风险提取事件的请求/响应序列化
+- 风险事件列表查询参数校验
+- 风险事件审核请求校验
+- 风险报告生成请求校验
+- 风险事件摘要序列化（含衍生字段计算）
+"""
+
 import json
 
 from rest_framework import serializers
 
 from risk.models import RiskEvent, RiskReport
 
+# 风险类型到中文标签的映射
 RISK_TYPE_LABELS = {
     "liquidity": "流动性风险",
     "credit": "信用风险",
@@ -17,6 +31,11 @@ RISK_TYPE_LABELS = {
 
 
 class RiskExtractionEventSerializer(serializers.Serializer):
+    """
+    单条风险提取事件的请求/响应序列化器。
+
+    类比 SpringBoot: 相当于一个 DTO 类，用于绑定 LLM 输出的风险事件 JSON 字段。
+    """
     company_name = serializers.CharField(max_length=255)
     risk_type = serializers.CharField(max_length=128)
     risk_level = serializers.ChoiceField(choices=RiskEvent.LEVEL_CHOICES)
@@ -38,10 +57,20 @@ class RiskExtractionEventSerializer(serializers.Serializer):
 
 
 class RiskExtractionSchemaSerializer(serializers.Serializer):
+    """
+    风险提取结果的顶层序列化器（包装多条事件）。
+
+    类比 SpringBoot: 相当于包装类 DTO，内含 List<RiskEvent>。
+    """
     events = RiskExtractionEventSerializer(many=True)
 
 
 class RiskBatchExtractionRequestSerializer(serializers.Serializer):
+    """
+    批量风险提取请求的序列化器。
+
+    类比 SpringBoot: 相当于 @RequestBody DTO，校验 document_ids 为非空整数数组。
+    """
     document_ids = serializers.ListField(
         child=serializers.IntegerField(min_value=1),
         allow_empty=False,
@@ -49,6 +78,12 @@ class RiskBatchExtractionRequestSerializer(serializers.Serializer):
 
 
 class RiskEventListQuerySerializer(serializers.Serializer):
+    """
+    风险事件列表查询参数的序列化器。
+
+    类比 SpringBoot: 相当于 @RequestParam 的多条件查询 DTO。
+    支持按公司名、风险类型、审核状态、风险级别、文档 ID、时间范围过滤。
+    """
     company_name = serializers.CharField(required=False, allow_blank=False)
     risk_type = serializers.CharField(required=False, allow_blank=False)
     review_status = serializers.ChoiceField(required=False, choices=RiskEvent.STATUS_CHOICES)
@@ -58,6 +93,18 @@ class RiskEventListQuerySerializer(serializers.Serializer):
     period_end = serializers.DateField(required=False)
 
     def validate(self, attrs):
+        """
+        跨字段校验：period_start 不能晚于 period_end。
+
+        参数:
+            attrs (dict): 已校验的字段字典。
+
+        返回:
+            dict: 校验通过的字段字典。
+
+        抛出:
+            ValidationError: 当 period_start > period_end 时。
+        """
         period_start = attrs.get("period_start")
         period_end = attrs.get("period_end")
         if period_start and period_end and period_start > period_end:
@@ -66,6 +113,11 @@ class RiskEventListQuerySerializer(serializers.Serializer):
 
 
 class RiskEventReviewSerializer(serializers.Serializer):
+    """
+    风险事件审核请求的序列化器。
+
+    类比 SpringBoot: 相当于 @RequestBody DTO，仅允许 approve 或 reject 两种操作。
+    """
     review_status = serializers.ChoiceField(
         choices=(
             (RiskEvent.STATUS_APPROVED, "Approved"),
@@ -75,11 +127,15 @@ class RiskEventReviewSerializer(serializers.Serializer):
 
 
 class CompanyRiskReportCreateSerializer(serializers.Serializer):
+    """
+    公司风险报告生成请求的序列化器。
+    """
     company_name = serializers.CharField(max_length=255)
     period_start = serializers.DateField(required=False, allow_null=True)
     period_end = serializers.DateField(required=False, allow_null=True)
 
     def validate(self, attrs):
+        """跨字段校验：period_start 不能晚于 period_end。"""
         period_start = attrs.get("period_start")
         period_end = attrs.get("period_end")
         if period_start and period_end and period_start > period_end:
@@ -88,16 +144,26 @@ class CompanyRiskReportCreateSerializer(serializers.Serializer):
 
 
 class TimeRangeRiskReportCreateSerializer(serializers.Serializer):
+    """
+    时间区间风险报告生成请求的序列化器。
+    """
     period_start = serializers.DateField()
     period_end = serializers.DateField()
 
     def validate(self, attrs):
+        """跨字段校验：period_start 不能晚于 period_end。"""
         if attrs["period_start"] > attrs["period_end"]:
             raise serializers.ValidationError({"message": "period_start 不能晚于 period_end。"})
         return attrs
 
 
 class RiskEventSummarySerializer(serializers.ModelSerializer):
+    """
+    风险事件摘要序列化器 —— 将 RiskEvent 模型转为前端可用的 JSON。
+
+    类比 SpringBoot: 相当于 Jackson 的 @JsonSerialize 配置，
+    包含从元数据中动态计算的衍生字段（risk_type_label, materiality_score 等）。
+    """
     document_id = serializers.IntegerField(source="document.id", read_only=True, allow_null=True)
     chunk_id = serializers.IntegerField(source="chunk.id", read_only=True, allow_null=True)
     document_filename = serializers.CharField(source="document.filename", read_only=True, allow_null=True, default=None)
@@ -150,12 +216,15 @@ class RiskEventSummarySerializer(serializers.ModelSerializer):
         ]
 
     def _get_meta(self, obj):
+        """获取事件的元数据字典，不存在时返回空字典。"""
         return obj.metadata or {}
 
     def get_risk_type_label(self, obj):
+        """返回风险类型的中文标签。"""
         return RISK_TYPE_LABELS.get(obj.risk_type, obj.risk_type)
 
     def get_extraction_metadata(self, obj):
+        """返回提取管道的元数据摘要（轮数、验证状态、LLM 调用次数等）。"""
         meta = self._get_meta(obj)
         pipeline = meta.get("extraction_pipeline")
         if not pipeline:
@@ -171,37 +240,51 @@ class RiskEventSummarySerializer(serializers.ModelSerializer):
         }
 
     def get_taxonomy_code(self, obj):
+        """返回风险分类代码。"""
         return self._get_meta(obj).get("taxonomy_code") or obj.risk_type
 
     def get_citations(self, obj):
+        """返回引文列表。"""
         citations = self._get_meta(obj).get("citations")
         return citations if isinstance(citations, list) else []
 
     def get_materiality_score(self, obj):
+        """返回实质性评分。"""
         return self._get_meta(obj).get("materiality_score")
 
     def get_likelihood_score(self, obj):
+        """返回可能性评分。"""
         return self._get_meta(obj).get("likelihood_score")
 
     def get_impact_scope(self, obj):
+        """返回影响范围列表。"""
         impact_scope = self._get_meta(obj).get("impact_scope")
         return impact_scope if isinstance(impact_scope, list) else []
 
     def get_why_it_matters(self, obj):
+        """返回"为何重要"的说明文本。"""
         return self._get_meta(obj).get("why_it_matters") or ""
 
     def get_watchpoints(self, obj):
+        """返回监控点列表。"""
         watchpoints = self._get_meta(obj).get("watchpoints")
         return watchpoints if isinstance(watchpoints, list) else []
 
     def get_requires_human_review(self, obj):
+        """返回是否需要人工复核。"""
         return bool(self._get_meta(obj).get("requires_human_review", False))
 
     def get_review_priority(self, obj):
+        """返回复核优先级分数。"""
         return self._get_meta(obj).get("review_priority")
 
 
 class RiskReportSerializer(serializers.ModelSerializer):
+    """
+    风险报告序列化器。
+
+    类比 SpringBoot: 相当于 Jackson 的 @JsonSerialize 配置。
+    """
     class Meta:
         model = RiskReport
         fields = [
@@ -220,6 +303,22 @@ class RiskReportSerializer(serializers.ModelSerializer):
 
 
 def parse_risk_extraction_payload(raw_content):
+    """
+    解析 LLM 返回的风险提取 JSON 内容，校验并返回清洗后的事件列表。
+
+    类比 SpringBoot: 相当于 @Valid + Jackson 解析的管道，
+    处理 LLM 输出中可能存在的 markdown 代码块包裹、空事件过滤等情况。
+
+    参数:
+        raw_content (str): LLM 返回的原始内容字符串。
+
+    返回:
+        list[dict]: 校验通过的风险事件列表。
+
+    抛出:
+        ValueError: 当内容不是合法 JSON 时。
+        ValidationError: 当 JSON 格式不符合 schema 时。
+    """
     normalized_content = str(raw_content or "").strip()
     if normalized_content.startswith("```"):
         lines = normalized_content.splitlines()

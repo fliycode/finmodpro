@@ -1,9 +1,17 @@
+"""
+监控查询服务 —— 提供系统状态查询、指标时序查询、告警规则/事件的完整 CRUD。
+类比 SpringBoot: 相当于 @Service 中的查询层，
+聚合 SystemMetric / AlertRule / AlertEvent 的数据访问，
+为 Controller 层提供简洁的业务方法。
+"""
+
 from datetime import timedelta
 
 from django.utils.timezone import now
 
 from ops.models import AlertEvent, AlertRule, SystemMetric
 
+# 预定义的默认告警规则模板，通过 seed_default_alert_rules 播种
 DEFAULT_ALERT_RULE_DEFINITIONS = (
     {
         "name": "CPU 使用率过高",
@@ -49,6 +57,18 @@ DEFAULT_ALERT_RULE_DEFINITIONS = (
 
 
 def get_current_system_status():
+    """
+    获取当前系统状态概览，包含所有关键指标的最新值和当前活跃告警数。
+
+    类比 SpringBoot: 相当于 Actuator /health 端点的数据聚合。
+
+    返回:
+        dict: {
+            "metrics": {metric_name: {value, unit, tags, collected_at}, ...},
+            "firing_alerts": int,  当前触发中的告警数,
+            "collected_at": str,   查询时间戳,
+        }
+    """
     metric_names = [
         "cpu_percent",
         "memory_percent",
@@ -74,7 +94,7 @@ def get_current_system_status():
                 "collected_at": latest.collected_at.isoformat(),
             }
 
-    # Count active alerts
+    # 统计当前活跃告警数（仅 firing 状态）
     firing_count = AlertEvent.objects.filter(status=AlertEvent.STATUS_FIRING).count()
 
     return {
@@ -85,6 +105,22 @@ def get_current_system_status():
 
 
 def get_metric_time_series(*, metric_name, hours=24):
+    """
+    获取指定指标在指定时间范围内的历史数据点（时序数据）。
+
+    类比 SpringBoot: 相当于 Prometheus /api/v1/query_range 的数据层实现。
+
+    参数:
+        metric_name (str): 指标名称，如 "cpu_percent"。
+        hours (int, 可选): 向前查询的小时数，默认 24 小时。
+
+    返回:
+        dict: {
+            "metric_name": str,
+            "hours": int,
+            "data_points": [{value, unit, collected_at}, ...],
+        }
+    """
     since = now() - timedelta(hours=hours)
     qs = (
         SystemMetric.objects.filter(
@@ -109,6 +145,15 @@ def get_metric_time_series(*, metric_name, hours=24):
 
 
 def list_alert_rules(*, enabled_only=False):
+    """
+    获取告警规则列表。
+
+    参数:
+        enabled_only (bool, 可选): 是否仅返回启用的规则。
+
+    返回:
+        list[dict]: 序列化后的告警规则列表。
+    """
     qs = AlertRule.objects.all()
     if enabled_only:
         qs = qs.filter(enabled=True)
@@ -116,6 +161,15 @@ def list_alert_rules(*, enabled_only=False):
 
 
 def get_alert_rule(*, rule_id):
+    """
+    获取单条告警规则的详情。
+
+    参数:
+        rule_id (int): 告警规则 ID。
+
+    返回:
+        dict | None: 规则详情，不存在时返回 None。
+    """
     try:
         rule = AlertRule.objects.get(id=rule_id)
         return _serialize_rule(rule)
@@ -135,6 +189,25 @@ def create_alert_rule(
     description="",
     created_by=None,
 ):
+    """
+    创建一条新的告警规则。
+
+    类比 SpringBoot: 相当于 @Service 中的 save 方法。
+
+    参数:
+        name (str):               规则名称，必须唯一。
+        metric_name (str):        要监控的指标名称。
+        condition (str):          比较条件（gt / lt / gte / lte / eq）。
+        threshold (float):        告警阈值。
+        severity (str, 可选):     严重级别，默认 "warning"。
+        enabled (bool, 可选):     是否启用，默认 True。
+        notification_channels (list, 可选): 通知渠道列表。
+        description (str, 可选):  规则描述。
+        created_by (User, 可选):  创建者。
+
+    返回:
+        dict: 序列化后的新规则数据。
+    """
     rule = AlertRule.objects.create(
         name=name,
         metric_name=metric_name,
@@ -150,6 +223,21 @@ def create_alert_rule(
 
 
 def seed_default_alert_rules(*, created_by=None):
+    """
+    播种预定义的默认告警规则。
+
+    使用 get_or_create 确保幂等性 —— 已存在的规则不会被覆盖。
+
+    参数:
+        created_by (User, 可选): 创建者。
+
+    返回:
+        dict: {
+            "created": int,   新创建的规则数,
+            "skipped": int,   已跳过（已存在）的规则数,
+            "rules": list,    所有规则（含新建和已有）的序列化数据,
+        }
+    """
     created = 0
     skipped = 0
     seeded_rules = []
@@ -180,6 +268,16 @@ def seed_default_alert_rules(*, created_by=None):
 
 
 def update_alert_rule(*, rule, **kwargs):
+    """
+    部分更新告警规则 —— 仅更新提供的字段。
+
+    参数:
+        rule (AlertRule): 要更新的规则模型实例。
+        **kwargs: 要更新的字段键值对，仅允许白名单中的字段。
+
+    返回:
+        dict: 更新后的规则序列化数据。
+    """
     allowed_fields = {
         "name",
         "metric_name",
@@ -198,10 +296,26 @@ def update_alert_rule(*, rule, **kwargs):
 
 
 def delete_alert_rule(*, rule):
+    """
+    删除一条告警规则。
+
+    参数:
+        rule (AlertRule): 要删除的规则模型实例。
+    """
     rule.delete()
 
 
 def list_alert_events(*, status=None, limit=50):
+    """
+    获取告警事件列表，支持按状态过滤。
+
+    参数:
+        status (str, 可选): 过滤状态（firing / resolved / acknowledged）。
+        limit (int, 可选):  返回的最大事件数量，默认 50。
+
+    返回:
+        list[dict]: 序列化后的告警事件列表。
+    """
     qs = AlertEvent.objects.select_related("rule", "acknowledged_by")
     if status:
         qs = qs.filter(status=status)
@@ -210,6 +324,19 @@ def list_alert_events(*, status=None, limit=50):
 
 
 def acknowledge_event(*, event_id, user):
+    """
+    确认一条告警事件（firing -> acknowledged）。
+
+    参数:
+        event_id (int): 告警事件 ID。
+        user: 执行确认操作的用户。
+
+    返回:
+        dict: 确认后的告警事件序列化数据。
+
+    抛出:
+        ValueError: 事件状态不是 firing 时抛出。
+    """
     event = AlertEvent.objects.get(id=event_id)
     if event.status != AlertEvent.STATUS_FIRING:
         raise ValueError("只能确认状态为 firing 的告警事件。")
@@ -220,6 +347,15 @@ def acknowledge_event(*, event_id, user):
 
 
 def _serialize_rule(rule):
+    """
+    将 AlertRule 模型实例序列化为前端可用的字典。
+
+    参数:
+        rule (AlertRule): 告警规则实例。
+
+    返回:
+        dict: 序列化后的规则数据。
+    """
     return {
         "id": rule.id,
         "name": rule.name,
@@ -237,6 +373,15 @@ def _serialize_rule(rule):
 
 
 def _serialize_event(event):
+    """
+    将 AlertEvent 模型实例序列化为前端可用的字典。
+
+    参数:
+        event (AlertEvent): 告警事件实例。
+
+    返回:
+        dict: 序列化后的事件数据，包含关联规则的衍生字段。
+    """
     return {
         "id": event.id,
         "rule_id": event.rule_id,

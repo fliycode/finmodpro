@@ -1,9 +1,20 @@
+"""
+告警引擎服务 —— 评估告警规则并管理告警事件。
+类比 SpringBoot: 相当于 @Service 中的定时任务逻辑 + 事件处理器。
+
+核心功能:
+- evaluate_alert_rules: 拉取最新指标，逐一评估所有启用的告警规则，
+  自动创建/更新/解决告警事件。通常由 Celery 定时任务调用。
+- acknowledge_alert_event: 管理员手动确认一条告警事件。
+"""
+
 import logging
 from datetime import timezone as tz
 
 from django.utils.timezone import now
 
 logger = __import__("logging").getLogger(__name__)
+# 活跃告警状态集合：firing（触发中）和 acknowledged（已确认但未解决的）都算活跃
 ACTIVE_ALERT_STATUSES = (
     "firing",
     "acknowledged",
@@ -11,13 +22,32 @@ ACTIVE_ALERT_STATUSES = (
 
 
 def evaluate_alert_rules():
+    """
+    评估所有启用的告警规则，并根据最新指标值自动创建或解决告警事件。
+
+    类比 SpringBoot: 相当于 @Scheduled 定时方法，由 Celery Beat 定期触发。
+    流程:
+    1. 加载所有启用的告警规则
+    2. 批量查询每条规则对应的最新指标值
+    3. 对每条规则，比较最新值与阈值
+       - 如果违反条件 且 没有活跃事件: 创建新的 firing 事件
+       - 如果违反条件 且 已有活跃事件: 更新 triggered_value
+       - 如果未违反条件 且 有活跃事件: 将事件状态改为 resolved
+
+    返回:
+        dict: {
+            "evaluated": int,  评估的规则数量
+            "triggered": int,  新触发的告警数
+            "resolved": int,   自动解决的告警数
+        }
+    """
     from ops.models import AlertEvent, AlertRule, SystemMetric
 
     rules = list(AlertRule.objects.filter(enabled=True))
     if not rules:
         return {"evaluated": 0, "triggered": 0, "resolved": 0}
 
-    # Group rules by metric_name for efficient lookup
+    # 按指标名称分组，批量查询每类指标的最新值
     metric_names = {r.metric_name for r in rules}
     latest_metrics = {}
     for name in metric_names:
@@ -61,7 +91,7 @@ def evaluate_alert_rules():
                 existing_open_event.triggered_value = metric.value
                 existing_open_event.save(update_fields=["triggered_value"])
         else:
-            # Resolve any active events for this rule once the metric recovers.
+            # 指标恢复正常 —— 将所有活跃事件标记为 resolved
             open_events = AlertEvent.objects.filter(
                 rule=rule,
                 status__in=ACTIVE_ALERT_STATUSES,
@@ -80,6 +110,21 @@ def evaluate_alert_rules():
 
 
 def acknowledge_alert_event(*, event_id, user):
+    """
+    管理员确认一条告警事件（状态: firing -> acknowledged）。
+
+    类比 SpringBoot: 相当于 @Service 方法，执行状态变更。
+
+    参数:
+        event_id (int): 告警事件 ID。
+        user: 执行确认操作的用户实例。
+
+    返回:
+        dict: 序列化后的告警事件数据。
+
+    抛出:
+        ValueError: 当事件状态不是 firing 时抛出（只能确认触发中的事件）。
+    """
     from ops.models import AlertEvent
 
     event = AlertEvent.objects.get(id=event_id)
@@ -93,6 +138,17 @@ def acknowledge_alert_event(*, event_id, user):
 
 
 def _compare_value(*, value, condition, threshold):
+    """
+    根据条件比较指标值与阈值。
+
+    参数:
+        value (float):    实际指标值。
+        condition (str):  比较条件（gt / lt / gte / lte / eq）。
+        threshold (float): 告警阈值。
+
+    返回:
+        bool: 是否满足告警条件（即是否应该触发告警）。
+    """
     if condition == "gt":
         return value > threshold
     elif condition == "lt":
@@ -107,6 +163,15 @@ def _compare_value(*, value, condition, threshold):
 
 
 def _serialize_alert_event(event):
+    """
+    将 AlertEvent 模型实例序列化为前端可用的字典格式。
+
+    参数:
+        event (AlertEvent): 告警事件模型实例。
+
+    返回:
+        dict: 序列化后的告警事件数据。
+    """
     return {
         "id": event.id,
         "rule_id": event.rule_id,

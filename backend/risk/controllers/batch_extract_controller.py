@@ -1,3 +1,9 @@
+"""
+批量风险抽取控制器 —— 处理多文档的批量风险提取请求。
+类比 SpringBoot: 相当于 @RestController 中的 @PostMapping 方法，
+提交批量抽取任务到 Celery 异步队列，支持在线（inline）执行和异步执行两种模式。
+"""
+
 from django.conf import settings
 
 from celery.result import AsyncResult
@@ -10,10 +16,29 @@ from risk.serializers import RiskBatchExtractionRequestSerializer
 
 
 class RiskDocumentBatchExtractView(APIView):
+    """
+    批量文档风险抽取视图 —— POST /api/risk/documents/extract-batch
+
+    接收一组文档 ID，为每个文档创建风险提取任务。
+
+    类比 SpringBoot: 相当于 @PostMapping("/document/extract-batch")。
+    """
     authentication_classes = []
     permission_classes = []
 
     def post(self, request):
+        """
+        发起批量文档风险抽取。
+
+        参数:
+            request: Django HttpRequest，body 包含:
+                     - document_ids (list[int], 必填): 文档 ID 列表。
+
+        返回:
+            JsonResponse: 包含 task_id 和状态信息。
+                         如果是 inline 模式（执行器运行在内存中），直接返回结果。
+                         如果是异步模式，返回 202 + task_id。
+        """
         user = get_authenticated_user(request)
         if user is None:
             return error_response(code=401, message="未认证。", status_code=401)
@@ -69,10 +94,24 @@ class RiskDocumentBatchExtractView(APIView):
 
 
 class RiskDocumentBatchExtractRetryView(APIView):
+    """
+    批量文档风险抽取重试视图 —— POST /api/risk/documents/extract-batch/retry
+
+    类比 SpringBoot: 相当于 @PostMapping("/extract-batch/retry")。
+    """
     authentication_classes = []
     permission_classes = []
 
     def post(self, request):
+        """
+        重新发起批量文档风险抽取。
+
+        参数:
+            request: Django HttpRequest，body 包含 document_ids 列表。
+
+        返回:
+            JsonResponse: 包含 task_id 和状态信息的成功响应。
+        """
         user = get_authenticated_user(request)
         if user is None:
             return error_response(code=401, message="未认证。", status_code=401)

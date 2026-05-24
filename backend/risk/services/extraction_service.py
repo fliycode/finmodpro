@@ -1,3 +1,17 @@
+"""
+风险提取服务 —— 从文档中提取风险事件的完整业务流程。
+类比 SpringBoot: 相当于 @Service 中的核心业务编排层，
+协调切块筛选、LLM 抽取-验证循环、判读增强、去重去重和持久化。
+
+主要流程:
+1. 筛选风险相关切块 (chunk_filter_service)
+2. 限制内容长度 (limit_extraction_chunks)
+3. 多轮提取-验证循环 (verification_service)
+4. 判读增强 (adjudication_service)
+5. 去重过滤 (防重复检测)
+6. 持久化到数据库
+"""
+
 from django.conf import settings
 from django.db import models, transaction
 
@@ -14,11 +28,30 @@ from risk.services.verification_service import run_extraction_with_verification
 
 
 def _text_bigrams(text):
+    """
+    将文本拆分为 bigram（双字符组）集合，用于相似度计算。
+
+    参数:
+        text (str): 输入文本。
+
+    返回:
+        set: bigram 集合。
+    """
     text = str(text or "").strip()
     return set(text[i:i + 2] for i in range(len(text) - 1)) if len(text) >= 2 else {text}
 
 
 def _text_similarity(text_a, text_b):
+    """
+    使用 Jaccard 相似度（基于 bigram）计算两段文本的相似度。
+
+    参数:
+        text_a (str): 文本 A。
+        text_b (str): 文本 B。
+
+    返回:
+        float: [0.0, 1.0] 的相似度分数。
+    """
     if not text_a or not text_b:
         return 0.0
     bg_a = _text_bigrams(text_a)
@@ -31,6 +64,16 @@ def _text_similarity(text_a, text_b):
 
 
 def _filter_against_existing(*, document, extracted_events):
+    """
+    将新提取的事件与数据库中已有事件进行相似度比较，过滤掉重复事件。
+
+    参数:
+        document (Document): 文档实例。
+        extracted_events (list[dict]): 新提取的风险事件列表。
+
+    返回:
+        list[dict]: 去重后的事件列表。
+    """
     existing_events = list(
         RiskEvent.objects.filter(document=document).values(
             "company_name", "risk_type", "summary", "evidence_text"
@@ -55,6 +98,8 @@ def _filter_against_existing(*, document, extracted_events):
             new_events.append(event)
     return new_events
 
+
+# 风险信号关键词列表，用于快速检测文档是否含有潜在风险内容
 RISK_SIGNAL_KEYWORDS = (
     "风险",
     "金融",
@@ -88,16 +133,44 @@ RISK_SIGNAL_KEYWORDS = (
 
 
 def list_document_chunks(*, document):
+    """
+    获取文档的所有 chunk，按 chunk_index 排序。
+
+    参数:
+        document (Document): 文档实例。
+
+    返回:
+        list[DocumentChunk]: chunk 列表。
+    """
     return list(DocumentChunk.objects.filter(document=document).order_by("chunk_index", "id"))
 
 
 def _build_chunk_context(chunks):
+    """
+    将 chunk 列表拼接为 LLM 可读的上下文字符串。
+
+    参数:
+        chunks (list[DocumentChunk]): chunk 列表。
+
+    返回:
+        str: 形如 "[chunk_id=x][chunk_index=y] content..." 的拼接文本。
+    """
     return "\n\n".join(
         f"[chunk_id={chunk.id}][chunk_index={chunk.chunk_index}] {chunk.content}" for chunk in chunks
     )
 
 
 def _resolve_chunk(*, raw_chunk_id, chunk_by_id):
+    """
+    根据 LLM 输出的 chunk_id 解析出对应的 DocumentChunk 实例。
+
+    参数:
+        raw_chunk_id: LLM 输出的原始 chunk_id。
+        chunk_by_id (dict): {chunk_id: DocumentChunk} 的映射。
+
+    返回:
+        DocumentChunk | None: 对应的 chunk 实例，找不到时返回 None。
+    """
     if raw_chunk_id is None:
         return None
     try:
@@ -107,6 +180,17 @@ def _resolve_chunk(*, raw_chunk_id, chunk_by_id):
 
 
 def limit_extraction_chunks(*, chunks, max_chunks=None, max_chars=None):
+    """
+    限制传入 LLM 的 chunk 数量和总字符数，避免超出 token 限制。
+
+    参数:
+        chunks (list[DocumentChunk]): 待限制的 chunk 列表。
+        max_chunks (int, 可选): 最大 chunk 数量。
+        max_chars (int, 可选): 最大字符数。
+
+    返回:
+        list[DocumentChunk]: 截断后的 chunk 列表，至少保留第一个。
+    """
     if not chunks:
         return []
 
@@ -139,6 +223,16 @@ def limit_extraction_chunks(*, chunks, max_chunks=None, max_chars=None):
 
 
 def detect_risk_signals(*, document, chunks):
+    """
+    快速检测文档是否包含风险信号关键词。
+
+    参数:
+        document (Document): 文档实例。
+        chunks (list[DocumentChunk]): 前 24 个 chunk。
+
+    返回:
+        dict: {"has_signal": bool, "matched_keywords": list[str]}。
+    """
     text_parts = [document.title or ""]
     text_parts.extend(chunk.content or "" for chunk in chunks[:24])
     corpus = "\n".join(text_parts).lower()
@@ -151,6 +245,20 @@ def detect_risk_signals(*, document, chunks):
 
 
 def extract_risk_events_for_document(*, document, stage_callback=None):
+    """
+    从单个文档中提取风险事件的完整流程。
+
+    类比 SpringBoot: 相当于 @Service 中的核心业务流程方法。
+    流程: chunk 列表 -> 筛选 -> 限制长度 -> 抽取+验证 -> 判读 -> 去重 -> 持久化。
+
+    参数:
+        document (Document): 要分析的文档实例。
+        stage_callback (callable, 可选): 阶段进度回调，签名:
+            callback(step=str, progress=int, message=str)
+
+    返回:
+        list[RiskEvent]: 新创建的风险事件实例列表。
+    """
     chunks = list_document_chunks(document=document)
     if not chunks:
         return []
@@ -251,6 +359,20 @@ def extract_risk_events_for_document(*, document, stage_callback=None):
 
 
 def batch_extract_risk_events_for_documents(*, document_ids):
+    """
+    批量从多个文档中提取风险事件。
+
+    参数:
+        document_ids (list[int]): 文档 ID 列表。
+
+    返回:
+        dict: {
+            "total_documents": int,
+            "processed_documents": int,
+            "total_created_count": int,
+            "results": [{document_id, status, message, created_count, risk_events}, ...],
+        }
+    """
     normalized_document_ids = list(dict.fromkeys(document_ids))
     documents_by_id = {
         document.id: document for document in Document.objects.filter(id__in=normalized_document_ids)

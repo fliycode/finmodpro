@@ -1,3 +1,9 @@
+"""
+单文档风险抽取控制器 —— 处理单文档风险提取、重试和状态查询。
+类比 SpringBoot: 相当于 @RestController 中的 @PostMapping / @GetMapping 方法，
+管理风险提取任务的完整生命周期。
+"""
+
 from django.conf import settings
 from django.core.exceptions import ValidationError
 
@@ -19,10 +25,32 @@ from systemcheck.services.audit_service import record_audit_event
 
 
 class RiskDocumentExtractView(APIView):
+    """
+    单文档风险抽取视图 —— POST /api/risk/documents/{document_id}/extract
+
+    为指定文档创建风险提取任务。
+
+    类比 SpringBoot: 相当于 @PostMapping("/documents/{documentId}/extract")。
+    """
     authentication_classes = []
     permission_classes = []
 
     def post(self, request, document_id):
+        """
+        发起单文档风险抽取。
+
+        参数:
+            request: Django HttpRequest。
+            document_id (int): 路径参数，文档 ID。
+
+        返回:
+            JsonResponse:
+            - 201: inline 模式且成功（有提取结果）
+            - 200: inline 模式且无提取结果（no_chunks / no_signals）
+            - 202: 异步任务已提交
+            - 429: 队列繁忙
+            - 404/500: 错误
+        """
         user = get_authenticated_user(request)
         if user is None:
             return error_response(code=401, message="未认证。", status_code=401)
@@ -113,10 +141,25 @@ class RiskDocumentExtractView(APIView):
 
 
 class RiskDocumentExtractRetryView(APIView):
+    """
+    单文档风险抽取重试视图 —— POST /api/risk/documents/{document_id}/extract/retry
+
+    类比 SpringBoot: 相当于 @PostMapping("/{documentId}/extract/retry")。
+    """
     authentication_classes = []
     permission_classes = []
 
     def post(self, request, document_id):
+        """
+        重新发起单文档风险抽取。
+
+        参数:
+            request: Django HttpRequest。
+            document_id (int): 路径参数，文档 ID。
+
+        返回:
+            JsonResponse: 任务状态和数据。
+        """
         user = get_authenticated_user(request)
         if user is None:
             return error_response(code=401, message="未认证。", status_code=401)
@@ -183,10 +226,25 @@ class RiskDocumentExtractRetryView(APIView):
 
 
 class RiskExtractStatusView(APIView):
+    """
+    风险抽取任务状态查询视图 —— GET /api/risk/documents/extract/status/{task_id}
+
+    类比 SpringBoot: 相当于 @GetMapping("/extract/status/{taskId}")。
+    """
     authentication_classes = []
     permission_classes = []
 
     def get(self, request, task_id):
+        """
+        查询风险抽取任务的状态和进度。
+
+        参数:
+            request: Django HttpRequest。
+            task_id (str): 路径参数，任务 UUID。
+
+        返回:
+            JsonResponse: 任务状态、进度、消息和结果数据。
+        """
         user = get_authenticated_user(request)
         if user is None:
             return error_response(code=401, message="未认证。", status_code=401)

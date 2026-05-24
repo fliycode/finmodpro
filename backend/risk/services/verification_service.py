@@ -1,3 +1,17 @@
+"""
+风险验证服务 —— 实现"提取-验证"循环管道。
+类比 SpringBoot: 相当于 @Service 中的迭代优化 Pipeline，
+每一轮让 LLM 先提取风险事件，再由验证 LLM 审核是否完整，
+如果不完整则在下一轮提供补充指导，直到通过验证或达到最大轮数。
+
+核心流程:
+1. 提取 (Extraction): LLM 从 chunk 内容中抽取风险事件
+2. 判读 (Adjudication): 对提取结果进行增强（materiality_score 等）
+3. 验证 (Verification): 另一 LLM 评估提取结果是否完整
+4. 如果不完整: 下一轮提供补充指导继续提取
+5. 最后: 对多轮结果进行去重合并
+"""
+
 import json
 import logging
 from datetime import datetime
@@ -17,6 +31,7 @@ logger = logging.getLogger(__name__)
 
 
 class _SafeEncoder(json.JSONEncoder):
+    """安全的 JSON 编码器，处理 Decimal 和 datetime 类型。"""
     def default(self, obj):
         if isinstance(obj, Decimal):
             return float(obj)
@@ -24,11 +39,24 @@ class _SafeEncoder(json.JSONEncoder):
             return obj.isoformat()
         return super().default(obj)
 
+
+# LLM 系统消息模板
 SYSTEM_MESSAGE = "你是金融风险抽取助手。严格输出 JSON，不要输出 markdown 或额外解释。"
 VERIFY_SYSTEM_MESSAGE = "你是金融风险抽取的质量审核专家。严格输出 JSON，不要输出 markdown 或额外解释。"
 
 
 def _call_extraction_llm(*, document, chunk_context, additional_guidance=None):
+    """
+    调用 LLM 执行风险事件抽取。
+
+    参数:
+        document (Document): 文档实例。
+        chunk_context (str): 拼接好的 chunk 上下文字符串。
+        additional_guidance (str, 可选): 上一轮验证提供的补充指导。
+
+    返回:
+        tuple: (events: list[dict], raw_content: str) — 提取的事件列表和 LLM 原始输出。
+    """
     provider = get_chat_provider()
     prompt = render_prompt(
         "risk/extract.txt",
@@ -57,6 +85,17 @@ def _call_extraction_llm(*, document, chunk_context, additional_guidance=None):
 
 
 def _call_verification_llm(*, document, chunk_context, extracted_events):
+    """
+    调用 LLM 验证已提取的风险事件是否完整。
+
+    参数:
+        document (Document): 文档实例。
+        chunk_context (str): 拼接好的 chunk 上下文字符串。
+        extracted_events (list[dict]): 已提取的事件列表。
+
+    返回:
+        tuple: (verification: dict, raw_content: str) — 验证结果和 LLM 原始输出。
+    """
     provider = get_chat_provider()
     prompt = render_prompt(
         "risk/verify.txt",
@@ -83,6 +122,18 @@ def _call_verification_llm(*, document, chunk_context, extracted_events):
 
 
 def _parse_extraction_output(raw_content):
+    """
+    解析 LLM 提取输出为事件列表。
+
+    参数:
+        raw_content (str): LLM 原始输出。
+
+    返回:
+        list[dict]: 校验后的事件列表。
+
+    抛出:
+        UpstreamServiceError: 当输出格式非法时。
+    """
     try:
         return parse_risk_extraction_payload(raw_content)
     except Exception as exc:
@@ -94,6 +145,20 @@ def _parse_extraction_output(raw_content):
 
 
 def _parse_verification_output(raw_content):
+    """
+    解析 LLM 验证输出为结构化字典。
+
+    参数:
+        raw_content (str): LLM 原始输出（可能包含 markdown 代码块）。
+
+    返回:
+        dict: {
+            "is_complete": bool,
+            "missing_aspects": [{field, chunk_id, hint}, ...],
+            "suggestions": [str, ...],
+            "issues_found": [str, ...],
+        }
+    """
     normalized = str(raw_content or "").strip()
     if normalized.startswith("```"):
         lines = normalized.splitlines()
@@ -134,6 +199,16 @@ def _parse_verification_output(raw_content):
 
 
 def _text_similarity(text_a, text_b):
+    """
+    使用 bigram Jaccard 相似度计算两段文本的相似度。
+
+    参数:
+        text_a (str): 文本 A。
+        text_b (str): 文本 B。
+
+    返回:
+        float: [0.0, 1.0] 的相似度分数。
+    """
     if not text_a or not text_b:
         return 0.0
 
@@ -151,6 +226,15 @@ def _text_similarity(text_a, text_b):
 
 
 def _merge_similar_events(deduplicated_events):
+    """
+    合并相似的重复事件（同公司+同风险类型下，高相似度的事件合并为一条）。
+
+    参数:
+        deduplicated_events (list[dict]): 已去重的事件列表。
+
+    返回:
+        list[dict]: 合并后的事件列表。
+    """
     threshold = getattr(settings, "RISK_EXTRACTION_MERGE_SIMILARITY_THRESHOLD", 0.35)
 
     groups = {}
@@ -196,7 +280,6 @@ def _merge_similar_events(deduplicated_events):
 
                 if should_merge:
                     used.add(j)
-                    # Combine evidence before potential swap
                     evidence_b = event_b.get("evidence_text", "")
                     evidence_best = best_match.get("evidence_text", "")
                     if evidence_b and evidence_b not in evidence_best:
@@ -214,6 +297,15 @@ def _merge_similar_events(deduplicated_events):
 
 
 def _deduplicate_events(events_list):
+    """
+    对事件列表进行去重（精确去重 + 相似合并）。
+
+    参数:
+        events_list (list[dict]): 待去重的事件列表。
+
+    返回:
+        list[dict]: 去重后的事件列表。
+    """
     seen = set()
     exact_deduplicated = []
     for event in events_list:
@@ -231,6 +323,15 @@ def _deduplicate_events(events_list):
 
 
 def _adjudicate_events(events):
+    """
+    对每条事件进行判读增强。
+
+    参数:
+        events (list[dict]): 原始事件列表。
+
+    返回:
+        list[dict]: 增强后的事件列表。
+    """
     return [
         {
             **event,
@@ -241,6 +342,32 @@ def _adjudicate_events(events):
 
 
 def run_extraction_with_verification(*, document, chunks, max_rounds=None, on_stage_update=None):
+    """
+    运行"提取-验证"循环管道，从文档 chunk 中提取风险事件。
+
+    类比 SpringBoot: 相当于 @Service 中的迭代处理 Pipeline。
+
+    流程:
+    for round in 1..max_rounds:
+        1. 提取 LLM 抽取事件
+        2. 判读增强
+        3. 如果达到最大轮数: 退出
+        4. 验证 LLM 审核完整性
+        5. 如果验证通过: 退出
+        否则: 将缺失项作为下一轮的补充指导
+    最终: 去重合并所有事件
+
+    参数:
+        document (Document): 文档实例。
+        chunks (list[DocumentChunk]): 筛选后的风险相关 chunk 列表。
+        max_rounds (int, 可选): 最大迭代轮数，默认从配置读取。
+        on_stage_update (callable, 可选): 阶段进度回调。
+
+    返回:
+        tuple: (events: list[dict], pipeline_metadata: dict)
+               events 是去重合并后的事件列表，
+               pipeline_metadata 包含 rounds_completed, verification_passed, total_llm_calls 等。
+    """
     if max_rounds is None:
         max_rounds = getattr(settings, "RISK_EXTRACTION_MAX_ROUNDS", 2)
 

@@ -1,3 +1,10 @@
+"""
+管理仪表盘数据聚合服务 —— 从各业务表中聚合系统全局统计指标。
+类比 SpringBoot: 相当于 @Service 中的仪表盘数据聚合层，
+类似于 Spring Admin Server 或 Grafana 的数据源查询，
+汇总知识库、文档、风险、模型调用、Token 消耗、检索命中率和审计操作等指标。
+"""
+
 from datetime import timedelta
 
 from django.db.models import Case, Count, F, IntegerField, Q, Sum, When
@@ -12,17 +19,42 @@ from risk.models import RiskEvent
 
 
 def _build_knowledgebase_count():
-    # The current backend still exposes a single implicit knowledge base.
+    """
+    知识库数量：当前后端只有一个隐式知识库。
+
+    返回:
+        int: 1（如果有文档存在）或 0。
+    """
     return 1 if Document.objects.exists() else 0
 
 
 def _format_percentage(numerator, denominator):
+    """
+    将分子分母格式化为百分比字符串。
+
+    参数:
+        numerator (int): 分子。
+        denominator (int): 分母。
+
+    返回:
+        str: 形如 "75.0%" 的百分比字符串。分母为 0 时返回 "0.0%"。
+    """
     if denominator <= 0:
         return "0.0%"
     return f"{(numerator / denominator) * 100:.1f}%"
 
 
 def _build_daily_series(*, days, values_by_day):
+    """
+    构建指定天数的时序数据数组。
+
+    参数:
+        days (int): 天数（如 7）。
+        values_by_day (dict): {date: value} 的日值映射。
+
+    返回:
+        list[dict]: [{date: "YYYY-MM-DD", value: int}, ...] 格式的时序数组。
+    """
     series = []
     today = timezone.localdate()
     for offset in range(days - 1, -1, -1):
@@ -37,6 +69,21 @@ def _build_daily_series(*, days, values_by_day):
 
 
 def _build_window_summary(*, queryset, date_field, days=7):
+    """
+    构建滑动窗口统计摘要（当前周期 vs 上一周期，含按日时序）。
+
+    参数:
+        queryset (QuerySet): 要统计的查询集。
+        date_field (str): 日期字段名（如 "created_at"）。
+        days (int, 可选): 窗口天数，默认 7。
+
+    返回:
+        dict: {
+            "current_count": int,   当前周期记录数,
+            "previous_count": int,  上一周期记录数（用于环比）,
+            "series": [{date, value}, ...],  按日时序数组,
+        }
+    """
     today = timezone.localdate()
     current_start_day = today - timedelta(days=days - 1)
     previous_start_day = current_start_day - timedelta(days=days)
@@ -66,6 +113,22 @@ def _build_window_summary(*, queryset, date_field, days=7):
 
 
 def _build_value_window_summary(*, queryset, date_field, value_expression, days=7):
+    """
+    构建滑动窗口数值求和统计（用于 Token 消耗等场景）。
+
+    参数:
+        queryset (QuerySet): 要统计的查询集。
+        date_field (str): 日期字段名。
+        value_expression: Django 聚合表达式（如 F("total_tokens")）。
+        days (int, 可选): 窗口天数，默认 7。
+
+    返回:
+        dict: {
+            "current_total": int,   当前周期总和,
+            "previous_total": int,  上一周期总和,
+            "series": [{date, value}, ...],  按日时序数组,
+        }
+    """
     today = timezone.localdate()
     current_start_day = today - timedelta(days=days - 1)
     previous_start_day = current_start_day - timedelta(days=days)
@@ -98,6 +161,15 @@ def _build_value_window_summary(*, queryset, date_field, value_expression, days=
 
 
 def _get_recent_activity(limit=8):
+    """
+    获取最近系统活动时间线（入库、风险、检索、评测）。
+
+    参数:
+        limit (int): 返回的最大条目数，默认 8。
+
+    返回:
+        list[dict]: 按时间戳降序排列的活动条目列表。
+    """
     items = []
 
     for task in IngestionTask.objects.select_related("document").order_by("-created_at", "-id")[:4]:
@@ -132,7 +204,7 @@ def _get_recent_activity(limit=8):
                 "tone": tone,
                 "status": "hit" if log.result_count > 0 else "miss",
                 "timestamp": log.created_at.isoformat(),
-                "message": f"检索问题“{log.query}”返回 {log.result_count} 条结果。",
+                "message": f"检索问题"{log.query}"返回 {log.result_count} 条结果。",
             }
         )
 
@@ -153,6 +225,15 @@ def _get_recent_activity(limit=8):
 
 
 def _get_recent_failures(limit=4):
+    """
+    获取最近失败的入库任务列表。
+
+    参数:
+        limit (int): 返回的最大条目数，默认 4。
+
+    返回:
+        list[dict]: 失败任务的概要信息列表。
+    """
     failures = []
     for task in IngestionTask.objects.select_related("document").filter(status=IngestionTask.STATUS_FAILED).order_by("-updated_at", "-id")[:limit]:
         failures.append(
@@ -171,6 +252,23 @@ def _get_recent_failures(limit=4):
 
 
 def get_dashboard_stats():
+    """
+    聚合系统全局仪表盘统计数据。
+
+    类比 SpringBoot: 相当于 Actuator + Micrometer 的多指标聚合端点，
+    一次调用返回所有关键的仪表盘指标。
+
+    返回的统计项:
+    - 知识库与文档: knowledgebase_count, document_count, document_status_distribution
+    - 风险事件: risk_event_count, pending/high_risk_event_count, risk_level_distribution
+    - 模型: active_model_count, model_invocation/token 统计（7 日窗口）
+    - 聊天与检索: chat_request_count_24h, retrieval_hit_rate_7d
+    - 审计: audit_operation_count_7d 及概览
+    - 活动时间线: recent_activity, recent_failures
+
+    返回:
+        dict: 包含所有仪表盘指标的完整字典。
+    """
     today = timezone.localdate()
     start_of_today = timezone.now() - timedelta(hours=24)
     start_day = today - timedelta(days=6)

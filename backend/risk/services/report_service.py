@@ -1,3 +1,10 @@
+"""
+风险报告服务 —— 生成和导出风险分析报告。
+类比 SpringBoot: 相当于 @Service 中的报告生成引擎，
+基于 RiskEvent 数据聚合生成三种维度的报告（公司/文档/时间区间），
+支持 Markdown 和 JSON 两种导出格式。
+"""
+
 import json
 
 from django.db.models import Count
@@ -7,6 +14,15 @@ from risk.models import RiskEvent, RiskReport
 
 
 def _build_risk_type_counts(*, event_ids):
+    """
+    统计指定事件 ID 列表中各风险类型的数量。
+
+    参数:
+        event_ids (list[int]): 风险事件 ID 列表。
+
+    返回:
+        dict: {risk_type: count, ...}
+    """
     return {
         row["risk_type"]: row["count"]
         for row in RiskEvent.objects.filter(id__in=event_ids)
@@ -17,6 +33,15 @@ def _build_risk_type_counts(*, event_ids):
 
 
 def _build_risk_level_counts(*, event_ids):
+    """
+    统计指定事件 ID 列表中各风险级别的数量。
+
+    参数:
+        event_ids (list[int]): 风险事件 ID 列表。
+
+    返回:
+        dict: {risk_level: count, ...}
+    """
     return {
         row["risk_level"]: row["count"]
         for row in RiskEvent.objects.filter(id__in=event_ids)
@@ -27,6 +52,15 @@ def _build_risk_level_counts(*, event_ids):
 
 
 def _collect_source_metadata(*, events):
+    """
+    收集报告源数据的元信息。
+
+    参数:
+        events (list[RiskEvent]): 报告包含的风险事件列表。
+
+    返回:
+        dict: 包含 event_ids, document_ids, 分布统计, citation_count 等元信息。
+    """
     event_ids = [event.id for event in events]
     citations = []
     taxonomy_counts = {}
@@ -55,12 +89,14 @@ def _collect_source_metadata(*, events):
 
 
 def _build_company_report_title(*, company_name, period_start=None, period_end=None):
+    """构建公司报告的标题。"""
     if period_start and period_end:
         return f"{company_name} 风险报告（{period_start} 至 {period_end}）"
     return f"{company_name} 风险报告"
 
 
 def _build_company_report_summary(*, company_name, event_count, risk_type_counts):
+    """构建公司报告的摘要。"""
     ordered_types = sorted(risk_type_counts.items(), key=lambda item: (-item[1], item[0]))
     top_risk_types = "、".join(f"{risk_type}({count})" for risk_type, count in ordered_types[:3])
     return (
@@ -70,10 +106,12 @@ def _build_company_report_summary(*, company_name, event_count, risk_type_counts
 
 
 def _get_event_meta(event):
+    """获取事件的元数据字典。"""
     return event.metadata or {}
 
 
 def _build_watchlist(events):
+    """从所有事件中提取监控清单（去重）。"""
     seen = []
     for event in events:
         for item in _get_event_meta(event).get("watchpoints") or []:
@@ -83,6 +121,15 @@ def _build_watchlist(events):
 
 
 def _render_event_brief(event):
+    """
+    将单条风险事件渲染为报告中的简要条目（Markdown 格式）。
+
+    参数:
+        event (RiskEvent): 风险事件实例。
+
+    返回:
+        list[str]: Markdown 格式的逐行文本。
+    """
     meta = _get_event_meta(event)
     watchpoints = "；".join(meta.get("watchpoints") or [])
     why_it_matters = meta.get("why_it_matters") or event.summary
@@ -98,6 +145,7 @@ def _render_event_brief(event):
 
 
 def _build_company_report_content(*, company_name, title, events, risk_type_counts, risk_level_counts):
+    """构建公司报告的正文内容（Markdown）。"""
     watchlist = _build_watchlist(events)
     lines = [
         title,
@@ -119,10 +167,12 @@ def _build_company_report_content(*, company_name, title, events, risk_type_coun
 
 
 def _build_time_range_report_title(*, period_start, period_end):
+    """构建时间区间报告的标题。"""
     return f"时间区间风险报告（{period_start} 至 {period_end}）"
 
 
 def _build_document_report_title(*, document):
+    """构建文档报告的标题。"""
     title = document.title or document.filename or f"文档 {document.id}"
     if document.source_date:
         return f"{title} 风险报告（{document.source_date}）"
@@ -130,6 +180,7 @@ def _build_document_report_title(*, document):
 
 
 def _build_document_report_summary(*, document, event_count, risk_type_counts):
+    """构建文档报告的摘要。"""
     ordered_types = sorted(risk_type_counts.items(), key=lambda item: (-item[1], item[0]))
     top_risk_types = "、".join(f"{risk_type}({count})" for risk_type, count in ordered_types[:3])
     return (
@@ -140,6 +191,7 @@ def _build_document_report_summary(*, document, event_count, risk_type_counts):
 
 
 def _build_document_report_content(*, document, title, events, risk_type_counts, risk_level_counts):
+    """构建文档报告的正文内容（Markdown）。"""
     watchlist = _build_watchlist(events)
     lines = [
         title,
@@ -163,6 +215,7 @@ def _build_document_report_content(*, document, title, events, risk_type_counts,
 
 
 def _build_time_range_report_summary(*, period_start, period_end, event_count, risk_type_counts):
+    """构建时间区间报告的摘要。"""
     ordered_types = sorted(risk_type_counts.items(), key=lambda item: (-item[1], item[0]))
     top_risk_types = "、".join(f"{risk_type}({count})" for risk_type, count in ordered_types[:3])
     return (
@@ -172,6 +225,7 @@ def _build_time_range_report_summary(*, period_start, period_end, event_count, r
 
 
 def _build_time_range_report_content(*, title, period_start, period_end, events, risk_type_counts, risk_level_counts):
+    """构建时间区间报告的正文内容（Markdown）。"""
     watchlist = _build_watchlist(events)
     lines = [
         title,
@@ -193,6 +247,20 @@ def _build_time_range_report_content(*, title, period_start, period_end, events,
 
 
 def generate_company_risk_report(*, company_name, period_start=None, period_end=None):
+    """
+    生成指定公司的风险报告。
+
+    参数:
+        company_name (str): 公司名称。
+        period_start (date, 可选): 时间范围起点。
+        period_end (date, 可选): 时间范围终点。
+
+    返回:
+        RiskReport: 新生成的报告实例。
+
+    抛出:
+        RiskEvent.DoesNotExist: 当没有符合条件的已审核事件时。
+    """
     events = RiskEvent.objects.filter(
         company_name=company_name,
         review_status=RiskEvent.STATUS_APPROVED,
@@ -207,24 +275,9 @@ def generate_company_risk_report(*, company_name, period_start=None, period_end=
         raise RiskEvent.DoesNotExist
 
     source_metadata = _collect_source_metadata(events=events)
-
-    title = _build_company_report_title(
-        company_name=company_name,
-        period_start=period_start,
-        period_end=period_end,
-    )
-    summary = _build_company_report_summary(
-        company_name=company_name,
-        event_count=len(events),
-        risk_type_counts=source_metadata["risk_type_counts"],
-    )
-    content = _build_company_report_content(
-        company_name=company_name,
-        title=title,
-        events=events,
-        risk_type_counts=source_metadata["risk_type_counts"],
-        risk_level_counts=source_metadata["risk_level_counts"],
-    )
+    title = _build_company_report_title(company_name=company_name, period_start=period_start, period_end=period_end)
+    summary = _build_company_report_summary(company_name=company_name, event_count=len(events), risk_type_counts=source_metadata["risk_type_counts"])
+    content = _build_company_report_content(company_name=company_name, title=title, events=events, risk_type_counts=source_metadata["risk_type_counts"], risk_level_counts=source_metadata["risk_level_counts"])
 
     report = RiskReport.objects.create(
         scope_type=RiskReport.SCOPE_COMPANY,
@@ -240,6 +293,19 @@ def generate_company_risk_report(*, company_name, period_start=None, period_end=
 
 
 def generate_time_range_risk_report(*, period_start, period_end):
+    """
+    生成指定时间区间的风险报告。
+
+    参数:
+        period_start (date): 起始日期。
+        period_end (date): 结束日期。
+
+    返回:
+        RiskReport: 新生成的报告实例。
+
+    抛出:
+        RiskEvent.DoesNotExist: 当没有符合条件的已审核事件时。
+    """
     events = list(
         RiskEvent.objects.filter(
             review_status=RiskEvent.STATUS_APPROVED,
@@ -254,20 +320,8 @@ def generate_time_range_risk_report(*, period_start, period_end):
 
     source_metadata = _collect_source_metadata(events=events)
     title = _build_time_range_report_title(period_start=period_start, period_end=period_end)
-    summary = _build_time_range_report_summary(
-        period_start=period_start,
-        period_end=period_end,
-        event_count=len(events),
-        risk_type_counts=source_metadata["risk_type_counts"],
-    )
-    content = _build_time_range_report_content(
-        title=title,
-        period_start=period_start,
-        period_end=period_end,
-        events=events,
-        risk_type_counts=source_metadata["risk_type_counts"],
-        risk_level_counts=source_metadata["risk_level_counts"],
-    )
+    summary = _build_time_range_report_summary(period_start=period_start, period_end=period_end, event_count=len(events), risk_type_counts=source_metadata["risk_type_counts"])
+    content = _build_time_range_report_content(title=title, period_start=period_start, period_end=period_end, events=events, risk_type_counts=source_metadata["risk_type_counts"], risk_level_counts=source_metadata["risk_level_counts"])
 
     report = RiskReport.objects.create(
         scope_type=RiskReport.SCOPE_TIME_RANGE,
@@ -282,6 +336,19 @@ def generate_time_range_risk_report(*, period_start, period_end):
 
 
 def generate_document_risk_report(*, document):
+    """
+    生成指定文档的风险报告。
+
+    参数:
+        document (Document): 文档实例。
+
+    返回:
+        RiskReport: 新生成的报告实例。
+
+    抛出:
+        TypeError: 当 document 不是 Document 实例时。
+        RiskEvent.DoesNotExist: 当文档没有风险事件时。
+    """
     if not isinstance(document, Document):
         raise TypeError("document 必须是 Document 实例。")
 
@@ -301,18 +368,8 @@ def generate_document_risk_report(*, document):
     )
 
     title = _build_document_report_title(document=document)
-    summary = _build_document_report_summary(
-        document=document,
-        event_count=len(events),
-        risk_type_counts=source_metadata["risk_type_counts"],
-    )
-    content = _build_document_report_content(
-        document=document,
-        title=title,
-        events=events,
-        risk_type_counts=source_metadata["risk_type_counts"],
-        risk_level_counts=source_metadata["risk_level_counts"],
-    )
+    summary = _build_document_report_summary(document=document, event_count=len(events), risk_type_counts=source_metadata["risk_type_counts"])
+    content = _build_document_report_content(document=document, title=title, events=events, risk_type_counts=source_metadata["risk_type_counts"], risk_level_counts=source_metadata["risk_level_counts"])
 
     report = RiskReport.objects.create(
         scope_type=RiskReport.SCOPE_DOCUMENT,
@@ -325,6 +382,19 @@ def generate_document_risk_report(*, document):
 
 
 def build_risk_report_export(*, report, export_format="markdown"):
+    """
+    导出风险报告为指定格式的文件内容。
+
+    参数:
+        report (RiskReport): 要导出的报告实例。
+        export_format (str): 导出格式，支持 "markdown" 或 "json"。
+
+    返回:
+        dict: {"filename": str, "content_type": str, "content": str}
+
+    抛出:
+        ValueError: 当格式不支持时。
+    """
     if export_format == "markdown":
         lines = [
             f"# {report.title}",
