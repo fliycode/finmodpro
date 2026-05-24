@@ -1,3 +1,8 @@
+"""
+模型配置控制器（类比 SpringBoot 中 @RestController）。
+提供模型配置的 CRUD 操作、启用/禁用切换和连接测试。
+是 LLM 管理后台最核心的控制面，所有操作均需要 auth.manage_model_config 权限。
+"""
 from rest_framework.views import APIView
 
 from common.api_response import error_response, success_response
@@ -26,6 +31,16 @@ from systemcheck.services.audit_service import record_audit_event
 
 
 def _require_manage_permission(request):
+    """统一的权限守卫函数，检查用户是否具有模型配置管理权限。
+
+    参数:
+        request: Django REST Framework 的 Request 对象。
+    返回:
+        (user, error_response) 元组：
+        - 若认证失败或权限不足，返回 (None, 错误响应对象)。
+        - 若通过，返回 (user, None)。
+    类比 SpringBoot 中 @PreAuthorize 注解 + SecurityContext 的组合。
+    """
     user = get_authenticated_user(request)
     if user is None:
         return None, error_response(code=401, message="未认证。", status_code=401)
@@ -35,6 +50,13 @@ def _require_manage_permission(request):
 
 
 def _build_model_config_audit_payload(model_config):
+    """构建模型配置的审计日志负载。
+
+    参数:
+        model_config: ModelConfig 实例。
+    返回:
+        dict，包含模型配置关键字段的快照，用于审计记录。
+    """
     return {
         "name": model_config.name,
         "capability": model_config.capability,
@@ -49,6 +71,13 @@ def _build_model_config_audit_payload(model_config):
 
 
 def _build_model_config_test_payload(payload):
+    """构建连接测试的审计日志负载。
+
+    参数:
+        payload: dict，测试请求的载荷。
+    返回:
+        dict，包含测试相关字段的快照。
+    """
     return {
         "model_config_id": payload.get("model_config_id") or "",
         "capability": payload.get("capability") or "",
@@ -60,10 +89,23 @@ def _build_model_config_test_payload(payload):
 
 
 class ModelConfigListView(APIView):
+    """模型配置列表视图。
+
+    GET  /api/model-configs/ — 列出所有模型配置及概览。
+    POST /api/model-configs/ — 创建新的模型配置。
+    需要 auth.manage_model_config 权限。
+    """
     authentication_classes = []
     permission_classes = []
 
     def get(self, request):
+        """列出所有模型配置及概览数据。
+
+        参数:
+            request: Django REST Framework 的 Request 对象。
+        返回:
+            JSON 响应，包含 total、overview（总模型数/启用数/调用统计）、model_configs 列表。
+        """
         _, permission_error = _require_manage_permission(request)
         if permission_error is not None:
             return permission_error
@@ -79,6 +121,13 @@ class ModelConfigListView(APIView):
         )
 
     def post(self, request):
+        """创建新的模型配置。
+
+        参数:
+            request: Django REST Framework 的 Request 对象，body 包含模型配置各字段。
+        返回:
+            JSON 响应，包含新创建的 model_config 对象。
+        """
         user, permission_error = _require_manage_permission(request)
         if permission_error is not None:
             return permission_error
@@ -98,10 +147,24 @@ class ModelConfigListView(APIView):
 
 
 class ModelConfigDetailView(APIView):
+    """模型配置详情视图。
+
+    PATCH  /api/model-configs/<id>/ — 更新模型配置。
+    DELETE /api/model-configs/<id>/ — 删除模型配置（启用中的不允许删除）。
+    需要 auth.manage_model_config 权限。
+    """
     authentication_classes = []
     permission_classes = []
 
     def patch(self, request, model_config_id):
+        """更新指定模型配置。
+
+        参数:
+            request: Django REST Framework 的 Request 对象。
+            model_config_id: URL 路径参数，模型配置的主键 ID。
+        返回:
+            JSON 响应，包含更新后的 model_config 对象。若配置不存在则返回 404。
+        """
         user, permission_error = _require_manage_permission(request)
         if permission_error is not None:
             return permission_error
@@ -132,6 +195,14 @@ class ModelConfigDetailView(APIView):
         return success_response(data={"model_config": ModelConfigSummarySerializer(updated).data})
 
     def delete(self, request, model_config_id):
+        """删除指定模型配置。
+
+        参数:
+            request: Django REST Framework 的 Request 对象。
+            model_config_id: URL 路径参数，模型配置的主键 ID。
+        返回:
+            JSON 响应，包含 {"deleted": True}。若配置不存在返回 404，配置启用中返回 400。
+        """
         user, permission_error = _require_manage_permission(request)
         if permission_error is not None:
             return permission_error
@@ -173,10 +244,23 @@ class ModelConfigDetailView(APIView):
 
 
 class ModelConfigActivationView(APIView):
+    """模型配置启用/禁用视图。
+
+    PATCH /api/model-configs/<id>/activation/ — 切换模型的启用状态。
+    需要 auth.manage_model_config 权限。
+    """
     authentication_classes = []
     permission_classes = []
 
     def patch(self, request, model_config_id):
+        """切换指定模型配置的启用状态。
+
+        参数:
+            request: Django REST Framework 的 Request 对象，body 包含 {"is_active": bool}。
+            model_config_id: URL 路径参数，模型配置的主键 ID。
+        返回:
+            JSON 响应，包含更新后的 model_config 对象。若配置不存在则返回 404。
+        """
         user, permission_error = _require_manage_permission(request)
         if permission_error is not None:
             return permission_error
@@ -214,10 +298,25 @@ class ModelConfigActivationView(APIView):
 
 
 class ModelConfigConnectionTestView(APIView):
+    """模型连接测试视图。
+
+    POST /api/model-configs/test-connection/ — 发送一次测试调用验证 API 端点是否可达。
+    支持 chat、embedding、rerank 三种能力类型的连接测试。
+    需要 auth.manage_model_config 权限。
+    """
     authentication_classes = []
     permission_classes = []
 
     def post(self, request):
+        """测试模型配置的连接是否可达。
+
+        参数:
+            request: Django REST Framework 的 Request 对象，body 包含 provider、model_name、endpoint、
+                     options 等信息。
+        返回:
+            JSON 响应，包含 {"ok": True} 表示连接成功。
+            若配置无效返回 400，服务不可用返回 503，上游错误返回对应状态码。
+        """
         user, permission_error = _require_manage_permission(request)
         if permission_error is not None:
             return permission_error

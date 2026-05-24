@@ -1,7 +1,16 @@
+"""
+llm 应用的序列化器（类比 SpringBoot 中 @Valid + Jackson @JsonProperty 的 DTO 校验与转换层）。
+该文件定义了所有请求/响应的数据结构和校验规则：
+- 输入序列化器（Write/Create/Update/Test）用于校验请求体
+- 输出序列化器（Summary）用于将模型实例转换为 JSON 响应
+
+Django REST Framework 的 Serializer 承担了 SpringBoot 中 @RequestBody + @Valid + Jackson 的组合职责。
+"""
 from rest_framework import serializers
 
 from llm.models import EvalRecord, FineTuneRun, FineTuneRunnerServer, ModelConfig
 
+# 直接接入的供应商（不含 LiteLLM Legacy）
 DIRECT_PROVIDER_CHOICES = (
     (ModelConfig.PROVIDER_DEEPSEEK, "DeepSeek"),
     (ModelConfig.PROVIDER_DASHSCOPE, "DashScope"),
@@ -11,6 +20,13 @@ DIRECT_PROVIDER_CHOICES = (
 
 
 def _mask_api_key(value):
+    """对 API Key 进行脱敏处理，仅显示部分字符。
+
+    参数:
+        value: 原始 API Key 字符串，可能为空。
+    返回:
+        脱敏后的字符串。长度 <= 10 时全部用 * 替换；否则保留前 6 位和后 4 位，中间用 ****** 替换。
+    """
     if not value:
         return ""
     if len(value) <= 10:
@@ -18,7 +34,14 @@ def _mask_api_key(value):
     return f"{value[:6]}******{value[-4:]}"
 
 
+# ===================== 模型配置 序列化器 =====================
+
 class ModelConfigSummarySerializer(serializers.ModelSerializer):
+    """模型配置的输出序列化器（类比 SpringBoot 的 Response DTO）。
+
+    在基础字段之上扩展了：脱敏后的 options、微调统计、路由别名、定价和调用次数等派生字段。
+    所有 SerializerMethodField 对应的 get_xxx 方法用于动态计算这些派生值。
+    """
     options = serializers.SerializerMethodField()
     has_api_key = serializers.SerializerMethodField()
     api_key_masked = serializers.SerializerMethodField()
@@ -39,18 +62,46 @@ class ModelConfigSummarySerializer(serializers.ModelSerializer):
     invocation_count = serializers.SerializerMethodField()
 
     def get_options(self, obj):
+        """获取脱敏后的 options 配置。
+
+        参数:
+            obj: ModelConfig 模型实例。
+        返回:
+            dict，其中的 api_key 字段已脱敏。
+        """
         options = dict(obj.options or {})
         if options.get("api_key"):
             options["api_key"] = _mask_api_key(options["api_key"])
         return options
 
     def get_has_api_key(self, obj):
+        """判断是否配置了 API Key。
+
+        参数:
+            obj: ModelConfig 模型实例。
+        返回:
+            bool，是否包含非空 api_key。
+        """
         return bool((obj.options or {}).get("api_key"))
 
     def get_api_key_masked(self, obj):
+        """获取脱敏后的 API Key 字符串。
+
+        参数:
+            obj: ModelConfig 模型实例。
+        返回:
+            str，脱敏后的 API Key。
+        """
         return _mask_api_key((obj.options or {}).get("api_key"))
 
     def _get_latest_fine_tune_run(self, obj):
+        """内部辅助方法：获取该模型配置关联的最新一次微调记录。
+
+        参数:
+            obj: ModelConfig 模型实例。
+        返回:
+            FineTuneRun 实例或 None。
+        """
         runs = getattr(obj, "fine_tune_runs", None)
         if runs is None:
             return None
@@ -59,55 +110,160 @@ class ModelConfigSummarySerializer(serializers.ModelSerializer):
         return None
 
     def get_fine_tune_run_count(self, obj):
+        """获取该模型关联的微调运行次数。
+
+        参数:
+            obj: ModelConfig 实例。
+        返回:
+            int，微调运行总次数。
+        """
         runs = getattr(obj, "fine_tune_runs", None)
         if runs is None or not hasattr(runs, "count"):
             return 0
         return runs.count()
 
     def get_latest_fine_tune_dataset(self, obj):
+        """获取最新微调运行的数据集名称。
+
+        参数:
+            obj: ModelConfig 实例。
+        返回:
+            str，数据集名称或空字符串。
+        """
         latest_run = self._get_latest_fine_tune_run(obj)
         return latest_run.dataset_name if latest_run else ""
 
     def get_latest_fine_tune_status(self, obj):
+        """获取最新微调运行的状态。
+
+        参数:
+            obj: ModelConfig 实例。
+        返回:
+            str，状态值或空字符串。
+        """
         latest_run = self._get_latest_fine_tune_run(obj)
         return latest_run.status if latest_run else ""
 
     def get_latest_fine_tune_artifact_path(self, obj):
+        """获取最新微调运行的产物路径。
+
+        参数:
+            obj: ModelConfig 实例。
+        返回:
+            str，产物路径或空字符串。
+        """
         latest_run = self._get_latest_fine_tune_run(obj)
         return latest_run.artifact_path if latest_run else ""
 
     def get_alias(self, obj):
+        """获取别名（等同于 name）。
+
+        参数:
+            obj: ModelConfig 实例。
+        返回:
+            str，别名。
+        """
         return obj.name
 
     def get_upstream_provider(self, obj):
+        """获取上游供应商名称。
+
+        参数:
+            obj: ModelConfig 实例。
+        返回:
+            str，provider 值。
+        """
         return obj.provider
 
     def get_upstream_model(self, obj):
+        """获取上游模型名称。
+
+        参数:
+            obj: ModelConfig 实例。
+        返回:
+            str，model_name 值。
+        """
         return obj.model_name
 
     def get_fallback_aliases(self, obj):
+        """获取回退别名列表。
+
+        参数:
+            obj: ModelConfig 实例。
+        返回:
+            list，回退别名列表。
+        """
         value = (obj.options or {}).get("fallback_aliases", [])
         return value if isinstance(value, list) else []
 
     def get_weight(self, obj):
+        """获取路由权重。
+
+        参数:
+            obj: ModelConfig 实例。
+        返回:
+            int/float，权重值，默认为 1。
+        """
         return (obj.options or {}).get("weight", 1)
 
     def get_input_price_per_million(self, obj):
+        """获取输入价格（每百万 token）。
+
+        参数:
+            obj: ModelConfig 实例。
+        返回:
+            Decimal，输入单价。
+        """
         return obj.input_price_per_million
 
     def get_output_price_per_million(self, obj):
+        """获取输出价格（每百万 token）。
+
+        参数:
+            obj: ModelConfig 实例。
+        返回:
+            Decimal，输出单价。
+        """
         return obj.output_price_per_million
 
     def get_request_price(self, obj):
+        """获取按次请求价格。
+
+        参数:
+            obj: ModelConfig 实例。
+        返回:
+            Decimal，每次请求价格。
+        """
         return obj.request_price
 
     def get_price_currency(self, obj):
+        """获取定价货币。
+
+        参数:
+            obj: ModelConfig 实例。
+        返回:
+            str，货币代码。
+        """
         return obj.price_currency
 
     def get_pricing_notes(self, obj):
+        """获取定价备注。
+
+        参数:
+            obj: ModelConfig 实例。
+        返回:
+            str，定价备注文本。
+        """
         return obj.pricing_notes
 
     def get_invocation_count(self, obj):
+        """获取调用次数（通过 annotate 注入）。
+
+        参数:
+            obj: ModelConfig 实例。
+        返回:
+            int，调用总次数。
+        """
         return getattr(obj, "invocation_count", 0)
 
     class Meta:
@@ -146,10 +302,16 @@ class ModelConfigSummarySerializer(serializers.ModelSerializer):
 
 
 class ModelConfigActivationSerializer(serializers.Serializer):
+    """模型配置启用状态序列化器（用于 PATCH 切换启用/禁用）。"""
     is_active = serializers.BooleanField()
 
 
 class ModelConfigWriteSerializer(serializers.Serializer):
+    """模型配置写入序列化器（用于创建和完整更新）。
+
+    类比 SpringBoot 中 @Valid 标注的 Request DTO。
+    所有字段均进行基本校验（长度、类型、必填/可选）。
+    """
     name = serializers.CharField(max_length=255)
     capability = serializers.ChoiceField(choices=ModelConfig.CAPABILITY_CHOICES)
     provider = serializers.ChoiceField(choices=DIRECT_PROVIDER_CHOICES)
@@ -171,6 +333,7 @@ class ModelConfigWriteSerializer(serializers.Serializer):
 
 
 class ModelConfigConnectionTestSerializer(serializers.Serializer):
+    """模型连接测试序列化器（用于验证 API 端点是否可达）。"""
     model_config_id = serializers.IntegerField(required=False)
     provider = serializers.ChoiceField(choices=DIRECT_PROVIDER_CHOICES)
     model_name = serializers.CharField(max_length=255)
@@ -178,7 +341,10 @@ class ModelConfigConnectionTestSerializer(serializers.Serializer):
     options = serializers.DictField(required=False, default=dict)
 
 
+# ===================== Prompt 配置 序列化器 =====================
+
 class PromptConfigSummarySerializer(serializers.Serializer):
+    """Prompt 模板配置的输出序列化器。"""
     key = serializers.CharField()
     category = serializers.CharField()
     name = serializers.CharField()
@@ -188,10 +354,14 @@ class PromptConfigSummarySerializer(serializers.Serializer):
 
 
 class PromptConfigUpdateSerializer(serializers.Serializer):
+    """Prompt 模板更新序列化器（仅允许修改模板内容）。"""
     template = serializers.CharField()
 
 
+# ===================== 评测 序列化器 =====================
+
 class EvalRecordSummarySerializer(serializers.ModelSerializer):
+    """评测记录的输出序列化器。"""
     model_config_id = serializers.IntegerField(source="model_config.id", allow_null=True)
 
     class Meta:
@@ -219,6 +389,7 @@ class EvalRecordSummarySerializer(serializers.ModelSerializer):
 
 
 class EvalRecordCreateSerializer(serializers.Serializer):
+    """评测运行创建序列化器。"""
     task_type = serializers.ChoiceField(choices=EvalRecord.TASK_CHOICES)
     model_config_id = serializers.IntegerField(required=False)
     version = serializers.CharField(required=False, allow_blank=True, max_length=128)
@@ -228,14 +399,31 @@ class EvalRecordCreateSerializer(serializers.Serializer):
     run_notes = serializers.CharField(required=False, allow_blank=True, default="")
 
 
+# ===================== 微调 序列化器 =====================
+
 class FineTuneRunnerServerSummarySerializer(serializers.ModelSerializer):
+    """微调训练服务器的输出序列化器。"""
     has_auth_token = serializers.SerializerMethodField()
     auth_token_masked = serializers.SerializerMethodField()
 
     def get_has_auth_token(self, obj):
+        """判断是否配置了认证令牌。
+
+        参数:
+            obj: FineTuneRunnerServer 实例。
+        返回:
+            bool，是否有 auth_token。
+        """
         return bool(obj.auth_token)
 
     def get_auth_token_masked(self, obj):
+        """获取脱敏后的认证令牌。
+
+        参数:
+            obj: FineTuneRunnerServer 实例。
+        返回:
+            str，脱敏后的令牌。
+        """
         return _mask_api_key(obj.auth_token)
 
     class Meta:
@@ -254,6 +442,7 @@ class FineTuneRunnerServerSummarySerializer(serializers.ModelSerializer):
 
 
 class FineTuneRunnerServerWriteSerializer(serializers.Serializer):
+    """微调训练服务器写入序列化器。"""
     name = serializers.CharField(max_length=255)
     base_url = serializers.URLField(max_length=500)
     auth_token = serializers.CharField(required=False, allow_blank=True, max_length=255)
@@ -262,6 +451,7 @@ class FineTuneRunnerServerWriteSerializer(serializers.Serializer):
 
 
 class FineTuneRunSummarySerializer(serializers.ModelSerializer):
+    """微调运行记录的输出序列化器。"""
     base_model_id = serializers.IntegerField(source="base_model.id")
     base_model_name = serializers.CharField(source="base_model.name")
     base_model_capability = serializers.CharField(source="base_model.capability")
@@ -272,12 +462,33 @@ class FineTuneRunSummarySerializer(serializers.ModelSerializer):
     runner_server_name = serializers.SerializerMethodField()
 
     def get_callback_token(self, obj):
+        """获取回调令牌（优先取临时属性，否则取数据库字段）。
+
+        参数:
+            obj: FineTuneRun 实例。
+        返回:
+            str，回调令牌。
+        """
         return getattr(obj, "callback_token", "") or getattr(obj, "callback_token_value", "")
 
     def get_runner_server_id(self, obj):
+        """获取训练服务器 ID。
+
+        参数:
+            obj: FineTuneRun 实例。
+        返回:
+            int 或 None。
+        """
         return obj.runner_server_id
 
     def get_runner_server_name(self, obj):
+        """获取训练服务器名称。
+
+        参数:
+            obj: FineTuneRun 实例。
+        返回:
+            str，服务器名称或空字符串。
+        """
         if obj.runner_server_id is None:
             return ""
         return obj.runner_server.name
@@ -321,6 +532,7 @@ class FineTuneRunSummarySerializer(serializers.ModelSerializer):
 
 
 class FineTuneRunCreateSerializer(serializers.Serializer):
+    """微调运行记录创建序列化器。"""
     base_model_id = serializers.IntegerField()
     runner_server_id = serializers.IntegerField(required=False, allow_null=True)
     dataset_name = serializers.CharField(max_length=255)
@@ -332,6 +544,7 @@ class FineTuneRunCreateSerializer(serializers.Serializer):
 
 
 class FineTuneRunUpdateSerializer(serializers.Serializer):
+    """微调运行记录更新序列化器。"""
     runner_server_id = serializers.IntegerField(required=False, allow_null=True)
     dataset_name = serializers.CharField(required=False, allow_blank=False, max_length=255)
     dataset_version = serializers.CharField(required=False, allow_blank=True, max_length=128)
@@ -349,6 +562,7 @@ class FineTuneRunUpdateSerializer(serializers.Serializer):
 
 
 class FineTuneRunCallbackSerializer(serializers.Serializer):
+    """微调回调序列化器（由远程训练 Runner 回调使用）。"""
     status = serializers.ChoiceField(choices=FineTuneRun.STATUS_CHOICES, required=False)
     external_job_id = serializers.CharField(required=False, allow_blank=True, max_length=255)
     metrics = serializers.DictField(required=False, default=dict)

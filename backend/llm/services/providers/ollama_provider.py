@@ -1,3 +1,13 @@
+"""
+Ollama Provider（类比 SpringBoot 中本地推理服务的 HTTP Client 封装）。
+
+提供：
+- OllamaChatProvider: 对话能力（通过 Ollama /api/chat）
+- OllamaEmbeddingProvider: 向量嵌入能力（通过 Ollama /api/embed）
+
+两者共享 OllamaApiMixin 中的通用 HTTP 请求、用量解析和日志记录逻辑。
+Ollama 是本地运行的推理引擎，不需要 API Key 认证。
+"""
 import json
 import logging
 import time
@@ -19,6 +29,18 @@ logger = logging.getLogger(__name__)
 
 
 class OllamaApiMixin:
+    """Ollama API 通用 Mixin 类。
+
+    提供 Ollama 所有能力共用的 HTTP POST、用量解析、日志记录逻辑。
+    类比 SpringBoot 中使用 @Component 抽取公共 HTTP 调用逻辑的父类。
+
+    属性:
+        provider_name: str，固定为 'ollama'。
+        endpoint: str，Ollama 服务地址（如 http://localhost:11434）。
+        model_name: str，模型名称。
+        options: dict，配置项（如 timeout_seconds）。
+        model_config: ModelConfig 实例或 None。
+    """
     provider_name = "ollama"
 
     def __init__(self, *, endpoint, model_name, options=None, model_config=None):
@@ -28,9 +50,23 @@ class OllamaApiMixin:
         self.model_config = model_config
 
     def _build_url(self, path):
+        """拼接完整的 Ollama API URL。
+
+        参数:
+            path: str，API 路径（如 '/api/chat'）。
+        返回:
+            str，完整 URL。
+        """
         return f"{self.endpoint}{path}"
 
     def _resolve_timeout_seconds(self, options=None):
+        """解析超时秒数，从 options.timeout_seconds 获取，默认 30 秒。
+
+        参数:
+            options: dict 或 None，调用级选项。
+        返回:
+            int，超时秒数（最小 1）。
+        """
         merged_options = {**self.options, **(options or {})}
         try:
             return max(1, int(merged_options.get("timeout_seconds") or 30))
@@ -38,6 +74,23 @@ class OllamaApiMixin:
             return 30
 
     def _post_json(self, path, payload, *, capability, options=None):
+        """向 Ollama API 发送 JSON POST 请求。
+
+        对 HTTPError 和传输错误进行统一的异常转换和日志记录。
+
+        参数:
+            path: str，API 路径。
+            payload: dict，请求体。
+            capability: str，能力类型（用于日志记录）。
+            options: dict 或 None，调用级选项。
+
+        返回:
+            dict，解析后的 JSON 响应。
+
+        异常:
+            UpstreamRateLimitError: 限流 (HTTP 429)。
+            UpstreamServiceError: 服务调用失败或不可用。
+        """
         url = self._build_url(path)
         body = json.dumps(payload).encode("utf-8")
         headers = {"Content-Type": "application/json"}
@@ -99,6 +152,15 @@ class OllamaApiMixin:
             ) from exc
 
     def _usage_from_payload(self, payload) -> TokenUsage:
+        """从 Ollama 响应中提取 Token 用量。
+
+        Ollama 的用量字段为 prompt_eval_count（输入）和 eval_count（输出）。
+
+        参数:
+            payload: dict，Ollama API 的 JSON 响应。
+        返回:
+            TokenUsage，填充了 request_tokens、response_tokens、total_tokens 和 source。
+        """
         request_tokens = int(payload.get("prompt_eval_count") or 0)
         response_tokens = int(payload.get("eval_count") or 0)
         total_tokens = int(payload.get("total_tokens") or (request_tokens + response_tokens))
@@ -121,6 +183,16 @@ class OllamaApiMixin:
         )
 
     def _record_success(self, *, capability, started_at, usage, trace_id="", request_id="", provider_request_id=""):
+        """记录成功调用的日志到数据库。
+
+        参数:
+            capability: str，能力类型。
+            started_at: float，调用开始时间。
+            usage: TokenUsage，用量统计。
+            trace_id: str，链路追踪 ID。
+            request_id: str，请求 ID。
+            provider_request_id: str，供应商返回的请求 ID。
+        """
         if self.model_config is None or self.model_config.pk is None:
             return
         try:
@@ -140,6 +212,15 @@ class OllamaApiMixin:
             logger.exception("Failed to record successful %s invocation log", capability)
 
     def _record_failure(self, *, capability, started_at, exc, trace_id="", request_id=""):
+        """记录失败调用的日志到数据库。
+
+        参数:
+            capability: str，能力类型。
+            started_at: float，调用开始时间。
+            exc: 异常对象。
+            trace_id: str，链路追踪 ID。
+            request_id: str，请求 ID。
+        """
         if self.model_config is None or self.model_config.pk is None:
             return
         try:
@@ -160,7 +241,23 @@ class OllamaApiMixin:
 
 
 class OllamaChatProvider(OllamaApiMixin, BaseChatProvider):
+    """Ollama 对话 Provider。
+
+    调用 Ollama /api/chat 端点进行对话。
+    """
+
     def chat(self, *, messages, options=None, trace_id="", request_id=""):
+        """发送对话请求。
+
+        参数:
+            messages: list[dict]，消息列表。
+            options: dict 或 None，调用级选项。
+            trace_id: str，链路追踪 ID。
+            request_id: str，请求 ID。
+
+        返回:
+            ChatResult，包含模型回复、用量和元数据。
+        """
         payload = {
             "model": self.model_name,
             "messages": messages,
@@ -218,7 +315,23 @@ class OllamaChatProvider(OllamaApiMixin, BaseChatProvider):
 
 
 class OllamaEmbeddingProvider(OllamaApiMixin, BaseEmbeddingProvider):
+    """Ollama 向量嵌入 Provider。
+
+    调用 Ollama /api/embed 端点生成向量嵌入。
+    """
+
     def embed(self, *, texts, options=None, trace_id="", request_id=""):
+        """生成文本的向量嵌入。
+
+        参数:
+            texts: list[str]，待嵌入的文本列表。
+            options: dict 或 None，调用级选项。
+            trace_id: str，链路追踪 ID。
+            request_id: str，请求 ID。
+
+        返回:
+            EmbeddingResult，包含向量列表、用量和元数据。
+        """
         merged_options = {**self.options, **(options or {})}
         payload = {
             "model": self.model_name,

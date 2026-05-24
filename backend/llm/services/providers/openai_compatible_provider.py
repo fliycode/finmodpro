@@ -1,3 +1,19 @@
+"""
+OpenAI 兼容 Provider（类比 SpringBoot 中通用的 OpenAI API HTTP Client 封装）。
+
+提供三个能力实现：
+- OpenAICompatibleChatProvider: 对话（含 chat 和 stream）
+- OpenAICompatibleEmbeddingProvider: 向量嵌入
+- OpenAICompatibleRerankProvider: 重排序
+
+三者共享 OpenAICompatibleApiMixin 中的通用 HTTP 逻辑：
+- API Key 解析（优先 options，其次环境变量）
+- 自动重试机制（传输层错误重试 3 次）
+- 标准化错误映射（429 限流、401/403 认证失败、404 模型不存在、常规错误）
+- Token 用量提取和调用日志记录
+
+DeepSeek、DashScope 的嵌入等均继承自此 Provider。
+"""
 import json
 import logging
 import os
@@ -19,7 +35,8 @@ from llm.services.providers.base import (
 
 
 logger = logging.getLogger(__name__)
-TRANSPORT_RETRY_ATTEMPTS = 3
+TRANSPORT_RETRY_ATTEMPTS = 3  # 传输层错误的最大重试次数
+# 供应商名到环境变量名的映射
 _PROVIDER_API_KEY_ENV_VARS = {
     "deepseek": "DEEPSEEK_API_KEY",
     "dashscope": "DASHSCOPE_API_KEY",
@@ -28,6 +45,23 @@ _PROVIDER_API_KEY_ENV_VARS = {
 
 
 class OpenAICompatibleApiMixin:
+    """OpenAI 兼容 API 通用 Mixin 类。
+
+    提供所有 OpenAI 兼容能力共用的：
+    - API Key 解析和认证头构建
+    - HTTP POST（带自动重试）
+    - Token 用量解析
+    - 调用成功/失败日志记录
+
+    类比 SpringBoot 中使用 RestTemplate 封装了重试和异常映射的 HTTP Client 父类。
+
+    属性:
+        provider_name: str，供应商名称（子类覆盖）。
+        endpoint: str，API 服务地址。
+        model_name: str，模型名称。
+        options: dict，配置项（api_key 等）。
+        model_config: ModelConfig 实例或 None。
+    """
     provider_name = "openai_compatible"
 
     def __init__(self, *, endpoint, model_name, options=None, model_config=None):
@@ -37,6 +71,15 @@ class OpenAICompatibleApiMixin:
         self.model_config = model_config
 
     def _resolve_options(self, options=None):
+        """解析 API Key：优先 options.api_key，其次环境变量。
+
+        参数:
+            options: dict 或 None，调用级配置覆盖。
+        返回:
+            dict，合并后的配置。
+        异常:
+            UpstreamServiceError: 当 API Key 未配置时抛出。
+        """
         merged_options = {**self.options, **(options or {})}
         api_key = merged_options.get("api_key")
         if not api_key:
@@ -55,32 +98,74 @@ class OpenAICompatibleApiMixin:
         return merged_options
 
     def _api_base(self):
+        """获取 API 基地址（自动追加 /v1）。
+
+        返回:
+            str，API 基地址 URL。
+        """
         if self.endpoint.endswith("/v1"):
             return self.endpoint
         return f"{self.endpoint}/v1"
 
     def _resolve_timeout_seconds(self, resolved_options):
+        """解析超时秒数。
+
+        参数:
+            resolved_options: dict，已解析的配置。
+        返回:
+            int，超时秒数。
+        """
         try:
             return max(1, int(resolved_options.get("timeout_seconds") or 30))
         except (TypeError, ValueError):
             return 30
 
     def _resolve_retry_attempts(self, resolved_options):
+        """解析重试次数。
+
+        参数:
+            resolved_options: dict，已解析的配置。
+        返回:
+            int，重试次数。
+        """
         try:
             return max(1, int(resolved_options.get("transport_retry_attempts") or TRANSPORT_RETRY_ATTEMPTS))
         except (TypeError, ValueError):
             return TRANSPORT_RETRY_ATTEMPTS
 
     def _build_url(self, path):
+        """拼接完整的 API URL。
+
+        参数:
+            path: str，API 路径（如 '/chat/completions'）。
+        返回:
+            str，完整 URL。
+        """
         return f"{self._api_base()}{path}"
 
     def _build_headers(self, api_key):
+        """构建带认证的 HTTP 请求头。
+
+        参数:
+            api_key: str，API Key。
+        返回:
+            dict，包含 Authorization 和 Content-Type。
+        """
         return {
             "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json",
         }
 
     def _usage_from_payload(self, payload) -> TokenUsage:
+        """从 OpenAI 兼容格式的响应中提取 Token 用量。
+
+        兼容多种字段名：prompt_tokens/input_tokens、completion_tokens/output_tokens。
+
+        参数:
+            payload: dict，API JSON 响应。
+        返回:
+            TokenUsage，填充了用量信息。
+        """
         usage = (payload or {}).get("usage") or {}
         request_tokens = int(usage.get("prompt_tokens") or usage.get("input_tokens") or 0)
         response_tokens = int(usage.get("completion_tokens") or usage.get("output_tokens") or 0)
@@ -99,6 +184,16 @@ class OpenAICompatibleApiMixin:
         )
 
     def _record_success(self, *, capability, started_at, usage, trace_id="", request_id="", provider_request_id=""):
+        """记录成功调用的日志。
+
+        参数:
+            capability: str，能力类型。
+            started_at: float，调用开始时间。
+            usage: TokenUsage，用量统计。
+            trace_id: str，链路追踪 ID。
+            request_id: str，请求 ID。
+            provider_request_id: str，供应商返回的请求 ID。
+        """
         if self.model_config is None or self.model_config.pk is None:
             return
         try:
@@ -118,6 +213,15 @@ class OpenAICompatibleApiMixin:
             logger.exception("Failed to record successful %s invocation log", capability)
 
     def _record_failure(self, *, capability, started_at, exc, trace_id="", request_id=""):
+        """记录失败调用的日志。
+
+        参数:
+            capability: str，能力类型。
+            started_at: float，调用开始时间。
+            exc: 异常对象。
+            trace_id: str，链路追踪 ID。
+            request_id: str，请求 ID。
+        """
         if self.model_config is None or self.model_config.pk is None:
             return
         try:
@@ -137,6 +241,24 @@ class OpenAICompatibleApiMixin:
             logger.exception("Failed to record failed %s invocation log", capability)
 
     def _post_json(self, path, payload, *, options=None, capability):
+        """向 OpenAI 兼容 API 发送 JSON POST 请求（带自动重试）。
+
+        对 HTTPError 进行分类映射：
+        - 429 -> UpstreamRateLimitError
+        - 401/403 或含 "api key"/"unauthorized" -> 认证失败
+        - 404 或含 "model not" -> 模型名称无效
+        - 其他 -> 通用服务错误
+        - 传输错误（URLError/TimeoutError）重试最多 retry_attempts 次
+
+        参数:
+            path: str，API 路径。
+            payload: dict，请求体。
+            options: dict 或 None，调用级选项。
+            capability: str，能力类型（用于日志）。
+
+        返回:
+            dict，解析后的 JSON 响应。
+        """
         resolved_options = self._resolve_options(options)
         timeout_seconds = self._resolve_timeout_seconds(resolved_options)
         retry_attempts = self._resolve_retry_attempts(resolved_options)
@@ -245,7 +367,23 @@ class OpenAICompatibleApiMixin:
 
 
 class OpenAICompatibleChatProvider(OpenAICompatibleApiMixin, BaseChatProvider):
+    """OpenAI 兼容对话 Provider。
+
+    调用 POST /v1/chat/completions，支持 chat 和 stream 两种模式。
+    """
+
     def chat(self, *, messages, options=None, trace_id="", request_id=""):
+        """发送对话请求（非流式）。
+
+        参数:
+            messages: list[dict]，消息列表（OpenAI Chat 格式）。
+            options: dict 或 None，调用级覆盖（temperature、max_tokens、response_format）。
+            trace_id: str，链路追踪 ID。
+            request_id: str，请求 ID。
+
+        返回:
+            ChatResult，包含模型回复、用量和元数据。
+        """
         merged_options = self._resolve_options(options)
         payload = {
             "model": self.model_name,
@@ -314,6 +452,15 @@ class OpenAICompatibleChatProvider(OpenAICompatibleApiMixin, BaseChatProvider):
         return result
 
     def stream(self, *, messages, options=None):
+        """流式对话接口（生成器）。
+
+        参数:
+            messages: list[dict]，消息列表。
+            options: dict 或 None，调用级覆盖选项。
+
+        产出:
+            str，每次产出一段文本增量（SSE 格式解析后的 content 字段）。
+        """
         merged_options = self._resolve_options(options)
         payload = {
             "model": self.model_name,
@@ -384,7 +531,26 @@ class OpenAICompatibleChatProvider(OpenAICompatibleApiMixin, BaseChatProvider):
 
 
 class OpenAICompatibleEmbeddingProvider(OpenAICompatibleApiMixin, BaseEmbeddingProvider):
+    """OpenAI 兼容向量嵌入 Provider。
+
+    调用 POST /v1/embeddings，支持 dimensions 和 encoding_format 参数。
+    """
+
     def embed(self, *, texts, options=None, trace_id="", request_id=""):
+        """生成文本的向量嵌入。
+
+        参数:
+            texts: list[str]，待嵌入的文本列表。
+            options: dict 或 None，调用级选项（dimensions、encoding_format）。
+            trace_id: str，链路追踪 ID。
+            request_id: str，请求 ID。
+
+        返回:
+            EmbeddingResult，包含向量列表（按输入 text 顺序排列）、用量和元数据。
+
+        异常:
+            UpstreamServiceError: 返回空向量、向量数量不匹配等服务端错误。
+        """
         started_at = time.monotonic()
         merged_options = self._resolve_options(options)
         payload = {
@@ -464,7 +630,28 @@ class OpenAICompatibleEmbeddingProvider(OpenAICompatibleApiMixin, BaseEmbeddingP
 
 
 class OpenAICompatibleRerankProvider(OpenAICompatibleApiMixin, BaseRerankProvider):
+    """OpenAI 兼容重排序 Provider。
+
+    调用 POST /v1/rerank，兼容 Jina/Cohere 等供应商的重排 API 格式。
+    """
+
     def rerank(self, *, query, documents, top_n=None, options=None, trace_id="", request_id=""):
+        """对文档列表进行重排序。
+
+        参数:
+            query: str，查询文本。
+            documents: list[str]，待排序的文档列表。
+            top_n: int 或 None，返回前 N 个结果。
+            options: dict 或 None，调用级选项。
+            trace_id: str，链路追踪 ID。
+            request_id: str，请求 ID。
+
+        返回:
+            RerankResult，包含排序后的 items（index + relevance_score）、用量和元数据。
+
+        异常:
+            UpstreamServiceError: 返回空重排结果等服务端错误。
+        """
         payload = {
             "model": self.model_name,
             "query": query,

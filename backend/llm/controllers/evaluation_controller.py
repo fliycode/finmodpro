@@ -1,3 +1,8 @@
+"""
+评测控制器（类比 SpringBoot 中 @RestController）。
+提供评测记录的列表查询（GET）和创建/运行（POST）。
+评测是对模型在 QA 问答和风险抽取任务上的准确性、延迟等指标的自动化测量。
+"""
 from rest_framework.views import APIView
 
 from common.api_response import error_response, success_response
@@ -13,10 +18,23 @@ from systemcheck.services.audit_service import record_audit_event
 
 
 class EvalRecordListCreateView(APIView):
+    """评测记录列表与创建视图。
+
+    GET  /api/evaluations/ — 列出所有评测记录及对比分组。
+    POST /api/evaluations/ — 运行一次评测并记录结果。
+    需要 auth.view_evaluation（GET）或 auth.run_evaluation（POST）权限。
+    """
     authentication_classes = []
     permission_classes = []
 
     def get(self, request):
+        """列出所有评测记录及对比分组。
+
+        参数:
+            request: Django REST Framework 的 Request 对象。
+        返回:
+            JSON 响应，包含 total（总数）、eval_records（记录列表）、comparison_groups（按评测模式分组对比）。
+        """
         user = get_authenticated_user(request)
         if user is None:
             return error_response(code=401, message="未认证。", status_code=401)
@@ -34,6 +52,14 @@ class EvalRecordListCreateView(APIView):
         )
 
     def post(self, request):
+        """运行一次评测并创建记录。
+
+        参数:
+            request: Django REST Framework 的 Request 对象，body 中包含 task_type（任务类型）、
+                     model_config_id（模型配置 ID）、evaluation_mode（评测模式）等。
+        返回:
+            201 Created JSON 响应，包含新创建的 EvalRecord。若模型配置不存在则返回 404。
+        """
         user = get_authenticated_user(request)
         if user is None:
             return error_response(code=401, message="未认证。", status_code=401)

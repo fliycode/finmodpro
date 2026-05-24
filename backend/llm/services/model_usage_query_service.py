@@ -1,4 +1,12 @@
-"""Model usage analytics query service."""
+"""
+模型用量分析查询服务（类比 SpringBoot 中 @Service 的分析层）。
+提供 LLM 网关的各类聚合分析数据：
+- 概览（网关健康状态、流量、Top 模型、最近错误）
+- 日志（分页查询、摘要聚合）
+- 链路追踪
+- 错误分析
+- 成本计算（汇总、时序、按模型分组）
+"""
 from collections import defaultdict
 from datetime import timedelta
 
@@ -9,9 +17,10 @@ from django.utils import timezone
 from llm.models import ModelConfig, ModelInvocationLog
 
 # ---------------------------------------------------------------------------
-# Helpers
+# 辅助函数
 # ---------------------------------------------------------------------------
 
+# 时间窗口预设映射：预设名 -> timedelta
 _TIME_PRESETS = {
     "1h": timedelta(hours=1),
     "24h": timedelta(hours=24),
@@ -19,21 +28,36 @@ _TIME_PRESETS = {
     "30d": timedelta(days=30),
 }
 
+# 延迟分桶定义：(标签, 下限ms, 上限ms)，上限为 None 表示到无穷
 _LATENCY_BUCKETS = [
     ("<100ms", 0, 100),
-    ("100–500ms", 100, 500),
-    ("500ms–1s", 500, 1000),
-    ("1–3s", 1000, 3000),
+    ("100-500ms", 100, 500),
+    ("500ms-1s", 500, 1000),
+    ("1-3s", 1000, 3000),
     (">3s", 3000, None),
 ]
 
 
 def _window_start(time_preset: str | None):
+    """将时间预设字符串转换为时间窗口的起始时刻。
+
+    参数:
+        time_preset: str，时间预设名（'1h' / '24h' / '7d' / '30d'）。
+    返回:
+        datetime，窗口起始时间。
+    """
     delta = _TIME_PRESETS.get(time_preset or "24h", _TIME_PRESETS["24h"])
     return timezone.now() - delta
 
 
 def _parse_filters(filters: dict | None):
+    """解析并规范化查询筛选条件。
+
+    参数:
+        filters: dict 或 None，原始筛选条件。
+    返回:
+        dict，包含 model、status、time 三个规范化后的筛选值。
+    """
     filters = filters or {}
     return {
         "model": filters.get("model") or None,
@@ -43,10 +67,23 @@ def _parse_filters(filters: dict | None):
 
 
 def _managed_qs():
+    """获取模型调用日志的基础查询集。
+
+    返回:
+        QuerySet，所有 ModelInvocationLog 记录。
+    """
     return ModelInvocationLog.objects.all()
 
 
 def _apply_filters(qs, filters: dict):
+    """将筛选条件应用到查询集上。
+
+    参数:
+        qs: QuerySet，基础查询集。
+        filters: dict，包含 model、status、time 筛选条件。
+    返回:
+        QuerySet，筛选后的查询集。
+    """
     start = _window_start(filters.get("time"))
     qs = qs.filter(created_at__gte=start)
     if filters.get("model"):
@@ -57,6 +94,13 @@ def _apply_filters(qs, filters: dict):
 
 
 def _pricing_map() -> dict:
+    """构建模型配置 ID -> (输入单价, 输出单价) 的映射字典。
+
+    用于在 Python 侧快速查找定价并估算成本。
+
+    返回:
+        dict，key 为 model_config_id，value 为 (input_price, output_price) 元组。
+    """
     pricing = {}
     for mc in ModelConfig.objects.all().only(
         "id",
@@ -71,11 +115,13 @@ def _pricing_map() -> dict:
 
 
 def _apply_pricing(row: dict, pricing: dict) -> tuple[float, float]:
-    """Return (input_cost, output_cost) for a DB-aggregate row.
+    """根据定价映射为单行聚合数据计算估算成本。
 
-    *row* must contain ``model_config_id``, ``req_tokens``, and
-    ``resp_tokens`` keys (the names produced by the ORM annotations used
-    throughout this module).
+    参数:
+        row: dict，必须包含 model_config_id、req_tokens、resp_tokens 键。
+        pricing: dict，由 _pricing_map() 返回的定价映射。
+    返回:
+        (float, float)，(输入成本估算, 输出成本估算)。
     """
     inp_price, out_price = pricing.get(row.get("model_config_id"), (0.0, 0.0))
     req_tokens = row.get("req_tokens") or 0
@@ -84,6 +130,14 @@ def _apply_pricing(row: dict, pricing: dict) -> tuple[float, float]:
 
 
 def _resolve_costs(row: dict, pricing: dict) -> tuple[float, float]:
+    """解析单行的成本数据：优先使用 DB 中已存储的成本快照，否则按定价估算。
+
+    参数:
+        row: dict，聚合行数据。
+        pricing: dict，定价映射。
+    返回:
+        (float, float)，(输入成本, 输出成本)。
+    """
     input_cost = float(row.get("input_cost_sum") or 0)
     output_cost = float(row.get("output_cost_sum") or 0)
     total_cost = float(row.get("total_cost_sum") or 0)
@@ -93,6 +147,13 @@ def _resolve_costs(row: dict, pricing: dict) -> tuple[float, float]:
 
 
 def _serialize_log(log) -> dict:
+    """将单条 ModelInvocationLog 序列化为字典。
+
+    参数:
+        log: ModelInvocationLog 实例。
+    返回:
+        dict，包含关键字段的序列化结果。
+    """
     return {
         "time": log.created_at.isoformat(),
         "alias": log.alias,
@@ -111,10 +172,21 @@ def _serialize_log(log) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Summary (Dashboard)
+# 概览（Dashboard）
 # ---------------------------------------------------------------------------
 
 def get_gateway_summary() -> dict:
+    """获取网关概览数据。
+
+    包含：
+    - 网关健康状态（healthy/configured/missing）
+    - 24h 内流量统计（请求数、失败数、错误率）
+    - Top 10 模型（按请求量）
+    - 最近 10 条失败日志
+
+    返回:
+        dict，包含 gateway、traffic、top_models、recent_errors。
+    """
     window_start = _window_start("24h")
     managed_configs = ModelConfig.objects.all()
     active_count = managed_configs.filter(is_active=True).count()
@@ -147,7 +219,7 @@ def get_gateway_summary() -> dict:
         "error_rate_pct": error_rate,
     }
 
-    # Top models by request count
+    # Top 模型按请求量排名
     top_qs = (
         recent_logs.values("alias")
         .annotate(request_count=Count("id"))
@@ -158,7 +230,7 @@ def get_gateway_summary() -> dict:
         for row in top_qs
     ]
 
-    # Recent failed invocations (sample)
+    # 最近失败的调用（采样）
     recent_errors = [
         _serialize_log(log)
         for log in recent_logs.filter(
@@ -175,11 +247,21 @@ def get_gateway_summary() -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Logs
+# 日志
 # ---------------------------------------------------------------------------
 
 def get_logs(filters: dict | None = None, page: int = 1, page_size: int = 50) -> dict:
-    """Return filtered request-level log rows. No raw prompt/response."""
+    """获取筛选后的分页调用日志。
+
+    不返回原始 prompt/response 内容。
+
+    参数:
+        filters: dict 或 None，筛选条件（model、status、time）。
+        page: int，页码（从 1 开始）。
+        page_size: int，每页条数（最大 200）。
+    返回:
+        dict，包含 filters、total、page、page_size、logs 列表。
+    """
     filters = _parse_filters(filters)
     qs = _apply_filters(_managed_qs(), filters)
     total = qs.count()
@@ -195,7 +277,15 @@ def get_logs(filters: dict | None = None, page: int = 1, page_size: int = 50) ->
 
 
 def get_logs_summary(filters: dict | None = None) -> dict:
-    """Return aggregate metrics honoring the same filters as get_logs."""
+    """获取日志聚合摘要指标。
+
+    包含请求总量、错误率、平均延迟、延迟分桶分布、错误码分布。
+
+    参数:
+        filters: dict 或 None，筛选条件。
+    返回:
+        dict，包含 total_requests、error_rate_pct、avg_latency_ms、error_breakdown、latency_buckets。
+    """
     filters = _parse_filters(filters)
     qs = _apply_filters(_managed_qs(), filters)
 
@@ -221,7 +311,7 @@ def get_logs_summary(filters: dict | None = None) -> dict:
     error_rate = round((failed / total * 100) if total else 0.0, 2)
     avg_latency = agg["avg_latency"] or 0.0
 
-    # Error breakdown by error_code
+    # 按错误码统计失败分布
     error_qs = (
         qs.filter(status=ModelInvocationLog.STATUS_FAILED)
         .values("error_code")
@@ -249,11 +339,18 @@ def get_logs_summary(filters: dict | None = None) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Traces
+# 链路追踪
 # ---------------------------------------------------------------------------
 
 def get_trace(trace_id: str) -> dict | None:
-    """Return a trace-level view of all log rows for trace_id, or None."""
+    """根据 trace_id 获取完整调用链的所有日志。
+
+    参数:
+        trace_id: str，链路追踪唯一标识。
+    返回:
+        dict 或 None，包含 trace_id、status、时间范围、logs 列表。
+        若 trace_id 无关联日志则返回 None。
+    """
     logs = list(_managed_qs().filter(trace_id=trace_id).order_by("created_at", "id"))
     if not logs:
         return None
@@ -274,11 +371,17 @@ def get_trace(trace_id: str) -> dict | None:
 
 
 # ---------------------------------------------------------------------------
-# Errors
+# 错误分析
 # ---------------------------------------------------------------------------
 
 def get_errors(time_preset: str = "24h") -> dict:
-    """Return aggregated error types plus recent error samples."""
+    """获取指定时间窗口内的聚合错误类型及最近错误样本。
+
+    参数:
+        time_preset: str，时间窗口预设名。
+    返回:
+        dict，包含 total_failed_requests、error_types（错误码分布）、recent_errors（最近 20 条）。
+    """
     window_start = _window_start(time_preset)
     failed_qs = _managed_qs().filter(
         status=ModelInvocationLog.STATUS_FAILED,
@@ -306,15 +409,20 @@ def get_errors(time_preset: str = "24h") -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Costs
+# 成本分析
 # ---------------------------------------------------------------------------
 
 def get_costs_summary(filters: dict | None = None) -> dict:
-    """Return token usage and estimated cost summary."""
+    """获取 Token 用量和估算成本汇总。
+
+    参数:
+        filters: dict 或 None，筛选条件。
+    返回:
+        dict，包含 total_requests、token 用量和 estimated 成本。
+    """
     filters = _parse_filters(filters)
     qs = _apply_filters(_managed_qs(), filters)
 
-    # Compute cost and totals from a single per-model_config_id grouped query.
     pricing = _pricing_map()
     by_config = list(
         qs.values("model_config_id")
@@ -349,15 +457,26 @@ def get_costs_summary(filters: dict | None = None) -> dict:
 
 
 def get_costs_timeseries(filters: dict | None = None) -> dict:
-    """Return usage/cost aggregated over time buckets."""
+    """获取按时间桶聚合的用量/成本时序数据。
+
+    时间颗粒度根据 time 预设自动选择：
+    - 1h: 分钟级 (TruncMinute)
+    - 24h: 小时级 (TruncHour)
+    - 7d: 6小时级 (TruncHour + Python 后处理)
+    - 30d: 天级 (TruncDay)
+
+    参数:
+        filters: dict 或 None，筛选条件。
+    返回:
+        dict，包含 granularity_hours/minutes 和 points 列表。
+    """
     filters = _parse_filters(filters)
     time_preset = filters.get("time", "24h")
     qs = _apply_filters(_managed_qs(), filters)
 
-    # Choose DB truncation function and display format based on time window.
-    # 1h uses per-minute bucketing so traffic within the hour stays observable.
-    # For 7d we use hourly DB truncation then collapse to 6-hour buckets in
-    # Python, which still scales by bucket/model pair rather than raw row count.
+    # 根据时间窗口选择 DB 截断函数和输出格式
+    # 1h 使用分钟级分桶以便观察小时内流量
+    # 7d 使用小时级 DB 截断后在 Python 中合并为 6 小时桶
     if time_preset == "1h":
         trunc_fn = TruncMinute("created_at")
         bucket_minutes = 1
@@ -381,7 +500,7 @@ def get_costs_timeseries(filters: dict | None = None) -> dict:
 
     pricing = _pricing_map()
 
-    # Aggregate in the DB by (time_bucket, model_config_id) — O(buckets × models)
+    # 在 DB 中按 (time_bucket, model_config_id) 聚合
     db_rows = (
         qs.annotate(time_bucket=trunc_fn)
         .values("time_bucket", "model_config_id")
@@ -396,7 +515,7 @@ def get_costs_timeseries(filters: dict | None = None) -> dict:
         .order_by("time_bucket")
     )
 
-    # Python post-pass: apply pricing and collapse to the desired granularity.
+    # Python 后处理：应用定价并将数据合并到目标粒度
     buckets: dict = defaultdict(lambda: {"request_count": 0, "estimated_cost": 0.0})
     for row in db_rows:
         ts = row["time_bucket"]
@@ -430,11 +549,19 @@ def get_costs_timeseries(filters: dict | None = None) -> dict:
 
 
 def get_costs_models(filters: dict | None = None) -> dict:
-    """Return per-model usage/cost breakdown with request share."""
+    """获取按模型分组的用量和成本明细。
+
+    每个模型包含请求量、占比百分比、Token 用量和估算成本。
+
+    参数:
+        filters: dict 或 None，筛选条件。
+    返回:
+        dict，包含 total_requests 和 models 列表。
+    """
     filters = _parse_filters(filters)
     qs = _apply_filters(_managed_qs(), filters)
 
-    # Aggregate by alias + model_config_id
+    # 按 alias + model_config_id 聚合
     by_alias = list(
         qs.values("alias", "model_config_id")
         .annotate(

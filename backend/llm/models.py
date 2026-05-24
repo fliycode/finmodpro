@@ -1,10 +1,33 @@
+"""
+llm 应用的数据模型（类比 SpringBoot 中 JPA/Hibernate 的 @Entity）。
+该文件定义了 LLM 管理面所需的所有数据库表：
+- ModelConfig: 模型配置（对应 @Entity，一条记录代表一个已接入的 LLM 模型）
+- EvalRecord: 评测记录（存储每次评测运行的指标）
+- FineTuneRunnerServer: 微调训练服务器配置
+- FineTuneRun: 微调运行记录（一次微调任务的完整生命周期）
+- ModelInvocationLog: 模型调用日志（每次实际 API 调用的审计/计费记录）
+
+Django ORM 自动通过 Meta 类生成数据库索引、约束和表名。
+"""
 from django.db import models, transaction
 
 
 class ModelConfig(models.Model):
-    CAPABILITY_CHAT = "chat"
-    CAPABILITY_EMBEDDING = "embedding"
-    CAPABILITY_RERANK = "rerank"
+    """模型配置实体（类比 SpringBoot 的 @Entity）。
+
+    字段类比：
+    - name: 别名，便于人工辨识
+    - capability: 能力类型（chat / embedding / rerank）
+    - provider: 供应商名称
+    - model_name: 上游模型标识
+    - endpoint: API 端点 URL
+    - options: JSON 扩展配置（如 api_key、fallback_aliases 等）
+    - input_price_per_million / output_price_per_million / request_price: 定价信息
+    - is_active: 是否启用（同一 capability 下只能启用一个）
+    """
+    CAPABILITY_CHAT = "chat"          # 对话能力
+    CAPABILITY_EMBEDDING = "embedding"  # 向量嵌入能力
+    CAPABILITY_RERANK = "rerank"      # 重排序能力
     CAPABILITY_CHOICES = (
         (CAPABILITY_CHAT, "Chat"),
         (CAPABILITY_EMBEDDING, "Embedding"),
@@ -46,6 +69,11 @@ class ModelConfig(models.Model):
         unique_together = ("capability", "name")
 
     def save(self, *args, **kwargs):
+        """保存模型配置，并确保同一 capability 下最多只有一个启用项。
+
+        在事务中执行：先保存自身，若被标记为 is_active，则将该 capability 下其他配置的 is_active 置为 False。
+        类比 SpringBoot 中 @Transactional 方法，保证同一能力类型下仅一个活跃配置。
+        """
         with transaction.atomic():
             super().save(*args, **kwargs)
             if self.is_active:
@@ -53,6 +81,11 @@ class ModelConfig(models.Model):
 
 
 class EvalRecord(models.Model):
+    """评测记录实体。
+
+    存储每次模型评测的结果，包括准确率、延迟等指标。
+    支持三种评测模式：baseline（基准）、rag（检索增强生成）、fine_tuned（微调）。
+    """
     EVALUATION_MODE_BASELINE = "baseline"
     EVALUATION_MODE_RAG = "rag"
     EVALUATION_MODE_FINE_TUNED = "fine_tuned"
@@ -95,20 +128,10 @@ class EvalRecord(models.Model):
         default=EVALUATION_MODE_BASELINE,
         db_index=True,
     )
-    target_name = models.CharField(max_length=255, db_index=True)
+    target_name = models.CharField(max_length=255, db_index=True)     # 评测目标名称
     task_type = models.CharField(max_length=64, choices=TASK_CHOICES, db_index=True)
-    qa_accuracy = models.DecimalField(
-        max_digits=5,
-        decimal_places=4,
-        blank=True,
-        null=True,
-    )
-    extraction_accuracy = models.DecimalField(
-        max_digits=5,
-        decimal_places=4,
-        blank=True,
-        null=True,
-    )
+    qa_accuracy = models.DecimalField(max_digits=5, decimal_places=4, blank=True, null=True)
+    extraction_accuracy = models.DecimalField(max_digits=5, decimal_places=4, blank=True, null=True)
     precision = models.DecimalField(max_digits=5, decimal_places=4, blank=True, null=True)
     recall = models.DecimalField(max_digits=5, decimal_places=4, blank=True, null=True)
     f1_score = models.DecimalField(max_digits=5, decimal_places=4, blank=True, null=True)
@@ -123,7 +146,7 @@ class EvalRecord(models.Model):
         default=STATUS_PENDING,
         db_index=True,
     )
-    metadata = models.JSONField(default=dict, blank=True)
+    metadata = models.JSONField(default=dict, blank=True)   # 扩展元数据（评测器类型、数据集大小等）
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -131,10 +154,14 @@ class EvalRecord(models.Model):
 
 
 class FineTuneRunnerServer(models.Model):
+    """微调训练服务器配置实体。
+
+    存储远程微调执行器（如 LLaMA-Factory Runner）的连接信息。
+    """
     name = models.CharField(max_length=255, unique=True)
-    base_url = models.URLField(max_length=500)
-    auth_token = models.CharField(max_length=255, blank=True, default="")
-    default_work_dir = models.CharField(max_length=500, blank=True, default="")
+    base_url = models.URLField(max_length=500)            # 训练服务器 API 基地址
+    auth_token = models.CharField(max_length=255, blank=True, default="")  # 认证令牌
+    default_work_dir = models.CharField(max_length=500, blank=True, default="")  # 默认工作目录
     is_enabled = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -144,6 +171,11 @@ class FineTuneRunnerServer(models.Model):
 
 
 class FineTuneRun(models.Model):
+    """微调运行记录实体。
+
+    存储一次微调任务从创建、派发、执行到完成的完整生命周期状态。
+    包含数据集信息、训练配置、产物路径、回调令牌等。
+    """
     STATUS_PENDING = "pending"
     STATUS_RUNNING = "running"
     STATUS_SUCCEEDED = "succeeded"
@@ -174,24 +206,24 @@ class FineTuneRun(models.Model):
         blank=True,
         null=True,
     )
-    run_key = models.CharField(max_length=64, blank=True, default="", db_index=True)
-    external_job_id = models.CharField(max_length=255, blank=True, default="", db_index=True)
+    run_key = models.CharField(max_length=64, blank=True, default="", db_index=True)   # 运行唯一标识
+    external_job_id = models.CharField(max_length=255, blank=True, default="", db_index=True)  # 外部任务 ID
     runner_name = models.CharField(max_length=128, blank=True, default="")
     dataset_name = models.CharField(max_length=255)
     dataset_version = models.CharField(max_length=128, blank=True, default="")
-    strategy = models.CharField(max_length=64, default="lora")
+    strategy = models.CharField(max_length=64, default="lora")   # 微调策略（lora / full）
     status = models.CharField(
         max_length=32,
         choices=STATUS_CHOICES,
         default=STATUS_PENDING,
         db_index=True,
     )
-    artifact_path = models.CharField(max_length=500, blank=True, default="")
-    export_path = models.CharField(max_length=500, blank=True, default="")
-    deployment_endpoint = models.CharField(max_length=500, blank=True, default="")
-    deployment_model_name = models.CharField(max_length=255, blank=True, default="")
-    callback_token_hash = models.CharField(max_length=128, blank=True, default="")
-    callback_token_value = models.CharField(max_length=255, blank=True, default="")
+    artifact_path = models.CharField(max_length=500, blank=True, default="")   # 产物路径
+    export_path = models.CharField(max_length=500, blank=True, default="")     # 导出路径
+    deployment_endpoint = models.CharField(max_length=500, blank=True, default="")  # 部署端点
+    deployment_model_name = models.CharField(max_length=255, blank=True, default="")  # 部署模型名
+    callback_token_hash = models.CharField(max_length=128, blank=True, default="")   # 回调令牌哈希
+    callback_token_value = models.CharField(max_length=255, blank=True, default="")   # 回调令牌明文（仅供创建时返回）
     dataset_manifest = models.JSONField(default=dict, blank=True)
     training_config = models.JSONField(default=dict, blank=True)
     artifact_manifest = models.JSONField(default=dict, blank=True)
@@ -210,6 +242,11 @@ class FineTuneRun(models.Model):
 
 
 class ModelInvocationLog(models.Model):
+    """模型调用日志实体。
+
+    每次通过网关或直接调用 LLM API 时记录一条日志，用于计费、监控和审计。
+    类比 SpringBoot 中的审计/日志实体，支持按时间、模型、trace_id 等维度查询。
+    """
     STATUS_SUCCESS = "success"
     STATUS_FAILED = "failed"
     STATUS_CHOICES = (
@@ -247,12 +284,12 @@ class ModelInvocationLog(models.Model):
         choices=ModelConfig.PROVIDER_CHOICES,
         default=ModelConfig.PROVIDER_OPENAI_COMPATIBLE,
     )
-    alias = models.CharField(max_length=255)
-    upstream_model = models.CharField(max_length=255, blank=True, default="")
-    # stage: optional pipeline step label; blank means unclassified (e.g. direct SDK calls outside the gateway).
+    alias = models.CharField(max_length=255)           # 别名（关联到 ModelConfig.name）
+    upstream_model = models.CharField(max_length=255, blank=True, default="")  # 上游模型标识
+    # stage: 可选流水线步骤标签；为空表示未分类（例如网关外部的直接 SDK 调用）
     stage = models.CharField(max_length=32, choices=STAGE_CHOICES, blank=True, default="")
     status = models.CharField(max_length=32, choices=STATUS_CHOICES, default=STATUS_SUCCESS)
-    latency_ms = models.PositiveIntegerField(default=0)
+    latency_ms = models.PositiveIntegerField(default=0)  # 调用延迟（毫秒）
     request_tokens = models.PositiveIntegerField(default=0)
     response_tokens = models.PositiveIntegerField(default=0)
     total_tokens = models.PositiveIntegerField(default=0)
@@ -261,7 +298,7 @@ class ModelInvocationLog(models.Model):
         choices=TOKEN_SOURCE_CHOICES,
         default=TOKEN_SOURCE_NONE,
     )
-    raw_usage = models.JSONField(default=dict, blank=True)
+    raw_usage = models.JSONField(default=dict, blank=True)  # 原始用量数据
     provider_request_id = models.CharField(max_length=128, blank=True, default="")
     input_unit_price_snapshot = models.DecimalField(max_digits=12, decimal_places=6, default=0)
     output_unit_price_snapshot = models.DecimalField(max_digits=12, decimal_places=6, default=0)
@@ -271,11 +308,9 @@ class ModelInvocationLog(models.Model):
     total_cost = models.DecimalField(max_digits=18, decimal_places=8, default=0)
     error_code = models.CharField(max_length=64, blank=True, default="")
     error_message = models.TextField(blank=True, default="")
-    trace_id = models.CharField(max_length=128, blank=True, default="")
-    request_id = models.CharField(max_length=128, blank=True, default="")
-    # db_index=True on created_at supports the default ordering sort (ORDER BY -created_at)
-    # and point-in-time range queries (e.g. recent logs feed) that don't include the
-    # composite-index prefix columns (model_config, trace_id, request_id).
+    trace_id = models.CharField(max_length=128, blank=True, default="")    # 链路追踪 ID
+    request_id = models.CharField(max_length=128, blank=True, default="")  # 请求 ID
+    # created_at 上有 db_index=True，支持默认按时间倒排及不包含复合索引前缀列的按时间范围查询
     created_at = models.DateTimeField(auto_now_add=True, db_index=True)
 
     class Meta:

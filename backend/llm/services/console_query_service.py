@@ -1,3 +1,10 @@
+"""
+控制台查询服务（类比 SpringBoot 中 @Service 的查询层）。
+该模块负责组装 LLM 管理控制台的三个概览页面数据：
+- 总览（供应商状态、活跃模型、最近活动）
+- 可观测性（对话统计、检索命中、失败详情）
+- 知识库（解析器能力、摄入队列状态）
+"""
 from collections import Counter
 from datetime import timedelta
 
@@ -10,6 +17,7 @@ from llm.models import FineTuneRun, ModelConfig
 from llm.services.model_config_service import get_active_model_config
 from rag.models import RetrievalLog
 
+# 供应商标签映射
 _PROVIDER_LABELS = {
     ModelConfig.PROVIDER_DEEPSEEK: "DeepSeek",
     ModelConfig.PROVIDER_DASHSCOPE: "DashScope",
@@ -18,9 +26,13 @@ _PROVIDER_LABELS = {
 }
 
 
-
-
 def _build_provider_status():
+    """构建各 LLM 供应商及辅助服务的连接状态列表。
+
+    返回:
+        list[dict]，每个元素包含 key、label、status（connected/configured/missing/idle）和 active_count。
+        也包含非 LLM 供应商的辅助组件：pymupdf4llm（文档解析）和 llamafactory（微调框架）。
+    """
     all_configs = list(ModelConfig.objects.exclude(provider=ModelConfig.PROVIDER_LITELLM))
     active_configs = [config for config in all_configs if config.is_active]
     configured_by_provider = Counter(config.provider for config in all_configs)
@@ -63,6 +75,13 @@ def _build_provider_status():
 
 
 def _serialize_model(model_config):
+    """将模型配置序列化为简洁的字典格式。
+
+    参数:
+        model_config: ModelConfig 实例或 None。
+    返回:
+        dict，包含 provider、model_name、endpoint、name 字段。
+    """
     if model_config is None:
         return {
             "provider": "",
@@ -79,11 +98,18 @@ def _serialize_model(model_config):
 
 
 def _serialize_failed_ingestion(task):
+    """将失败的摄入任务序列化为字典格式。
+
+    参数:
+        task: IngestionTask 实例。
+    返回:
+        dict，包含 document_id、document_title、message、current_step、updated_at。
+    """
     return {
         "document_id": task.document_id,
         "document_title": task.document.title,
         "document_type": task.document.doc_type,
-        # Keep the task error if present; otherwise surface the document-level error for older failures.
+        # 优先使用任务级错误信息，否则回退到文档级错误（用于旧版本失败的记录）
         "message": task.error_message or task.document.error_message,
         "current_step": task.current_step,
         "updated_at": task.updated_at.isoformat(),
@@ -91,6 +117,13 @@ def _serialize_failed_ingestion(task):
 
 
 def _recent_failed_ingestions(limit=5):
+    """获取最近失败的摄入任务列表。
+
+    参数:
+        limit: int，返回的最大记录数，默认 5。
+    返回:
+        list[IngestionTask]，按更新时间倒序排列。
+    """
     return list(
         IngestionTask.objects.filter(status=IngestionTask.STATUS_FAILED)
         .select_related("document")
@@ -99,6 +132,15 @@ def _recent_failed_ingestions(limit=5):
 
 
 def build_llm_console_summary():
+    """构建 LLM 控制台总览数据。
+
+    返回:
+        dict，包含：
+        - providers: 供应商及辅助服务连接状态列表
+        - active_models: 当前活跃的 chat 和 embedding 模型信息
+        - recent_activity: 24h 内的对话请求数、失败摄入数、运行中微调数等
+        - quick_links: 管理页面的快捷导航链接
+    """
     try:
         active_chat = get_active_model_config(ModelConfig.CAPABILITY_CHAT)
     except ModelNotConfiguredError:
@@ -140,6 +182,13 @@ def build_llm_console_summary():
 
 
 def build_llm_observability_summary():
+    """构建 LLM 可观测性概览数据。
+
+    返回:
+        dict，包含：
+        - overview: 24h 内对话请求数、检索命中数、平均延迟、失败摄入总数
+        - recent_failures: 最近的摄入失败详情列表
+    """
     window_start = timezone.now() - timedelta(hours=24)
     recent_chat_logs = RetrievalLog.objects.filter(
         source=RetrievalLog.SOURCE_CHAT_ASK,
@@ -164,6 +213,15 @@ def build_llm_observability_summary():
 
 
 def build_llm_knowledge_summary():
+    """构建 LLM 知识库概览数据。
+
+    返回:
+        dict，包含：
+        - parser_capabilities: 各文档格式（txt/pdf/docx）的解析器和回退策略
+        - ingestion_summary: 文档摄入队列各状态（queued/running/succeeded/failed）计数
+        - recent_failures: 最近摄入失败详情
+        - pipeline_steps: 摄入流水线步骤描述
+    """
     recent_failures = _recent_failed_ingestions()
     return {
         "parser_capabilities": {
