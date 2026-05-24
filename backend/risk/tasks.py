@@ -1,3 +1,15 @@
+"""
+风险分析的 Celery 异步任务定义。
+
+类比 SpringBoot: 相当于 @Async 注解的异步方法或 Spring Batch 的 Job，
+由 Celery Worker 守护进程执行。这些任务负责将 LLM 调用等耗时操作
+从 HTTP 请求-响应循环中剥离，避免阻塞 Web 服务线程。
+
+任务列表:
+- extract_document_task:          单文档风险抽取（信号检测 + 抽取 + 验证 + 持久化）
+- batch_extract_document_task:    批量文档风险抽取（遍历多个文档执行抽取）
+- expire_stale_extractions_task:  过期任务清理（定时将僵尸任务标记为失败）
+"""
 from celery import shared_task
 from celery.exceptions import SoftTimeLimitExceeded
 from django.conf import settings
@@ -19,6 +31,15 @@ from risk.services.task_service import (
 
 
 def _resolve_extraction_task(extraction_task_id):
+    """
+    根据任务 UUID 查找对应的 RiskExtractionTask 记录。
+
+    参数:
+        extraction_task_id (UUID | None): 任务主键。
+
+    返回:
+        RiskExtractionTask | None: 找到的任务实例，不存在时返回 None。
+    """
     if extraction_task_id is None:
         return None
     try:
@@ -28,6 +49,13 @@ def _resolve_extraction_task(extraction_task_id):
 
 
 def _finalize_success(extraction_task, result):
+    """
+    将提取任务标记为成功完成。
+
+    参数:
+        extraction_task (RiskExtractionTask | None): 任务实例，None 时跳过。
+        result (dict): 提取结果数据。
+    """
     if extraction_task is None:
         return
     finish_risk_extraction_task(
@@ -39,6 +67,14 @@ def _finalize_success(extraction_task, result):
 
 
 def _finalize_failure(extraction_task, *, message, error_code):
+    """
+    将提取任务标记为失败。
+
+    参数:
+        extraction_task (RiskExtractionTask | None): 任务实例，None 时跳过。
+        message (str): 失败原因描述。
+        error_code (str): 错误代码（用于 HTTP 状态码映射）。
+    """
     if extraction_task is None:
         return
     finish_risk_extraction_task(
@@ -55,6 +91,25 @@ def _finalize_failure(extraction_task, *, message, error_code):
     time_limit=settings.RISK_EXTRACTION_TASK_TIME_LIMIT,
 )
 def extract_document_task(document_id, extraction_task_id=None):
+    """
+    单文档风险抽取异步任务。
+
+    类比 SpringBoot: 相当于 @Async 方法 + Spring Batch Step 的组合。
+    工作流程:
+    1. 检查文档是否存在
+    2. 获取文档的所有 chunk
+    3. 快速检测风险关键词信号（无信号则跳过）
+    4. 调用 extract_risk_events_for_document 执行完整的抽取+验证+持久化管道
+    5. 超时异常和通用异常的捕获处理
+
+    参数:
+        document_id (int): 要分析的文档 ID。
+        extraction_task_id (UUID, 可选): 关联的状态跟踪任务 ID。
+
+    返回:
+        dict: {status, message, document_id, created_count, risk_events, [error_code]}
+              status: "not_found" | "no_chunks" | "no_signals" | "succeeded" | "failed"
+    """
     extraction_task = _resolve_extraction_task(extraction_task_id)
 
     try:
@@ -160,6 +215,23 @@ def extract_document_task(document_id, extraction_task_id=None):
     time_limit=settings.RISK_EXTRACTION_BATCH_TASK_TIME_LIMIT,
 )
 def batch_extract_document_task(document_ids):
+    """
+    批量文档风险抽取异步任务。
+
+    类比 SpringBoot: 相当于 @Async 批处理方法，逐个文档执行抽取。
+    使用 dict.fromkeys 去重，对每个文档执行信号检测 -> 抽取的完整流程。
+
+    参数:
+        document_ids (list[int]): 要批量分析的文档 ID 列表。
+
+    返回:
+        dict: {
+            "total_documents": int,
+            "processed_documents": int,
+            "total_created_count": int,
+            "results": [{document_id, status, message, created_count, risk_events}, ...],
+        }
+    """
     normalized_document_ids = list(dict.fromkeys(document_ids))
     documents_by_id = {
         document.id: document
@@ -243,5 +315,14 @@ def batch_extract_document_task(document_ids):
 
 @shared_task(name="risk.expire_stale_extractions_task")
 def expire_stale_extractions_task():
+    """
+    清理过期的风险提取任务（定时任务）。
+
+    类比 SpringBoot: 相当于 @Scheduled 的定期清理方法。
+    将长时间未更新的 queued/running 任务标记为 failed。
+
+    返回:
+        dict: {"expired_count": int} 被标记为过期的任务数量。
+    """
     expired_count = expire_stale_risk_extractions()
     return {"expired_count": expired_count}
