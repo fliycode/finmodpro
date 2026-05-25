@@ -68,6 +68,7 @@ const defaultFormState = () => ({
   is_active: false,
   has_api_key: false,
   api_key_masked: '',
+  options_json: '',
 });
 
 function getFirstProviderForCapability(capability = 'chat') {
@@ -103,6 +104,7 @@ function getProviderDefaults(capability = 'chat', provider = 'deepseek') {
 }
 
 const form = reactive(defaultFormState());
+const showAdvanced = ref(false);
 
 const drawerTitle = computed(() => (editingId.value ? '编辑模型' : '新增模型'));
 const supportsTokenOptions = computed(() => form.capability === 'chat');
@@ -242,6 +244,7 @@ function resetForm() {
   Object.assign(form, defaultFormState());
   editingId.value = null;
   originalOptions.value = {};
+  showAdvanced.value = false;
 }
 
 function openCreate() {
@@ -253,9 +256,22 @@ function openCreate() {
 function openEdit(config) {
   resetForm();
   editingId.value = config.id;
-  const safeOptions = { ...(config.options || {}) };
-  delete safeOptions.api_key;
+  const knownKeys = new Set(["api_key", "temperature", "max_tokens"]);
+  const safeOptions = {};
+  const extraOptions = {};
+  if (config.options) {
+    for (const [k, v] of Object.entries(config.options)) {
+      if (knownKeys.has(k)) {
+        safeOptions[k] = v;
+      } else {
+        extraOptions[k] = v;
+      }
+    }
+  }
   originalOptions.value = safeOptions;
+  form.options_json = Object.keys(extraOptions).length > 0
+    ? JSON.stringify(extraOptions, null, 2)
+    : "";
   form.name = config.name;
   form.model_name = config.model_name;
   form.capability = config.capability;
@@ -280,6 +296,17 @@ function buildOptions() {
   const options = {
     ...originalOptions.value,
   };
+  // 解析高级 JSON 选项
+  if (form.options_json.trim()) {
+    try {
+      const parsed = JSON.parse(form.options_json.trim());
+      if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)) {
+        Object.assign(options, parsed);
+      }
+    } catch {
+      // 解析失败时忽略
+    }
+  }
   const apiKey = String(form.api_key || '').trim();
 
   if (apiKey) {
@@ -610,6 +637,25 @@ onMounted(fetchConfigs);
         <el-form-item label="模型描述">
           <el-input v-model="form.description" type="textarea" :rows="3" placeholder="补充模型用途、擅长任务或接入说明。" />
         </el-form-item>
+
+        <el-divider />
+        <div class="form-toggle-row" @click="showAdvanced = !showAdvanced" style="cursor: pointer; user-select: none; display: flex; align-items: center; gap: 8px;">
+          <span :style="{ color: 'var(--el-text-color-regular)', fontWeight: 500 }">高级选项</span>
+          <span :style="{ color: 'var(--el-text-color-secondary)', fontSize: '12px', transform: showAdvanced ? 'rotate(90deg)' : 'rotate(0deg)', transition: 'transform 0.2s', display: 'inline-block' }">▶</span>
+          <span :style="{ color: 'var(--el-text-color-secondary)', fontSize: '12px' }">非标准 API 路径、自定义参数等（JSON 格式）</span>
+        </div>
+        <template v-if="showAdvanced">
+          <el-form-item label="高级配置 (JSON)">
+            <el-input
+              v-model="form.options_json"
+              type="textarea"
+              :rows="6"
+              placeholder='{"no_v1_suffix": true, "chat_path": "/api/chat"}'
+              style="font-family: monospace; font-size: 13px;"
+            />
+            <div class="form-footnote">例如：自定义端点路径、提供商特有参数。标准字段（api_key / temperature / max_tokens）请在基础表单中填写，此处不会覆盖。</div>
+          </el-form-item>
+        </template>
 
         <div class="model-form__grid">
           <el-form-item :label="form.has_api_key ? `API Key（当前：${form.api_key_masked || '已配置'}）` : 'API Key'">

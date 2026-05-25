@@ -66,6 +66,7 @@ const defaultFormState = () => ({
   is_active: false,
   has_api_key: false,
   api_key_masked: "",
+  options_json: "",
 });
 
 const getCapabilityRouteDefaults = (capability = "chat") => {
@@ -103,6 +104,7 @@ const defaultRunnerServerFormState = () => ({
 });
 
 const form = reactive(defaultFormState());
+const showAdvanced = ref(false);
 const fineTuneForm = reactive(defaultFineTuneFormState());
 const runnerServerForm = reactive(defaultRunnerServerFormState());
 
@@ -228,6 +230,7 @@ const frameMeta = computed(() => {
 const resetForm = () => {
   Object.assign(form, defaultFormState());
   editingId.value = null;
+  showAdvanced.value = false;
 };
 
 const openCreate = (capability = "chat") => {
@@ -250,11 +253,35 @@ const openEdit = (config) => {
   form.max_tokens = Number(config.options?.max_tokens ?? 1024);
   form.has_api_key = Boolean(config.has_api_key);
   form.api_key_masked = config.api_key_masked || "";
+  // 提取非标准 options 字段放入 JSON 编辑区
+  const knownKeys = new Set(["api_key", "temperature", "max_tokens"]);
+  const extraOptions = {};
+  if (config.options) {
+    for (const [k, v] of Object.entries(config.options)) {
+      if (!knownKeys.has(k)) {
+        extraOptions[k] = v;
+      }
+    }
+  }
+  form.options_json = Object.keys(extraOptions).length > 0
+    ? JSON.stringify(extraOptions, null, 2)
+    : "";
   drawerVisible.value = true;
 };
 
 const buildPayload = () => {
   const options = {};
+  // 解析高级 JSON 选项
+  if (form.options_json.trim()) {
+    try {
+      const parsed = JSON.parse(form.options_json.trim());
+      if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)) {
+        Object.assign(options, parsed);
+      }
+    } catch {
+      // 解析失败时忽略，由校验层拦截
+    }
+  }
   if (form.api_key.trim()) {
     options.api_key = form.api_key.trim();
   }
@@ -933,6 +960,25 @@ onMounted(async () => {
                 <el-input-number v-model="form.max_tokens" :min="1" :max="8192" :step="128" style="width: 100%" />
               </el-form-item>
             </div>
+          </template>
+
+          <el-divider />
+          <div class="form-toggle-row" @click="showAdvanced = !showAdvanced" style="cursor: pointer; user-select: none;">
+            <span :style="{ color: 'var(--el-text-color-regular)', fontWeight: 500 }">高级选项</span>
+            <span :style="{ color: 'var(--el-text-color-secondary)', fontSize: '12px', transform: showAdvanced ? 'rotate(90deg)' : 'rotate(0deg)', transition: 'transform 0.2s', display: 'inline-block' }">▶</span>
+            <span :style="{ color: 'var(--el-text-color-secondary)', fontSize: '12px', marginLeft: '8px' }">非标准 API 路径、自定义参数等（JSON 格式）</span>
+          </div>
+          <template v-if="showAdvanced">
+            <el-form-item label="高级配置 (JSON)">
+              <el-input
+                v-model="form.options_json"
+                type="textarea"
+                :rows="6"
+                placeholder='{"no_v1_suffix": true, "chat_path": "/api/chat"}'
+                style="font-family: monospace; font-size: 13px;"
+              />
+              <div class="form-footnote">例如：自定义端点路径、提供商特有参数。标准字段（api_key / temperature / max_tokens）请在基础表单中填写，此处不会覆盖。</div>
+            </el-form-item>
           </template>
 
           <el-form-item>
