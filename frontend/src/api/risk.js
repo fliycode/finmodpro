@@ -56,6 +56,14 @@ export const createRiskApi = (overrides = {}) => {
   };
 
   return {
+    getExtractionHistory(params = {}, { signal } = {}) {
+      const queryString = buildQueryString(params);
+      const path = queryString
+        ? `/api/risk/extractions?${queryString}`
+        : '/api/risk/extractions';
+      return requestJson(path, { signal });
+    },
+
     getEvents(params = {}, { signal } = {}) {
       const queryString = buildQueryString(params);
       const path = queryString ? `/api/risk/events?${queryString}` : '/api/risk/events';

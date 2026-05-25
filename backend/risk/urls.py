@@ -28,6 +28,7 @@ from risk.controllers import (
     RiskDocumentExtractView,
     RiskEventListView,
     RiskEventReviewView,
+    RiskExtractionHistoryView,
     RiskExtractStatusView,
     RiskReportExportView,
     SentimentAnalyzeView,
@@ -38,6 +39,8 @@ from risk.controllers import (
 urlpatterns = [
     # 风险分析概览仪表盘
     path("analytics/overview", RiskAnalyticsOverviewView.as_view(), name="risk-analytics-overview"),
+    # 风险提取历史列表
+    path("extractions", RiskExtractionHistoryView.as_view(), name="risk-extraction-history"),
     # 风险事件列表查询
     path("events", RiskEventListView.as_view(), name="risk-event-list"),
     # 风险事件审核

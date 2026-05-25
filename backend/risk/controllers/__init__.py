@@ -14,6 +14,7 @@ from risk.controllers.extract_controller import (
     RiskDocumentExtractView,
     RiskExtractStatusView,
 )
+from risk.controllers.history_controller import RiskExtractionHistoryView
 from risk.controllers.list_controller import RiskEventListView
 from risk.controllers.report_controller import (
     CompanyRiskReportCreateView,
@@ -32,6 +33,7 @@ __all__ = [
     "RiskDocumentBatchExtractView",
     "RiskDocumentExtractRetryView",
     "RiskDocumentExtractView",
+    "RiskExtractionHistoryView",
     "RiskExtractStatusView",
     "RiskEventListView",
     "RiskEventReviewView",

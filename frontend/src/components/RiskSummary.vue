@@ -32,6 +32,9 @@ const detailDialogMode = ref('event');
 const activeDetailPayload = ref(null);
 const resultEvents = ref([]);
 const resultErrorMsg = ref('');
+const extractionHistory = ref([]);
+const isLoadingHistory = ref(false);
+const historyErrorMsg = ref('');
 let knowledgeDocumentsRequestId = 0;
 let knowledgeDocumentSearchTimer = null;
 
@@ -577,6 +580,84 @@ const fetchKnowledgeDocuments = async ({ searchKeyword = '' } = {}) => {
   }
 };
 
+const fetchExtractionHistory = async () => {
+  isLoadingHistory.value = true;
+  historyErrorMsg.value = '';
+  try {
+    const data = await riskApi.getExtractionHistory({ limit: 10 });
+    extractionHistory.value = data.data?.tasks || data.tasks || [];
+  } catch (error) {
+    historyErrorMsg.value = error.message || '加载提取历史失败';
+    extractionHistory.value = [];
+  } finally {
+    isLoadingHistory.value = false;
+  }
+};
+
+const loadHistoryEntry = async (entry) => {
+  if (isUploading.value || isProcessing.value) return;
+  const documentId = entry.document_id;
+  if (!documentId) return;
+
+  isUploading.value = true;
+  resultEvents.value = [];
+  resultErrorMsg.value = '';
+
+  try {
+    const document = await kbApi.getDocumentDetail(documentId);
+    activeDocument.value = document;
+    selectedKnowledgeDocumentId.value = document.id;
+    upsertKnowledgeDocument(document);
+
+    pipelineRun.value = {
+      ...createPipelineRunState(),
+      status: entry.status === 'SUCCESS' ? 'succeeded' : 'failed',
+      fileName: entry.document_filename || document.filename || document.title || '',
+      documentId: document.id,
+      uploadProgress: 100,
+      ingestProgress: 100,
+      extractProgress: 100,
+      detail: entry.status === 'SUCCESS'
+        ? `已提取 ${entry.created_count || 0} 条风险事件`
+        : (entry.error_message || entry.message || '提取未完成'),
+      createdCount: entry.created_count || 0,
+    };
+
+    if (entry.status === 'SUCCESS') {
+      await fetchDocumentEvents(documentId);
+      saveSessionState();
+    } else {
+      resultErrorMsg.value = entry.error_message || entry.message || '提取失败';
+    }
+  } catch (error) {
+    applyPipelineFailure(error);
+    notifyPipelineFailure(error, '加载历史提取结果失败');
+  } finally {
+    isUploading.value = false;
+  }
+};
+
+const historyAgoText = (isoString) => {
+  if (!isoString) return '';
+  const diff = Date.now() - new Date(isoString).getTime();
+  const minutes = Math.floor(diff / 60000);
+  if (minutes < 1) return '刚刚';
+  if (minutes < 60) return `${minutes} 分钟前`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours} 小时前`;
+  const days = Math.floor(hours / 24);
+  if (days < 30) return `${days} 天前`;
+  return new Date(isoString).toLocaleDateString('zh-CN');
+};
+
+const historyStatusText = (status) => ({
+  SUCCESS: '已完成', QUEUED: '排队中', RUNNING: '执行中', FAILURE: '失败',
+}[status] || status || '未知');
+
+const historyStatusTone = (status) => ({
+  SUCCESS: 'success', QUEUED: 'muted', RUNNING: 'active', FAILURE: 'danger',
+}[status] || 'muted');
+
 const queueKnowledgeDocumentSearch = (searchKeyword = '') => {
   if (knowledgeDocumentSearchTimer) {
     clearTimeout(knowledgeDocumentSearchTimer);
@@ -836,6 +917,7 @@ const runRiskPipeline = async (documentId) => {
 
   await fetchDocumentEvents(documentId);
   saveSessionState();
+  fetchExtractionHistory();
   flash.success('风险提取完成');
 };
 
@@ -1008,6 +1090,7 @@ const restoreSessionState = async () => {
 
 onMounted(async () => {
   fetchKnowledgeDocuments();
+  fetchExtractionHistory();
   await restoreSessionState();
 });
 
@@ -1098,6 +1181,37 @@ const handleGenerateReport = async () => {
         <AppIcon name="download" />
         {{ exportHint }}
       </el-button>
+    </section>
+
+    <section v-if="extractionHistory.length" class="risk-page__history">
+      <div class="risk-page__history-head">
+        <span class="risk-page__history-label">最近提取</span>
+        <span class="risk-page__history-count">{{ extractionHistory.length }} 条记录</span>
+      </div>
+      <ol class="risk-page__history-list">
+        <li v-for="entry in extractionHistory" :key="entry.task_id">
+          <button
+            type="button"
+            class="risk-page__history-item"
+            :data-active="activeDocument?.id === entry.document_id"
+            :disabled="isUploading || isProcessing"
+            @click="loadHistoryEntry(entry)"
+          >
+            <div class="risk-page__history-item-head">
+              <strong>{{ entry.document_title || entry.document_filename || '未命名文档' }}</strong>
+              <span class="risk-page__status" :data-tone="historyStatusTone(entry.status)">
+                {{ historyStatusText(entry.status) }}
+              </span>
+            </div>
+            <div class="risk-page__history-item-meta">
+              <span v-if="entry.status === 'SUCCESS'">{{ entry.created_count || 0 }} 条风险</span>
+              <span v-else-if="entry.status === 'FAILURE'">{{ entry.error_message || entry.message || '提取失败' }}</span>
+              <span v-else>{{ entry.message || '处理中' }}</span>
+              <span class="risk-page__history-item-ago">{{ historyAgoText(entry.finished_at || entry.created_at) }}</span>
+            </div>
+          </button>
+        </li>
+      </ol>
     </section>
 
     <section class="risk-page__studio">
@@ -1464,6 +1578,110 @@ const handleGenerateReport = async () => {
 
 .risk-page__toolbar {
   flex-wrap: wrap;
+}
+
+.risk-page__history {
+  display: grid;
+  gap: 10px;
+  padding: 14px 18px;
+  border: 1px solid var(--line-soft);
+  border-radius: 18px;
+  background: color-mix(in oklab, var(--surface-2) 90%, var(--surface-3));
+}
+
+.risk-page__history-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.risk-page__history-label {
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+}
+
+.risk-page__history-count {
+  font-size: 0.7rem;
+  color: var(--text-muted);
+}
+
+.risk-page__history-list {
+  display: flex;
+  gap: 10px;
+  overflow-x: auto;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  scrollbar-width: thin;
+}
+
+.risk-page__history-list > li {
+  flex: 0 0 260px;
+  min-width: 0;
+}
+
+.risk-page__history-item {
+  display: grid;
+  gap: 8px;
+  width: 100%;
+  padding: 12px 14px;
+  border: 1px solid var(--line-soft);
+  border-radius: 14px;
+  background: var(--surface-1);
+  text-align: left;
+  cursor: pointer;
+  transition: background 180ms ease, box-shadow 180ms ease;
+}
+
+.risk-page__history-item:hover:not(:disabled) {
+  background: color-mix(in oklab, var(--brand-soft) 28%, var(--surface-hover));
+  box-shadow: 0 0 0 1px color-mix(in oklab, var(--brand) 20%, transparent);
+}
+
+.risk-page__history-item:focus-visible {
+  outline: 2px solid color-mix(in oklab, var(--brand) 64%, white);
+  outline-offset: -2px;
+}
+
+.risk-page__history-item[data-active='true'] {
+  border-color: color-mix(in oklab, var(--brand) 40%, var(--line-soft));
+  background: color-mix(in oklab, var(--brand) 6%, var(--surface-1));
+}
+
+.risk-page__history-item:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.risk-page__history-item-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.risk-page__history-item-head strong {
+  color: var(--text-primary);
+  font-size: 0.875rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.risk-page__history-item-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 0.72rem;
+  color: var(--text-muted);
+}
+
+.risk-page__history-item-ago {
+  flex-shrink: 0;
 }
 
 .risk-page__toolbar-button {

@@ -356,6 +356,26 @@ def heartbeat_risk_extraction_task(task, *, step, progress, message):
     )
 
 
+def list_extraction_tasks(*, document_id=None, status=None, limit=20):
+    """
+    查询提取任务列表，按创建时间倒序。
+
+    参数:
+        document_id (int, 可选): 按文档 ID 过滤。
+        status (str, 可选): 按状态过滤 (queued / running / succeeded / failed)。
+        limit (int): 返回条数上限。
+
+    返回:
+        QuerySet[RiskExtractionTask]: 带 document 预加载的查询集。
+    """
+    queryset = RiskExtractionTask.objects.select_related("document").order_by("-created_at")
+    if document_id is not None:
+        queryset = queryset.filter(document_id=document_id)
+    if status is not None:
+        queryset = queryset.filter(status=status)
+    return queryset[:limit]
+
+
 def finish_risk_extraction_task(task, *, status, message, result_payload=None, error_code=""):
     """
     标记任务完成（成功或失败），写入最终结果。
