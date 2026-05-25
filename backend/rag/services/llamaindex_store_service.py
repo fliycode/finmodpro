@@ -73,6 +73,16 @@ def _build_milvus_vector_store():
         "text_key": "content",
         "similarity_metric": "COSINE",
         "overwrite": False,
+        "output_fields": [
+            "document_id",
+            "chunk_id",
+            "document_title",
+            "doc_type",
+            "source_date",
+            "page_label",
+            "chunk_index",
+            "content",
+        ],
     }
     token = getattr(settings, "MILVUS_TOKEN", "")
     if token:
