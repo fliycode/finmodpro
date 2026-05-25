@@ -394,12 +394,14 @@ def _best_relevance_score(item):
     获取检索结果的最佳相关性评分。
 
     从可选字段 rerank_score > score > keyword_score > vector_score 中选取最大值。
+    各字段可能来自不同评分算法且范围不一致（如 keyword_score 可达 2.0），
+    因此统一 clamp 到 [0, 1] 后再比较。
 
     参数：
       - item: dict 检索结果条目。
 
     返回：
-      - float|None: 最佳评分，所有字段都无效时返回 None。
+      - float|None: 最佳评分（0-1），所有字段都无效时返回 None。
     """
     scores = [
         _numeric_score(item, "rerank_score"),
@@ -407,7 +409,7 @@ def _best_relevance_score(item):
         _numeric_score(item, "keyword_score"),
         _numeric_score(item, "vector_score"),
     ]
-    numeric_scores = [score for score in scores if score is not None]
+    numeric_scores = [max(0.0, min(score, 1.0)) for score in scores if score is not None]
     if not numeric_scores:
         return None
     return max(numeric_scores)

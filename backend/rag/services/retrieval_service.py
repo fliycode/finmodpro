@@ -37,6 +37,17 @@ def _normalize_top_k(top_k):
     return normalized
 
 
+def _clamp_score(value):
+    """
+    将评分 clamp 到 [0, 1] 范围，兼容不同来源评分算法范围不一致的情况（如
+    keyword_score 可达 2.0，BM25 无上界）。
+    """
+    try:
+        return max(0.0, min(float(value), 1.0))
+    except (TypeError, ValueError):
+        return 0.0
+
+
 def serialize_citation(item):
     """
     将单条检索结果序列化为引文格式，供前端展示使用。
@@ -58,13 +69,13 @@ def serialize_citation(item):
     if item.get("window"):
         citation["window"] = item["window"]
     if "score" in item:
-        citation["score"] = item["score"]
+        citation["score"] = _clamp_score(item["score"])
     if "rerank_score" in item:
-        citation["rerank_score"] = item["rerank_score"]
+        citation["rerank_score"] = _clamp_score(item["rerank_score"])
     if "keyword_score" in item:
-        citation["keyword_score"] = item["keyword_score"]
+        citation["keyword_score"] = _clamp_score(item["keyword_score"])
     if "vector_score" in item:
-        citation["vector_score"] = item["vector_score"]
+        citation["vector_score"] = _clamp_score(item["vector_score"])
     return citation
 
 

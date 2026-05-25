@@ -764,9 +764,9 @@ const handleAsk = async () => {
                 <div class="qa-cite-card__snippet">{{ cite.snippet || '暂无摘录。' }}</div>
                 <div
                   class="qa-cite-card__score"
-                  v-if="Math.max(cite.rerank_score || 0, cite.score || 0, cite.keyword_score || 0, cite.vector_score || 0) > 0"
+                  v-if="(cite.rerank_score || cite.score) > 0"
                 >
-                  相关度 {{ (Math.max(cite.rerank_score || 0, cite.score || 0, cite.keyword_score || 0, cite.vector_score || 0) * 100).toFixed(0) }}%
+                  相关度 {{ ((cite.rerank_score || cite.score) * 100).toFixed(0) }}%
                 </div>
               </div>
             </div>

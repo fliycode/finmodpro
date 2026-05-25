@@ -62,6 +62,9 @@ def rerank_results(results, query=None):
             except Exception:
                 logger.exception("Rerank API call failed; falling back to vector score.")
 
+    for item in results:
+        if "rerank_score" not in item:
+            item["rerank_score"] = item.get("score", 0.0)
     return sorted(results, key=lambda item: item.get("score", 0.0), reverse=True)
 
 
@@ -127,4 +130,7 @@ def rerank_with_variants(results, query_variants=None, fallback_query=None):
     except Exception:
         logger.exception("Rerank API call failed; falling back to vector score.")
 
-    return sorted(results, key=lambda item: item.get("score", 0.0), reverse=True)
+    for item in results:
+        if "rerank_score" not in item:
+            item["rerank_score"] = item.get("score", 0.0)
+    return sorted(results, key=lambda item: item.get("rerank_score", 0.0), reverse=True)

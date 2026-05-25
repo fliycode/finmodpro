@@ -25,9 +25,9 @@ const normalizeCitations = (rawCitations) => {
     page_label: cite.page_label || cite.page || (cite.metadata && (cite.metadata.page || cite.metadata.page_label)) || 'N/A',
     snippet: cite.snippet || cite.text || cite.content || '',
     score: Number(cite.score || 0),
-    rerank_score: Number(cite.rerank_score || 0),
-    keyword_score: Number(cite.keyword_score || 0),
-    vector_score: Number(cite.vector_score || 0),
+    rerank_score: Math.min(Number(cite.rerank_score || 0), 1),
+    keyword_score: Math.min(Number(cite.keyword_score || 0), 1),
+    vector_score: Math.min(Number(cite.vector_score || 0), 1),
   }));
 };
 
