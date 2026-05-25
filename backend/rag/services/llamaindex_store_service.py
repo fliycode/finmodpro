@@ -467,7 +467,13 @@ def _bm25_search(query, filters=None, limit=5):
         return []
 
     retriever_copy = copy.copy(retriever)
-    retriever_copy.similarity_top_k = max(int(limit), 1)
+    # BM25Retriever 存文档在 corpus 而非 _nodes
+    corpus = getattr(retriever_copy, "corpus", None) or []
+    node_count = len(corpus)
+    requested_k = max(int(limit), 1)
+    if node_count > 0 and requested_k > node_count:
+        requested_k = node_count
+    retriever_copy.similarity_top_k = requested_k
 
     metadata_filters = _build_bm25_metadata_filters(filters)
     if metadata_filters:
