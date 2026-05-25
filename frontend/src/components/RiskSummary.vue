@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
 import { ElMessageBox } from 'element-plus';
 
 import { kbApi } from '../api/knowledgebase.js';
@@ -130,6 +130,24 @@ const sortedRiskEvents = computed(() => [...resultEvents.value].sort((left, righ
 
   return String(right.event_time || '').localeCompare(String(left.event_time || ''));
 }));
+
+const expandedCategories = reactive({});
+const toggleCategory = (key) => {
+  expandedCategories[key] = !expandedCategories[key];
+};
+
+watch(groupedRiskResults, (groups) => {
+  Object.keys(expandedCategories).forEach((k) => delete expandedCategories[k]);
+  if (groups.length > 0) {
+    expandedCategories[groups[0].key] = true;
+  }
+}, { immediate: true });
+
+const insightLimit = ref(5);
+const visibleInsights = computed(() => sortedRiskEvents.value.slice(0, insightLimit.value));
+const toggleInsightLimit = () => {
+  insightLimit.value = insightLimit.value <= 5 ? sortedRiskEvents.value.length : 5;
+};
 
 const highestRiskGroup = computed(() => groupedRiskResults.value[0] || null);
 const severeEventCount = computed(() => resultEvents.value.filter(
@@ -1263,7 +1281,7 @@ const handleGenerateReport = async () => {
 
           <ol class="risk-page__insight-list">
             <li
-              v-for="event in sortedRiskEvents"
+              v-for="event in visibleInsights"
               :key="`${event.id || event.risk_type}-${event.event_time || event.summary}`"
             >
               <button
@@ -1293,6 +1311,15 @@ const handleGenerateReport = async () => {
               </button>
             </li>
           </ol>
+
+          <button
+            v-if="sortedRiskEvents.length > 5"
+            type="button"
+            class="risk-page__show-more"
+            @click="toggleInsightLimit"
+          >
+            {{ insightLimit <= 5 ? `展开全部 ${sortedRiskEvents.length} 条事件` : '收起' }}
+          </button>
 
           <div class="risk-page__document-note">
             <span class="risk-page__heading-note">原文片段</span>
@@ -1336,24 +1363,44 @@ const handleGenerateReport = async () => {
 
         <ol v-else-if="groupedRiskResults.length" class="risk-page__category-list">
           <li v-for="group in groupedRiskResults" :key="group.key">
-            <button
-              type="button"
+            <div
               class="risk-page__category"
               :data-tone="riskTagTypeMap[normalizeRiskLevel(group.dominantLevel)] || 'muted'"
-              @click="openRiskGroupDetail(group)"
             >
-              <div class="risk-page__category-head">
-                <strong>{{ group.key }}</strong>
-                <span class="risk-page__status" :data-tone="riskTagTypeMap[normalizeRiskLevel(group.dominantLevel)] || 'muted'">
-                  {{ getRiskLevelText(normalizeRiskLevel(group.dominantLevel)) }}
-                </span>
+              <button
+                type="button"
+                class="risk-page__category-header"
+                @click="toggleCategory(group.key)"
+              >
+                <div class="risk-page__category-head">
+                  <strong>{{ group.key }}</strong>
+                  <span class="risk-page__status" :data-tone="riskTagTypeMap[normalizeRiskLevel(group.dominantLevel)] || 'muted'">
+                    {{ getRiskLevelText(normalizeRiskLevel(group.dominantLevel)) }}
+                  </span>
+                </div>
+                <span class="risk-page__category-count">{{ group.count }} 条</span>
+                <span class="risk-page__category-chevron" :class="{ 'is-expanded': expandedCategories[group.key] }">&#9662;</span>
+              </button>
+              <p class="risk-page__category-summary">{{ group.summary }}</p>
+              <div v-if="expandedCategories[group.key]" class="risk-page__category-body">
+                <button
+                  v-for="event in group.events"
+                  :key="event.id || event.summary"
+                  type="button"
+                  class="risk-page__category-event"
+                  @click.stop="openRiskEventDetail(event)"
+                >
+                  <div class="risk-page__category-event-head">
+                    <span class="risk-page__status" :data-tone="riskTagTypeMap[normalizeRiskLevel(event.risk_level)] || 'muted'">
+                      {{ getRiskLevelText(normalizeRiskLevel(event.risk_level)) }}
+                    </span>
+                    <span>{{ formatRiskEventTime(event.event_time) }}</span>
+                    <span>{{ formatConfidenceScore(event.confidence_score) }}</span>
+                  </div>
+                  <p>{{ event.summary || '暂无摘要' }}</p>
+                </button>
               </div>
-              <p>{{ group.summary }}</p>
-              <div class="risk-page__category-meta">
-                <span>{{ group.count }} 条事件</span>
-                <span>点击查看详情</span>
-              </div>
-            </button>
+            </div>
           </li>
         </ol>
 
@@ -1557,7 +1604,6 @@ const handleGenerateReport = async () => {
 .risk-page__toolbar,
 .risk-page__context-bar,
 .risk-page__category-head,
-.risk-page__category-meta,
 .risk-page__detail-head,
 .risk-page__detail-item-head,
 .risk-page__dialog-actions,
@@ -1776,7 +1822,6 @@ const handleGenerateReport = async () => {
 .risk-page__summary-note,
 .risk-page__document-note p,
 .risk-page__state p,
-.risk-page__category p,
 .risk-page__picker-item span,
 .risk-page__picker-item p,
 .risk-page__detail-section p,
@@ -1832,13 +1877,12 @@ const handleGenerateReport = async () => {
 }
 
 .risk-page__insight,
-.risk-page__category,
 .risk-page__picker-item,
 .risk-page__detail-item {
   display: grid;
-  gap: 12px;
+  gap: 8px;
   width: 100%;
-  padding: 18px 20px;
+  padding: 12px 16px;
   border: none;
   border-radius: 0;
   background: transparent;
@@ -1848,33 +1892,170 @@ const handleGenerateReport = async () => {
 }
 
 .risk-page__insight:hover,
-.risk-page__category:hover,
 .risk-page__picker-item:hover,
 .risk-page__detail-item:hover {
   background: color-mix(in oklab, var(--brand-soft) 36%, var(--surface-hover));
 }
 
 .risk-page__insight:focus-visible,
-.risk-page__category:focus-visible,
 .risk-page__picker-item:focus-visible,
 .risk-page__detail-item:focus-visible {
   outline: 2px solid color-mix(in oklab, var(--brand) 64%, white);
   outline-offset: -2px;
 }
 
-.risk-page__insight[data-tone='danger'],
+.risk-page__insight[data-tone='danger'] {
+  background: rgba(196, 73, 61, 0.04);
+}
+
+.risk-page__insight[data-tone='warning'] {
+  background: rgba(186, 128, 40, 0.05);
+}
+
+.risk-page__insight[data-tone='success'] {
+  background: rgba(33, 129, 92, 0.04);
+}
+
+/* ---- 分类手风琴 ---- */
+.risk-page__category {
+  display: grid;
+  background: transparent;
+  text-align: left;
+}
+
 .risk-page__category[data-tone='danger'] {
   background: rgba(196, 73, 61, 0.04);
 }
 
-.risk-page__insight[data-tone='warning'],
 .risk-page__category[data-tone='warning'] {
   background: rgba(186, 128, 40, 0.05);
 }
 
-.risk-page__insight[data-tone='success'],
 .risk-page__category[data-tone='success'] {
   background: rgba(33, 129, 92, 0.04);
+}
+
+.risk-page__category-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 12px 16px;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  transition: background 180ms ease;
+}
+
+.risk-page__category-header:hover {
+  background: color-mix(in oklab, var(--brand-soft) 36%, var(--surface-hover));
+}
+
+.risk-page__category-header:focus-visible {
+  outline: 2px solid color-mix(in oklab, var(--brand) 64%, white);
+  outline-offset: -2px;
+}
+
+.risk-page__category-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1;
+  min-width: 0;
+}
+
+.risk-page__category-count {
+  color: var(--text-muted);
+  font-size: 0.8rem;
+  flex-shrink: 0;
+}
+
+.risk-page__category-chevron {
+  color: var(--text-muted);
+  font-size: 0.7rem;
+  transition: transform 200ms ease;
+  flex-shrink: 0;
+}
+
+.risk-page__category-chevron.is-expanded {
+  transform: rotate(180deg);
+}
+
+.risk-page__category-summary {
+  margin: 0;
+  padding: 0 16px 10px;
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+  line-height: 1.5;
+}
+
+.risk-page__category-body {
+  border-top: 1px solid var(--line-soft);
+  display: grid;
+}
+
+.risk-page__category-event {
+  display: grid;
+  gap: 6px;
+  width: 100%;
+  padding: 10px 16px;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  transition: background 180ms ease;
+}
+
+.risk-page__category-event + .risk-page__category-event {
+  border-top: 1px solid color-mix(in oklab, var(--line-soft) 60%, transparent);
+}
+
+.risk-page__category-event:hover {
+  background: color-mix(in oklab, var(--brand-soft) 24%, var(--surface-hover));
+}
+
+.risk-page__category-event-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
+.risk-page__category-event p {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+  line-height: 1.5;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* ---- 展示更多 ---- */
+.risk-page__show-more {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  padding: 10px;
+  border: none;
+  border-top: 1px solid var(--line-soft);
+  background: color-mix(in oklab, var(--surface-2) 92%, var(--surface-3));
+  color: var(--brand);
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 180ms ease;
+}
+
+.risk-page__show-more:hover {
+  background: color-mix(in oklab, var(--brand-soft) 36%, var(--surface-hover));
 }
 
 .risk-page__status {
@@ -1915,7 +2096,6 @@ const handleGenerateReport = async () => {
 }
 
 .risk-page__insight-meta,
-.risk-page__category-meta,
 .risk-page__detail-head {
   flex-wrap: wrap;
   align-items: baseline;
@@ -2065,7 +2245,7 @@ const handleGenerateReport = async () => {
   .risk-page__toolbar,
   .risk-page__insight-head,
   .risk-page__category-head,
-  .risk-page__category-meta,
+  .risk-page__category-header,
   .risk-page__picker-item-head {
     align-items: flex-start;
     flex-direction: column;
