@@ -16,6 +16,8 @@ const riskTagTypeMap = { high: 'danger', critical: 'danger', medium: 'warning', 
 const riskLevelTextMap = { critical: '严重', high: '高', medium: '中', low: '低' };
 const KNOWLEDGE_DOCUMENT_PAGE_SIZE = 24;
 
+const SAVED_SESSION_KEY = 'finmodpro:risk:lastSession';
+
 const fileInput = ref(null);
 const isUploading = ref(false);
 const isGeneratingReport = ref(false);
@@ -517,6 +519,11 @@ const resetPipelineRun = () => {
   activeDocument.value = null;
   resultEvents.value = [];
   resultErrorMsg.value = '';
+  try {
+    localStorage.removeItem(SAVED_SESSION_KEY);
+  } catch {
+    // 静默忽略
+  }
 };
 
 const upsertKnowledgeDocument = (document) => {
@@ -665,6 +672,11 @@ const startPipelineRun = (file) => {
   activeDocument.value = null;
   resultEvents.value = [];
   resultErrorMsg.value = '';
+  try {
+    localStorage.removeItem(SAVED_SESSION_KEY);
+  } catch {
+    // 静默忽略
+  }
 };
 
 const syncActiveDocument = async (documentId) => {
@@ -823,6 +835,7 @@ const runRiskPipeline = async (documentId) => {
   });
 
   await fetchDocumentEvents(documentId);
+  saveSessionState();
   flash.success('风险提取完成');
 };
 
@@ -942,8 +955,60 @@ const handleUseKnowledgeDocument = async () => {
   }
 };
 
-onMounted(() => {
+const saveSessionState = () => {
+  if (!activeDocument.value?.id || !resultEvents.value.length) {
+    return;
+  }
+  try {
+    localStorage.setItem(SAVED_SESSION_KEY, JSON.stringify({
+      documentId: activeDocument.value.id,
+      fileName: pipelineRun.value.fileName || activeDocument.value.filename || '',
+      savedAt: Date.now(),
+    }));
+  } catch {
+    // localStorage 不可用时静默忽略
+  }
+};
+
+const restoreSessionState = async () => {
+  let stored;
+  try {
+    const raw = localStorage.getItem(SAVED_SESSION_KEY);
+    if (!raw) return;
+    stored = JSON.parse(raw);
+  } catch {
+    localStorage.removeItem(SAVED_SESSION_KEY);
+    return;
+  }
+
+  if (!stored?.documentId) return;
+
+  try {
+    const document = await kbApi.getDocumentDetail(stored.documentId);
+    activeDocument.value = document;
+    selectedKnowledgeDocumentId.value = document.id;
+    upsertKnowledgeDocument(document);
+
+    pipelineRun.value = {
+      ...createPipelineRunState(),
+      status: 'succeeded',
+      fileName: stored.fileName || document.filename || document.title || '',
+      documentId: document.id,
+      uploadProgress: 100,
+      ingestProgress: 100,
+      extractProgress: 100,
+      detail: '已加载历史提取结果',
+    };
+
+    await fetchDocumentEvents(stored.documentId);
+  } catch {
+    localStorage.removeItem(SAVED_SESSION_KEY);
+  }
+};
+
+onMounted(async () => {
   fetchKnowledgeDocuments();
+  await restoreSessionState();
 });
 
 onBeforeUnmount(() => {
