@@ -1,5 +1,5 @@
 <template>
-  <div class="markdown-body" v-html="renderedHtml" />
+  <div class="markdown-body" v-html="renderedHtml" @click="onCiteClick" />
 </template>
 
 <script setup>
@@ -20,6 +20,18 @@ import DOMPurify from 'dompurify';
 
 // 导入 GitHub Dark 主题
 import 'highlight.js/styles/github-dark.css';
+
+const emit = defineEmits(['cite-click']);
+
+const onCiteClick = (event) => {
+  const ref = event.target.closest('.cite-ref');
+  if (ref && ref.dataset.citeIndex) {
+    const index = parseInt(ref.dataset.citeIndex, 10);
+    if (!isNaN(index) && index > 0) {
+      emit('cite-click', index);
+    }
+  }
+};
 
 const props = defineProps({
   content: {
@@ -124,13 +136,19 @@ marked.setOptions({
   gfm: true,    // 启用 GitHub Flavored Markdown
 });
 
-// 渲染 Markdown 并清理 XSS
+// 预处理：将引用编号 [1]/【1】 转为可点击的 span，便于在回答中跳转到引用面板
+const CITATION_PATTERN = /\[\s*(\d{1,2})\s*\]|【\s*(\d{1,2})\s*】/g;
+const preprocessCitations = (text) => text.replace(CITATION_PATTERN, (match, n1, n2) => {
+  const index = n1 || n2;
+  return `<span class="cite-ref" data-cite-index="${index}">${match}</span>`;
+});
+
 const renderedHtml = computed(() => {
   if (!props.content) return '';
 
-  const rawHtml = marked.parse(props.content);
+  const rawHtml = marked.parse(preprocessCitations(props.content));
   return DOMPurify.sanitize(rawHtml, {
-    ADD_TAGS: ['button'], // 允许复制按钮
+    ADD_TAGS: ['button'],
     ADD_ATTR: ['onclick', 'class', 'target', 'rel'],
   });
 });
@@ -357,5 +375,17 @@ const renderedHtml = computed(() => {
 .markdown-body .task-list-item input[type="checkbox"] {
   margin-right: 0.5em;
   accent-color: #2457c5;
+}
+
+/* 引用编号可点击样式 */
+.markdown-body .cite-ref {
+  color: #7b9fff;
+  cursor: pointer;
+  font-weight: 700;
+  transition: color 0.2s ease;
+}
+.markdown-body .cite-ref:hover {
+  color: #a0c4ff;
+  text-decoration: underline;
 }
 </style>

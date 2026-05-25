@@ -61,6 +61,10 @@ def serialize_citation(item):
         citation["score"] = item["score"]
     if "rerank_score" in item:
         citation["rerank_score"] = item["rerank_score"]
+    if "keyword_score" in item:
+        citation["keyword_score"] = item["keyword_score"]
+    if "vector_score" in item:
+        citation["vector_score"] = item["vector_score"]
     return citation
 
 

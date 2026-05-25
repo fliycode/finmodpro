@@ -205,6 +205,25 @@ const resetConversation = () => {
   railVisible.value = false;
 };
 
+const openCitationPanel = (citations) => {
+  railVisible.value = true;
+  if (citations && citations.length > 0) {
+    nextTick(() => scrollToCitation(1));
+  }
+};
+
+const scrollToCitation = (index) => {
+  railVisible.value = true;
+  nextTick(() => {
+    const el = document.getElementById(`cite-card-${index}`);
+    if (el) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      el.classList.add('qa-cite-card--highlight');
+      setTimeout(() => el.classList.remove('qa-cite-card--highlight'), 2000);
+    }
+  });
+};
+
 const refreshSessionOptions = async () => {
   if (sessionOptionsPromise) {
     return sessionOptionsPromise;
@@ -620,6 +639,7 @@ const handleAsk = async () => {
                           v-if="msg.content"
                           :content="msg.content"
                           :streaming="msg.isStreaming"
+                          @cite-click="(index) => scrollToCitation(index)"
                         />
                         <span v-if="msg.isStreaming" class="qa-cursor" />
                       </div>
@@ -647,6 +667,7 @@ const handleAsk = async () => {
                         v-if="msg.citations && msg.citations.length > 0"
                         type="button"
                         class="qa-cite-jump"
+                        @click="openCitationPanel(msg.citations)"
                       >
                         {{ getCitationDisclosureLabel(msg.citations) }}
                       </button>
@@ -728,6 +749,7 @@ const handleAsk = async () => {
             <div
               v-for="(cite, index) in latestCitations.slice(0, 5)"
               :key="`cite-${index}`"
+              :id="`cite-card-${index + 1}`"
               class="qa-cite-card"
             >
               <div class="qa-cite-card__index" :class="{ 'qa-cite-card__index--active': index === 0 }">
@@ -740,8 +762,11 @@ const handleAsk = async () => {
                   <span v-if="cite.page_label && cite.page_label !== 'N/A'">· {{ cite.page_label }}</span>
                 </div>
                 <div class="qa-cite-card__snippet">{{ cite.snippet || '暂无摘录。' }}</div>
-                <div class="qa-cite-card__score" v-if="(cite.rerank_score || cite.score) > 0">
-                  相关度 {{ ((cite.rerank_score || cite.score) * 100).toFixed(0) }}%
+                <div
+                  class="qa-cite-card__score"
+                  v-if="Math.max(cite.rerank_score || 0, cite.score || 0, cite.keyword_score || 0, cite.vector_score || 0) > 0"
+                >
+                  相关度 {{ (Math.max(cite.rerank_score || 0, cite.score || 0, cite.keyword_score || 0, cite.vector_score || 0) * 100).toFixed(0) }}%
                 </div>
               </div>
             </div>
@@ -1546,6 +1571,11 @@ const handleAsk = async () => {
   font-size: 11px;
   color: var(--text-muted);
   font-weight: 600;
+}
+
+.qa-cite-card--highlight {
+  background: rgba(66, 120, 255, 0.15);
+  box-shadow: inset 2px 0 0 var(--brand);
 }
 
 /* Question Buttons */
