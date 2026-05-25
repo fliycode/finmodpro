@@ -77,6 +77,7 @@ class OllamaApiMixin:
         """向 Ollama API 发送 JSON POST 请求。
 
         对 HTTPError 和传输错误进行统一的异常转换和日志记录。
+        支持通过 options.api_key 配置 Bearer Token 认证（适用于代理网关场景）。
 
         参数:
             path: str，API 路径。
@@ -94,6 +95,9 @@ class OllamaApiMixin:
         url = self._build_url(path)
         body = json.dumps(payload).encode("utf-8")
         headers = {"Content-Type": "application/json"}
+        api_key = self.options.get("api_key")
+        if api_key:
+            headers["Authorization"] = f"Bearer {api_key}"
         logger.info(
             "Calling %s provider",
             self.provider_name,
@@ -264,8 +268,9 @@ class OllamaChatProvider(OllamaApiMixin, BaseChatProvider):
             "stream": False,
         }
         merged_options = {**self.options, **(options or {})}
-        if merged_options:
-            payload["options"] = merged_options
+        ollama_options = {k: v for k, v in merged_options.items() if k != "api_key"}
+        if ollama_options:
+            payload["options"] = ollama_options
         started_at = time.monotonic()
         try:
             response_payload = self._post_json("/api/chat", payload, capability="chat", options=options)
@@ -337,7 +342,8 @@ class OllamaEmbeddingProvider(OllamaApiMixin, BaseEmbeddingProvider):
             "model": self.model_name,
             "input": texts[0] if len(texts) == 1 else texts,
         }
-        payload.update(merged_options)
+        ollama_options = {k: v for k, v in merged_options.items() if k != "api_key"}
+        payload.update(ollama_options)
         started_at = time.monotonic()
         try:
             response_payload = self._post_json("/api/embed", payload, capability="embedding", options=options)

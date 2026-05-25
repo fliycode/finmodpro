@@ -136,11 +136,16 @@ class OpenAICompatibleApiMixin:
     def _build_url(self, path):
         """拼接完整的 API URL。
 
+        当 options.no_v1_suffix 为 True 时，直接使用 endpoint 作为基地址，
+        不追加 /v1 后缀。适用于代理网关等非标准 API 路径场景。
+
         参数:
             path: str，API 路径（如 '/chat/completions'）。
         返回:
             str，完整 URL。
         """
+        if self.options.get("no_v1_suffix"):
+            return f"{self.endpoint}{path}"
         return f"{self._api_base()}{path}"
 
     def _build_headers(self, api_key):
@@ -157,9 +162,11 @@ class OpenAICompatibleApiMixin:
         }
 
     def _usage_from_payload(self, payload) -> TokenUsage:
-        """从 OpenAI 兼容格式的响应中提取 Token 用量。
+        """从 OpenAI 兼容或 Ollama 格式的响应中提取 Token 用量。
 
-        兼容多种字段名：prompt_tokens/input_tokens、completion_tokens/output_tokens。
+        兼容两种格式：
+        - OpenAI: usage.prompt_tokens / usage.completion_tokens
+        - Ollama: 顶层的 prompt_eval_count / eval_count
 
         参数:
             payload: dict，API JSON 响应。
@@ -167,20 +174,24 @@ class OpenAICompatibleApiMixin:
             TokenUsage，填充了用量信息。
         """
         usage = (payload or {}).get("usage") or {}
-        request_tokens = int(usage.get("prompt_tokens") or usage.get("input_tokens") or 0)
-        response_tokens = int(usage.get("completion_tokens") or usage.get("output_tokens") or 0)
-        total_tokens = int(usage.get("total_tokens") or (request_tokens + response_tokens))
+        request_tokens = int(usage.get("prompt_tokens") or usage.get("input_tokens") or payload.get("prompt_eval_count") or 0)
+        response_tokens = int(usage.get("completion_tokens") or usage.get("output_tokens") or payload.get("eval_count") or 0)
+        total_tokens = int(usage.get("total_tokens") or payload.get("total_tokens") or (request_tokens + response_tokens))
         source = (
             ModelInvocationLog.TOKEN_SOURCE_PROVIDER
             if (request_tokens or response_tokens or total_tokens)
             else ModelInvocationLog.TOKEN_SOURCE_NONE
         )
+        raw = dict(usage) if usage else {
+            "prompt_eval_count": payload.get("prompt_eval_count"),
+            "eval_count": payload.get("eval_count"),
+        }
         return TokenUsage(
             request_tokens=request_tokens,
             response_tokens=response_tokens,
             total_tokens=total_tokens,
             source=source,
-            raw=dict(usage),
+            raw=raw,
         )
 
     def _record_success(self, *, capability, started_at, usage, trace_id="", request_id="", provider_request_id=""):
@@ -385,6 +396,7 @@ class OpenAICompatibleChatProvider(OpenAICompatibleApiMixin, BaseChatProvider):
             ChatResult，包含模型回复、用量和元数据。
         """
         merged_options = self._resolve_options(options)
+        chat_path = merged_options.get("chat_path") or "/chat/completions"
         payload = {
             "model": self.model_name,
             "messages": messages,
@@ -399,7 +411,7 @@ class OpenAICompatibleChatProvider(OpenAICompatibleApiMixin, BaseChatProvider):
         started_at = time.monotonic()
         try:
             response_payload = self._post_json(
-                "/chat/completions",
+                chat_path,
                 payload,
                 options=options,
                 capability="chat",
@@ -414,8 +426,17 @@ class OpenAICompatibleChatProvider(OpenAICompatibleApiMixin, BaseChatProvider):
             )
             raise
         usage = self._usage_from_payload(response_payload)
+        # 兼容两种响应格式：
+        # - OpenAI 标准: choices[0].message.content
+        # - Ollama 原生: message.content（某些代理会透传 Ollama 原始响应）
         choices = response_payload.get("choices") or []
-        message = (choices[0] or {}).get("message") or {}
+        if choices:
+            first_choice = choices[0] or {}
+            message = first_choice.get("message") or {}
+            finish_reason = first_choice.get("finish_reason") or ""
+        else:
+            message = response_payload.get("message") or {}
+            finish_reason = response_payload.get("done_reason") or ""
         content = message.get("content")
         if isinstance(content, list):
             content = "".join(str(item) for item in content)
@@ -437,7 +458,7 @@ class OpenAICompatibleChatProvider(OpenAICompatibleApiMixin, BaseChatProvider):
         result = ChatResult(
             content=content,
             usage=usage,
-            finish_reason=(choices[0] or {}).get("finish_reason") or "",
+            finish_reason=finish_reason,
             request_id=response_payload.get("id") or "",
             raw_response=response_payload,
         )
@@ -462,6 +483,7 @@ class OpenAICompatibleChatProvider(OpenAICompatibleApiMixin, BaseChatProvider):
             str，每次产出一段文本增量（SSE 格式解析后的 content 字段）。
         """
         merged_options = self._resolve_options(options)
+        chat_path = merged_options.get("chat_path") or "/chat/completions"
         payload = {
             "model": self.model_name,
             "messages": messages,
@@ -474,7 +496,7 @@ class OpenAICompatibleChatProvider(OpenAICompatibleApiMixin, BaseChatProvider):
         if merged_options.get("response_format") is not None:
             payload["response_format"] = merged_options["response_format"]
         body = json.dumps(payload).encode("utf-8")
-        url = self._build_url("/chat/completions")
+        url = self._build_url(chat_path)
         try:
             response = request.urlopen(
                 request.Request(
