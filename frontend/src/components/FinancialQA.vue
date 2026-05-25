@@ -740,8 +740,8 @@ const handleAsk = async () => {
                   <span v-if="cite.page_label && cite.page_label !== 'N/A'">· {{ cite.page_label }}</span>
                 </div>
                 <div class="qa-cite-card__snippet">{{ cite.snippet || '暂无摘录。' }}</div>
-                <div class="qa-cite-card__score" v-if="cite.score > 0">
-                  相关度 {{ (cite.score * 100).toFixed(0) }}%
+                <div class="qa-cite-card__score" v-if="(cite.rerank_score || cite.score) > 0">
+                  相关度 {{ ((cite.rerank_score || cite.score) * 100).toFixed(0) }}%
                 </div>
               </div>
             </div>

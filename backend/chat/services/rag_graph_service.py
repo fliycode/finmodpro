@@ -20,13 +20,13 @@ RAG 图谱流程（Graph Nodes & Edges）：
                           └──(无结果)──> [empty_retrieval_context] ──> END
 
 节点说明：
-  - route: 根据问题意图判断走"检索"还是"直接回答"路径
+  - route: LLM 驱动的意图路由（regex 预检查 + LLM 分类），判断走"检索"还是"直接回答"
   - rewrite_query: 用 LLM 重写问题为更优的检索查询
   - retrieve_and_merge: 并行检索 + 重排序合并
   - score_filter: 按相关性阈值过滤结果
   - build_retrieval_context: 将检索结果组装为带引用的上下文
   - empty_retrieval_context: 无检索结果时的回落上下文
-  - direct_answer_context: 直接回答（不需检索的问候语或约束性提问）
+  - direct_answer_context: 直接回答（问候语、自我介绍等不查知识库的轻量对话）
 
 该模块核心是构建 RAG 有向图，对外提供 prepare_chat_payload() 和
 prepare_chat_payload_streaming() 两个入口函数。
@@ -123,71 +123,6 @@ _DIRECT_ASSISTANT_PATTERNS = (
     "你可以做什么",
     "who are you",
     "what are you",
-)
-# 文档来源关键词：暗示问题涉及文档/资料/报告等知识库内容
-_DOCUMENT_SOURCE_PATTERNS = (
-    "知识库",
-    "上传",
-    "文档",
-    "文件",
-    "资料",
-    "材料",
-    "报告",
-    "报表",
-    "财报",
-    "年报",
-    "审计报告",
-    "开题报告",
-    "论文",
-    "合同",
-    "制度",
-    "方案",
-    "计划书",
-    "手册",
-    "纪要",
-    "公告",
-    "通知",
-    "document",
-    "file",
-    "report",
-    "memo",
-)
-# 文档查找动作词：表明用户想在知识库中检索信息
-_DOCUMENT_LOOKUP_PATTERNS = (
-    "查",
-    "查询",
-    "找",
-    "检索",
-    "看一下",
-    "告诉我",
-    "是什么",
-    "有哪些",
-    "多少",
-    "题目",
-    "标题",
-    "名称",
-    "内容",
-    "摘要",
-    "结论",
-    "作者",
-    "日期",
-    "时间",
-    "title",
-    "what is",
-    "which",
-    "find",
-    "search",
-)
-# 生成/创作动作词：表明用户想生成新内容
-_GENERATION_PATTERNS = (
-    "生成",
-    "写",
-    "撰写",
-    "起草",
-    "拟定",
-    "设计",
-    "建议",
-    "推荐",
 )
 # 约束性回复词：表明用户想要简短/有限的回答，不需要检索
 _CONSTRAINED_RESPONSE_PATTERNS = (
@@ -287,29 +222,6 @@ def _has_direct_assistant_intent(question):
     """
     normalized = _normalize_question_text(question)
     return any(pattern in normalized for pattern in _DIRECT_ASSISTANT_PATTERNS)
-
-
-def _has_document_lookup_intent(question):
-    """
-    检测问题是否具有"文档查找意图"（在知识库中检索信息）。
-
-    判断条件：同时包含文档来源词和查找动作词，且不是单纯的生成请求。
-
-    参数：
-      - question: str 用户问题。
-
-    返回：
-      - bool: True 表示应走检索路径。
-    """
-    normalized = _normalize_question_text(question)
-    if not normalized:
-        return False
-    has_source_hint = any(pattern in normalized for pattern in _DOCUMENT_SOURCE_PATTERNS)
-    has_lookup_hint = any(pattern in normalized for pattern in _DOCUMENT_LOOKUP_PATTERNS)
-    asks_to_create = any(pattern in normalized for pattern in _GENERATION_PATTERNS)
-    if asks_to_create and not any(pattern in normalized for pattern in ("根据", "基于", "参考", "知识库", "上传")):
-        return False
-    return has_source_hint and has_lookup_hint
 
 
 def _has_constrained_response_intent(question):
@@ -553,12 +465,52 @@ def _emit_step(data: dict):
         pass
 
 
-def _route_by_rules(state: ChatRagState):
+def _classify_intent_with_llm(question, provider):
     """
-    图节点：基于规则的问题路由。
+    使用 LLM 判断用户问题是否需要从知识库检索。
 
-    根据问题文本的意图匹配决定走"检索"（retrieve）还是"直接回答"（direct）路径。
-    优先级：直接助手意图 > 约束性回复意图 > 有上下文过滤器 > 文档查找意图 > 默认直接回答。
+    轻量级二分类：retrieve（检索）或 direct（直接回答）。
+    temperature=0 保证确定性，max_tokens=64 降低成本。
+
+    参数：
+      - question: str 用户问题。
+      - provider: object LLM 提供商实例。
+
+    返回：
+      - tuple[str, str]: (route, route_guard)，失败时兜底返回 ("retrieve", "llm_router_fallback")。
+    """
+    prompt = [
+        {
+            "role": "system",
+            "content": (
+                "你是查询路由器。判断用户问题是否需要从知识库检索资料来回答。"
+                "输出严格 JSON：{\"route\": \"retrieve\", \"reason\": \"...\"} "
+                "或 {\"route\": \"direct\", \"reason\": \"...\"}，不要输出额外文本。\n"
+                "需要检索(retrieve)：涉及具体数据、事实、文档内容、公司信息、金融指标、业务规则等需要查资料的问题。\n"
+                "直接回答(direct)：问候闲聊、通用概念解释、创作生成、个人观点建议等无需查资料的问题。"
+            ),
+        },
+        {"role": "user", "content": question},
+    ]
+    try:
+        raw_output = provider.chat(
+            messages=prompt,
+            options={"temperature": 0, "max_tokens": 64},
+        ).content
+        parsed = _parse_json_candidate(raw_output)
+        if isinstance(parsed, dict) and parsed.get("route") in ("retrieve", "direct"):
+            return parsed["route"], "llm_router"
+    except Exception:
+        logger.exception("LLM routing failed; defaulting to retrieve")
+    return "retrieve", "llm_router_fallback"
+
+
+def _route_by_llm(state: ChatRagState):
+    """
+    图节点：LLM 驱动的问题路由。
+
+    优先级：regex 预检查（零成本拦截明显不需检索的问候/约束意图）
+    → 上下文过滤器 → LLM 意图分类 → 失败兜底检索。
 
     参数：
       - state: ChatRagState 当前图状态。
@@ -577,12 +529,8 @@ def _route_by_rules(state: ChatRagState):
     elif resolved_filters:
         route = "retrieve"
         route_guard = "context_filters_present"
-    elif _has_document_lookup_intent(question):
-        route = "retrieve"
-        route_guard = "document_lookup_intent"
     else:
-        route = "direct"
-        route_guard = "default_direct"
+        route, route_guard = _classify_intent_with_llm(question, state["provider"])
     logger.info(
         "chat rag route",
         extra={"question": question, "route": route, "route_guard": route_guard},
@@ -661,7 +609,7 @@ def _retrieve_and_merge(state: ChatRagState):
     图节点：执行向量检索 + 重排序合并。
 
     根据查询变体进行多路检索，将结果合并后调用 rerank 服务重排序。
-    对于文档查找意图，使用更大的检索窗口（top_k * multiplier）。
+    使用放大后的检索窗口（top_k * multiplier）保证候选池充足。
 
     参数：
       - state: ChatRagState 当前图状态。
@@ -675,11 +623,8 @@ def _retrieve_and_merge(state: ChatRagState):
         limit=_chat_query_variant_limit(),
     )
     requested_top_k = int(state["top_k"])
-    retrieval_top_k = requested_top_k
-    candidate_limit = MAX_CHAT_CITATIONS
-    if _has_document_lookup_intent(state["question"]):
-        retrieval_top_k = _chat_retrieval_top_k(requested_top_k)
-        candidate_limit = retrieval_top_k
+    retrieval_top_k = _chat_retrieval_top_k(requested_top_k)
+    candidate_limit = retrieval_top_k
 
     raw_results = retrieve_chat_context_results(
         query=rewritten_query,
@@ -866,7 +811,7 @@ def _build_rag_graph():
       - CompiledGraph: 编译后的可执行 RAG 图，挂载了 django_memory_store 作为长期记忆后端。
     """
     graph = StateGraph(ChatRagState)
-    graph.add_node("route", _route_by_rules)
+    graph.add_node("route", _route_by_llm)
     graph.add_node("rewrite_query", _rewrite_query)
     graph.add_node("retrieve_and_merge", _retrieve_and_merge, retry_policy=_RETRIEVAL_RETRY)
     graph.add_node("score_filter", _score_filter)

@@ -530,12 +530,13 @@ class ChatAskApiTests(TestCase):
         self.assertEqual(retrieval_log.source, RetrievalLog.SOURCE_CHAT_ASK)
         self.assertIsNotNone(retrieval_log.duration_ms)
         self.assertEqual(retrieval_log.metadata["route"], "retrieve")
-        self.assertEqual(retrieval_log.metadata["route_guard"], "document_lookup_intent")
+        self.assertEqual(retrieval_log.metadata["route_guard"], "llm_router_fallback")
         self.assertEqual(retrieval_log.metadata["rewritten_query"], "查一下 Outlook memo 里的 revenue and margin outlook")
         self.assertEqual(retrieval_log.metadata["answer_mode"], "cited")
 
     def test_prepare_chat_payload_rewrites_query_and_grades_results(self):
         provider = ScriptedChatProvider([
+            '{"route": "retrieve", "reason": "test"}',
             '{"rewritten_query":"capital adequacy stress test report","query_variants":["capital adequacy stress test report","car stress scenario"]}',
         ])
 
@@ -550,6 +551,7 @@ class ChatAskApiTests(TestCase):
 
     def test_prepare_chat_payload_logs_rewrite_and_score_filter(self):
         provider = ScriptedChatProvider([
+            '{"route": "retrieve", "reason": "test"}',
             '{"rewritten_query":"cash flow forecast"}',
         ])
 
@@ -566,6 +568,7 @@ class ChatAskApiTests(TestCase):
 
     def test_prepare_chat_payload_passes_query_variants_when_retriever_supports_it(self):
         provider = ScriptedChatProvider([
+            '{"route": "retrieve", "reason": "test"}',
             '{"rewritten_query":"capital adequacy stress test","query_variants":["capital adequacy stress test","car stress scenario"]}',
         ])
 
@@ -581,6 +584,7 @@ class ChatAskApiTests(TestCase):
 
     def test_prepare_chat_payload_forces_retrieval_for_report_title_lookup(self):
         provider = ScriptedChatProvider([
+            '{"route": "retrieve", "reason": "test"}',
             '{"rewritten_query":"开题报告 题目"}',
         ])
 
@@ -590,7 +594,7 @@ class ChatAskApiTests(TestCase):
         )
 
         self.assertEqual(payload["route"], "retrieve")
-        self.assertEqual(payload["route_guard"], "document_lookup_intent")
+        self.assertEqual(payload["route_guard"], "llm_router")
 
     def test_prepare_chat_payload_forces_direct_for_platform_question(self):
         provider = ScriptedChatProvider([])
@@ -665,7 +669,7 @@ class ChatAskApiTests(TestCase):
         self.assertEqual(response.status_code, 200)
         retrieval_log = RetrievalLog.objects.latest("id")
         self.assertEqual(retrieval_log.metadata["route"], "retrieve")
-        self.assertEqual(retrieval_log.metadata["route_guard"], "document_lookup_intent")
+        self.assertEqual(retrieval_log.metadata["route_guard"], "llm_router_fallback")
         self.assertEqual(retrieval_log.metadata["rewritten_query"], "capital adequacy stress test")
         self.assertEqual(
             retrieval_log.metadata["query_variants"],
