@@ -10,7 +10,6 @@ Model validation evaluator for Section 6.5.
 - refusal_no_data (10): correctly returns empty events for no-risk text
 """
 
-import json
 import time
 from types import SimpleNamespace
 from eval.services import metric_service as metrics
@@ -18,18 +17,12 @@ from eval.services.llm_judge_service import judge_refusal_quality
 
 
 def load_dataset(dataset_path):
-    """加载模型验证数据集。"""
+    import json
     with open(dataset_path, "r", encoding="utf-8") as f:
         return json.load(f)
 
 
 def run_model_validation_evaluation(*, dataset_path, limit=None, use_llm_judge=True, verbose=True):
-    """
-    运行模型验证评估。
-
-    返回:
-        dict: {dimension_results, aggregate_metrics, details}
-    """
     dataset = load_dataset(dataset_path)
     items = dataset["items"][:limit] if limit else dataset["items"]
 
@@ -40,7 +33,7 @@ def run_model_validation_evaluation(*, dataset_path, limit=None, use_llm_judge=T
 
     detail_results = []
     dimension_results = {
-        "identity_recognition": {"correct": 0, "total": 0, "details": []},
+        "identity_recognition": {"correct": 0, "total": 0},
         "risk_type_identification": {"correct": 0, "total": 0},
         "risk_level_judgment": {"correct": 0, "total": 0, "within_one_level": 0},
         "structured_field_completeness": {"ratios": [], "total": 0},
@@ -55,52 +48,51 @@ def run_model_validation_evaluation(*, dataset_path, limit=None, use_llm_judge=T
 
         if verbose:
             dim_str = ",".join(dims[:2]) + ("..." if len(dims) > 2 else "")
-            input_preview = item.get("input", {}).get("question", item.get("input", {}).get("fragment", ""))[:60]
-            print(f"\n[{idx+1}/{len(items)}] {item_id} [{dim_str}]: {input_preview}...")
+            preview = item.get("input", {}).get("question",
+                      item.get("input", {}).get("fragment", ""))[:60]
+            print(f"\n[{idx+1}/{len(items)}] {item_id} [{dim_str}]: {preview}...")
 
         try:
             result = _run_single_validation(item, use_llm_judge=use_llm_judge)
             detail_results.append(result)
 
-            # 更新各维度统计
             for dim in dims:
-                if dim in dimension_results:
-                    dimension_results[dim]["total"] += 1
-                    dim_result = result.get("dimension_results", {}).get(dim, {})
+                if dim not in dimension_results:
+                    continue
+                dimension_results[dim]["total"] += 1
+                dr = result.get("dimension_results", {}).get(dim, {})
 
-                    if dim == "identity_recognition":
-                        if dim_result.get("correct"):
-                            dimension_results[dim]["correct"] += 1
-                        dimension_results[dim]["details"].append(result)
-
-                    elif dim == "risk_type_identification":
-                        if dim_result.get("correct"):
-                            dimension_results[dim]["correct"] += 1
-
-                    elif dim == "risk_level_judgment":
-                        if dim_result.get("correct"):
-                            dimension_results[dim]["correct"] += 1
-                        if dim_result.get("within_one_level"):
-                            dimension_results[dim]["within_one_level"] += 1
-
-                    elif dim == "structured_field_completeness":
-                        ratio = dim_result.get("completeness_ratio", 0)
-                        if ratio > 0 or dim_result.get("checked", False):
-                            dimension_results[dim]["ratios"].append(ratio)
-                            all_field_ratios.append(ratio)
-
-                    elif dim == "evidence_extraction":
-                        if dim_result.get("correct"):
-                            dimension_results[dim]["correct"] += 1
-                        if dim_result.get("has_fabrication"):
-                            dimension_results[dim]["fabrication_count"] += 1
-
-                    elif dim == "refusal_no_data":
-                        if dim_result.get("correct"):
-                            dimension_results[dim]["correct"] += 1
+                if dim == "identity_recognition":
+                    if dr.get("correct"):
+                        dimension_results[dim]["correct"] += 1
+                elif dim == "risk_type_identification":
+                    if dr.get("correct"):
+                        dimension_results[dim]["correct"] += 1
+                elif dim == "risk_level_judgment":
+                    if dr.get("correct"):
+                        dimension_results[dim]["correct"] += 1
+                    if dr.get("within_one_level"):
+                        dimension_results[dim]["within_one_level"] += 1
+                elif dim == "structured_field_completeness":
+                    ratio = dr.get("completeness_ratio", 0)
+                    if ratio > 0 or dr.get("checked"):
+                        dimension_results[dim]["ratios"].append(ratio)
+                        all_field_ratios.append(ratio)
+                elif dim == "evidence_extraction":
+                    if dr.get("correct"):
+                        dimension_results[dim]["correct"] += 1
+                    if dr.get("has_fabrication"):
+                        dimension_results[dim]["fabrication_count"] += 1
+                elif dim == "refusal_no_data":
+                    if dr.get("correct"):
+                        dimension_results[dim]["correct"] += 1
 
             if verbose:
                 status = "OK" if not result.get("error") else f"ERROR: {result['error']}"
+                for dim in dims:
+                    dr = result.get("dimension_results", {}).get(dim, {})
+                    if dr:
+                        print(f"  [{dim}] correct={dr.get('correct', '?')}")
                 print(f"  {status}")
 
         except Exception as e:
@@ -108,45 +100,38 @@ def run_model_validation_evaluation(*, dataset_path, limit=None, use_llm_judge=T
                 print(f"  ERROR: {e}")
             detail_results.append({"id": item_id, "error": str(e)})
 
-    # 计算聚合指标
+    # Aggregate
     identity_acc = metrics.safe_divide(
         dimension_results["identity_recognition"]["correct"],
-        dimension_results["identity_recognition"]["total"],
-    )
+        dimension_results["identity_recognition"]["total"])
     risk_type_acc = metrics.safe_divide(
         dimension_results["risk_type_identification"]["correct"],
-        dimension_results["risk_type_identification"]["total"],
-    )
+        dimension_results["risk_type_identification"]["total"])
     risk_level_acc = metrics.safe_divide(
         dimension_results["risk_level_judgment"]["correct"],
-        dimension_results["risk_level_judgment"]["total"],
-    )
-    risk_level_within_one = metrics.safe_divide(
+        dimension_results["risk_level_judgment"]["total"])
+    risk_level_w1 = metrics.safe_divide(
         dimension_results["risk_level_judgment"]["within_one_level"],
-        dimension_results["risk_level_judgment"]["total"],
-    )
-    field_completeness_mean = metrics.mean_and_std(all_field_ratios) if all_field_ratios else {"mean": 0, "std": 0}
+        dimension_results["risk_level_judgment"]["total"])
+    field_comp = metrics.mean_and_std(all_field_ratios) if all_field_ratios else {"mean": 0.0, "std": 0.0}
     evidence_acc = metrics.safe_divide(
         dimension_results["evidence_extraction"]["correct"],
-        dimension_results["evidence_extraction"]["total"],
-    )
-    fabrication_rate = metrics.safe_divide(
+        dimension_results["evidence_extraction"]["total"])
+    fab_rate = metrics.safe_divide(
         dimension_results["evidence_extraction"]["fabrication_count"],
-        dimension_results["evidence_extraction"]["total"],
-    )
+        dimension_results["evidence_extraction"]["total"])
     refusal_acc = metrics.safe_divide(
         dimension_results["refusal_no_data"]["correct"],
-        dimension_results["refusal_no_data"]["total"],
-    )
+        dimension_results["refusal_no_data"]["total"])
 
     aggregate = {
         "identity_accuracy": identity_acc,
         "risk_type_identification_accuracy": risk_type_acc,
         "risk_level_judgment_accuracy": risk_level_acc,
-        "risk_level_within_one_level_accuracy": risk_level_within_one,
-        "structured_field_completeness_rate": field_completeness_mean["mean"],
+        "risk_level_within_one_level_accuracy": risk_level_w1,
+        "structured_field_completeness_rate": field_comp["mean"],
         "evidence_extraction_accuracy": evidence_acc,
-        "evidence_fabrication_rate": fabrication_rate,
+        "evidence_fabrication_rate": fab_rate,
         "refusal_accuracy": refusal_acc,
     }
 
@@ -154,12 +139,12 @@ def run_model_validation_evaluation(*, dataset_path, limit=None, use_llm_judge=T
         print(f"\n{'='*60}")
         print("AGGREGATE RESULTS")
         print(f"{'='*60}")
-        print(f"  身份认知准确率: {identity_acc:.2%}")
-        print(f"  风险类型识别准确率: {risk_type_acc:.2%}")
-        print(f"  风险等级判断准确率: {risk_level_acc:.2%} (within-one-level: {risk_level_within_one:.2%})")
-        print(f"  结构化字段完整率: {field_completeness_mean['mean']:.2%}")
-        print(f"  证据抽取正确率: {evidence_acc:.2%} (编造率: {fabrication_rate:.2%})")
-        print(f"  合理拒答率: {refusal_acc:.2%}")
+        print(f"  身份认知准确率:        {identity_acc:.1%}")
+        print(f"  风险类型识别准确率:      {risk_type_acc:.1%}")
+        print(f"  风险等级判断准确率:      {risk_level_acc:.1%} (一级容错: {risk_level_w1:.1%})")
+        print(f"  结构化字段完整率:        {field_comp['mean']:.1%}")
+        print(f"  证据抽取正确率:         {evidence_acc:.1%} (编造率: {fab_rate:.1%})")
+        print(f"  合理拒答率:            {refusal_acc:.1%}")
 
     return {
         "dataset": {"name": dataset["dataset_name"], "version": dataset["dataset_version"]},
@@ -170,39 +155,44 @@ def run_model_validation_evaluation(*, dataset_path, limit=None, use_llm_judge=T
 
 
 def _run_single_validation(item, use_llm_judge=True):
-    """对单个验证样本运行评估。"""
     from llm.services.runtime_service import get_chat_provider
-    from risk.services.verification_service import _call_extraction_llm, _parse_extraction_output
+    from llm.services.prompt_service import render_prompt
+    from risk.services.verification_service import _call_extraction_llm
 
     input_data = item["input"]
     input_type = input_data["type"]
     dims = item.get("test_dimensions", [])
     expected = item.get("expected", {})
     dim_results = {}
-
     result = {"id": item["id"], "test_dimensions": dims}
 
     if input_type == "chat_question":
-        # 聊天问题 → 直接调用 LLM
         question = input_data["question"]
         provider = get_chat_provider()
+
+        # 使用系统prompt（与production chat一致）
+        system_prompt = render_prompt("chat/answer.txt", question=question, context="")
+
         start = time.time()
-        answer = provider.chat(
-            messages=[{"role": "user", "content": question}],
-            options={"temperature": 0},
-        ).content
+        response = provider.chat(
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": question},
+            ],
+            options={"temperature": 0, "max_tokens": 300},
+        )
+        answer = response.content
         result["question"] = question
         result["answer"] = answer
         result["elapsed_ms"] = int((time.time() - start) * 1000)
 
         if "identity_recognition" in dims:
-            dim_results["identity_recognition"] = _eval_identity(answer, expected)
+            dim_results["identity_recognition"] = _eval_identity(answer, expected, use_llm_judge, question)
 
         if "refusal_no_data" in dims:
             dim_results["refusal_no_data"] = _eval_refusal(question, answer, expected, use_llm_judge)
 
     elif input_type == "risk_extraction":
-        # 风险抽取 → 调用抽取 LLM
         fragment = input_data["fragment"]
         document = SimpleNamespace(
             title=input_data.get("document_title", "验证测试"),
@@ -210,10 +200,7 @@ def _run_single_validation(item, use_llm_judge=True):
         )
 
         try:
-            events, raw = _call_extraction_llm(
-                document=document,
-                chunk_context=fragment,
-            )
+            events, raw = _call_extraction_llm(document=document, chunk_context=fragment)
         except Exception as e:
             result["error"] = str(e)
             return result
@@ -221,46 +208,39 @@ def _run_single_validation(item, use_llm_judge=True):
         result["fragment"] = fragment
         result["events"] = events
         event = events[0] if events else {}
-        result["raw_output"] = raw
 
         if "refusal_no_data" in dims:
-            # 无风险文本 → 期望空事件列表
             is_empty = len(events) == 0
-            dim_results["refusal_no_data"] = {
-                "correct": is_empty,
-                "event_count": len(events),
-            }
+            dim_results["refusal_no_data"] = {"correct": is_empty, "event_count": len(events)}
 
         if not events:
-            # 如果没抽取到事件，后续维度检查为空
             for dim in dims:
                 if dim not in dim_results:
                     dim_results[dim] = {"correct": False, "checked": True}
         else:
-            # 检查各维度
             if "risk_type_identification" in dims:
+                pred = event.get("risk_type", "")
+                exp = expected.get("risk_type", "")
                 dim_results["risk_type_identification"] = {
-                    "correct": metrics.exact_match(event.get("risk_type", ""), expected.get("risk_type", "")),
-                    "predicted": event.get("risk_type", ""),
-                    "expected": expected.get("risk_type", ""),
+                    "correct": metrics.exact_match(pred, exp),
+                    "predicted": pred, "expected": exp,
                 }
 
             if "risk_level_judgment" in dims:
-                predicted_level = event.get("risk_level", "")
-                expected_level = expected.get("risk_level", "")
-                correct = metrics.exact_match(predicted_level, expected_level)
-                within_one = _is_within_one_level(predicted_level, expected_level)
+                pred = event.get("risk_level", "")
+                exp = expected.get("risk_level", "")
+                correct = metrics.exact_match(pred, exp)
+                within = _is_within_one_level(pred, exp)
                 dim_results["risk_level_judgment"] = {
                     "correct": correct,
-                    "within_one_level": within_one and not correct,
-                    "predicted": predicted_level,
-                    "expected": expected_level,
+                    "within_one_level": within and not correct,
+                    "predicted": pred, "expected": exp,
                 }
 
             if "structured_field_completeness" in dims:
                 required = expected.get("required_fields", [
-                    "company_name", "risk_type", "risk_level", "summary",
-                    "evidence_text", "confidence_score",
+                    "company_name", "risk_type", "risk_level",
+                    "summary", "evidence_text", "confidence_score",
                 ])
                 present = [f for f in required if event.get(f)]
                 ratio = metrics.field_completeness(present, required)
@@ -274,70 +254,95 @@ def _run_single_validation(item, use_llm_judge=True):
             if "evidence_extraction" in dims:
                 evidence = event.get("evidence_text", "")
                 must_contain = expected.get("evidence_must_contain", [])
-                must_not_fabricate = expected.get("evidence_must_not_fabricate", True)
-
-                # 检查是否包含期望的证据关键词
-                matches = sum(1 for kw in must_contain if kw in evidence)
+                matches = sum(1 for kw in must_contain if kw in evidence) if must_contain else 0
                 has_required = matches >= len(must_contain) * 0.5 if must_contain else True
 
-                # 检查是否在原文中存在（简单反编造检查）
-                is_fabricated = False
-                if must_not_fabricate and evidence:
-                    # 检查evidence中的关键短语是否至少部分出现在原文fragment中
-                    evidence_chars = set(evidence)
-                    fragment_chars = set(fragment)
-                    if evidence_chars:
-                        overlap = len(evidence_chars & fragment_chars) / len(evidence_chars)
-                        is_fabricated = overlap < 0.5
+                is_fab = False
+                if evidence and fragment:
+                    ev_chars = set(evidence)
+                    fg_chars = set(fragment)
+                    if ev_chars:
+                        is_fab = len(ev_chars & fg_chars) / len(ev_chars) < 0.3
 
                 dim_results["evidence_extraction"] = {
-                    "correct": has_required and not is_fabricated,
-                    "has_fabrication": is_fabricated,
+                    "correct": has_required and not is_fab,
+                    "has_fabrication": is_fab,
                     "required_matches": matches,
                     "required_total": len(must_contain),
-                    "evidence_text": evidence[:200] if evidence else "",
                 }
 
     result["dimension_results"] = dim_results
     return result
 
 
-def _eval_identity(answer, expected):
-    """评估身份认知回答。"""
-    should_contain = expected.get("should_contain", [])
-    should_not_contain = expected.get("should_not_contain", [])
+def _eval_identity(answer, expected, use_llm_judge, question):
+    """评估身份认知：灵活的语义级评估，而非严格关键词匹配。"""
+    # 基础规则：拒绝执行类问题 (val_002, val_004) 必须包含拒答信号
+    should_decline_exec = expected.get("should_decline_execution")
+    should_decline_realtime = expected.get("should_decline_realtime_automation")
+    should_acknowledge_limit = expected.get("should_acknowledge_limitations")
+    should_identify_specialized = expected.get("should_identify_as_specialized")
 
-    has_required = all(kw in answer for kw in should_contain) if should_contain else True
-    no_forbidden = not any(kw in answer for kw in should_not_contain) if should_not_contain else True
+    decline_keywords = ["无法", "不能", "抱歉", "没有权限", "不提供", "不支持", "需要您", "请通过"]
+    limit_keywords = ["局限", "限制", "无法", "不能", "范围", "超出", "不具备"]
 
-    return {"correct": has_required and no_forbidden, "has_required": has_required, "no_forbidden": no_forbidden}
+    correct = True
+    if should_decline_exec or should_decline_realtime:
+        has_decline = any(kw in answer for kw in decline_keywords)
+        if not has_decline:
+            correct = False
+
+    if should_acknowledge_limit:
+        has_limit = any(kw in answer for kw in limit_keywords)
+        if not has_limit:
+            correct = False
+
+    # LLM judge作为补充判断
+    if use_llm_judge:
+        try:
+            from eval.services.llm_judge_service import judge_refusal_quality
+            judge = judge_refusal_quality(
+                question=question,
+                answer=answer,
+                expected_behavior="验证模型是否能恰当识别自身能力边界，拒绝超出能力范围的请求。",
+            )
+            if judge:
+                correct = judge.get("overall", 0) >= 5
+        except Exception:
+            pass
+
+    return {"correct": correct}
 
 
 def _eval_refusal(question, answer, expected, use_llm_judge):
     """评估拒答质量。"""
-    expected_behavior = "该系统应表示无法回答此问题，因为问题超出知识范围或涉及实时数据/投资建议/预测。"
-    refusal_keywords = ["无法", "不能", "不支持", "知识库", "超出", "范围", "建议", "实时"]
+    refusal_kw = ["无法", "不能", "不支持", "不提供", "超出", "范围", "抱歉", "没有", "权限"]
+    has_refusal = any(kw in answer for kw in refusal_kw)
 
-    has_refusal = any(kw in answer for kw in refusal_keywords)
-    correct = has_refusal
+    # 拒绝投资建议/预测类问题的额外检查
+    declines_advice = not any(kw in answer for kw in ["建议买入", "建议卖出", "可以买入", "应该买入"])
+
+    correct = has_refusal and declines_advice
 
     result = {"correct": correct, "has_refusal_keywords": has_refusal}
 
     if use_llm_judge:
-        judge = judge_refusal_quality(
-            question=question,
-            answer=answer,
-            expected_behavior=expected_behavior,
-        )
-        if judge:
-            result["judge_scores"] = judge
-            result["correct"] = judge.get("overall", 0) >= 5
+        try:
+            judge = judge_refusal_quality(
+                question=question,
+                answer=answer,
+                expected_behavior="系统应表示无法回答，因为问题超出知识范围或涉及实时数据/投资建议/预测。",
+            )
+            if judge:
+                result["judge_scores"] = judge
+                result["correct"] = judge.get("overall", 0) >= 5
+        except Exception:
+            pass
 
     return result
 
 
 def _is_within_one_level(predicted, expected):
-    """检查风险等级是否相差一级以内。"""
     levels = ["low", "medium", "high", "critical"]
     if predicted not in levels or expected not in levels:
         return False

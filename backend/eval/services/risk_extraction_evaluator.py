@@ -172,7 +172,7 @@ def _run_single_extraction(item):
 
     # 取第一个抽取的事件进行对比（如果标注只有一条）
     if events:
-        event = events[0]
+        event = {k: _to_str(v) for k, v in events[0].items()}
     else:
         event = {}
 
@@ -255,13 +255,27 @@ def _compare_field(predicted, expected, match_fn):
         return 0, 1, 1
 
 
+def _to_str(value):
+    """将值安全转换为字符串。"""
+    if value is None or value == "":
+        return ""
+    if isinstance(value, str):
+        return value
+    # datetime / date 对象
+    if hasattr(value, "isoformat"):
+        return value.isoformat()
+    return str(value)
+
+
 def _year_month_match(predicted_time, expected_time):
     """检查时间是否在年+月级别匹配。"""
-    if not predicted_time or not expected_time:
+    pred_str = _to_str(predicted_time)
+    exp_str = _to_str(expected_time)
+    if not pred_str or not exp_str:
         return False
     # 取 YYYY-MM 部分
-    pred_ym = predicted_time[:7] if len(predicted_time) >= 7 else predicted_time
-    exp_ym = expected_time[:7] if len(expected_time) >= 7 else expected_time
+    pred_ym = pred_str[:7] if len(pred_str) >= 7 else pred_str
+    exp_ym = exp_str[:7] if len(exp_str) >= 7 else exp_str
     return pred_ym == exp_ym
 
 
