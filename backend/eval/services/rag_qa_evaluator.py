@@ -192,8 +192,8 @@ def _run_single_qa(*, item, strategy, top_k, use_llm_judge):
     citations_context = ""
     if citations:
         for i, c in enumerate(citations):
-            citations_context += f"[{i+1}] Source: {c.get('source', 'unknown')}\n"
-            citations_context += f"    Content: {c.get('content', '')[:200]}\n"
+            citations_context += f"[{i+1}] Source: {c.get('document_title', 'unknown')}\n"
+            citations_context += f"    Content: {c.get('snippet', '')[:200]}\n"
 
     # 基础规则判断
     is_correct = False
@@ -227,7 +227,7 @@ def _run_single_qa(*, item, strategy, top_k, use_llm_judge):
             is_correct = judge_scores["accuracy"] >= 5
 
     # 计算引用召回率
-    actual_sources = [c.get("source", c.get("document_name", "")) for c in citations]
+    actual_sources = [c.get("document_title", "") for c in citations]
     expected_sources = item.get("expected_document_sources", [])
     recall = metrics.citation_recall(actual_sources, expected_sources)
 

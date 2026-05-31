@@ -107,7 +107,7 @@ def run_questions_with_strategy(items, strategy):
             ctx = ""
             if citations:
                 for i, c in enumerate(citations[:5]):
-                    ctx += f"[{i+1}] {c.get('source','?')}: {c.get('content','')[:150]}\n"
+                    ctx += f"[{i+1}] {c.get('document_title','?')}: {c.get('snippet','')[:150]}\n"
 
             # LLM Judge评分
             judge = judge_rag_answer(
