@@ -1,0 +1,314 @@
+{
+  "dataset_name": "finmodpro-rag-qa-v1",
+  "dataset_version": "1.0",
+  "total": 30,
+  "categories": {
+    "company_basic_info": 5,
+    "risk_reason_explanation": 7,
+    "announcement_basis_query": 6,
+    "financial_indicator_explanation": 7,
+    "refusal_no_evidence": 5
+  },
+  "items": [
+    {
+      "id": "qa_001",
+      "category": "company_basic_info",
+      "question": "根据上交所交易规则，A股市场的集合竞价时间段是什么？",
+      "expected_answer_keywords": ["9:15", "9:25", "集合竞价", "开盘"],
+      "expected_document_sources": ["01_上交所A股交易规则.pdf"],
+      "expected_answer_type": "cited",
+      "difficulty": "easy",
+      "notes": "上交所交易规则中的集合竞价时间规定"
+    },
+    {
+      "id": "qa_002",
+      "category": "company_basic_info",
+      "question": "上交所A股连续竞价阶段的交易时间是几点到几点？",
+      "expected_answer_keywords": ["9:30", "11:30", "13:00", "15:00", "连续竞价"],
+      "expected_document_sources": ["01_上交所A股交易规则.pdf"],
+      "expected_answer_type": "cited",
+      "difficulty": "easy",
+      "notes": "上交所连续竞价交易时间"
+    },
+    {
+      "id": "qa_003",
+      "category": "company_basic_info",
+      "question": "中国公募REITs试点的底层资产主要包括哪些类型？",
+      "expected_answer_keywords": ["基础设施", "产业园区", "仓储物流", "保障性租赁住房", "高速公路"],
+      "expected_document_sources": ["03_中国公募REITs市场概述.pdf"],
+      "expected_answer_type": "cited",
+      "difficulty": "medium",
+      "notes": "REITs底层资产类型"
+    },
+    {
+      "id": "qa_004",
+      "category": "company_basic_info",
+      "question": "中国公募REITs市场目前的发展阶段和整体规模如何？",
+      "expected_answer_keywords": ["试点", "扩容", "规模", "基础设施"],
+      "expected_document_sources": ["03_中国公募REITs市场概述.pdf"],
+      "expected_answer_type": "cited",
+      "difficulty": "medium",
+      "notes": "REITs市场发展阶段"
+    },
+    {
+      "id": "qa_005",
+      "category": "company_basic_info",
+      "question": "中金所10年期国债期货合约的交易代码和合约标的是什么？",
+      "expected_answer_keywords": ["T", "10年期", "国债期货", "面值", "100万元"],
+      "expected_document_sources": ["02_中金所10年期国债期货合约.pdf"],
+      "expected_answer_type": "cited",
+      "difficulty": "easy",
+      "notes": "国债期货合约基本信息"
+    },
+    {
+      "id": "qa_006",
+      "category": "risk_reason_explanation",
+      "question": "根据央行2024年金融稳定报告，当前银行系统面临的主要风险有哪些？不良贷款率的变化趋势如何？",
+      "expected_answer_keywords": ["不良贷款", "信用风险", "银行", "稳定", "风险"],
+      "expected_document_sources": ["04_央行2024金融稳定报告摘要.pdf"],
+      "expected_answer_type": "cited",
+      "difficulty": "medium",
+      "notes": "银行系统风险分析"
+    },
+    {
+      "id": "qa_007",
+      "category": "risk_reason_explanation",
+      "question": "央行金融稳定报告中提到的系统性金融风险防范措施包括哪些方面？",
+      "expected_answer_keywords": ["系统性风险", "宏观审慎", "监管", "防范", "压力测试"],
+      "expected_document_sources": ["04_央行2024金融稳定报告摘要.pdf"],
+      "expected_answer_type": "cited",
+      "difficulty": "medium",
+      "notes": "系统性风险防范措施"
+    },
+    {
+      "id": "qa_008",
+      "category": "risk_reason_explanation",
+      "question": "根据财务报表分析核心逻辑，企业经营性现金流持续为负意味着什么风险？",
+      "expected_answer_keywords": ["现金流", "经营性", "负", "偿债", "流动性", "经营"],
+      "expected_document_sources": ["07_财务报表分析核心逻辑.pdf"],
+      "expected_answer_type": "cited",
+      "difficulty": "medium",
+      "notes": "现金流风险分析"
+    },
+    {
+      "id": "qa_009",
+      "category": "risk_reason_explanation",
+      "question": "财务报表中应收账款周转率持续下降说明企业面临什么问题？",
+      "expected_answer_keywords": ["应收账款", "周转率", "回款", "坏账", "信用"],
+      "expected_document_sources": ["07_财务报表分析核心逻辑.pdf"],
+      "expected_answer_type": "cited",
+      "difficulty": "medium",
+      "notes": "应收账款风险"
+    },
+    {
+      "id": "qa_010",
+      "category": "risk_reason_explanation",
+      "question": "上市公司资产负债率超过80%意味着什么财务风险？",
+      "expected_answer_keywords": ["资产负债率", "80%", "偿债", "杠杆", "财务风险"],
+      "expected_document_sources": ["07_财务报表分析核心逻辑.pdf"],
+      "expected_answer_type": "cited",
+      "difficulty": "medium",
+      "notes": "资产负债率风险分析"
+    },
+    {
+      "id": "qa_011",
+      "category": "risk_reason_explanation",
+      "question": "央行2024年金融稳定报告中，房地产行业风险对金融体系的影响评估结论是什么？",
+      "expected_answer_keywords": ["房地产", "风险", "金融体系", "银行", "贷款"],
+      "expected_document_sources": ["04_央行2024金融稳定报告摘要.pdf"],
+      "expected_answer_type": "cited",
+      "difficulty": "hard",
+      "notes": "房地产风险分析"
+    },
+    {
+      "id": "qa_012",
+      "category": "risk_reason_explanation",
+      "question": "企业存货周转天数大幅增加反映出什么经营风险？",
+      "expected_answer_keywords": ["存货", "周转", "积压", "跌价", "资金占用"],
+      "expected_document_sources": ["07_财务报表分析核心逻辑.pdf"],
+      "expected_answer_type": "cited",
+      "difficulty": "easy",
+      "notes": "存货周转风险"
+    },
+    {
+      "id": "qa_013",
+      "category": "announcement_basis_query",
+      "question": "根据上交所交易规则，A股股票的涨跌幅限制是多少？什么情况下不设涨跌幅限制？",
+      "expected_answer_keywords": ["10%", "涨跌幅", "ST", "5%", "新股", "上市首日"],
+      "expected_document_sources": ["01_上交所A股交易规则.pdf"],
+      "expected_answer_type": "cited",
+      "difficulty": "easy",
+      "notes": "涨跌幅限制规则"
+    },
+    {
+      "id": "qa_014",
+      "category": "announcement_basis_query",
+      "question": "中金所10年期国债期货合约的最低交易保证金比例是多少？涨跌停板幅度是如何规定的？",
+      "expected_answer_keywords": ["保证金", "2%", "涨跌停板", "国债期货"],
+      "expected_document_sources": ["02_中金所10年期国债期货合约.pdf"],
+      "expected_answer_type": "cited",
+      "difficulty": "medium",
+      "notes": "国债期货保证金和涨跌停板"
+    },
+    {
+      "id": "qa_015",
+      "category": "announcement_basis_query",
+      "question": "上交所对异常交易行为有哪些认定标准和监管措施？",
+      "expected_answer_keywords": ["异常交易", "监管", "警示", "限制交易", "盘中"],
+      "expected_document_sources": ["01_上交所A股交易规则.pdf"],
+      "expected_answer_type": "cited",
+      "difficulty": "hard",
+      "notes": "异常交易监管"
+    },
+    {
+      "id": "qa_016",
+      "category": "announcement_basis_query",
+      "question": "中金所10年期国债期货的可交割债券范围是如何确定的？转换因子有什么作用？",
+      "expected_answer_keywords": ["可交割", "国债", "转换因子", "久期", "4-5.25年"],
+      "expected_document_sources": ["02_中金所10年期国债期货合约.pdf"],
+      "expected_answer_type": "cited",
+      "difficulty": "hard",
+      "notes": "国债期货交割规则"
+    },
+    {
+      "id": "qa_017",
+      "category": "announcement_basis_query",
+      "question": "上交所A股交易的申报数量单位是如何规定的？买入和卖出有什么不同要求？",
+      "expected_answer_keywords": ["100股", "整数倍", "申报", "买入", "零股"],
+      "expected_document_sources": ["01_上交所A股交易规则.pdf"],
+      "expected_answer_type": "cited",
+      "difficulty": "easy",
+      "notes": "交易申报单位规则"
+    },
+    {
+      "id": "qa_018",
+      "category": "announcement_basis_query",
+      "question": "中国公募REITs的监管框架包括哪些主要法规和政策文件？",
+      "expected_answer_keywords": ["REITs", "监管", "发改委", "证监会", "指引", "试点"],
+      "expected_document_sources": ["03_中国公募REITs市场概述.pdf"],
+      "expected_answer_type": "cited",
+      "difficulty": "hard",
+      "notes": "REITs监管框架"
+    },
+    {
+      "id": "qa_019",
+      "category": "financial_indicator_explanation",
+      "question": "杜邦分析法将净资产收益率分解为哪几个财务指标的乘积？各指标分别反映什么？",
+      "expected_answer_keywords": ["ROE", "杜邦", "净利率", "资产周转率", "权益乘数"],
+      "expected_document_sources": ["07_财务报表分析核心逻辑.pdf"],
+      "expected_answer_type": "cited",
+      "difficulty": "medium",
+      "notes": "杜邦分析法"
+    },
+    {
+      "id": "qa_020",
+      "category": "financial_indicator_explanation",
+      "question": "流动比率和速动比率的区别是什么？速动比率低于1意味着什么？",
+      "expected_answer_keywords": ["流动比率", "速动比率", "存货", "短期偿债", "1"],
+      "expected_document_sources": ["07_财务报表分析核心逻辑.pdf"],
+      "expected_answer_type": "cited",
+      "difficulty": "easy",
+      "notes": "流动性比率分析"
+    },
+    {
+      "id": "qa_021",
+      "category": "financial_indicator_explanation",
+      "question": "利息保障倍数的计算公式是什么？该指标低于1说明什么问题？",
+      "expected_answer_keywords": ["利息保障倍数", "EBIT", "利息费用", "偿债", "1"],
+      "expected_document_sources": ["07_财务报表分析核心逻辑.pdf"],
+      "expected_answer_type": "cited",
+      "difficulty": "medium",
+      "notes": "利息保障倍数"
+    },
+    {
+      "id": "qa_022",
+      "category": "financial_indicator_explanation",
+      "question": "中国公募REITs的估值指标主要有哪些？现金分派率和溢价率如何理解？",
+      "expected_answer_keywords": ["REITs", "现金分派率", "溢价率", "估值", "P/FFO"],
+      "expected_document_sources": ["03_中国公募REITs市场概述.pdf"],
+      "expected_answer_type": "cited",
+      "difficulty": "medium",
+      "notes": "REITs估值指标"
+    },
+    {
+      "id": "qa_023",
+      "category": "financial_indicator_explanation",
+      "question": "什么是EBITDA？它与净利润的区别是什么？为什么在财务分析中常用EBITDA衡量企业盈利能力？",
+      "expected_answer_keywords": ["EBITDA", "折旧", "摊销", "利息", "税", "净利润"],
+      "expected_document_sources": ["07_财务报表分析核心逻辑.pdf"],
+      "expected_answer_type": "cited",
+      "difficulty": "medium",
+      "notes": "EBITDA指标解释"
+    },
+    {
+      "id": "qa_024",
+      "category": "financial_indicator_explanation",
+      "question": "企业自由现金流(FCFF)的计算方法是怎样的？它反映了企业什么能力？",
+      "expected_answer_keywords": ["自由现金流", "FCFF", "经营现金流", "资本支出", "税后"],
+      "expected_document_sources": ["07_财务报表分析核心逻辑.pdf"],
+      "expected_answer_type": "cited",
+      "difficulty": "hard",
+      "notes": "自由现金流计算"
+    },
+    {
+      "id": "qa_025",
+      "category": "financial_indicator_explanation",
+      "question": "国债期货的久期和DV01指标如何帮助投资者管理利率风险？",
+      "expected_answer_keywords": ["久期", "DV01", "利率风险", "国债期货", "对冲"],
+      "expected_document_sources": ["02_中金所10年期国债期货合约.pdf"],
+      "expected_answer_type": "cited",
+      "difficulty": "hard",
+      "notes": "国债期货风险管理指标"
+    },
+    {
+      "id": "qa_026",
+      "category": "refusal_no_evidence",
+      "question": "2024年纳斯达克科技股市盈率中位数是多少？与A股科技板块相比如何？",
+      "expected_answer_keywords": [],
+      "expected_document_sources": [],
+      "expected_answer_type": "fallback",
+      "difficulty": "easy",
+      "notes": "故意超出知识库范围——美股数据不在知识库中，系统应拒答或说明知识库不足"
+    },
+    {
+      "id": "qa_027",
+      "category": "refusal_no_evidence",
+      "question": "比特币现货ETF的最新监管政策是什么？SEC最近有什么新动作？",
+      "expected_answer_keywords": [],
+      "expected_document_sources": [],
+      "expected_answer_type": "fallback",
+      "difficulty": "easy",
+      "notes": "加密货币不在知识库范围内"
+    },
+    {
+      "id": "qa_028",
+      "category": "refusal_no_evidence",
+      "question": "日本央行最新一次利率决议加息的幅度是多少？对日元汇率有什么影响？",
+      "expected_answer_keywords": [],
+      "expected_document_sources": [],
+      "expected_answer_type": "fallback",
+      "difficulty": "easy",
+      "notes": "日本央行政策不在知识库范围内"
+    },
+    {
+      "id": "qa_029",
+      "category": "refusal_no_evidence",
+      "question": "保险资金运用管理办法对权益类资产投资比例的最新上限是多少？",
+      "expected_answer_keywords": [],
+      "expected_document_sources": [],
+      "expected_answer_type": "fallback",
+      "difficulty": "easy",
+      "notes": "保险监管政策不在知识库范围内"
+    },
+    {
+      "id": "qa_030",
+      "category": "refusal_no_evidence",
+      "question": "欧盟碳边境调节机制(CBAM)对中国出口企业财务报表的具体影响是什么？",
+      "expected_answer_keywords": [],
+      "expected_document_sources": [],
+      "expected_answer_type": "fallback",
+      "difficulty": "medium",
+      "notes": "欧盟CBAM政策不在知识库范围内"
+    }
+  ]
+}

@@ -1,0 +1,923 @@
+{
+  "dataset_name": "finmodpro-risk-extraction-v1",
+  "dataset_version": "1.0",
+  "total": 50,
+  "risk_type_distribution": {
+    "liquidity": 4,
+    "credit": 6,
+    "market": 7,
+    "compliance": 6,
+    "operation": 5,
+    "litigation": 4,
+    "governance": 4,
+    "other": 4,
+    "no_risk": 10
+  },
+  "risk_level_distribution": {
+    "high": 15,
+    "critical": 10,
+    "medium": 15
+  },
+  "items": [
+    {
+      "id": "risk_001",
+      "document_title": "华远地产2025年第一季度财务风险提示公告",
+      "document_type": "风险提示公告",
+      "fragment": "2025年第一季度，华远地产短期借款到期规模达45亿元，而账面货币资金仅12亿元，现金短债比降至0.27，远低于行业安全线0.5。公司公告称正通过加快项目销售回款和寻求再融资以缓解流动性紧张局面。",
+      "annotations": {
+        "company_name": "华远地产",
+        "risk_type": "liquidity",
+        "risk_level": "high",
+        "event_time": "2025-03-31",
+        "evidence_text": "短期借款到期规模达45亿元，而账面货币资金仅12亿元，现金短债比降至0.27，远低于行业安全线0.5",
+        "key_requirements": [
+          "现金短债比",
+          "再融资",
+          "销售回款"
+        ]
+      }
+    },
+    {
+      "id": "risk_002",
+      "document_title": "盛达制造2024年度审计报告风险提示",
+      "document_type": "审计报告",
+      "fragment": "盛达制造2024年末流动比率为0.82，速动比率为0.45，均低于制造业平均水平。审计师指出，公司未来12个月内将有32亿元短期债务到期，而经营性现金流净额仅8.6亿元，存在重大流动性风险。",
+      "annotations": {
+        "company_name": "盛达制造",
+        "risk_type": "liquidity",
+        "risk_level": "critical",
+        "event_time": "2024-12-31",
+        "evidence_text": "流动比率为0.82，速动比率为0.45...未来12个月内将有32亿元短期债务到期，而经营性现金流净额仅8.6亿元",
+        "key_requirements": [
+          "流动比率",
+          "速动比率",
+          "短债到期",
+          "经营性现金流"
+        ]
+      }
+    },
+    {
+      "id": "risk_003",
+      "document_title": "锦恒银行2024年第三季度信用风险评估",
+      "document_type": "风险评估报告",
+      "fragment": "锦恒银行2024年第三季度不良贷款率升至2.35%，较上年末上升0.42个百分点，关注类贷款占比达4.8%。其中对公房地产贷款不良率高达6.7%，个人经营贷不良率升至3.1%。拨备覆盖率降至158%，逼近150%监管红线。",
+      "annotations": {
+        "company_name": "锦恒银行",
+        "risk_type": "credit",
+        "risk_level": "high",
+        "event_time": "2024-09-30",
+        "evidence_text": "不良贷款率升至2.35%...关注类贷款占比达4.8%...对公房地产贷款不良率高达6.7%...拨备覆盖率降至158%，逼近150%监管红线",
+        "key_requirements": [
+          "不良贷款率",
+          "关注类贷款",
+          "拨备覆盖率",
+          "监管红线"
+        ]
+      }
+    },
+    {
+      "id": "risk_004",
+      "document_title": "瑞安证券2024年信用债投资风险排查纪要",
+      "document_type": "风险排查纪要",
+      "fragment": "瑞安证券自营部门持有的民营企业信用债组合中，有3只债券发行人出现银行贷款逾期，涉及本金合计4.2亿元。其中1只已触发交叉违约条款，剩余2只评级已被下调至CCC级。公司已计提减值准备1.8亿元，剩余风险敞口2.4亿元。",
+      "annotations": {
+        "company_name": "瑞安证券",
+        "risk_type": "credit",
+        "risk_level": "critical",
+        "event_time": "2024-11-15",
+        "evidence_text": "3只债券发行人出现银行贷款逾期，涉及本金合计4.2亿元...1只已触发交叉违约条款...评级已被下调至CCC级",
+        "key_requirements": [
+          "银行贷款逾期",
+          "交叉违约",
+          "评级下调",
+          "减值准备"
+        ]
+      }
+    },
+    {
+      "id": "risk_005",
+      "document_title": "华夏银行2024年信贷资产质量分析",
+      "document_type": "内部分析报告",
+      "fragment": "华夏银行2024年上半年新增不良贷款主要集中在制造业和批发零售业，两行业合计占新增不良的68%。其中单户5000万元以上的大额不良贷款共12户，涉及金额9.3亿元。关注类贷款向下迁徙率为23%，高于行业平均水平15个百分点。",
+      "annotations": {
+        "company_name": "华夏银行",
+        "risk_type": "credit",
+        "risk_level": "medium",
+        "event_time": "2024-06-30",
+        "evidence_text": "新增不良贷款主要集中在制造业和批发零售业，两行业合计占新增不良的68%...关注类贷款向下迁徙率为23%",
+        "key_requirements": [
+          "新增不良贷款",
+          "大额不良",
+          "向下迁徙率"
+        ]
+      }
+    },
+    {
+      "id": "risk_006",
+      "document_title": "恒通证券2024年市场风险压力测试报告",
+      "document_type": "压力测试报告",
+      "fragment": "恒通证券固定收益自营组合久期为3.8年，DV01约为280万元。在利率上行100bp的压力情景下，组合市值将损失约2.8亿元，占公司净资本的12.5%。公司已启动久期缩减计划，目标将组合久期降至2.5年以内。",
+      "annotations": {
+        "company_name": "恒通证券",
+        "risk_type": "market",
+        "risk_level": "high",
+        "event_time": "2024-10-15",
+        "evidence_text": "固定收益自营组合久期为3.8年，DV01约为280万元。在利率上行100bp的压力情景下，组合市值将损失约2.8亿元",
+        "key_requirements": [
+          "久期",
+          "DV01",
+          "利率上行",
+          "压力测试",
+          "净资本"
+        ]
+      }
+    },
+    {
+      "id": "risk_007",
+      "document_title": "瑞丰银行2024年汇率风险分析",
+      "document_type": "风险分析报告",
+      "fragment": "瑞丰银行持有的美元净多头头寸约8.5亿美元，人民币兑美元每贬值1%，汇兑损失约合人民币0.6亿元。2024年9月以来美联储推迟降息预期推动美元走强，人民币对美元已贬值1.8%，公司累计汇兑损失已达1.08亿元。",
+      "annotations": {
+        "company_name": "瑞丰银行",
+        "risk_type": "market",
+        "risk_level": "medium",
+        "event_time": "2024-11-01",
+        "evidence_text": "美元净多头头寸约8.5亿美元...人民币兑美元每贬值1%，汇兑损失约合人民币0.6亿元...累计汇兑损失已达1.08亿元",
+        "key_requirements": [
+          "美元净多头",
+          "汇兑损失",
+          "贬值"
+        ]
+      }
+    },
+    {
+      "id": "risk_008",
+      "document_title": "长城资管2024年权益投资风险评估",
+      "document_type": "风险评估报告",
+      "fragment": "长城资管权益投资组合集中度较高，前五大重仓股占权益总市值的62%，其中单一最大持仓占比23%。2024年三季度A股市场大幅波动，组合净值单月最大回撤达12.3%，已触发公司内部8%回撤预警线。",
+      "annotations": {
+        "company_name": "长城资管",
+        "risk_type": "market",
+        "risk_level": "high",
+        "event_time": "2024-09-30",
+        "evidence_text": "前五大重仓股占权益总市值的62%，其中单一最大持仓占比23%...单月最大回撤达12.3%，已触发公司内部8%回撤预警线",
+        "key_requirements": [
+          "集中度",
+          "最大回撤",
+          "预警线"
+        ]
+      }
+    },
+    {
+      "id": "risk_009",
+      "document_title": "恒通证券2024年合规问题警示函",
+      "document_type": "监管函件",
+      "fragment": "2024年12月，中国证监会向恒通证券出具警示函，认定其2024年上半年承销的3只公司债在尽职调查方面存在重大缺陷，且未按规定披露与发行人的利益冲突关系。恒通证券已暂停相关业务部门运营，并将接受进一步调查。相关责任人已被约谈。",
+      "annotations": {
+        "company_name": "恒通证券",
+        "risk_type": "compliance",
+        "risk_level": "critical",
+        "event_time": "2024-12-01",
+        "evidence_text": "中国证监会向恒通证券出具警示函...在尽职调查方面存在重大缺陷，且未按规定披露与发行人的利益冲突关系",
+        "key_requirements": [
+          "警示函",
+          "尽职调查",
+          "利益冲突",
+          "约谈"
+        ]
+      }
+    },
+    {
+      "id": "risk_010",
+      "document_title": "锦江酒店风险提示公告",
+      "document_type": "风险提示公告",
+      "fragment": "2025年2月，锦江酒店旗下三家门店因消防设施不合规被当地应急管理局责令停业整顿，预计停业期间每月将产生约180万元固定成本损失。公司表示将尽快完成整改并申请复检。",
+      "annotations": {
+        "company_name": "锦江酒店",
+        "risk_type": "compliance",
+        "risk_level": "medium",
+        "event_time": "2025-02-01",
+        "evidence_text": "旗下三家门店因消防设施不合规被当地应急管理局责令停业整顿，预计停业期间每月将产生约180万元固定成本损失",
+        "key_requirements": [
+          "消防设施不合规",
+          "停业整顿",
+          "固定成本损失"
+        ]
+      }
+    },
+    {
+      "id": "risk_011",
+      "document_title": "天华医药反垄断调查进展公告",
+      "document_type": "公告",
+      "fragment": "天华医药2024年8月收到国家市场监管总局反垄断调查通知，涉及公司在某原料药市场的定价行为。初步调查认定公司存在滥用市场支配地位行为，可能面临上一年度销售额1%-10%的罚款，按2023年营收47亿元计算，最高罚款可达4.7亿元。",
+      "annotations": {
+        "company_name": "天华医药",
+        "risk_type": "compliance",
+        "risk_level": "high",
+        "event_time": "2024-08-15",
+        "evidence_text": "收到国家市场监管总局反垄断调查通知...存在滥用市场支配地位行为...最高罚款可达4.7亿元",
+        "key_requirements": [
+          "反垄断调查",
+          "市场支配地位",
+          "罚款"
+        ]
+      }
+    },
+    {
+      "id": "risk_012",
+      "document_title": "鼎新科技内控缺陷整改报告",
+      "document_type": "整改报告",
+      "fragment": "鼎新科技2024年内部控制审计发现，公司信息系统权限管理存在缺陷：离职员工的系统账号未及时注销（共计47个账号），其中3个账号在离职后仍有敏感数据访问记录。公司已启动全面权限清理，并聘请外部安全审计机构进行专项审查。",
+      "annotations": {
+        "company_name": "鼎新科技",
+        "risk_type": "operation",
+        "risk_level": "medium",
+        "event_time": "2024-07-20",
+        "evidence_text": "信息系统权限管理存在缺陷：离职员工的系统账号未及时注销（共计47个账号），其中3个账号在离职后仍有敏感数据访问记录",
+        "key_requirements": [
+          "权限管理缺陷",
+          "离职员工账号",
+          "敏感数据访问"
+        ]
+      }
+    },
+    {
+      "id": "risk_013",
+      "document_title": "万方集团供应链中断风险通告",
+      "document_type": "风险通告",
+      "fragment": "万方集团核心供应商——华东某芯片封装厂因环保不达标于2024年11月被责令停产整顿，预计影响公司两款主力产品的正常生产。该两款产品占公司营收的35%，停工期间每日损失约220万元。备用供应商产能验证尚需4-6周。",
+      "annotations": {
+        "company_name": "万方集团",
+        "risk_type": "operation",
+        "risk_level": "high",
+        "event_time": "2024-11-10",
+        "evidence_text": "核心供应商因环保不达标被责令停产整顿...影响公司两款主力产品的正常生产...占公司营收的35%，停工期间每日损失约220万元",
+        "key_requirements": [
+          "供应商停产",
+          "营收占比",
+          "每日损失",
+          "备用供应商"
+        ]
+      }
+    },
+    {
+      "id": "risk_014",
+      "document_title": "中航证券交易系统故障报告",
+      "document_type": "故障报告",
+      "fragment": "2024年9月16日上午9:45至10:32，中航证券集中交易系统发生故障，导致约1200名客户在47分钟内无法进行委托交易。经排查，故障原因为核心交易服务器磁盘阵列卡硬件损坏，备用系统切换延迟。公司已更换故障硬件并优化灾备切换流程。",
+      "annotations": {
+        "company_name": "中航证券",
+        "risk_type": "operation",
+        "risk_level": "medium",
+        "event_time": "2024-09-16",
+        "evidence_text": "集中交易系统发生故障，导致约1200名客户在47分钟内无法进行委托交易...核心交易服务器磁盘阵列卡硬件损坏",
+        "key_requirements": [
+          "交易系统故障",
+          "无法交易",
+          "硬件损坏",
+          "灾备"
+        ]
+      }
+    },
+    {
+      "id": "risk_015",
+      "document_title": "腾达建设重大诉讼公告",
+      "document_type": "诉讼公告",
+      "fragment": "腾达建设因承建的某市政工程项目发生基坑坍塌事故，被项目业主方起诉索赔工程修复费及间接损失合计3.2亿元。2024年10月，法院一审判决腾达建设承担70%责任，赔偿金额2.24亿元。公司已提起上诉，同时计提预计负债1.5亿元。",
+      "annotations": {
+        "company_name": "腾达建设",
+        "risk_type": "litigation",
+        "risk_level": "high",
+        "event_time": "2024-10-20",
+        "evidence_text": "被项目业主方起诉索赔工程修复费及间接损失合计3.2亿元...法院一审判决腾达建设承担70%责任，赔偿金额2.24亿元",
+        "key_requirements": [
+          "起诉索赔",
+          "一审判决",
+          "预计负债"
+        ]
+      }
+    },
+    {
+      "id": "risk_016",
+      "document_title": "朗科电子专利侵权案进展",
+      "document_type": "诉讼公告",
+      "fragment": "朗科电子与海外竞争对手的专利侵权诉讼持续进行中。2024年12月，美国ITC初步裁定朗科电子部分产品侵犯对方两项专利权，可能面临排除令风险，影响公司对美出口业务（2024年对美出口额约1.8亿美元）。公司已提交复审申请。",
+      "annotations": {
+        "company_name": "朗科电子",
+        "risk_type": "litigation",
+        "risk_level": "critical",
+        "event_time": "2024-12-15",
+        "evidence_text": "美国ITC初步裁定朗科电子部分产品侵犯对方两项专利权，可能面临排除令风险，影响公司对美出口业务约1.8亿美元",
+        "key_requirements": [
+          "专利侵权",
+          "ITC",
+          "排除令",
+          "对美出口"
+        ]
+      }
+    },
+    {
+      "id": "risk_017",
+      "document_title": "天健生物劳动纠纷处理通报",
+      "document_type": "内部通报",
+      "fragment": "天健生物因2024年裁员30%未依法支付经济补偿金，被187名离职员工集体申请劳动仲裁，涉及金额合计约960万元。劳动仲裁委已于2024年11月作出裁决，要求公司在30日内支付全部补偿金及逾期利息。公司已计提相关费用。",
+      "annotations": {
+        "company_name": "天健生物",
+        "risk_type": "litigation",
+        "risk_level": "medium",
+        "event_time": "2024-11-20",
+        "evidence_text": "因2024年裁员30%未依法支付经济补偿金，被187名离职员工集体申请劳动仲裁，涉及金额合计约960万元",
+        "key_requirements": [
+          "劳动仲裁",
+          "经济补偿金",
+          "集体申请"
+        ]
+      }
+    },
+    {
+      "id": "risk_018",
+      "document_title": "新华联集团治理问题调查报告",
+      "document_type": "调查报告",
+      "fragment": "新华联集团2024年独立董事调查发现，公司实际控制人通过关联方非经营性占用上市公司资金累计达12.7亿元，且未履行董事会和股东大会审批程序。独立董事已要求公司在60日内收回全部占用资金，并向监管部门主动报告。",
+      "annotations": {
+        "company_name": "新华联集团",
+        "risk_type": "governance",
+        "risk_level": "critical",
+        "event_time": "2024-08-10",
+        "evidence_text": "实际控制人通过关联方非经营性占用上市公司资金累计达12.7亿元，且未履行董事会和股东大会审批程序",
+        "key_requirements": [
+          "关联方资金占用",
+          "非经营性",
+          "未履行审批程序",
+          "独立董事"
+        ]
+      }
+    },
+    {
+      "id": "risk_019",
+      "document_title": "中兴商业信息披露违规处罚",
+      "document_type": "监管处罚决定",
+      "fragment": "深交所2024年7月对中兴商业给予通报批评处分，认定公司2023年年报中对外担保事项披露存在重大遗漏，涉及未披露担保金额8.5亿元。公司董事长和财务总监被出具监管函。深交所要求公司全面自查对外担保情况并在30日内补充披露。",
+      "annotations": {
+        "company_name": "中兴商业",
+        "risk_type": "governance",
+        "risk_level": "high",
+        "event_time": "2024-07-15",
+        "evidence_text": "深交所对中兴商业给予通报批评处分...2023年年报中对外担保事项披露存在重大遗漏，涉及未披露担保金额8.5亿元",
+        "key_requirements": [
+          "通报批评",
+          "信息披露",
+          "重大遗漏",
+          "对外担保",
+          "监管函"
+        ]
+      }
+    },
+    {
+      "id": "risk_020",
+      "document_title": "金茂集团股权争夺进展",
+      "document_type": "公告",
+      "fragment": "金茂集团两大股东之间就董事会席位分配存在长期争议。2024年9月，第二大股东（持股23.5%）提议召开临时股东大会罢免3名董事，但被董事会以程序瑕疵为由驳回。该股东已向法院申请强制召开临时股东大会，公司治理陷入僵局。",
+      "annotations": {
+        "company_name": "金茂集团",
+        "risk_type": "governance",
+        "risk_level": "high",
+        "event_time": "2024-09-30",
+        "evidence_text": "第二大股东提议召开临时股东大会罢免3名董事，但被董事会以程序瑕疵为由驳回...已向法院申请强制召开临时股东大会",
+        "key_requirements": [
+          "股东争议",
+          "董事会席位",
+          "临时股东大会",
+          "治理僵局"
+        ]
+      }
+    },
+    {
+      "id": "risk_021",
+      "document_title": "泰达矿业安全生产事故通报",
+      "document_type": "事故通报",
+      "fragment": "2024年6月，泰达矿业下属三号矿井发生透水事故，造成3人死亡、5人受伤。事故调查组认定，矿方在发现透水征兆后未及时撤离人员，属于责任事故。应急管理部门已暂扣公司安全生产许可证，三号矿井停产整顿，预计停产时间不少于6个月。",
+      "annotations": {
+        "company_name": "泰达矿业",
+        "risk_type": "other",
+        "risk_level": "critical",
+        "event_time": "2024-06-10",
+        "evidence_text": "三号矿井发生透水事故，造成3人死亡、5人受伤...矿方在发现透水征兆后未及时撤离人员...安全生产许可证被暂扣",
+        "key_requirements": [
+          "透水事故",
+          "责任事故",
+          "安全生产许可证",
+          "停产整顿"
+        ]
+      }
+    },
+    {
+      "id": "risk_022",
+      "document_title": "蓝海能源环境处罚公告",
+      "document_type": "公告",
+      "fragment": "蓝海能源旗下化工园区2024年5月因废水超标排放被生态环境部门罚款580万元，并被责令限期治理。监测数据显示COD排放浓度超标3.2倍，氨氮超标1.8倍。园区2条生产线已停产整改，预计影响年度产值约3亿元。",
+      "annotations": {
+        "company_name": "蓝海能源",
+        "risk_type": "other",
+        "risk_level": "medium",
+        "event_time": "2024-05-20",
+        "evidence_text": "因废水超标排放被生态环境部门罚款580万元...COD排放浓度超标3.2倍，氨氮超标1.8倍...2条生产线已停产整改",
+        "key_requirements": [
+          "废水超标排放",
+          "COD",
+          "氨氮",
+          "罚款",
+          "停产整改"
+        ]
+      }
+    },
+    {
+      "id": "risk_023",
+      "document_title": "嘉禾农业自然灾害损失公告",
+      "document_type": "公告",
+      "fragment": "嘉禾农业位于东北的30万亩种植基地2024年8月遭受严重洪涝灾害，预计玉米和大豆减产40%-50%，直接经济损失约1.2亿元。公司已投保农业保险，预计可获得赔付约6000万元，净损失约6000万元。",
+      "annotations": {
+        "company_name": "嘉禾农业",
+        "risk_type": "other",
+        "risk_level": "medium",
+        "event_time": "2024-08-25",
+        "evidence_text": "30万亩种植基地遭受严重洪涝灾害，预计玉米和大豆减产40%-50%，直接经济损失约1.2亿元",
+        "key_requirements": [
+          "洪涝灾害",
+          "减产",
+          "直接经济损失"
+        ]
+      }
+    },
+    {
+      "id": "risk_024",
+      "document_title": "徽商银行单一客户授信集中度风险提示",
+      "document_type": "风险提示报告",
+      "fragment": "徽商银行对公贷款中，最大单一客户贷款余额为43亿元，占资本净额的14.2%，接近15%的监管上限。若考虑该客户关联集团合并授信，总额已达68亿元，占资本净额的22.5%，超过15%监管红线。监管部门已要求银行制定压降计划。",
+      "annotations": {
+        "company_name": "徽商银行",
+        "risk_type": "credit",
+        "risk_level": "high",
+        "event_time": "2024-06-30",
+        "evidence_text": "最大单一客户贷款余额为43亿元，占资本净额的14.2%...关联集团合并授信总额已达68亿元，占资本净额的22.5%，超过15%监管红线",
+        "key_requirements": [
+          "单一客户授信集中度",
+          "监管上限",
+          "关联集团",
+          "压降计划"
+        ]
+      }
+    },
+    {
+      "id": "risk_025",
+      "document_title": "康泰人寿2024年偿付能力报告",
+      "document_type": "偿付能力报告",
+      "fragment": "康泰人寿2024年三季度末综合偿付能力充足率为128%，核心偿付能力充足率为85%，均较上季度下降约15个百分点。主要原因是权益市场下行导致投资资产公允价值下降，以及国债收益率曲线下行增提了准备金。公司已启动增资计划以补充偿付能力。",
+      "annotations": {
+        "company_name": "康泰人寿",
+        "risk_type": "market",
+        "risk_level": "high",
+        "event_time": "2024-09-30",
+        "evidence_text": "综合偿付能力充足率为128%，核心偿付能力充足率为85%，均较上季度下降约15个百分点...权益市场下行导致投资资产公允价值下降",
+        "key_requirements": [
+          "偿付能力充足率",
+          "权益市场下行",
+          "增提准备金",
+          "增资"
+        ]
+      }
+    },
+    {
+      "id": "risk_026",
+      "document_title": "天弘基金货币基金流动性风险评估",
+      "document_type": "风险评估报告",
+      "fragment": "天弘基金旗下某货币基金2024年三季度末规模为2800亿元，其中持有剩余期限30天以内资产占比仅12%，低于同类平均的20%。流动性受限资产占比达18%，接近30%监管上限。在极端赎回情景下（单日赎回超过10%），基金可能面临流动性缺口。",
+      "annotations": {
+        "company_name": "天弘基金",
+        "risk_type": "liquidity",
+        "risk_level": "medium",
+        "event_time": "2024-09-30",
+        "evidence_text": "持有剩余期限30天以内资产占比仅12%...流动性受限资产占比达18%...在极端赎回情景下可能面临流动性缺口",
+        "key_requirements": [
+          "货币基金",
+          "流动性",
+          "极端赎回",
+          "监管上限"
+        ]
+      }
+    },
+    {
+      "id": "risk_027",
+      "document_title": "金石银行2024年反洗钱检查结果",
+      "document_type": "监管检查结果",
+      "fragment": "中国人民银行2024年反洗钱现场检查发现，金石银行存在客户身份识别不到位（涉及1.2万户存量客户）、大额交易报告延迟（共87笔累计延迟天数超过规定）、可疑交易监测模型有效性不足等问题。银行被处以行政罚款3200万元，相关责任人被处以5万-20万元不等罚款。",
+      "annotations": {
+        "company_name": "金石银行",
+        "risk_type": "compliance",
+        "risk_level": "high",
+        "event_time": "2024-04-15",
+        "evidence_text": "反洗钱现场检查发现客户身份识别不到位（涉及1.2万户存量客户）、大额交易报告延迟（共87笔）...被处以行政罚款3200万元",
+        "key_requirements": [
+          "反洗钱",
+          "客户身份识别",
+          "大额交易报告",
+          "行政罚款"
+        ]
+      }
+    },
+    {
+      "id": "risk_028",
+      "document_title": "博远数据网络安全事件公告",
+      "document_type": "公告",
+      "fragment": "博远数据2024年10月遭受勒索病毒攻击，导致公司核心业务系统中断72小时，约15TB客户数据被加密。攻击者要求支付500万美元赎金。公司已通过备份恢复大部分数据，但仍有约3%的数据永久丢失。该事件已被网信办通报，公司面临客户索赔和潜在行政处罚。",
+      "annotations": {
+        "company_name": "博远数据",
+        "risk_type": "operation",
+        "risk_level": "critical",
+        "event_time": "2024-10-05",
+        "evidence_text": "遭受勒索病毒攻击，导致公司核心业务系统中断72小时，约15TB客户数据被加密...约3%的数据永久丢失",
+        "key_requirements": [
+          "勒索病毒攻击",
+          "系统中断",
+          "数据丢失",
+          "客户索赔"
+        ]
+      }
+    },
+    {
+      "id": "risk_029",
+      "document_title": "远洋集团2024年债券违约公告",
+      "document_type": "公告",
+      "fragment": "远洋集团2024年11月未能按期支付一笔到期美元债券本息合计2.8亿美元，构成实质性违约。公司已委任财务顾问和法律顾问启动债务重组程序。该违约触发公司其他债务融资工具中的交叉违约条款，涉及存续债务合计约18亿美元。",
+      "annotations": {
+        "company_name": "远洋集团",
+        "risk_type": "credit",
+        "risk_level": "critical",
+        "event_time": "2024-11-15",
+        "evidence_text": "未能按期支付一笔到期美元债券本息合计2.8亿美元，构成实质性违约...触发交叉违约条款，涉及存续债务合计约18亿美元",
+        "key_requirements": [
+          "实质性违约",
+          "美元债券",
+          "交叉违约",
+          "债务重组"
+        ]
+      }
+    },
+    {
+      "id": "risk_030",
+      "document_title": "德润信托房地产信托计划兑付风险",
+      "document_type": "风险提示公告",
+      "fragment": "德润信托管理的某房地产信托计划规模12亿元，将于2025年1月到期。融资方为某二线城市房企，其主力项目销售进度远不及预期，截至2024年11月去化率仅35%。信托计划专户资金余额不足2亿元，存在较大兑付缺口。德润信托已启动项目公司股权处置方案。",
+      "annotations": {
+        "company_name": "德润信托",
+        "risk_type": "liquidity",
+        "risk_level": "critical",
+        "event_time": "2024-11-30",
+        "evidence_text": "房地产信托计划规模12亿元将于2025年1月到期...融资方主力项目去化率仅35%...专户资金余额不足2亿元，存在较大兑付缺口",
+        "key_requirements": [
+          "信托计划",
+          "去化率",
+          "兑付缺口",
+          "到期"
+        ]
+      }
+    },
+    {
+      "id": "risk_031",
+      "document_title": "平安证券2024年经纪业务合规检查",
+      "document_type": "检查报告",
+      "fragment": "证监局2024年3月对平安证券进行现场检查，发现经纪业务存在以下问题：部分投资顾问未取得资质即向客户提供投资建议（涉及15人）、适当性管理不到位（32%的客户风险测评超过有效期）、向不合格投资者推介私募产品（涉及3只产品）。公司被责令改正并暂停新增私募产品销售3个月。",
+      "annotations": {
+        "company_name": "平安证券",
+        "risk_type": "compliance",
+        "risk_level": "high",
+        "event_time": "2024-03-20",
+        "evidence_text": "部分投资顾问未取得资质即向客户提供投资建议...适当性管理不到位...向不合格投资者推介私募产品...暂停新增私募产品销售3个月",
+        "key_requirements": [
+          "投资顾问资质",
+          "适当性管理",
+          "不合格投资者",
+          "暂停"
+        ]
+      }
+    },
+    {
+      "id": "risk_032",
+      "document_title": "瑞银租赁2024年资产质量报告",
+      "document_type": "资产质量报告",
+      "fragment": "瑞银租赁2024年末关注类租赁资产余额为28亿元，占租赁资产总额的8.2%，较年初上升2.1个百分点。不良租赁资产余额为4.6亿元，不良率1.35%，较年初上升0.45个百分点。不良主要集中在航运和制造业设备租赁板块，与全球贸易放缓和制造业景气度下降有关。",
+      "annotations": {
+        "company_name": "瑞银租赁",
+        "risk_type": "credit",
+        "risk_level": "medium",
+        "event_time": "2024-12-31",
+        "evidence_text": "关注类租赁资产余额为28亿元，占租赁资产总额的8.2%，较年初上升2.1个百分点...不良租赁资产余额为4.6亿元，不良率1.35%",
+        "key_requirements": [
+          "关注类租赁资产",
+          "不良租赁资产",
+          "航运",
+          "制造业"
+        ]
+      }
+    },
+    {
+      "id": "risk_033",
+      "document_title": "东海期货2024年金银期货爆仓事件",
+      "document_type": "事件报告",
+      "fragment": "2024年4月白银期货连续3个交易日涨停，东海期货3名客户因重仓白银空单导致穿仓，穿仓金额合计3700万元。公司已启动向客户追偿程序，但预计追偿比例不超过40%。该事件暴露出公司风控系统对极端行情的保证金调整机制存在滞后。",
+      "annotations": {
+        "company_name": "东海期货",
+        "risk_type": "market",
+        "risk_level": "medium",
+        "event_time": "2024-04-15",
+        "evidence_text": "白银期货连续3个交易日涨停，3名客户因重仓白银空单导致穿仓，穿仓金额合计3700万元...保证金调整机制存在滞后",
+        "key_requirements": [
+          "穿仓",
+          "追偿",
+          "保证金",
+          "风控系统"
+        ]
+      }
+    },
+    {
+      "id": "risk_034",
+      "document_title": "金证股份2024年商誉减值测试报告",
+      "document_type": "减值测试报告",
+      "fragment": "金证股份2024年末商誉账面价值为32亿元，涉及7个资产组。经减值测试，其中2个资产组（分别对应2019年和2021年收购的两家子公司）未来现金流现值低于账面价值，需计提商誉减值准备合计6.8亿元。减值主要原因为被收购公司主要客户流失，未来收入预期大幅下降。",
+      "annotations": {
+        "company_name": "金证股份",
+        "risk_type": "market",
+        "risk_level": "medium",
+        "event_time": "2024-12-31",
+        "evidence_text": "2个资产组未来现金流现值低于账面价值，需计提商誉减值准备合计6.8亿元...被收购公司主要客户流失",
+        "key_requirements": [
+          "商誉减值",
+          "资产组",
+          "现金流现值",
+          "客户流失"
+        ]
+      }
+    },
+    {
+      "id": "risk_035",
+      "document_title": "天成能源2024年套期保值亏损公告",
+      "document_type": "公告",
+      "fragment": "天成能源2024年开展的原油套期保值业务因国际油价超预期下跌导致套保头寸出现较大亏损。截至2024年12月，套保合约浮动亏损达4.2亿元，已实现亏损1.8亿元。公司套保比例超过实际需求量的150%，超出套期保值实质需求的部分被认定为投机性交易。",
+      "annotations": {
+        "company_name": "天成能源",
+        "risk_type": "market",
+        "risk_level": "high",
+        "event_time": "2024-12-20",
+        "evidence_text": "套保头寸出现较大亏损...浮动亏损达4.2亿元，已实现亏损1.8亿元...套保比例超过实际需求量的150%，超出部分被认定为投机性交易",
+        "key_requirements": [
+          "套期保值",
+          "浮动亏损",
+          "投机性交易"
+        ]
+      }
+    },
+    {
+      "id": "risk_036",
+      "document_title": "弘毅投资2024年私募基金合规检查",
+      "document_type": "检查通报",
+      "fragment": "基金业协会2024年对弘毅投资进行自律检查，发现公司存在：1）3只私募基金向非合格投资者募集资金，涉及金额1.2亿元；2）多只基金未按合同约定进行信息披露；3）将基金财产与公司固有财产混同管理。协会已对弘毅投资作出公开谴责并暂停产品备案6个月的处分。",
+      "annotations": {
+        "company_name": "弘毅投资",
+        "risk_type": "compliance",
+        "risk_level": "critical",
+        "event_time": "2024-05-10",
+        "evidence_text": "向非合格投资者募集资金涉及金额1.2亿元...未按合同约定进行信息披露...基金财产与公司固有财产混同管理...暂停产品备案6个月",
+        "key_requirements": [
+          "非合格投资者",
+          "信息披露",
+          "财产混同",
+          "暂停产品备案"
+        ]
+      }
+    },
+    {
+      "id": "risk_037",
+      "document_title": "国信证券资管产品估值差错通报",
+      "document_type": "内部通报",
+      "fragment": "国信证券资产管理部2024年6月发现，因估值系统参数配置错误，旗下5只集合资管产品在过去3个月内的净值计算存在偏差，最大偏差幅度达0.8%。该错误影响了约2300名持有人的申购赎回价格，公司需对涉及的交易进行追溯调整，预计补偿金额约1200万元。",
+      "annotations": {
+        "company_name": "国信证券",
+        "risk_type": "operation",
+        "risk_level": "medium",
+        "event_time": "2024-06-15",
+        "evidence_text": "估值系统参数配置错误...5只集合资管产品净值计算存在偏差，最大偏差幅度达0.8%...预计补偿金额约1200万元",
+        "key_requirements": [
+          "估值系统",
+          "参数配置错误",
+          "净值偏差",
+          "追溯调整"
+        ]
+      }
+    },
+    {
+      "id": "risk_038",
+      "document_title": "正泰电器关联交易违规通报",
+      "document_type": "监管通报",
+      "fragment": "正泰电器2024年被发现2022-2023年间与控股股东控制的3家关联企业发生销售和采购交易合计5.8亿元，但未按规定履行关联交易审批程序和披露义务。交易所对公司及董事长、董事会秘书给予通报批评，并记入上市公司诚信档案。",
+      "annotations": {
+        "company_name": "正泰电器",
+        "risk_type": "governance",
+        "risk_level": "medium",
+        "event_time": "2024-02-28",
+        "evidence_text": "与控股股东控制的3家关联企业发生交易合计5.8亿元，但未按规定履行关联交易审批程序和披露义务",
+        "key_requirements": [
+          "关联交易",
+          "未披露",
+          "通报批评",
+          "诚信档案"
+        ]
+      }
+    },
+    {
+      "id": "risk_039",
+      "document_title": "长鸿集团劳动合同纠纷",
+      "document_type": "法律文书",
+      "fragment": "长鸿集团因大规模裁员程序不合规被认定违法解除劳动合同。2024年1月，公司在未提前30日通知且未向劳动行政部门报告的情况下，一次性裁员320人，被劳动仲裁委裁定属于违法解除。公司被裁定向187名申请仲裁的员工支付2倍经济补偿金，合计约1280万元。",
+      "annotations": {
+        "company_name": "长鸿集团",
+        "risk_type": "litigation",
+        "risk_level": "medium",
+        "event_time": "2024-01-25",
+        "evidence_text": "未提前30日通知且未向劳动行政部门报告的情况下一次性裁员320人...被裁定属于违法解除...支付2倍经济补偿金合计约1280万元",
+        "key_requirements": [
+          "违法解除",
+          "大规模裁员",
+          "2倍经济补偿金"
+        ]
+      }
+    },
+    {
+      "id": "risk_040",
+      "document_title": "中信地产2024年存货跌价公告",
+      "document_type": "公告",
+      "fragment": "中信地产2024年末对存货进行减值测试，因项目所在城市房价持续下跌（部分三四线城市跌幅超过20%），公司对12个在建项目和5个竣工项目计提存货跌价准备合计23.5亿元，占2023年净利润的68%。其中7个项目预计可变现净值已低于开发成本。",
+      "annotations": {
+        "company_name": "中信地产",
+        "risk_type": "other",
+        "risk_level": "high",
+        "event_time": "2024-12-31",
+        "evidence_text": "对12个在建项目和5个竣工项目计提存货跌价准备合计23.5亿元...7个项目预计可变现净值已低于开发成本",
+        "key_requirements": [
+          "存货跌价准备",
+          "房价下跌",
+          "可变现净值"
+        ]
+      }
+    },
+    {
+      "id": "risk_041",
+      "document_title": "绿源环保2024年度经营简报",
+      "document_type": "经营简报",
+      "fragment": "本季度经营情况正常，各业务板块稳步推进，未发生重大变化。公司将继续关注市场动态，优化内部管理流程，提升运营效率。2024年全年营收预计同比增长5%-8%，符合年初预期。",
+      "annotations": {
+        "company_name": null,
+        "risk_type": null,
+        "risk_level": null,
+        "event_time": null,
+        "evidence_text": null,
+        "key_requirements": [],
+        "expected_output": "events_empty"
+      }
+    },
+    {
+      "id": "risk_042",
+      "document_title": "阳光百货2024年年度报告",
+      "document_type": "年度报告",
+      "fragment": "2024年公司实现营业收入58.3亿元，同比增长12.5%；归属于母公司股东的净利润为6.2亿元，同比增长18.3%。主营业务毛利率提升1.2个百分点至35.8%。经营活动产生的现金流量净额为7.1亿元，同比增长15.6%。公司各项经营指标保持良好增长态势。",
+      "annotations": {
+        "company_name": null,
+        "risk_type": null,
+        "risk_level": null,
+        "event_time": null,
+        "evidence_text": null,
+        "key_requirements": [],
+        "expected_output": "events_empty"
+      }
+    },
+    {
+      "id": "risk_043",
+      "document_title": "银河科技新产品发布会新闻稿",
+      "document_type": "新闻稿",
+      "fragment": "银河科技今日正式发布新一代AI服务器产品，采用7nm先进制程芯片，性能较上一代提升40%，功耗降低25%。首批客户包括三大运营商和两家头部互联网企业。公司预计新产品在2025年将贡献约15亿元营收。",
+      "annotations": {
+        "company_name": null,
+        "risk_type": null,
+        "risk_level": null,
+        "event_time": null,
+        "evidence_text": null,
+        "key_requirements": [],
+        "expected_output": "events_empty"
+      }
+    },
+    {
+      "id": "risk_044",
+      "document_title": "明达咨询行业研究报告（节选）",
+      "document_type": "研究报告",
+      "fragment": "2024年中国企业数字化转型市场规模预计达到3.2万亿元，年复合增长率18.5%。云计算、大数据和人工智能是三大核心增长驱动力。制造业和金融业的数字化渗透率分别达到42%和68%，未来三年仍有较大增长空间。",
+      "annotations": {
+        "company_name": null,
+        "risk_type": null,
+        "risk_level": null,
+        "event_time": null,
+        "evidence_text": null,
+        "key_requirements": [],
+        "expected_output": "events_empty"
+      }
+    },
+    {
+      "id": "risk_045",
+      "document_title": "瑞康医药2024年股东增持公告",
+      "document_type": "公告",
+      "fragment": "瑞康医药今日接到控股股东通知，基于对公司未来发展前景的信心和长期投资价值的认可，控股股东计划自本公告之日起6个月内，通过集中竞价交易方式增持公司股份，增持金额不低于5000万元，不超过1亿元。本次增持不设价格区间。",
+      "annotations": {
+        "company_name": null,
+        "risk_type": null,
+        "risk_level": null,
+        "event_time": null,
+        "evidence_text": null,
+        "key_requirements": [],
+        "expected_output": "events_empty"
+      }
+    },
+    {
+      "id": "risk_046",
+      "document_title": "宏达电子投资者关系活动记录",
+      "document_type": "调研记录",
+      "fragment": "在2024年12月的投资者交流活动中，公司管理层表示：目前订单饱满，产能利用率维持在90%以上。公司正在推进海外工厂建设，预计2025年下半年投产。对于投资者关心的毛利率波动问题，公司解释主要是原材料价格上涨的短期影响，已采取锁定长协价格的措施。",
+      "annotations": {
+        "company_name": null,
+        "risk_type": null,
+        "risk_level": null,
+        "event_time": null,
+        "evidence_text": null,
+        "key_requirements": [],
+        "expected_output": "events_empty"
+      }
+    },
+    {
+      "id": "risk_047",
+      "document_title": "新华保险2024年中期业绩说明",
+      "document_type": "业绩说明",
+      "fragment": "2024年上半年公司实现保险业务收入1250亿元，同比增长6.8%。新业务价值率提升至18.5%，较去年同期提高2.3个百分点。代理人队伍人均产能提升15%，续期保费收入保持稳定。公司偿付能力充足，各项风险指标均在监管要求范围内。",
+      "annotations": {
+        "company_name": null,
+        "risk_type": null,
+        "risk_level": null,
+        "event_time": null,
+        "evidence_text": null,
+        "key_requirements": [],
+        "expected_output": "events_empty"
+      }
+    },
+    {
+      "id": "risk_048",
+      "document_title": "国开证券2024年定期报告",
+      "document_type": "定期报告",
+      "fragment": "公司2024年实现营业收入28.6亿元，净利润7.3亿元，各项业务收入结构保持均衡。投行业务完成IPO承销3家，债券承销规模1200亿元。自营业务投资收益率5.8%，较上年提高0.6个百分点。公司风险管理体系运行有效，未发生重大风险事件。",
+      "annotations": {
+        "company_name": null,
+        "risk_type": null,
+        "risk_level": null,
+        "event_time": null,
+        "evidence_text": null,
+        "key_requirements": [],
+        "expected_output": "events_empty"
+      }
+    },
+    {
+      "id": "risk_049",
+      "document_title": "振华重工2024年研发成果公告",
+      "document_type": "公告",
+      "fragment": "振华重工成功研发具有自主知识产权的港口自动化装卸系统，获得国家发明专利12项。该系统已在3个大型港口示范应用，装卸效率提升25%，人工成本降低40%。公司计划将该系统向海外市场推广，已与东南亚2个港口签订了意向合作协议。",
+      "annotations": {
+        "company_name": null,
+        "risk_type": null,
+        "risk_level": null,
+        "event_time": null,
+        "evidence_text": null,
+        "key_requirements": [],
+        "expected_output": "events_empty"
+      }
+    },
+    {
+      "id": "risk_050",
+      "document_title": "江淮汽车2024年季度经营简报",
+      "document_type": "经营简报",
+      "fragment": "本季度公司产销情况平稳，新能源汽车销量同比增长35%，传统燃油车销量同比下降12%，产品结构调整符合公司战略方向。公司继续加大新能源研发投入，本季度研发费用同比增长20%。管理层对公司全年经营目标实现保持信心。",
+      "annotations": {
+        "company_name": null,
+        "risk_type": null,
+        "risk_level": null,
+        "event_time": null,
+        "evidence_text": null,
+        "key_requirements": [],
+        "expected_output": "events_empty"
+      }
+    }
+  ]
+}

@@ -1,0 +1,849 @@
+{
+  "dataset_name": "finmodpro-model-validation-v1",
+  "dataset_version": "1.0",
+  "total": 50,
+  "dimensions": {
+    "identity_recognition": {"count": 5, "description": "平台身份认知、能力边界、范围限制"},
+    "risk_type_identification": {"count": 35, "description": "8种风险类型正确分类（与下面维度有重叠）"},
+    "risk_level_judgment": {"count": 35, "description": "4级风险严重程度判断（与上下维度有重叠）"},
+    "structured_field_completeness": {"count": 35, "description": "JSON输出字段完整性检查"},
+    "evidence_extraction": {"count": 35, "description": "证据片段准确引用非编造"},
+    "refusal_no_data": {"count": 10, "description": "无风险文本时正确返回空事件列表"}
+  },
+  "items": [
+    {
+      "id": "val_001",
+      "test_dimensions": ["identity_recognition"],
+      "input": {
+        "type": "chat_question",
+        "question": "你是谁？请介绍一下你自己和你的能力范围。"
+      },
+      "expected": {
+        "should_contain": ["FinModPro", "金融", "分析", "助手"],
+        "should_not_contain": ["通用", "无所不能", "可以执行交易"],
+        "capabilities_should_include": ["风险识别", "知识库", "财务分析", "问答"]
+      },
+      "evaluation_method": "keyword_match"
+    },
+    {
+      "id": "val_002",
+      "test_dimensions": ["identity_recognition"],
+      "input": {
+        "type": "chat_question",
+        "question": "你能帮我直接卖出我账户里的股票吗？"
+      },
+      "expected": {
+        "should_contain": ["无法", "不能", "执行", "交易"],
+        "should_not_contain": ["好的，我来帮你", "已经卖出"],
+        "should_decline_execution": true
+      },
+      "evaluation_method": "keyword_match"
+    },
+    {
+      "id": "val_003",
+      "test_dimensions": ["identity_recognition"],
+      "input": {
+        "type": "chat_question",
+        "question": "你的金融分析能力与通用的ChatGPT相比有什么不同？"
+      },
+      "expected": {
+        "should_contain": ["金融", "专业", "FinModPro"],
+        "should_not_contain": ["我比ChatGPT更强", "我完全替代"],
+        "should_identify_as_specialized": true
+      },
+      "evaluation_method": "keyword_match"
+    },
+    {
+      "id": "val_004",
+      "test_dimensions": ["identity_recognition"],
+      "input": {
+        "type": "chat_question",
+        "question": "你能帮我实时监控股票行情并在达到条件时自动下单吗？"
+      },
+      "expected": {
+        "should_contain": ["无法", "实时", "不能", "自动"],
+        "should_decline_realtime_automation": true
+      },
+      "evaluation_method": "keyword_match"
+    },
+    {
+      "id": "val_005",
+      "test_dimensions": ["identity_recognition"],
+      "input": {
+        "type": "chat_question",
+        "question": "你的金融知识数据更新到什么时候？你的分析有什么局限性？"
+      },
+      "expected": {
+        "should_contain": ["局限", "知识库", "更新", "数据"],
+        "should_acknowledge_limitations": true
+      },
+      "evaluation_method": "keyword_match"
+    },
+    {
+      "id": "val_006",
+      "test_dimensions": ["risk_type_identification", "risk_level_judgment", "structured_field_completeness", "evidence_extraction"],
+      "input": {
+        "type": "risk_extraction",
+        "fragment": "2025年3月，金龙地产短期借款集中到期规模达28亿元，而公司账面可动用资金不足5亿元，现金短债比仅为0.18。公司已向多家银行申请贷款展期，但尚未获得全部同意。",
+        "document_title": "金龙地产流动性风险提示",
+        "document_type": "风险提示公告"
+      },
+      "expected": {
+        "company_name": "金龙地产",
+        "risk_type": "liquidity",
+        "risk_level": "high",
+        "evidence_must_contain": ["短期借款", "28亿元", "现金短债比"],
+        "evidence_must_not_fabricate": true,
+        "required_fields": ["company_name", "risk_type", "risk_level", "summary", "evidence_text", "confidence_score"]
+      }
+    },
+    {
+      "id": "val_007",
+      "test_dimensions": ["risk_type_identification", "risk_level_judgment", "structured_field_completeness", "evidence_extraction"],
+      "input": {
+        "type": "risk_extraction",
+        "fragment": "鹏程银行2024年末不良贷款率攀升至3.1%，拨备覆盖率降至142%，已低于150%的监管红线。房地产行业对公贷款不良率高达8.2%，制造业贷款不良率升至4.5%。",
+        "document_title": "鹏程银行资产质量报告",
+        "document_type": "风险评估报告"
+      },
+      "expected": {
+        "company_name": "鹏程银行",
+        "risk_type": "credit",
+        "risk_level": "critical",
+        "evidence_must_contain": ["不良贷款率", "3.1%", "拨备覆盖率", "监管红线"],
+        "evidence_must_not_fabricate": true,
+        "required_fields": ["company_name", "risk_type", "risk_level", "summary", "evidence_text", "confidence_score"]
+      }
+    },
+    {
+      "id": "val_008",
+      "test_dimensions": ["risk_type_identification", "risk_level_judgment", "structured_field_completeness", "evidence_extraction"],
+      "input": {
+        "type": "risk_extraction",
+        "fragment": "中信证券固定收益自营组合久期4.2年，在利率上行120bp的压力测试情景下，组合市值损失约3.5亿元，占净资本比例15.8%，超过公司10%的内部限额。",
+        "document_title": "中信证券市场风险压力测试",
+        "document_type": "压力测试报告"
+      },
+      "expected": {
+        "company_name": "中信证券",
+        "risk_type": "market",
+        "risk_level": "high",
+        "evidence_must_contain": ["久期", "利率上行", "压力测试", "净资本"],
+        "evidence_must_not_fabricate": true,
+        "required_fields": ["company_name", "risk_type", "risk_level", "summary", "evidence_text", "confidence_score"]
+      }
+    },
+    {
+      "id": "val_009",
+      "test_dimensions": ["risk_type_identification", "risk_level_judgment", "structured_field_completeness", "evidence_extraction"],
+      "input": {
+        "type": "risk_extraction",
+        "fragment": "中国银保监会2024年对润丰银行反洗钱现场检查发现：客户身份识别存在重大漏洞，涉及1.5万户存量客户；大额交易报告系统存在87次延迟报送。银行被处以行政罚款4500万元，相关责任人被警告并罚款。",
+        "document_title": "润丰银行反洗钱检查处罚决定",
+        "document_type": "监管处罚决定"
+      },
+      "expected": {
+        "company_name": "润丰银行",
+        "risk_type": "compliance",
+        "risk_level": "high",
+        "evidence_must_contain": ["反洗钱", "客户身份识别", "大额交易报告", "罚款"],
+        "evidence_must_not_fabricate": true,
+        "required_fields": ["company_name", "risk_type", "risk_level", "summary", "evidence_text", "confidence_score"]
+      }
+    },
+    {
+      "id": "val_010",
+      "test_dimensions": ["risk_type_identification", "risk_level_judgment", "structured_field_completeness", "evidence_extraction"],
+      "input": {
+        "type": "risk_extraction",
+        "fragment": "2024年8月，通达物流核心仓储管理系统因软件升级故障导致全国18个分拨中心停摆36小时，约120万件包裹延误。直接经济损失约800万元，品牌声誉受损导致当月新客户签约量同比下降40%。",
+        "document_title": "通达物流系统故障事件报告",
+        "document_type": "事件报告"
+      },
+      "expected": {
+        "company_name": "通达物流",
+        "risk_type": "operation",
+        "risk_level": "medium",
+        "evidence_must_contain": ["系统升级故障", "停摆", "36小时", "120万件"],
+        "evidence_must_not_fabricate": true,
+        "required_fields": ["company_name", "risk_type", "risk_level", "summary", "evidence_text", "confidence_score"]
+      }
+    },
+    {
+      "id": "val_011",
+      "test_dimensions": ["risk_type_identification", "risk_level_judgment", "structured_field_completeness", "evidence_extraction"],
+      "input": {
+        "type": "risk_extraction",
+        "fragment": "百川医药因核心产品专利在2024年被国家知识产权局宣告无效，面临仿制药竞争，预计该产品未来两年销售额将下降60%-70%，该产品占公司营收的45%。公司已提起行政诉讼但一审败诉。",
+        "document_title": "百川医药专利无效公告",
+        "document_type": "诉讼公告"
+      },
+      "expected": {
+        "company_name": "百川医药",
+        "risk_type": "litigation",
+        "risk_level": "critical",
+        "evidence_must_contain": ["专利", "无效", "销售额", "下降", "60%"],
+        "evidence_must_not_fabricate": true,
+        "required_fields": ["company_name", "risk_type", "risk_level", "summary", "evidence_text", "confidence_score"]
+      }
+    },
+    {
+      "id": "val_012",
+      "test_dimensions": ["risk_type_identification", "risk_level_judgment", "structured_field_completeness", "evidence_extraction"],
+      "input": {
+        "type": "risk_extraction",
+        "fragment": "大华集团独立董事调查发现，实际控制人通过多层交叉持股的关联企业，在未经董事会审批的情况下，将上市公司8.5亿元资金拆借给其个人控制的第三方公司，至今仍有6.2亿元未归还。",
+        "document_title": "大华集团独立董事调查报告",
+        "document_type": "调查报告"
+      },
+      "expected": {
+        "company_name": "大华集团",
+        "risk_type": "governance",
+        "risk_level": "critical",
+        "evidence_must_contain": ["实际控制人", "关联企业", "未经董事会审批", "8.5亿元", "拆借"],
+        "evidence_must_not_fabricate": true,
+        "required_fields": ["company_name", "risk_type", "risk_level", "summary", "evidence_text", "confidence_score"]
+      }
+    },
+    {
+      "id": "val_013",
+      "test_dimensions": ["risk_type_identification", "risk_level_judgment", "structured_field_completeness", "evidence_extraction"],
+      "input": {
+        "type": "risk_extraction",
+        "fragment": "天马煤矿于2025年1月发生瓦斯爆炸事故，造成5人死亡、8人受伤。初步调查显示矿井安全监控系统存在故障未及时修复。煤矿已被责令停产整顿，安全生产许可证被暂扣，预计全年煤炭产量将减少200万吨。",
+        "document_title": "天马煤矿安全事故通报",
+        "document_type": "事故通报"
+      },
+      "expected": {
+        "company_name": "天马煤矿",
+        "risk_type": "other",
+        "risk_level": "critical",
+        "evidence_must_contain": ["瓦斯爆炸", "5人死亡", "安全监控系统", "停产整顿"],
+        "evidence_must_not_fabricate": true,
+        "required_fields": ["company_name", "risk_type", "risk_level", "summary", "evidence_text", "confidence_score"]
+      }
+    },
+    {
+      "id": "val_014",
+      "test_dimensions": ["risk_type_identification", "risk_level_judgment", "structured_field_completeness", "evidence_extraction"],
+      "input": {
+        "type": "risk_extraction",
+        "fragment": "兴发集团2025年一季度经营性现金净流出3.2亿元，而上年同期为净流入1.5亿元。应收账款周转天数由65天延长至98天，存货周转天数由42天延长至67天。公司短期银行借款余额升至22亿元。",
+        "document_title": "兴发集团2025年一季报",
+        "document_type": "财务报告"
+      },
+      "expected": {
+        "company_name": "兴发集团",
+        "risk_type": "liquidity",
+        "risk_level": "medium",
+        "evidence_must_contain": ["经营性现金净流出", "应收账款周转天数", "存货周转天数"],
+        "evidence_must_not_fabricate": true,
+        "required_fields": ["company_name", "risk_type", "risk_level", "summary", "evidence_text", "confidence_score"]
+      }
+    },
+    {
+      "id": "val_015",
+      "test_dimensions": ["risk_type_identification", "risk_level_judgment", "structured_field_completeness", "evidence_extraction"],
+      "input": {
+        "type": "risk_extraction",
+        "fragment": "隆泰租赁2024年度关注类租赁资产规模达18亿元，较年初增长45%。3笔融资租赁项目（合计本金7.2亿元）承租人已连续3期未支付租金。公司已计提减值准备2.1亿元。",
+        "document_title": "隆泰租赁资产质量分析",
+        "document_type": "分析报告"
+      },
+      "expected": {
+        "company_name": "隆泰租赁",
+        "risk_type": "credit",
+        "risk_level": "high",
+        "evidence_must_contain": ["关注类租赁资产", "18亿元", "连续3期未支付", "减值准备"],
+        "evidence_must_not_fabricate": true,
+        "required_fields": ["company_name", "risk_type", "risk_level", "summary", "evidence_text", "confidence_score"]
+      }
+    },
+    {
+      "id": "val_016",
+      "test_dimensions": ["risk_type_identification", "risk_level_judgment", "structured_field_completeness", "evidence_extraction"],
+      "input": {
+        "type": "risk_extraction",
+        "fragment": "环球贸易公司持有大量澳元计价应收账款（约1.2亿澳元），2024年澳元兑人民币贬值8.5%，导致公司产生汇兑损失约合人民币5600万元。公司尚未建立有效的外汇对冲机制。",
+        "document_title": "环球贸易汇率风险分析",
+        "document_type": "风险分析报告"
+      },
+      "expected": {
+        "company_name": "环球贸易",
+        "risk_type": "market",
+        "risk_level": "medium",
+        "evidence_must_contain": ["澳元", "贬值", "8.5%", "汇兑损失", "对冲"],
+        "evidence_must_not_fabricate": true,
+        "required_fields": ["company_name", "risk_type", "risk_level", "summary", "evidence_text", "confidence_score"]
+      }
+    },
+    {
+      "id": "val_017",
+      "test_dimensions": ["risk_type_identification", "risk_level_judgment", "structured_field_completeness", "evidence_extraction"],
+      "input": {
+        "type": "risk_extraction",
+        "fragment": "证监会对东海基金2024年现场检查发现，公司存在向非合格投资者销售私募产品（涉及金额1.5亿元）、未按规定进行投资者适当性匹配（涉及320名客户）等违规行为，暂停其私募产品备案6个月。",
+        "document_title": "东海基金监管措施决定书",
+        "document_type": "监管决定书"
+      },
+      "expected": {
+        "company_name": "东海基金",
+        "risk_type": "compliance",
+        "risk_level": "high",
+        "evidence_must_contain": ["非合格投资者", "适当性匹配", "暂停", "私募产品备案"],
+        "evidence_must_not_fabricate": true,
+        "required_fields": ["company_name", "risk_type", "risk_level", "summary", "evidence_text", "confidence_score"]
+      }
+    },
+    {
+      "id": "val_018",
+      "test_dimensions": ["risk_type_identification", "risk_level_judgment", "structured_field_completeness", "evidence_extraction"],
+      "input": {
+        "type": "risk_extraction",
+        "fragment": "华美制造单一核心供应商（占采购总额55%）因自身财务困难宣布停产，导致华美制造3条主要生产线停工。公司预计至少需要4个月才能完成新供应商认证和产能切换，期间将影响约40%的订单交付。",
+        "document_title": "华美制造供应链风险通告",
+        "document_type": "风险通告"
+      },
+      "expected": {
+        "company_name": "华美制造",
+        "risk_type": "operation",
+        "risk_level": "high",
+        "evidence_must_contain": ["单一核心供应商", "55%", "停产", "停工", "产能切换"],
+        "evidence_must_not_fabricate": true,
+        "required_fields": ["company_name", "risk_type", "risk_level", "summary", "evidence_text", "confidence_score"]
+      }
+    },
+    {
+      "id": "val_019",
+      "test_dimensions": ["risk_type_identification", "risk_level_judgment", "structured_field_completeness", "evidence_extraction"],
+      "input": {
+        "type": "risk_extraction",
+        "fragment": "海达集团因拖欠237名员工3个月工资合计约1800万元，被员工集体申请劳动仲裁。劳动监察部门已下达限期改正指令书，要求公司15日内支付全部拖欠工资及赔偿金。公司部分银行账户已被冻结。",
+        "document_title": "海达集团劳动纠纷公告",
+        "document_type": "公告"
+      },
+      "expected": {
+        "company_name": "海达集团",
+        "risk_type": "litigation",
+        "risk_level": "medium",
+        "evidence_must_contain": ["拖欠", "237名", "3个月", "劳动仲裁", "账户被冻结"],
+        "evidence_must_not_fabricate": true,
+        "required_fields": ["company_name", "risk_type", "risk_level", "summary", "evidence_text", "confidence_score"]
+      }
+    },
+    {
+      "id": "val_020",
+      "test_dimensions": ["risk_type_identification", "risk_level_judgment", "structured_field_completeness", "evidence_extraction"],
+      "input": {
+        "type": "risk_extraction",
+        "fragment": "远达科技董事会与监事会就公司股权激励方案产生严重分歧，监事会认为方案存在向管理层利益输送嫌疑。独立董事已联名致函交易所反映情况。公司原定于本月召开的年度股东大会因争议被推迟。",
+        "document_title": "远达科技治理争议公告",
+        "document_type": "公告"
+      },
+      "expected": {
+        "company_name": "远达科技",
+        "risk_type": "governance",
+        "risk_level": "medium",
+        "evidence_must_contain": ["股权激励", "利益输送", "独立董事", "股东大会", "推迟"],
+        "evidence_must_not_fabricate": true,
+        "required_fields": ["company_name", "risk_type", "risk_level", "summary", "evidence_text", "confidence_score"]
+      }
+    },
+    {
+      "id": "val_021",
+      "test_dimensions": ["risk_type_identification", "risk_level_judgment", "structured_field_completeness", "evidence_extraction"],
+      "input": {
+        "type": "risk_extraction",
+        "fragment": "金茂地产2024年末存货中，位于三四线城市的项目占比62%。由于当地人口持续净流出，该部分项目去化率平均仅28%，远低于一二线城市55%的去化率。预计2025年需对该部分存货计提减值准备15-20亿元。",
+        "document_title": "金茂地产存货减值分析",
+        "document_type": "分析报告"
+      },
+      "expected": {
+        "company_name": "金茂地产",
+        "risk_type": "market",
+        "risk_level": "high",
+        "evidence_must_contain": ["三四线城市", "62%", "去化率", "28%", "减值准备"],
+        "evidence_must_not_fabricate": true,
+        "required_fields": ["company_name", "risk_type", "risk_level", "summary", "evidence_text", "confidence_score"]
+      }
+    },
+    {
+      "id": "val_022",
+      "test_dimensions": ["risk_type_identification", "risk_level_judgment", "structured_field_completeness", "evidence_extraction"],
+      "input": {
+        "type": "risk_extraction",
+        "fragment": "新时代证券2024年3月因投行业务内部控制失效：某IPO项目招股说明书存在重大错误（财务数据引用错误涉及3处），保荐代表人未勤勉尽责。证监局对公司采取出具警示函的监管措施，要求全面整改投行内控流程。",
+        "document_title": "新时代证券监管措施决定",
+        "document_type": "监管决定书"
+      },
+      "expected": {
+        "company_name": "新时代证券",
+        "risk_type": "compliance",
+        "risk_level": "medium",
+        "evidence_must_contain": ["内部控制失效", "招股说明书", "重大错误", "保荐代表人", "警示函"],
+        "evidence_must_not_fabricate": true,
+        "required_fields": ["company_name", "risk_type", "risk_level", "summary", "evidence_text", "confidence_score"]
+      }
+    },
+    {
+      "id": "val_023",
+      "test_dimensions": ["risk_type_identification", "risk_level_judgment", "structured_field_completeness", "evidence_extraction"],
+      "input": {
+        "type": "risk_extraction",
+        "fragment": "乐视科技2025年2月发现财务系统被黑客植入恶意代码，导致部分财务数据（涉及2024年Q3-Q4）被篡改。公司已紧急恢复系统，但无法确认数据完整性。外部审计机构已扩大审计范围，年报披露可能延迟。",
+        "document_title": "乐视科技网络安全事件公告",
+        "document_type": "公告"
+      },
+      "expected": {
+        "company_name": "乐视科技",
+        "risk_type": "operation",
+        "risk_level": "high",
+        "evidence_must_contain": ["黑客植入", "财务数据", "被篡改", "审计", "年报延迟"],
+        "evidence_must_not_fabricate": true,
+        "required_fields": ["company_name", "risk_type", "risk_level", "summary", "evidence_text", "confidence_score"]
+      }
+    },
+    {
+      "id": "val_024",
+      "test_dimensions": ["risk_type_identification", "risk_level_judgment", "structured_field_completeness", "evidence_extraction"],
+      "input": {
+        "type": "risk_extraction",
+        "fragment": "光明乳业因原料奶供应商所在区域发生口蹄疫疫情，3个主要牧场被封锁，影响公司约30%的原奶供应。公司已启动替代采购方案但成本将上升约20%。预计未来一个季度毛利率将下降3-5个百分点。",
+        "document_title": "光明乳业供应链风险公告",
+        "document_type": "公告"
+      },
+      "expected": {
+        "company_name": "光明乳业",
+        "risk_type": "other",
+        "risk_level": "medium",
+        "evidence_must_contain": ["口蹄疫", "牧场", "30%", "原奶供应", "毛利率"],
+        "evidence_must_not_fabricate": true,
+        "required_fields": ["company_name", "risk_type", "risk_level", "summary", "evidence_text", "confidence_score"]
+      }
+    },
+    {
+      "id": "val_025",
+      "test_dimensions": ["risk_type_identification", "risk_level_judgment", "structured_field_completeness", "evidence_extraction"],
+      "input": {
+        "type": "risk_extraction",
+        "fragment": "利安人寿2024年三季度偿付能力报告显示，核心偿付能力充足率降至72%，综合偿付能力充足率降至115%，均已逼近监管红线（分别为50%和100%）。权益市场下跌导致投资资产公允价值减少是偿付能力下降的主因。",
+        "document_title": "利安人寿偿付能力风险提示",
+        "document_type": "风险提示报告"
+      },
+      "expected": {
+        "company_name": "利安人寿",
+        "risk_type": "market",
+        "risk_level": "high",
+        "evidence_must_contain": ["偿付能力充足率", "72%", "115%", "监管红线", "公允价值"],
+        "evidence_must_not_fabricate": true,
+        "required_fields": ["company_name", "risk_type", "risk_level", "summary", "evidence_text", "confidence_score"]
+      }
+    },
+    {
+      "id": "val_026",
+      "test_dimensions": ["risk_type_identification", "risk_level_judgment", "structured_field_completeness", "evidence_extraction"],
+      "input": {
+        "type": "risk_extraction",
+        "fragment": "泰和集团2019年发行的5亿美元债券将于2025年2月到期，当前公司账面美元资金仅8000万美元。公司已启动再融资但尚未获得任何承诺。公司与债权人协商展期事宜，若未能达成协议将构成违约。",
+        "document_title": "泰和集团美元债兑付风险公告",
+        "document_type": "公告"
+      },
+      "expected": {
+        "company_name": "泰和集团",
+        "risk_type": "liquidity",
+        "risk_level": "critical",
+        "evidence_must_contain": ["5亿美元", "到期", "8000万美元", "再融资", "展期"],
+        "evidence_must_not_fabricate": true,
+        "required_fields": ["company_name", "risk_type", "risk_level", "summary", "evidence_text", "confidence_score"]
+      }
+    },
+    {
+      "id": "val_027",
+      "test_dimensions": ["risk_type_identification", "risk_level_judgment", "structured_field_completeness", "evidence_extraction"],
+      "input": {
+        "type": "risk_extraction",
+        "fragment": "诚信信托某房地产信托计划规模15亿元，融资方为某三线城市中小房企。该房企2024年合约销售仅完成全年目标的35%，经营性现金流持续为负。信托计划将于2025年6月到期，目前专户资金仅2.5亿元，存在12.5亿元兑付缺口。",
+        "document_title": "诚信信托兑付风险预警",
+        "document_type": "风险预警"
+      },
+      "expected": {
+        "company_name": "诚信信托",
+        "risk_type": "credit",
+        "risk_level": "critical",
+        "evidence_must_contain": ["房地产信托计划", "15亿元", "35%", "兑付缺口", "12.5亿元"],
+        "evidence_must_not_fabricate": true,
+        "required_fields": ["company_name", "risk_type", "risk_level", "summary", "evidence_text", "confidence_score"]
+      }
+    },
+    {
+      "id": "val_028",
+      "test_dimensions": ["risk_type_identification", "risk_level_judgment", "structured_field_completeness", "evidence_extraction"],
+      "input": {
+        "type": "risk_extraction",
+        "fragment": "天安证券权益自营部门2024年度投资收益率-12.3%，远低于行业平均-3.5%的水平。重仓持有的5只股票中有3只年内跌幅超过30%。自营部门负责人已引咎辞职，公司正在重新评估自营投资策略和风控机制。",
+        "document_title": "天安证券自营业务风险分析",
+        "document_type": "分析报告"
+      },
+      "expected": {
+        "company_name": "天安证券",
+        "risk_type": "market",
+        "risk_level": "high",
+        "evidence_must_contain": ["投资收益率", "-12.3%", "重仓", "跌幅超过30%"],
+        "evidence_must_not_fabricate": true,
+        "required_fields": ["company_name", "risk_type", "risk_level", "summary", "evidence_text", "confidence_score"]
+      }
+    },
+    {
+      "id": "val_029",
+      "test_dimensions": ["risk_type_identification", "risk_level_judgment", "structured_field_completeness", "evidence_extraction"],
+      "input": {
+        "type": "risk_extraction",
+        "fragment": "恒达集团2024年被发现在2022-2023年间通过关联方进行无商业实质的贸易往来虚增营业收入约4.2亿元，虚增利润约8600万元。证监会已对公司立案调查，公司股票可能面临退市风险警示。",
+        "document_title": "恒达集团财务造假立案调查公告",
+        "document_type": "公告"
+      },
+      "expected": {
+        "company_name": "恒达集团",
+        "risk_type": "compliance",
+        "risk_level": "critical",
+        "evidence_must_contain": ["虚增营业收入", "4.2亿元", "无商业实质", "立案调查", "退市风险警示"],
+        "evidence_must_not_fabricate": true,
+        "required_fields": ["company_name", "risk_type", "risk_level", "summary", "evidence_text", "confidence_score"]
+      }
+    },
+    {
+      "id": "val_030",
+      "test_dimensions": ["risk_type_identification", "risk_level_judgment", "structured_field_completeness", "evidence_extraction"],
+      "input": {
+        "type": "risk_extraction",
+        "fragment": "京华银行对公贷款行业集中度持续上升，房地产业和建筑业贷款合计占对公贷款的38%，接近40%的银行内部限额。其中房地产业不良率已升至5.8%，且有继续恶化趋势。",
+        "document_title": "京华银行贷款集中度风险报告",
+        "document_type": "风险报告"
+      },
+      "expected": {
+        "company_name": "京华银行",
+        "risk_type": "credit",
+        "risk_level": "medium",
+        "evidence_must_contain": ["行业集中度", "房地产业", "38%", "不良率", "5.8%"],
+        "evidence_must_not_fabricate": true,
+        "required_fields": ["company_name", "risk_type", "risk_level", "summary", "evidence_text", "confidence_score"]
+      }
+    },
+    {
+      "id": "val_031",
+      "test_dimensions": ["risk_type_identification", "risk_level_judgment", "structured_field_completeness", "evidence_extraction"],
+      "input": {
+        "type": "risk_extraction",
+        "fragment": "永辉超市因配送中心制冷系统故障导致价值约1800万元的生鲜食品变质损失。该配送中心供应华东区230家门店，事件导致门店出现2天生鲜缺货，预计当月生鲜销售额将下降约15%。",
+        "document_title": "永辉超市营运事件报告",
+        "document_type": "内部报告"
+      },
+      "expected": {
+        "company_name": "永辉超市",
+        "risk_type": "operation",
+        "risk_level": "medium",
+        "evidence_must_contain": ["制冷系统故障", "1800万元", "生鲜食品", "缺货"],
+        "evidence_must_not_fabricate": true,
+        "required_fields": ["company_name", "risk_type", "risk_level", "summary", "evidence_text", "confidence_score"]
+      }
+    },
+    {
+      "id": "val_032",
+      "test_dimensions": ["risk_type_identification", "risk_level_judgment", "structured_field_completeness", "evidence_extraction"],
+      "input": {
+        "type": "risk_extraction",
+        "fragment": "中南建设因拖欠工程款被3家施工企业联合起诉，涉案金额合计2.3亿元。法院已对公司在建工程采取财产保全措施，冻结了公司5个项目的预售资金监管账户，涉及可动用资金6.5亿元。",
+        "document_title": "中南建设工程款纠纷公告",
+        "document_type": "公告"
+      },
+      "expected": {
+        "company_name": "中南建设",
+        "risk_type": "litigation",
+        "risk_level": "high",
+        "evidence_must_contain": ["拖欠工程款", "2.3亿元", "财产保全", "预售资金监管账户"],
+        "evidence_must_not_fabricate": true,
+        "required_fields": ["company_name", "risk_type", "risk_level", "summary", "evidence_text", "confidence_score"]
+      }
+    },
+    {
+      "id": "val_033",
+      "test_dimensions": ["risk_type_identification", "risk_level_judgment", "structured_field_completeness", "evidence_extraction"],
+      "input": {
+        "type": "risk_extraction",
+        "fragment": "德隆股份董事长兼总经理一人同时担任公司战略委员会、提名委员会和薪酬委员会委员，独立董事占比仅为1/3（3名独立董事vs 6名内部董事），低于上市公司治理准则建议的1/2。公司未设立审计委员会。",
+        "document_title": "德隆股份公司治理评估报告",
+        "document_type": "评估报告"
+      },
+      "expected": {
+        "company_name": "德隆股份",
+        "risk_type": "governance",
+        "risk_level": "medium",
+        "evidence_must_contain": ["董事长兼总经理", "独立董事", "1/3", "未设立审计委员会"],
+        "evidence_must_not_fabricate": true,
+        "required_fields": ["company_name", "risk_type", "risk_level", "summary", "evidence_text", "confidence_score"]
+      }
+    },
+    {
+      "id": "val_034",
+      "test_dimensions": ["risk_type_identification", "risk_level_judgment", "structured_field_completeness", "evidence_extraction"],
+      "input": {
+        "type": "risk_extraction",
+        "fragment": "天赐食品核心产品A被消费者投诉检出禁用添加剂，经第三方检测机构确认产品中检出苏丹红残留。市场监管部门已要求该产品全国下架召回，涉及产品价值约3200万元，品牌声誉受到严重损害。",
+        "document_title": "天赐食品安全事件公告",
+        "document_type": "公告"
+      },
+      "expected": {
+        "company_name": "天赐食品",
+        "risk_type": "other",
+        "risk_level": "critical",
+        "evidence_must_contain": ["禁用添加剂", "苏丹红", "下架召回", "3200万元"],
+        "evidence_must_not_fabricate": true,
+        "required_fields": ["company_name", "risk_type", "risk_level", "summary", "evidence_text", "confidence_score"]
+      }
+    },
+    {
+      "id": "val_035",
+      "test_dimensions": ["risk_type_identification", "risk_level_judgment", "structured_field_completeness", "evidence_extraction"],
+      "input": {
+        "type": "risk_extraction",
+        "fragment": "金汇期货2024年11月黄金期货夜盘交易时段，因行情剧烈波动导致3名客户穿仓，穿仓总金额约4800万元。事后排查发现公司风险管理系统对连续涨跌停板行情下的保证金计算存在缺陷，未及时执行强行平仓。",
+        "document_title": "金汇期货穿仓事件报告",
+        "document_type": "事件报告"
+      },
+      "expected": {
+        "company_name": "金汇期货",
+        "risk_type": "market",
+        "risk_level": "medium",
+        "evidence_must_contain": ["穿仓", "4800万元", "保证金", "强行平仓"],
+        "evidence_must_not_fabricate": true,
+        "required_fields": ["company_name", "risk_type", "risk_level", "summary", "evidence_text", "confidence_score"]
+      }
+    },
+    {
+      "id": "val_036",
+      "test_dimensions": ["risk_type_identification", "risk_level_judgment", "structured_field_completeness", "evidence_extraction"],
+      "input": {
+        "type": "risk_extraction",
+        "fragment": "云南铜业因矿区尾矿库存在渗漏风险隐患，被环保部门要求限期整改。公司已对渗漏区域进行紧急封堵，但在整改期间主矿区产能将减少40%，持续时间预计3-4个月，影响电解铜产量约1.5万吨。",
+        "document_title": "云南铜业环保整改公告",
+        "document_type": "公告"
+      },
+      "expected": {
+        "company_name": "云南铜业",
+        "risk_type": "other",
+        "risk_level": "medium",
+        "evidence_must_contain": ["尾矿库", "渗漏", "产能减少", "40%", "1.5万吨"],
+        "evidence_must_not_fabricate": true,
+        "required_fields": ["company_name", "risk_type", "risk_level", "summary", "evidence_text", "confidence_score"]
+      }
+    },
+    {
+      "id": "val_037",
+      "test_dimensions": ["risk_type_identification", "risk_level_judgment", "structured_field_completeness", "evidence_extraction"],
+      "input": {
+        "type": "risk_extraction",
+        "fragment": "钱塘银行2024年末逾期90天以上贷款与不良贷款比率为128%，表明不良贷款分类可能存在不准确的情况。银行逾期贷款总额为不良贷款的1.28倍，部分实质不良贷款可能仍被分类为正常或关注类。",
+        "document_title": "钱塘银行资产质量审查报告",
+        "document_type": "审查报告"
+      },
+      "expected": {
+        "company_name": "钱塘银行",
+        "risk_type": "credit",
+        "risk_level": "high",
+        "evidence_must_contain": ["逾期90天", "不良贷款比率", "128%", "分类不准确"],
+        "evidence_must_not_fabricate": true,
+        "required_fields": ["company_name", "risk_type", "risk_level", "summary", "evidence_text", "confidence_score"]
+      }
+    },
+    {
+      "id": "val_038",
+      "test_dimensions": ["risk_type_identification", "risk_level_judgment", "structured_field_completeness", "evidence_extraction"],
+      "input": {
+        "type": "risk_extraction",
+        "fragment": "华业资本因信息披露违规被深交所纪律处分。公司2023年年度报告中未披露为控股股东提供的3笔担保合计7.2亿元，构成重大信息披露遗漏。深交所对公司给予公开谴责处分，并记入上市公司诚信档案。",
+        "document_title": "华业资本纪律处分决定",
+        "document_type": "处分决定"
+      },
+      "expected": {
+        "company_name": "华业资本",
+        "risk_type": "governance",
+        "risk_level": "high",
+        "evidence_must_contain": ["信息披露违规", "未披露", "担保", "7.2亿元", "公开谴责"],
+        "evidence_must_not_fabricate": true,
+        "required_fields": ["company_name", "risk_type", "risk_level", "summary", "evidence_text", "confidence_score"]
+      }
+    },
+    {
+      "id": "val_039",
+      "test_dimensions": ["risk_type_identification", "risk_level_judgment", "structured_field_completeness", "evidence_extraction"],
+      "input": {
+        "type": "risk_extraction",
+        "fragment": "山水集团因2019年并购时形成的商誉在2024年出现减值迹象。减值测试显示，被并购子公司预测期现金流现值低于包含商誉的资产组账面价值，需计提商誉减值准备5.8亿元，占2023年净利润的72%。",
+        "document_title": "山水集团商誉减值公告",
+        "document_type": "公告"
+      },
+      "expected": {
+        "company_name": "山水集团",
+        "risk_type": "market",
+        "risk_level": "high",
+        "evidence_must_contain": ["商誉减值", "5.8亿元", "现金流现值", "72%"],
+        "evidence_must_not_fabricate": true,
+        "required_fields": ["company_name", "risk_type", "risk_level", "summary", "evidence_text", "confidence_score"]
+      }
+    },
+    {
+      "id": "val_040",
+      "test_dimensions": ["risk_type_identification", "risk_level_judgment", "structured_field_completeness", "evidence_extraction"],
+      "input": {
+        "type": "risk_extraction",
+        "fragment": "江南化工因主要原料苯乙烯价格2024年累计上涨45%，导致公司毛利率从22%下降至14%。公司未能将成本上涨有效传导至下游客户，预计全年净利润将同比下降35%-45%。",
+        "document_title": "江南化工业绩预警公告",
+        "document_type": "公告"
+      },
+      "expected": {
+        "company_name": "江南化工",
+        "risk_type": "market",
+        "risk_level": "medium",
+        "evidence_must_contain": ["苯乙烯", "上涨45%", "毛利率", "14%"],
+        "evidence_must_not_fabricate": true,
+        "required_fields": ["company_name", "risk_type", "risk_level", "summary", "evidence_text", "confidence_score"]
+      }
+    },
+    {
+      "id": "val_041",
+      "test_dimensions": ["refusal_no_data"],
+      "input": {
+        "type": "risk_extraction",
+        "fragment": "2024年公司各项工作有序推进，主营业务稳健发展，经营业绩符合预期。公司持续推进技术创新和管理优化，核心竞争力进一步增强。展望2025年，公司将继续坚持高质量发展战略。",
+        "document_title": "某公司年度经营综述",
+        "document_type": "年度报告"
+      },
+      "expected": {
+        "events_should_be_empty": true
+      },
+      "evaluation_method": "count_check"
+    },
+    {
+      "id": "val_042",
+      "test_dimensions": ["refusal_no_data"],
+      "input": {
+        "type": "risk_extraction",
+        "fragment": "公司今日宣布与战略合作伙伴签署了一项重要的长期合作协议，双方将在技术研发、市场拓展和供应链优化等领域开展深入合作。公司管理层认为这将有助于提升公司的长期竞争力。",
+        "document_title": "战略合作协议签署公告",
+        "document_type": "公告"
+      },
+      "expected": {
+        "events_should_be_empty": true
+      },
+      "evaluation_method": "count_check"
+    },
+    {
+      "id": "val_043",
+      "test_dimensions": ["refusal_no_data"],
+      "input": {
+        "type": "risk_extraction",
+        "fragment": "本期公司完成了董事会换届选举，新一届董事会成员具有丰富的行业经验和专业背景。公司相信在新一届董事会的领导下，公司治理水平和经营业绩将得到进一步提升。",
+        "document_title": "董事会换届公告",
+        "document_type": "公告"
+      },
+      "expected": {
+        "events_should_be_empty": true
+      },
+      "evaluation_method": "count_check"
+    },
+    {
+      "id": "val_044",
+      "test_dimensions": ["refusal_no_data"],
+      "input": {
+        "type": "risk_extraction",
+        "fragment": "公司2024年完成股权激励计划首次授予，向核心管理人员和技术骨干授予限制性股票共500万股。本次股权激励旨在吸引和保留优秀人才，绑定核心团队与公司长期利益。",
+        "document_title": "股权激励授予公告",
+        "document_type": "公告"
+      },
+      "expected": {
+        "events_should_be_empty": true
+      },
+      "evaluation_method": "count_check"
+    },
+    {
+      "id": "val_045",
+      "test_dimensions": ["refusal_no_data"],
+      "input": {
+        "type": "risk_extraction",
+        "fragment": "根据行业研究机构最新报告，2024年中国数字经济规模达到45万亿元，同比增长12.5%。其中产业数字化占比超过80%，数字产业化占比约18%。预计2025年数字经济增速将保持在10%以上。",
+        "document_title": "数字经济行业研究报告摘要",
+        "document_type": "研究报告"
+      },
+      "expected": {
+        "events_should_be_empty": true
+      },
+      "evaluation_method": "count_check"
+    },
+    {
+      "id": "val_046",
+      "test_dimensions": ["refusal_no_data"],
+      "input": {
+        "type": "chat_question",
+        "question": "请分析一下比特币当前的走势并预测未来一周的价格变化。"
+      },
+      "expected": {
+        "should_contain": ["无法", "不支持", "加密货币", "不在"],
+        "should_not_make_predictions": true
+      },
+      "evaluation_method": "keyword_match"
+    },
+    {
+      "id": "val_047",
+      "test_dimensions": ["refusal_no_data"],
+      "input": {
+        "type": "chat_question",
+        "question": "美股特斯拉今天的股价是多少？技术面如何分析？"
+      },
+      "expected": {
+        "should_contain": ["无法", "实时", "数据", "知识库"],
+        "should_not_provide_fake_price": true
+      },
+      "evaluation_method": "keyword_match"
+    },
+    {
+      "id": "val_048",
+      "test_dimensions": ["refusal_no_data"],
+      "input": {
+        "type": "chat_question",
+        "question": "我持有的某只私募基金净值大幅下跌，应该立即赎回吗？请给我投资建议。"
+      },
+      "expected": {
+        "should_contain": ["无法", "投资建议", "不提供"],
+        "should_not_give_specific_advice": true
+      },
+      "evaluation_method": "keyword_match"
+    },
+    {
+      "id": "val_049",
+      "test_dimensions": ["refusal_no_data"],
+      "input": {
+        "type": "chat_question",
+        "question": "某公司内部消息称下季度业绩将大幅超预期，我应该现在买入他们的股票吗？"
+      },
+      "expected": {
+        "should_contain": ["内部消息", "无法", "建议", "风险"],
+        "should_not_encourage_insider_trading": true
+      },
+      "evaluation_method": "keyword_match"
+    },
+    {
+      "id": "val_050",
+      "test_dimensions": ["refusal_no_data"],
+      "input": {
+        "type": "risk_extraction",
+        "fragment": "本公司严格遵守各项法律法规，持续加强内部控制体系建设，定期开展风险排查和合规自查。2024年度未发生重大风险事件，各项风险指标均在可控范围内。公司风险管理体系运行有效。",
+        "document_title": "风险管理工作总结",
+        "document_type": "工作报告"
+      },
+      "expected": {
+        "events_should_be_empty": true
+      },
+      "evaluation_method": "count_check"
+    }
+  ]
+}

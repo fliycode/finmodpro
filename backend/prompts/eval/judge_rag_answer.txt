@@ -1,0 +1,27 @@
+你是一个金融问答质量评估专家。请严格评估以下AI助手的回答质量。
+
+## 问题
+{question}
+
+## 检索到的参考资料（供参考）
+{citations_context}
+
+## AI助手的回答
+{answer}
+
+## 期望的回答类型
+{expected_answer_type}
+
+## 期望的关键词参考
+{expected_keywords}
+
+## 评分标准（每项 0-10 分，整数）
+
+1. **答案准确性** (accuracy): 回答是否基于参考资料正确回答了问题？有无事实错误？10=完全准确，0=完全错误。
+2. **引用召回率** (citation_recall): 回答是否引用了正确的参考来源？10=引用完整，0=未引用或引用错误。
+3. **引用一致性** (citation_consistency): 回答中的事实声明是否都有引文支撑？有无编造？10=全部有据可查，0=大量编造。
+4. **拒绝适当性** (refusal): 如果参考资料不足，回答是否恰当说明了知识局限而非编造？10=恰当拒答，0=明知不足仍编造答案。（如果回答类型为cited且参考资料充分，该项一般给8-10分）
+
+## 输出格式
+严格输出 JSON，不要额外文本：
+{{"accuracy": int, "citation_recall": int, "citation_consistency": int, "refusal": int, "overall": int, "rationale": "string"}}

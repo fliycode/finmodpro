@@ -227,6 +227,7 @@ INSTALLED_APPS = [
     "systemcheck",                  # 系统健康检查
     "django_celery_beat",           # 定时任务调度
     "ops",                          # 运维监控
+    "eval",                         # 模型评估与测试
 ]
 
 # ==================== 中间件配置 ====================
